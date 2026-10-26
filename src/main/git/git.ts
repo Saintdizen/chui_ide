@@ -51,11 +51,18 @@ import { parseSubmodules, type GitSubmodule } from '../../shared/git-submodules'
 import type { GitWorktree } from '../../shared/git-worktrees';
 import type { GitLfsInfo } from '../../shared/git-lfs';
 import {
+  sparseAdd as gitSparseAdd,
+  sparseDisable as gitSparseDisable,
+  sparseInfo as gitSparseInfo,
+  sparseSet as gitSparseSet,
+  type SparseContext,
+} from './sparse';
+import { listSshKeys } from './ssh-keys';
+import {
   IDENTITY_CONFIG_PATTERN,
   identityFromConfig,
   identityPatch,
   parseIdentityConfig,
-  parseSshPublicKey,
   type GitIdentity,
   type GitSshKey,
 } from '../../shared/git-identity';
@@ -77,13 +84,7 @@ import {
   forgePipelineRerun,
   forgePipelines,
 } from './forge';
-import {
-  isConePatterns,
-  normalizeSparseDirectory,
-  parseSparseFlag,
-  parseSparseList,
-  type GitSparseInfo,
-} from '../../shared/git-sparse';
+import type { GitSparseInfo } from '../../shared/git-sparse';
 import { summarizeRoot, type GitRootFetch, type GitRootSummary } from '../../shared/git-multiroot';
 import { COMMIT_DIFF_MAX_CHARS, truncateDiff } from '../../shared/commit-message';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
@@ -1251,39 +1252,6 @@ export class GitService {
     return this.identity();
   }
 
-  /**
-   * Открытые ключи из `~/.ssh`. Ими работают с удалёнными репозиториями, а с git
-   * 2.34 — и подписывают коммиты (`gpg.format=ssh`).
-   */
-  async sshKeys(): Promise<GitSshKey[]> {
-    const dir = path.join(os.homedir(), '.ssh');
-    const entries = await fs.readdir(dir).catch(() => [] as string[]);
-    const keys: GitSshKey[] = [];
-    for (const name of entries) {
-      if (!name.endsWith('.pub')) continue;
-      const full = path.join(dir, name);
-      const text = await fs.readFile(full, 'utf8').catch(() => '');
-      const parsed = parseSshPublicKey(text);
-      if (!parsed) continue;
-      keys.push({
-        path: full,
-        type: parsed.type,
-        comment: parsed.comment,
-        fingerprint: await this.sshFingerprint(full),
-        publicKey: text.trim(),
-      });
-    }
-    return keys.sort((a, b) => a.path.localeCompare(b.path));
-  }
-
-  /** Отпечаток ключа (`ssh-keygen -lf`). Нет ssh-keygen — пусто, а не отказ. */
-  private async sshFingerprint(file: string): Promise<string> {
-    const result = await this.tool('ssh-keygen', ['-l', '-f', file]);
-    if (!result.ok) return '';
-    // «256 SHA256:abcd… comment (ED25519)» — берём второй столбец.
-    return result.stdout.trim().split(/\s+/)[1] ?? '';
-  }
-
   /** Есть ли ключ подписи: у ssh — файл на диске, у GPG — секретный ключ в связке. */
   private async signingKeyFound(identity: GitIdentity): Promise<boolean> {
     if (identity.signingKey === '') return false;
@@ -1304,68 +1272,29 @@ export class GitService {
 
   /* ── разреженный рабочий каталог (sparse checkout) ─────────────── */
 
-  /**
-   * Что выложено на диск: включён ли разреженный режим и какие каталоги выбраны.
-   * Читаем из конфига и `git sparse-checkout list`; своё состояние не держим — репозиторий
-   * могли настроить и мимо IDE (в терминале).
-   */
   async sparseInfo(): Promise<GitSparseInfo> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    const enabledRaw = await execGit(['config', '--get', 'core.sparseCheckout'], repoRoot, { allowFailure: true });
-    const enabled = enabledRaw.ok && parseSparseFlag(enabledRaw.stdout);
-    if (!enabled) return { enabled: false, cone: false, patterns: [] };
-
-    const coneRaw = await execGit(['config', '--get', 'core.sparseCheckoutCone'], repoRoot, { allowFailure: true });
-    // Современный git по умолчанию работает в cone-режиме: нет значения — считаем cone,
-    // явное `false` — режим шаблонов.
-    const cone = !coneRaw.ok || coneRaw.stdout.trim() === '' || parseSparseFlag(coneRaw.stdout);
-
-    const list = await execGit(['sparse-checkout', 'list'], repoRoot, { allowFailure: true });
-    const patterns = list.ok ? parseSparseList(list.stdout) : [];
-    return { enabled: true, cone: cone || isConePatterns(patterns), patterns };
+    return gitSparseInfo(this.sparseCtx());
   }
 
-  /**
-   * Задать набор каталогов (cone-режим). Заменяет прежний набор целиком:
-   * `git sparse-checkout set` выкладывает только перечисленное и корень.
-   * Пустой набор — ошибка: выключение режима отдельная операция (`sparseDisable`),
-   * а не вероятно забытый аргумент.
-   */
-  async sparseSet(directories: readonly string[]): Promise<GitSparseInfo> {
-    const repoRoot = await this.requireRoot();
-    const dirs = this.cleanDirectories(directories);
-    if (dirs.length === 0) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбран ни один каталог');
-    await execGit(['sparse-checkout', 'set', '--cone', '--', ...dirs], repoRoot);
-    return this.sparseInfo();
+  async sparseSet(directories: string[]): Promise<GitSparseInfo> {
+    return gitSparseSet(this.sparseCtx(), directories);
   }
 
-  /** Добавить каталог к текущему набору (`git sparse-checkout add`). */
   async sparseAdd(directory: string): Promise<GitSparseInfo> {
-    const repoRoot = await this.requireRoot();
-    const clean = normalizeSparseDirectory(directory);
-    if (clean === null) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Негодный путь каталога');
-    await execGit(['sparse-checkout', 'add', '--', clean], repoRoot);
-    return this.sparseInfo();
+    return gitSparseAdd(this.sparseCtx(), directory);
   }
 
   /** Выключить разреженный режим: на диск возвращается весь репозиторий. */
   async sparseDisable(): Promise<GitSparseInfo> {
-    const repoRoot = await this.requireRoot();
-    await execGit(['sparse-checkout', 'disable'], repoRoot);
-    return this.sparseInfo();
+    return gitSparseDisable(this.sparseCtx());
   }
 
-  /** Привести список каталогов к виду git: без повторов и мусора. */
-  private cleanDirectories(directories: readonly string[]): string[] {
-    const out: string[] = [];
-    for (const item of directories) {
-      const clean = normalizeSparseDirectory(item);
-      if (clean === null || out.includes(clean)) continue;
-      out.push(clean);
-    }
-    return out;
+  private sparseCtx(): SparseContext {
+    return { repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit) };
+  }
+
+  async sshKeys(): Promise<GitSshKey[]> {
+    return listSshKeys();
   }
 
   /* ── Git LFS (хранение больших файлов) ─────────────────────────────────── */
