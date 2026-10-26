@@ -24,7 +24,7 @@ import type { GitReflogEntry } from '../../shared/git-reflog';
 import type { GitStashEntry } from '../../shared/git-stash';
 import { parseTagList, type GitTag } from '../../shared/git-tags';
 import type { RebaseTodoItem } from '../../shared/git-rebase';
-import { pullModeArgs, type PullMode } from '../../shared/git-pull';
+import type { PullMode } from '../../shared/git-pull';
 import type { GitRefDiff } from '../../shared/git-ref-diff';
 import { type GitBisectState } from '../../shared/git-bisect';
 import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
@@ -106,12 +106,14 @@ import {
 } from './lfs';
 import { addWorktree, listWorktrees, pruneWorktrees, removeWorktree, type WorktreesContext } from './worktree';
 import { RpcFailure } from '../ipc/router';
-import type { BranchContext, HistoryContext, WorktreeContext } from './contexts';
+import type { BranchContext, HistoryContext, NetContext, WorktreeContext } from './contexts';
+import { fetch, pull, push, remotes } from './net';
+import { clone } from './clone';
 import { branches, checkout, deleteBranch, renameBranch } from './branches';
 import { blame, compareRefs, conflictParts, diffRefs, logGraph, logHistory, logText, reflog, show } from './history';
 import { locateFile } from './locate';
 export { gitTemplateDir } from './exec';
-import { CLONE_TIMEOUT_MS, execGit, gitTemplateDir, type GitResult, NETWORK_TIMEOUT_MS } from './exec';
+import { execGit, gitTemplateDir, type GitResult, NETWORK_TIMEOUT_MS } from './exec';
 
 /**
  * Редактор списка шагов для `git rebase -i`: кладёт наш готовый список на место
@@ -364,118 +366,6 @@ export class GitService {
     const { repoRoot, relative } = await locateFile(() => this.status(), filePath);
     await execGit(['add', '--', relative], repoRoot);
     return this.refresh();
-  }
-
-  /**
-   * Удалённые репозитории: имя и адреса. Из `git remote -v` собираем карту по
-   * имени — одна строка на `(fetch)`, одна на `(push)`.
-   */
-  async remotes(): Promise<GitRemote[]> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) return [];
-
-    const result = await execGit(['remote', '-v'], repoRoot, { allowFailure: true });
-    const byName = new Map<string, GitRemote>();
-    for (const line of result.stdout.split('\n')) {
-      // Формат: `origin\thttps://… (fetch)`. Пробелы в адресе недопустимы, поэтому хвост режем по нему.
-      const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/.exec(line.trim());
-      if (!match) continue;
-      const name = match[1]!;
-      const url = match[2]!;
-      const known = byName.get(name) ?? { name, fetchUrl: '', pushUrl: '' };
-      if (match[3] === 'fetch') known.fetchUrl = url;
-      else known.pushUrl = url;
-      byName.set(name, known);
-    }
-    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  /** Забрать изменения из удалённого репозитория, не трогая рабочее дерево. */
-  async fetch(): Promise<GitNetworkResult> {
-    return this.network(['fetch', '--all', '--prune']);
-  }
-
-  /**
-   * Забрать изменения во ВСЕХ корнях области, а не только в активном. В многообласти
-   * папки — разные репозитории, и «обновить всё» одним нажатием удобнее, чем
-   * переключать корень на каждую. Папка без репозитория или с недоступным remote
-   * не губит остальные: по каждой отдаём свой итог.
-   */
-  async fetchRoots(roots: readonly WorkspaceRoot[]): Promise<GitRootFetch[]> {
-    const results = await Promise.all(
-      roots.map(async (item): Promise<GitRootFetch> => {
-        const repoRoot = await this.repositoryRoot(item.root);
-        if (!repoRoot) {
-          return { root: item.root, name: item.name, ok: false, message: 'не репозиторий git' };
-        }
-        const result = await execGit(['fetch', '--all', '--prune'], repoRoot, {
-          allowFailure: true,
-          timeout: NETWORK_TIMEOUT_MS,
-        });
-        const text = (result.stderr.trim() || result.stdout.trim()).trim();
-        return { root: item.root, name: item.name, ok: result.ok, message: text || 'обновлено' };
-      }),
-    );
-    // Активную папку пересчитываем: её статус виден в панели и в строке состояния.
-    await this.refresh().catch(() => undefined);
-    return results;
-  }
-
-  /**
-   * Влить изменения из удалённого репозитория в текущую ветку. `mode` задаёт флаги:
-   * слияние, перебазирование или только перемотка; `default` не подсказывает ничего —
-   * git ведёт себя так, как настроен у человека.
-   */
-  async pull(mode: PullMode = 'default'): Promise<GitNetworkResult> {
-    return this.network(['pull', '--no-edit', ...pullModeArgs(mode)]);
-  }
-
-  /**
-   * Отправить коммиты в удалённый репозиторий.
-   *
-   * Первая отправка ветки ставит upstream (`-u origin <ветка>`): без него
-   * следующий `push` и `pull` не знают, куда идут. Принудительную отправку делаем
-   * через `--force-with-lease`, а не `--force`: она не затрёт чужие коммиты,
-   * если удалённая ветка уехала вперёд, — то есть страхует от чужой работы.
-   */
-  async push(options: { setUpstream?: boolean; force?: boolean } = {}): Promise<GitNetworkResult> {
-    // Одна команда вместо цепочки «статус → проверка upstream → push»: каждый
-    // запуск процесса стоит времени, а git отдаёт нужное сам. `%00` разделяет
-    // поля, потому что имя ветки может содержать что угодно, кроме NUL.
-    //
-    // Отдельно про detached HEAD: `%(refname:short)` для него пуст, а не «HEAD» —
-    // пустое имя git отвергнет сам (`fatal: dst refspec ... does not match any`),
-    // и это честнее нашего прежнего отказа. Ветку берём из `symbolic-ref`: он
-    // отвечает «не ветка» кодом, а не пустой строкой, которую нельзя отличить
-    // от ошибки запуска.
-    const repoRoot = await this.requireRoot();
-    const head = await execGit(['symbolic-ref', '--short', '-q', 'HEAD'], repoRoot, { allowFailure: true });
-    if (!head.ok || !head.stdout.trim()) {
-      throw new RpcFailure(RpcErrorCode.InvalidParams, 'HEAD оторван (detached): нечего отправлять');
-    }
-    const branch = head.stdout.trim();
-    const probe = await execGit(['config', '--get', `branch.${branch}.remote`], repoRoot, { allowFailure: true });
-    const args = ['push'];
-    if (options.force) args.push('--force-with-lease');
-    if (options.setUpstream || !probe.stdout.trim()) args.push('-u', 'origin', branch);
-    return this.network(args);
-  }
-
-  /**
-   * Клонирование в новую папку. Прогресс git пишет в stderr, поэтому нужен
-   * поток, а не буферизованный вызов: иначе пользователь видит только тишину.
-   */
-  async clone(url: string, directory: string, onProgress?: (line: string) => void): Promise<{ path: string }> {
-    const link = url.trim();
-    if (!link) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Пустой адрес репозитория');
-
-    const target = path.resolve(directory);
-    const existing = await fs.stat(target).catch(() => null);
-    if (existing) throw new RpcFailure(RpcErrorCode.InvalidParams, `Папка уже существует: ${target}`);
-    await fs.mkdir(path.dirname(target), { recursive: true });
-
-    await this.stream(['clone', '--progress', link, target], path.dirname(target), onProgress);
-    return { path: target };
   }
 
   /** Статус плюс рассылка события: любую правку в репозитории UI узнаёт отсюда. */
@@ -814,6 +704,56 @@ export class GitService {
     return listSshKeys();
   }
 
+  /* ── сеть и удалённые репозитории ─────────────────────────────────────── */
+
+  async remotes(): Promise<GitRemote[]> {
+    return remotes(this.netCtx());
+  }
+
+  async fetch(): Promise<GitNetworkResult> {
+    return fetch(this.netCtx());
+  }
+
+  /**
+   * Обновление всех корней рабочей папки разом. В контракте это «git.fetchRoots»:
+   * список приходит снаружи, потому что корни знает рабочая папка, а не git.
+   */
+  async fetchRoots(roots: readonly WorkspaceRoot[]): Promise<GitRootFetch[]> {
+    const results = await Promise.all(
+      roots.map(async (item): Promise<GitRootFetch> => {
+        const repoRoot = await this.repositoryRoot(item.root);
+        if (!repoRoot) {
+          return { root: item.root, name: item.name, ok: false, message: 'не репозиторий git' };
+        }
+        const result = await execGit(['fetch', '--all', '--prune'], repoRoot, {
+          allowFailure: true,
+          timeout: NETWORK_TIMEOUT_MS,
+        });
+        const text = (result.stderr.trim() || result.stdout.trim()).trim();
+        return { root: item.root, name: item.name, ok: result.ok, message: text || 'обновлено' };
+      }),
+    );
+    // Активную папку пересчитываем: её статус виден в панели и в строке состояния.
+    await this.refresh().catch(() => undefined);
+    return results;
+  }
+
+  async pull(mode: PullMode = 'default'): Promise<GitNetworkResult> {
+    return pull(this.netCtx(), mode);
+  }
+
+  async push(options: { setUpstream?: boolean; force?: boolean } = {}): Promise<GitNetworkResult> {
+    return push(this.netCtx(), options);
+  }
+
+  async clone(url: string, directory: string, onProgress?: (line: string) => void): Promise<{ path: string }> {
+    return clone(url, directory, onProgress);
+  }
+
+  private netCtx(): NetContext {
+    return this.gitContext();
+  }
+
   /* ── ветки ────────────────────────────────────────────────────────────── */
 
   async branches(): Promise<GitBranch[]> {
@@ -1057,54 +997,5 @@ export class GitService {
 
   private readText(absolute: string): Promise<string> {
     return readFileText(absolute);
-  }
-
-  /**
-   * Долгая операция с построчным выводом: прогресс и ошибки приходят из stderr,
-   * причём прогресс-строки разделены не переводом строки, а возвратом каретки.
-   */
-  private stream(args: string[], cwd: string, onLine?: (line: string) => void): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const child = spawn('git', ['--no-optional-locks', '-c', 'core.quotepath=false', ...args], {
-        cwd,
-        windowsHide: true,
-        env: {
-          ...process.env,
-          GIT_TERMINAL_PROMPT: '0',
-          GIT_EDITOR: 'true',
-          GIT_PAGER: 'cat',
-        },
-      });
-
-      const timeout = setTimeout(() => {
-        child.kill('SIGTERM');
-        reject(new RpcFailure(RpcErrorCode.Internal, 'git не ответил за 10 минут'));
-      }, CLONE_TIMEOUT_MS);
-
-      let rest = '';
-      const feed = (chunk: string): void => {
-        rest += chunk;
-        const lines = rest.split(/\r?\n|\r/);
-        rest = lines.pop() ?? '';
-        for (const line of lines) {
-          const text = line.trim();
-          if (text) onLine?.(text);
-        }
-      };
-
-      child.stdout.setEncoding('utf8');
-      child.stderr.setEncoding('utf8');
-      child.stdout.on('data', feed);
-      child.stderr.on('data', feed);
-      child.on('error', (error) => {
-        clearTimeout(timeout);
-        reject(new RpcFailure(RpcErrorCode.Internal, `git: ${error.message}`));
-      });
-      child.on('close', (code) => {
-        clearTimeout(timeout);
-        if (code === 0) resolve();
-        else reject(new RpcFailure(RpcErrorCode.Internal, `git ${args[0]} завершился с кодом ${code}`, rest.trim()));
-      });
-    });
   }
 }

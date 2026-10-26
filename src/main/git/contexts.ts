@@ -73,7 +73,23 @@ export interface HistoryContext extends RepositoryContext {}
  */
 export interface BranchContext extends RepositoryContext, StatusContext {}
 
-/** Удалённые репозитории: `forge.ts` и `network.ts` решают по ним, что показать. */
+/** Удалённые репозитории: `forge.ts` и `net.ts` решают по ним, что показать. */
 export interface RemoteContext {
   remotes(): Promise<GitRemote[]>;
 }
+
+/**
+ * Сеть и удалённые репозитории: fetch/pull/push и список адресов.
+ *
+ * Корень здесь не «есть ли репозиторий», а «куда идти»: операции без корня —
+ * ошибка, список адресов без репозитория — пустой список.
+ */
+export interface NetContext extends RepositoryContext, RemoteContext, StatusContext {
+  repositoryRoot(explicit?: string): Promise<string | null>;
+}
+
+/**
+ * Клонирование: пишет в новый каталог, репозитория ещё нет, поэтому корня в
+ * контексте и быть не может — только git.
+ */
+export type CloneContext = Record<string, never>;
