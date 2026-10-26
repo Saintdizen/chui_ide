@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,6 +30,7 @@ import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState }
 import { headText, type InspectContext, reset, revert } from './inspect';
 import { commitDiff, discard, discardHunk, fileHunks, stage, stageHunk, unstage, unstageHunk } from './index-staging';
 import { markResolved as gitMarkResolved } from './conflict';
+import { checkIgnore as gitCheckIgnore } from './check-ignore';
 import { runNetwork } from './network';
 import {
   stashApply as gitStashApply,
@@ -874,68 +874,13 @@ export class GitService {
   /* ── дополнительные рабочие каталоги (worktree) ───────────────────────── */
 
   /**
-   * Какие из путей git считает игнорируемыми (`.gitignore`). Спрашиваем только про
-   * то, что реально видно в дереве: полный список игнорируемого на проекте с
-   * `node_modules` — это сотни тысяч строк, и читать его незачем.
-   *
-   * Пути идут на stdin через NUL: так их не ограничивает длина командной строки,
-   * а `-z` даёт ответ тоже через NUL — имена со спецсимволами не ломают разбор.
+   * Игнорируемые пути — `check-ignore.ts`: `check-ignore` отвечает кодом 1 на
+   * «ничего не игнорируется», и глушить это внутри `execGit` незачем.
    */
   async checkIgnore(paths: string[]): Promise<string[]> {
     const repoRoot = await this.repositoryRoot();
-    if (!repoRoot || paths.length === 0) return [];
-    const relative = paths.map((target) => {
-      const absolute = path.resolve(target);
-      const text = path.relative(repoRoot, absolute).split(path.sep).join('/');
-      return { absolute, text };
-    });
-    const known = new Map(relative.map((item) => [item.text, item.absolute]));
-    const output = await this.checkIgnoreRaw(
-      repoRoot,
-      relative.map((item) => item.text),
-    );
-    return (
-      output
-        .split('\u0000')
-        // На Windows git отвечает родным разделителем — сверяем в прямых слэшах.
-        .map((line) => line.trim().split('\\').join('/'))
-        .map((line) => known.get(line))
-        .filter((item): item is string => typeof item === 'string')
-    );
-  }
-
-  /** Сам вызов `git check-ignore`: пути на stdin, ответ NUL-разделённый. */
-  private checkIgnoreRaw(repoRoot: string, relative: string[]): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const child = spawn('git', ['--no-optional-locks', 'check-ignore', '-z', '--stdin'], {
-        cwd: repoRoot,
-        windowsHide: true,
-        env: {
-          ...process.env,
-          GIT_TERMINAL_PROMPT: '0',
-          GIT_EDITOR: 'true',
-          GIT_PAGER: 'cat',
-        },
-      });
-      let stdout = '';
-      let stderr = '';
-      child.stdout.setEncoding('utf8');
-      child.stderr.setEncoding('utf8');
-      child.stdout.on('data', (chunk: string) => {
-        stdout += chunk;
-      });
-      child.stderr.on('data', (chunk: string) => {
-        stderr += chunk;
-      });
-      child.on('error', (error) => reject(new RpcFailure(RpcErrorCode.Internal, `git: ${error.message}`)));
-      child.on('close', (code) => {
-        // Код 1 — «ничего не игнорируется»: это обычный ответ, а не сбой.
-        if (code === 0 || code === 1) resolve(stdout);
-        else reject(new RpcFailure(RpcErrorCode.Internal, `git check-ignore: ${stderr.trim() || `код ${code}`}`));
-      });
-      // Пути разделяем NUL: в имени файла перевод строки — законное имя.
-      child.stdin.end(relative.map((item) => `${item}\u0000`).join(''));
-    });
+    if (!repoRoot) return [];
+    return gitCheckIgnore(repoRoot, paths);
   }
 
   /** Имя коммита может начинаться с `-` — тогда git примет его за флаг, а не за ссылку. */
