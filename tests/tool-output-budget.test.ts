@@ -4,6 +4,8 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runTool } from '../src/main/ai/agent-tools';
 import { MAX_OUTPUT_CHARS, STEP_OUTPUT_CHARS, stepOutputChars, toolOutputChars } from '../src/main/ai/output-budget';
+import { TOOL_OUTPUT_CHARS } from '../src/main/ai/output-budget';
+import { AGENT_TOOLS } from '../src/shared/tools';
 import type { ToolContext } from '../src/main/ai/tool-context';
 import { WorkspaceService } from '../src/main/workspace/workspace';
 import type { WebFetchRunner } from '../src/main/ai/tool-context';
@@ -196,5 +198,32 @@ describe('бюджет шага под окно модели', () => {
     expect(stepOutputChars(32_000)).toBeGreaterThanOrEqual(6_000);
     // Совсем маленькое окно не обнуляет ответ инструмента.
     expect(stepOutputChars(1_000)).toBe(6_000);
+  });
+
+  /**
+   * Ключи `TOOL_OUTPUT_CHARS` — имена инструментов, а не их действий: `runTool`
+   * и `clipOutcome` спрашивают потолок по имени. Ключ, переживший переименование,
+   * не падает и не мигает — он молча перестаёт работать: `run` (когда команда
+   * была действием `terminal`) висел в таблице, а настоящий шелл получал общий
+   * предел 18 000 вместо 12 000 (вдвое дороже каждый вызов, до конца диалога).
+   *
+   * Поэтому сторож двусторонний: таблица не смеет знать несуществующих имён и
+   * не смеет забывать существующие. Новый инструмент без строки — не ошибка
+   * (общий предел честный), но пропажа уже объявленного — регрессия.
+   */
+  it('таблица потолков говорит об именах, которые существуют', () => {
+    const names = new Set(AGENT_TOOLS.map((tool) => tool.name));
+    const orphans = Object.keys(TOOL_OUTPUT_CHARS).filter((key) => !names.has(key));
+    expect(orphans, `в TOOL_OUTPUT_CHARS нет таких инструментов: ${orphans.join(', ')}`).toEqual([]);
+
+    // Объявленные однажды имена держатся: `terminal` — дорогой вывод процесса,
+    // `edit`/`file`/`terminalList` — короткий отчёт, которому общий предел ни к чему.
+    // `read` — исключение по смыслу: он и объявлен как `MAX_OUTPUT_CHARS`
+    // (пачка файлов целиком), поэтому у него проверяется только наличие строки.
+    expect(TOOL_OUTPUT_CHARS.read).toBe(MAX_OUTPUT_CHARS);
+    for (const name of ['list', 'search', 'terminal', 'terminalOutput', 'checks', 'run_tests', 'edit', 'file']) {
+      expect(names).toContain(name);
+      expect(toolOutputChars(name), `${name} потерял свой потолок`).toBeLessThan(MAX_OUTPUT_CHARS);
+    }
   });
 });

@@ -321,19 +321,25 @@ function clipOutcome(
       Math.max(Math.ceil(MIN_OUTPUT_CHARS / 3.5), before?.tokensLeft ?? MAX_OUTPUT_TOKENS),
     ),
   };
+  // Хвост выводят все срезы, которые читают с конца: не только одноразовый
+  // `terminal`, но и `terminalOutput` — за ним приходят именно за хвостом живой
+  // сессии. У `terminal` сверху при этом остаются две первые строки (они часто
+  // и есть причина падения), у чтения сессии — нет: там нужен только хвост.
+  const tailFirst = name === 'terminal' || name === 'terminalOutput';
+  const withHead = name === 'terminal';
   let detail = original;
   if (fitOutput(original, limit) !== original) {
     const file = spill(ctx, name, original);
     const note = `\n… (вывод обрезан${exhausted ? ' — бюджет вывода на шаг исчерпан' : ''}${file ? `; ${spillHint(file)}` : ''})`;
-    const head = name === 'terminal' ? `${original.split('\n').slice(0, 2).join('\n').slice(0, 400)}\n` : '';
+    const head = withHead ? `${original.split('\n').slice(0, 2).join('\n').slice(0, 400)}\n` : '';
     const room = {
       chars: limit.chars - note.length - head.length,
       tokens: limit.tokens - estimateTextTokens(note + head),
     };
-    const fitted = fitOutput(original, room, name === 'terminal');
+    const fitted = fitOutput(original, room, tailFirst);
     // Код и списки не обрываем посреди строки, если есть хотя бы одна полная.
-    const newline = name === 'terminal' ? fitted.indexOf('\n') : fitted.lastIndexOf('\n');
-    const body = newline < 0 ? fitted : name === 'terminal' ? fitted.slice(newline + 1) : fitted.slice(0, newline);
+    const newline = tailFirst ? fitted.indexOf('\n') : fitted.lastIndexOf('\n');
+    const body = newline < 0 ? fitted : tailFirst ? fitted.slice(newline + 1) : fitted.slice(0, newline);
     detail = head + body + note;
   }
   if (ctx.stepBudget && before) {
