@@ -15,7 +15,7 @@ import { estimateTextTokens, isCondenseMarker } from '../../shared/context-fit';
 import { fitOutput } from '../../shared/output-budget';
 import { argumentsShape, describeShape, missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
 import { canonicalCall } from '../../shared/tool-aliases';
-import { MAX_OUTPUT_CHARS, MAX_OUTPUT_TOKENS, MIN_OUTPUT_CHARS } from './output-budget';
+import { MAX_OUTPUT_CHARS, MAX_OUTPUT_TOKENS, MIN_OUTPUT_CHARS, toolOutputChars } from './output-budget';
 import { spill } from './output-trim';
 import { spillHint } from './spill';
 import { terminalAction } from './agent-terminal';
@@ -292,8 +292,13 @@ function clipOutcome(
     exhausted && !source.includes('бюджет вывода на шаг исчерпан')
       ? `${source}\n… (бюджет вывода на шаг исчерпан)`
       : source;
+  // Свой потолок у инструмента: `list` на 18 000 символов не нужен никогда, а
+  // `read` нужен пачкой файлов. Меняем ТОЛЬКО символы: токенный предел остаётся
+  // прежним, иначе `fitOutput` начнёт резать по токенам раньше, чем по символам,
+  // и у русского текста с номерами строк выйдет вдвое короче, чем просили.
+  const chars = Math.min(toolOutputChars(name), Math.max(MIN_OUTPUT_CHARS, before?.left ?? MAX_OUTPUT_CHARS));
   const limit = {
-    chars: Math.min(MAX_OUTPUT_CHARS, Math.max(MIN_OUTPUT_CHARS, before?.left ?? MAX_OUTPUT_CHARS)),
+    chars,
     tokens: Math.min(
       MAX_OUTPUT_TOKENS,
       Math.max(Math.ceil(MIN_OUTPUT_CHARS / 3.5), before?.tokensLeft ?? MAX_OUTPUT_TOKENS),

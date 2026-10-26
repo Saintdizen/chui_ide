@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runTool } from '../src/main/ai/agent-tools';
-import { MAX_OUTPUT_CHARS, STEP_OUTPUT_CHARS, stepOutputChars } from '../src/main/ai/output-budget';
+import { MAX_OUTPUT_CHARS, STEP_OUTPUT_CHARS, stepOutputChars, toolOutputChars } from '../src/main/ai/output-budget';
 import type { ToolContext } from '../src/main/ai/tool-context';
 import { WorkspaceService } from '../src/main/workspace/workspace';
 import { estimateTextTokens } from '../src/shared/context-fit';
@@ -73,8 +73,11 @@ describe('бюджет ответов инструментов', () => {
     });
 
     for (const [name, size] of sizes) {
-      // Пометка «обрезано» с путём к копии — ещё строка сверх потолка.
-      expect(size, `${name}: ${size} символов`).toBeLessThanOrEqual(MAX_OUTPUT_CHARS + 500);
+      // Пометка «обрезано» с путём к копии — ещё строка сверх потолка. Свой
+      // потолок инструмента — то, до чего он реально ужимается: без него
+      // таблица `TOOL_OUTPUT_CHARS` осталась бы объявленной и мёртвой.
+      const cap = Math.min(toolOutputChars(name), MAX_OUTPUT_CHARS) + 500;
+      expect(size, `${name}: ${size} символов (потолок ${cap})`).toBeLessThanOrEqual(cap);
     }
   }, 180_000);
 
