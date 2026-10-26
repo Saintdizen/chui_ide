@@ -11,7 +11,7 @@
 
 Вне класса уже всё, что проверяется отдельно (`workspace-context.ts`,
 `src/shared/read-coverage.ts`, `git/exec.ts`, `git/forge.ts`, `git/bisect.ts`,
-`git/inspect.ts`, `git/status.ts`, `git/repository-watcher.ts`, `git/args.ts`, `git/diff-text.ts`, `git/apply.ts`, `git/locate.ts`, `git/file-text.ts`).
+`git/inspect.ts`, `git/status.ts`, `git/repository-watcher.ts`, `git/args.ts`, `git/diff-text.ts`, `git/apply.ts`, `git/locate.ts`, `git/file-text.ts`, `git/network.ts`).
 Без повода не затевать: выигрыш здесь только в читаемости, скорость и поведение те же.
 
 - [ ] **`src/main/git/git.ts` — 1 715 строк.** Распил идёт по одному узлу за
