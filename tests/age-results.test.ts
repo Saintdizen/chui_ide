@@ -165,6 +165,21 @@ describe('картинки в истории', () => {
   });
 });
 
+describe('что свёртка не трогает', () => {
+  it('системное сообщение не сворачивается: адреса у него нет', async () => {
+    const { ageStaleResults } = await import('../src/main/ai/age-results');
+    // Карта проекта и кодекс лежат в `system` и стоят в каждом запросе. Свёртка
+    // выбирает по длине, а не по роли, — и система с картинкой или длинная рамка
+    // уехала бы в пометку с адресом копии. Вернуть её агент не сможет: `spill`
+    // пишет её же копию, но прочитать карту инструментом — это шаг, а не правило.
+    const system: ChatMessage = { role: 'system', content: `карта проекта\n${'файл.ts '.repeat(400)}` };
+    const messages: ChatMessage[] = [system, long(1), long(2), long(3)];
+    const outcome = ageStaleResults(messages, { keepRecent: 1, spillDir: spillDir(), minChars: 100 });
+    expect(messages[0]?.content).toBe(system.content);
+    expect(outcome.aged).toBe(2);
+  });
+});
+
 describe('порог давности', () => {
   it('ответ на две тысячи символов сворачивается, а не живёт вечно', async () => {
     const { ageStaleResults } = await import('../src/main/ai/age-results');

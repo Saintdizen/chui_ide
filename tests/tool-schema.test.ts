@@ -162,8 +162,9 @@ describe('описания аргументов', () => {
     'Folder or file (default: whole project).',
     'diff, log, blame: one file.',
     'One file instead of paths.',
+    'Files instead of path.',
     'One file.',
-    'Instead of path: 2-5 files; output capped.',
+    'Instead of path: 2-5 files.',
     'present: result files, 1–5, inside the project.',
     'stage, unstage, discard, commit: files/folders.',
     'Scope; glob from here.',
@@ -209,6 +210,11 @@ describe('описания аргументов', () => {
     const CANONICAL_LINE = new Set([
       LINE_NUMBERING,
       `First line; ${LINE_NUMBERING}`,
+      // С 27.10 это КОНСТАНТА, а не `LINE_NUMBERING`: полная формулировка («Lines
+      // and columns are 1-based, the same as read prints them.») тянула 15 токенов
+      // в каждый запрос ради того, что модель знает и так. "1-based" держит
+      // главный риск (счёт с нуля vs с единицы) за 2 токена.
+      'First line. 1-based.',
       'Last line, inclusive.',
       `open: line. ${LINE_NUMBERING}`,
       `open, present: line. ${LINE_NUMBERING}`,

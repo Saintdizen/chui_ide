@@ -127,8 +127,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'read',
     side: 'main',
     description:
-      'Read a file — whole, a line range (`startLine`/`endLine`) or several at once (`paths`). ' +
-      'Prefer a range around the spot: a whole file costs more than the answer needs. ' +
+      'Read a file — whole, a line range (`startLine`/`endLine`) or several (`paths`, 2-5, output capped). ' +
+      'Prefer a range around the spot. ' +
       'Output lines are numbered from 1: those numbers go to edit.',
     inputSchema: {
       type: 'object',
@@ -136,12 +136,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         path: { type: 'string', description: 'One file.' },
         paths: {
           type: 'array',
-          description: '2-5 files instead; output capped.',
+          description: 'Files instead of path.',
           items: { type: 'string' },
         },
         startLine: {
           type: 'number',
-          description: `First line; ${LINE_NUMBERING}`,
+          description: 'First line. 1-based.',
         },
         endLine: {
           type: 'number',
@@ -149,7 +149,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
         force: {
           type: 'boolean',
-          description: 'Re-read (same turn).',
+          description: 'Re-read.',
         },
       },
     },
@@ -330,6 +330,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     // Плоская запись (`path`+`oldText`+`newText`, `path`+`contents`) остаётся
     // живой — её собирает разбор (`flatWrite`), но схема её больше не объявляет:
     // две параллельные формы стоили 96 токенов в каждом запросе.
+    // Что делает каждый ключ, схема больше не повторяет: `path`, `oldText`,
+    // `newText` и `contents` названы в описании инструмента (`[{path, oldText,
+    // newText}] or [{path, contents}]`). Три тавтологии («Anchor: exact, unique.»,
+    // «Replacement; empty deletes.», «Whole file: replaces it.») стоили 46 токенов
+    // в каждом запросе (замер 27.10).
     description:
       'Change files: edits[] — [{path, oldText, newText}] or [{path, contents}] for a whole new file; ' +
       'move, delete — file.',
@@ -343,9 +348,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
             type: 'object',
             properties: {
               path: { type: 'string' },
-              oldText: { type: 'string', description: 'Anchor: exact, unique.' },
-              newText: { type: 'string', description: 'Replacement; empty deletes.' },
-              contents: { type: 'string', description: 'Whole file: replaces it.' },
+              oldText: { type: 'string' },
+              newText: { type: 'string' },
+              contents: { type: 'string' },
             },
             // `path` здесь НЕ обязателен: проверка схемы срабатывает раньше разбора
             // и выдавала бы «не хватает edits[0].path» вместо точного совета, а разбор

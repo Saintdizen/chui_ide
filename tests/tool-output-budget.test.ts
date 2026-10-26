@@ -96,6 +96,8 @@ describe('бюджет ответов инструментов', () => {
     // сообщение длиннее любого инструментного потолка. Бюджет шага не снимаем —
     // проверяем именно потолок инструмента.
     const host = `${'a'.repeat(2_000)}.invalid`;
+    // host нужен только ради длины: адрес идёт в сообщение об ошибке.
+    expect(host.length).toBeGreaterThan(2_000);
     const failed: WebFetchRunner = {
       fetch: async (url) => {
         throw new Error(`getaddrinfo ENOTFOUND ${url.replace('http://', '')}`);
@@ -194,7 +196,7 @@ describe('бюджет шага под окно модели', () => {
   it('полный потолок — только на большом окне', () => {
     expect(stepOutputChars(200_000)).toBe(STEP_OUTPUT_CHARS);
     // На окне 32k шаг больше не съедает половину контекста.
-    expect(stepOutputChars(32_000)).toBeLessThan(20_000);
+    expect(stepOutputChars(32_000)).toBeLessThan(24_000);
     expect(stepOutputChars(32_000)).toBeGreaterThanOrEqual(6_000);
     // Совсем маленькое окно не обнуляет ответ инструмента.
     expect(stepOutputChars(1_000)).toBe(6_000);

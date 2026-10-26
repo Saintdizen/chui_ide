@@ -481,10 +481,7 @@ export function toolPresetNote(preset: ToolPresetId): string {
   if (spec.groups === null) {
     const roster = rosterLine(rosterNames(preset));
     if (roster === '') return '';
-    return (
-      `Набор инструментов: «${spec.label}» — всё, что может эта сборка. ` +
-      `Чего не видно в списке — зови по имени, он выполнится.${roster}`
-    );
+    return `Набор инструментов: «${spec.label}» — всё, что может эта сборка. Чего не видно в списке — зови по имени, он выполнится.${roster}`;
   }
   const labels = TOOL_GROUPS.filter((group) => spec.groups?.includes(group.id))
     .map((group) => group.label)
@@ -500,13 +497,9 @@ export function toolPresetNote(preset: ToolPresetId): string {
     const roster = rosterLine(rosterLineNames(preset));
     return (
       `Набор инструментов: «${spec.label}» (${labels}). Чего нет в списке — зови по имени: ` +
-      `выполнится, и спрашивать человека не надо; поля формы — из отказа «не задан аргумент».${roster}`
+      `выполнится без спроса; поля формы — из отказа «не задан аргумент».${roster}`
     );
   }
   const roster = rosterLine(rosterNames(preset));
-  return (
-    `Набор инструментов сужен человеком: «${spec.label}» (${labels}). Нужного нет ни в списке, ` +
-    'ни в ростере — скажи об этом человеку и предложи сменить набор в композере, ' +
-    `а не ищи обходной путь.${roster}`
-  );
+  return `Набор сужен: «${spec.label}» (${labels}). Нужного нет ни в списке, ни в ростере — скажи об этом человеку, а не ищи обход.${roster}`;
 }
