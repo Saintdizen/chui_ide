@@ -47,9 +47,10 @@ import { readFileText, showFile } from './file-text';
 import { locateFile, locatePaths } from './locate';
 import { RepositoryWatcher } from './repository-watcher';
 import { parseStatus, writeLocalConfig } from './status';
-import { parseSubmodules, type GitSubmodule } from '../../shared/git-submodules';
+import type { GitSubmodule } from '../../shared/git-submodules';
 import type { GitWorktree } from '../../shared/git-worktrees';
 import type { GitLfsInfo } from '../../shared/git-lfs';
+import { listSubmodules, type SubmoduleContext, updateSubmodules } from './submodules';
 import {
   rebase as gitRebase,
   rebaseAbort as gitRebaseAbort,
@@ -980,19 +981,19 @@ export class GitService {
 
   /** Подмодули репозитория: какие папки — чужие репозитории и в каком они состоянии. */
   async submodules(): Promise<GitSubmodule[]> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) return [];
-    const result = await execGit(['submodule', 'status'], repoRoot, { allowFailure: true });
-    return result.ok ? parseSubmodules(result.stdout) : [];
+    return listSubmodules(this.submoduleCtx());
   }
 
   /** Забрать код подмодулей: `git submodule update --init --recursive`. */
   async submoduleUpdate(): Promise<GitStatus> {
-    const repoRoot = await this.requireRoot();
-    await execGit(['submodule', 'update', '--init', '--recursive'], repoRoot, {
-      timeout: NETWORK_TIMEOUT_MS,
-    });
-    return this.refresh();
+    return updateSubmodules(this.submoduleCtx());
+  }
+
+  private submoduleCtx(): SubmoduleContext {
+    return {
+      repositoryRoot: () => this.repositoryRoot(),
+      refresh: () => this.refresh(),
+    };
   }
 
   /* ── площадка хостинга: запросы на слияние (PR/MR) ─────────────────────── */
