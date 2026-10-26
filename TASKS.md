@@ -43,7 +43,26 @@
        состоянием класса и стали чистой функцией от `root()`. Перед «это сам
        класс» — проверить, не стоит ли под обёрткой функция.
 
-## Дальше по git.ts (записано 26.10, не сделано)
+## Дальше по git.ts (записано 26.10 — СДЕЛАНО 26.10, 919 → 862)
+
+### Сделано 26.10: 13 «*-Ctx()» сняты
+
+Механический шаг, который был отложен. В `git.ts` жило 13 приватных методов вида
+`private forgeCtx(): ForgeContext { return this.gitContext(); }` — снаружи ни один не
+звался (`grep` по `src` и `tests` пуст), тела у них выродились в один и тот же
+`this.gitContext()`.
+
+Что сделано: 13 методов удалены, 70 обращений `this.XxxCtx()` заменены на
+`this.gitContext()`, из импортов ушли ставшие ненужными `type *Context`
+(BisectContext, ForgeContext, InspectContext, LfsContext, RebaseContext,
+SparseContext, StashContext, SubmoduleContext, WorktreesContext + строка
+`import type { BranchContext, HistoryContext, NetContext, WorktreeContext }`).
+
+**919 → 862 строки** (−57, −132/+74 в diff). Типы 0, статика 0, тесты 5632 passed.
+
+Правило на будущее: если у `*-Ctx()` тело выродилось в `return this.gitContext()`,
+это не «шов на будущее», а забытая обёртка. Единственный настоящий контекст —
+`gitContext()`: он один собирает замыкания на `requireRoot` и т.д.
 
 - [x] **Снято замером 26.10: «оставшиеся» пункты уже сделаны.** Два из них — `reset`
        живёт в `inspect.ts` и идёт через `InspectContext`, `worktreeAdd/Remove/Prune`

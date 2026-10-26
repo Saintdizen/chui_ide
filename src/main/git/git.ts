@@ -26,8 +26,8 @@ import type { RebaseTodoItem } from '../../shared/git-rebase';
 import type { PullMode } from '../../shared/git-pull';
 import type { GitRefDiff } from '../../shared/git-ref-diff';
 import { type GitBisectState } from '../../shared/git-bisect';
-import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
-import { headText, type InspectContext, reset, revert } from './inspect';
+import { bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
+import { headText, reset, revert } from './inspect';
 import { commitDiff, discard, discardHunk, fileHunks, stage, stageHunk, unstage, unstageHunk } from './index-staging';
 import { markResolved as gitMarkResolved } from './conflict';
 import { checkIgnore as gitCheckIgnore } from './check-ignore';
@@ -39,7 +39,6 @@ import {
   stashPop as gitStashPop,
   stashSave as gitStashSave,
   stashShow as gitStashShow,
-  type StashContext,
 } from './stash';
 import { nameArg as gitNameArg } from './args';
 import { rawDiff } from './diff-text';
@@ -51,20 +50,18 @@ import type { GitSubmodule } from '../../shared/git-submodules';
 import type { GitWorktree } from '../../shared/git-worktrees';
 import type { GitLfsInfo } from '../../shared/git-lfs';
 import type { Source } from './git-context-source';
-import { listSubmodules, type SubmoduleContext, updateSubmodules } from './submodules';
+import { listSubmodules, updateSubmodules } from './submodules';
 import {
   rebase as gitRebase,
   rebaseAbort as gitRebaseAbort,
   rebaseContinue as gitRebaseContinue,
   rebaseSkip as gitRebaseSkip,
-  type RebaseContext,
 } from './rebase';
 import {
   sparseAdd as gitSparseAdd,
   sparseDisable as gitSparseDisable,
   sparseInfo as gitSparseInfo,
   sparseSet as gitSparseSet,
-  type SparseContext,
 } from './sparse';
 import { listSshKeys } from './ssh-keys';
 import {
@@ -77,7 +74,6 @@ import {
 } from '../../shared/git-identity';
 import type { ForgeComment, ForgeInfo, ForgeIssue, ForgeNotification, ForgePipeline } from '../../shared/git-platform';
 import {
-  type ForgeContext,
   forgeCheckout,
   forgeComment,
   forgeComments,
@@ -102,11 +98,9 @@ import {
   lfsPull as gitLfsPull,
   lfsTrack as gitLfsTrack,
   lfsUntrack as gitLfsUntrack,
-  type LfsContext,
 } from './lfs';
-import { addWorktree, listWorktrees, pruneWorktrees, removeWorktree, type WorktreesContext } from './worktree';
+import { addWorktree, listWorktrees, pruneWorktrees, removeWorktree } from './worktree';
 import { RpcFailure } from '../ipc/router';
-import type { BranchContext, HistoryContext, NetContext, WorktreeContext } from './contexts';
 import { fetch, pull, push, remotes } from './net';
 import { clone } from './clone';
 import { branches, checkout, deleteBranch, renameBranch } from './branches';
@@ -280,10 +274,6 @@ export class GitService {
   }
 
   /** Контекст для модуля `inspect`: три колбэка, состояние класса наружу не идёт. */
-  private inspectContext(): InspectContext {
-    return this.gitContext();
-  }
-
   /**
    * Один набор колбэков на все модули `./git/*`.
    *
@@ -306,52 +296,44 @@ export class GitService {
   /* ── интерактивный rebase ─────────────────────────────────────────────── */
 
   async rebase(count: number, items: readonly RebaseTodoItem[]): Promise<GitRebaseResult> {
-    return gitRebase(this.rebaseCtx(), count, items);
+    return gitRebase(this.gitContext(), count, items);
   }
 
   /** Продолжить остановленный rebase (конфликт разрешён или шаг `edit` закончен). */
   async rebaseContinue(): Promise<GitRebaseResult> {
-    return gitRebaseContinue(this.rebaseCtx());
+    return gitRebaseContinue(this.gitContext());
   }
 
   /** Пропустить текущий коммит остановленного rebase. */
   async rebaseSkip(): Promise<GitRebaseResult> {
-    return gitRebaseSkip(this.rebaseCtx());
+    return gitRebaseSkip(this.gitContext());
   }
 
   /** Прервать rebase: ветка возвращается туда, где была до запуска. */
   async rebaseAbort(): Promise<GitStatus> {
-    return gitRebaseAbort(this.rebaseCtx());
-  }
-
-  private rebaseCtx(): RebaseContext {
-    return this.gitContext();
+    return gitRebaseAbort(this.gitContext());
   }
 
   /* ── пошаговый поиск багованного коммита (bisect) ──────────────────────── */
 
-  private bisectContext(): BisectContext {
-    return this.gitContext();
-  }
-
   /** Состояние поиска багованного коммита (bisect). */
   async bisectState(): Promise<GitBisectState> {
-    return bisectState(this.bisectContext());
+    return bisectState(this.gitContext());
   }
 
   /** Начать поиск: `bad` — известный плохой коммит, `good` — известный хороший. */
   async bisectStart(options: { bad?: string; good?: string } = {}): Promise<GitBisectState> {
-    return bisectStart(this.bisectContext(), options);
+    return bisectStart(this.gitContext(), options);
   }
 
   /** Пометить текущий проверяемый коммит хорошим, плохим или пропустить его. */
   async bisectMark(mark: 'good' | 'bad' | 'skip'): Promise<GitBisectState> {
-    return bisectMark(this.bisectContext(), mark);
+    return bisectMark(this.gitContext(), mark);
   }
 
   /** Закончить поиск: ветка возвращается туда, где была до него. */
   async bisectReset(): Promise<GitStatus> {
-    return bisectReset(this.bisectContext());
+    return bisectReset(this.gitContext());
   }
 
   /** Конфликт решён → `conflict.ts`: `add --` ровно этого пути и свежий статус. */
@@ -371,59 +353,51 @@ export class GitService {
    * изменений быть не должно); пустая строка — файл новый или без коммитов.
    */
   async headText(filePath: string): Promise<string | null> {
-    return headText(this.inspectContext(), filePath);
+    return headText(this.gitContext(), filePath);
   }
 
   /* ── отложенные изменения (stash) ─────────────────────────────────────── */
 
   async stashList(): Promise<GitStashEntry[]> {
-    return gitStashList(this.stashCtx());
+    return gitStashList(this.gitContext());
   }
 
   /** `stash push` без изменений завершается успешно — это пустой результат, не сбой. */
   async stashSave(options: { message?: string; includeUntracked?: boolean } = {}): Promise<GitStatus> {
-    return gitStashSave(this.stashCtx(), options);
+    return gitStashSave(this.gitContext(), options);
   }
 
   async stashApply(index: number): Promise<GitStatus> {
-    return gitStashApply(this.stashCtx(), index);
+    return gitStashApply(this.gitContext(), index);
   }
 
   async stashPop(index: number): Promise<GitStatus> {
-    return gitStashPop(this.stashCtx(), index);
+    return gitStashPop(this.gitContext(), index);
   }
 
   async stashDrop(index: number): Promise<GitStatus> {
-    return gitStashDrop(this.stashCtx(), index);
+    return gitStashDrop(this.gitContext(), index);
   }
 
   async stashShow(index: number): Promise<string> {
-    return gitStashShow(this.stashCtx(), index);
-  }
-
-  private stashCtx(): StashContext {
-    return this.gitContext();
+    return gitStashShow(this.gitContext(), index);
   }
 
   async worktrees(): Promise<GitWorktree[]> {
-    return listWorktrees(this.worktreeCtx());
+    return listWorktrees(this.gitContext());
   }
 
   async worktreeAdd(target: string, options: { branch?: string; newBranch?: string } = {}): Promise<GitWorktree[]> {
-    return addWorktree(this.worktreeCtx(), target, options);
+    return addWorktree(this.gitContext(), target, options);
   }
 
   async worktreeRemove(target: string, force = false): Promise<GitWorktree[]> {
-    return removeWorktree(this.worktreeCtx(), target, force);
+    return removeWorktree(this.gitContext(), target, force);
   }
 
   /** Убрать записи о каталогах, которых уже нет на диске. */
   async worktreePrune(): Promise<GitWorktree[]> {
-    return pruneWorktrees(this.worktreeCtx());
-  }
-
-  private worktreeCtx(): WorktreesContext {
-    return this.gitContext();
+    return pruneWorktrees(this.gitContext());
   }
 
   /* ── отдельные коммиты и теги ─────────────────────────────────────────── */
@@ -437,12 +411,12 @@ export class GitService {
 
   /** Отменить один коммит новым коммитом с обратными правками. */
   async revert(commit: string): Promise<GitStatus> {
-    return revert(this.inspectContext(), commit);
+    return revert(this.gitContext(), commit);
   }
 
   /** Передвинуть ветку на коммит: soft (только указатель), mixed (+ индекс), hard (+ дерево). */
   async reset(mode: 'soft' | 'mixed' | 'hard', commit: string): Promise<GitStatus> {
-    return reset(this.inspectContext(), mode, commit);
+    return reset(this.gitContext(), mode, commit);
   }
 
   /* ── интерактивный rebase ──────────────────────────────────────────────── */
@@ -527,16 +501,12 @@ export class GitService {
 
   /** Подмодули репозитория: какие папки — чужие репозитории и в каком они состоянии. */
   async submodules(): Promise<GitSubmodule[]> {
-    return listSubmodules(this.submoduleCtx());
+    return listSubmodules(this.gitContext());
   }
 
   /** Забрать код подмодулей: `git submodule update --init --recursive`. */
   async submoduleUpdate(): Promise<GitStatus> {
-    return updateSubmodules(this.submoduleCtx());
-  }
-
-  private submoduleCtx(): SubmoduleContext {
-    return this.gitContext();
+    return updateSubmodules(this.gitContext());
   }
 
   /* ── площадка хостинга: запросы на слияние (PR/MR) ─────────────────────── */
@@ -552,12 +522,8 @@ export class GitService {
    * `remote` — какой из удалённых смотреть; без него — `origin`, иначе первый по имени.
    */
   /** Площадка: задачи, конвейеры, уведомления. Тело — в `git/forge.ts`. */
-  private forgeCtx(): ForgeContext {
-    return this.gitContext();
-  }
-
   async forgeInfo(remote?: string): Promise<ForgeInfo> {
-    return forgeInfo(this.forgeCtx(), remote);
+    return forgeInfo(this.gitContext(), remote);
   }
 
   async forgeCreate(options: {
@@ -567,55 +533,55 @@ export class GitService {
     draft?: boolean;
     source?: string;
   }): Promise<ForgeInfo> {
-    return forgeCreate(this.forgeCtx(), options);
+    return forgeCreate(this.gitContext(), options);
   }
 
   async forgeCheckout(number: number): Promise<GitStatus> {
-    return forgeCheckout(this.forgeCtx(), number);
+    return forgeCheckout(this.gitContext(), number);
   }
 
   async forgeComments(number: number): Promise<ForgeComment[]> {
-    return forgeComments(this.forgeCtx(), number);
+    return forgeComments(this.gitContext(), number);
   }
 
   async forgeComment(number: number, body: string): Promise<ForgeComment[]> {
-    return forgeComment(this.forgeCtx(), number, body);
+    return forgeComment(this.gitContext(), number, body);
   }
 
   async forgeIssues(): Promise<ForgeIssue[]> {
-    return forgeIssues(this.forgeCtx());
+    return forgeIssues(this.gitContext());
   }
 
   async forgeIssueCreate(options: { title: string; body?: string }): Promise<ForgeIssue[]> {
-    return forgeIssueCreate(this.forgeCtx(), options);
+    return forgeIssueCreate(this.gitContext(), options);
   }
 
   async forgeIssueClose(number: number): Promise<ForgeIssue[]> {
-    return forgeIssueClose(this.forgeCtx(), number);
+    return forgeIssueClose(this.gitContext(), number);
   }
 
   async forgeIssueComments(number: number): Promise<ForgeComment[]> {
-    return forgeIssueComments(this.forgeCtx(), number);
+    return forgeIssueComments(this.gitContext(), number);
   }
 
   async forgeIssueComment(number: number, body: string): Promise<ForgeComment[]> {
-    return forgeIssueComment(this.forgeCtx(), number, body);
+    return forgeIssueComment(this.gitContext(), number, body);
   }
 
   async forgePipelines(): Promise<ForgePipeline[]> {
-    return forgePipelines(this.forgeCtx());
+    return forgePipelines(this.gitContext());
   }
 
   async forgePipelineRerun(id: number): Promise<ForgePipeline[]> {
-    return forgePipelineRerun(this.forgeCtx(), id);
+    return forgePipelineRerun(this.gitContext(), id);
   }
 
   async forgeNotifications(): Promise<ForgeNotification[]> {
-    return forgeNotifications(this.forgeCtx());
+    return forgeNotifications(this.gitContext());
   }
 
   async forgeNotificationRead(id: string): Promise<ForgeNotification[]> {
-    return forgeNotificationRead(this.forgeCtx(), id);
+    return forgeNotificationRead(this.gitContext(), id);
   }
 
   /* ── личность, подпись коммитов и ключи ────────────────────────────────── */
@@ -671,24 +637,20 @@ export class GitService {
   /* ── разреженный рабочий каталог (sparse checkout) ─────────────── */
 
   async sparseInfo(): Promise<GitSparseInfo> {
-    return gitSparseInfo(this.sparseCtx());
+    return gitSparseInfo(this.gitContext());
   }
 
   async sparseSet(directories: string[]): Promise<GitSparseInfo> {
-    return gitSparseSet(this.sparseCtx(), directories);
+    return gitSparseSet(this.gitContext(), directories);
   }
 
   async sparseAdd(directory: string): Promise<GitSparseInfo> {
-    return gitSparseAdd(this.sparseCtx(), directory);
+    return gitSparseAdd(this.gitContext(), directory);
   }
 
   /** Выключить разреженный режим: на диск возвращается весь репозиторий. */
   async sparseDisable(): Promise<GitSparseInfo> {
-    return gitSparseDisable(this.sparseCtx());
-  }
-
-  private sparseCtx(): SparseContext {
-    return this.gitContext();
+    return gitSparseDisable(this.gitContext());
   }
 
   async sshKeys(): Promise<GitSshKey[]> {
@@ -698,11 +660,11 @@ export class GitService {
   /* ── сеть и удалённые репозитории ─────────────────────────────────────── */
 
   async remotes(): Promise<GitRemote[]> {
-    return remotes(this.netCtx());
+    return remotes(this.gitContext());
   }
 
   async fetch(): Promise<GitNetworkResult> {
-    return fetch(this.netCtx());
+    return fetch(this.gitContext());
   }
 
   /**
@@ -730,145 +692,125 @@ export class GitService {
   }
 
   async pull(mode: PullMode = 'default'): Promise<GitNetworkResult> {
-    return pull(this.netCtx(), mode);
+    return pull(this.gitContext(), mode);
   }
 
   async push(options: { setUpstream?: boolean; force?: boolean } = {}): Promise<GitNetworkResult> {
-    return push(this.netCtx(), options);
+    return push(this.gitContext(), options);
   }
 
   async clone(url: string, directory: string, onProgress?: (line: string) => void): Promise<{ path: string }> {
     return clone(url, directory, onProgress);
   }
 
-  private netCtx(): NetContext {
-    return this.gitContext();
-  }
-
   /* ── ветки ────────────────────────────────────────────────────────────── */
 
   async branches(): Promise<GitBranch[]> {
-    return branches(this.branchCtx());
+    return branches(this.gitContext());
   }
 
   async checkout(name: string, create = false): Promise<GitStatus> {
-    return checkout(this.branchCtx(), name, create);
+    return checkout(this.gitContext(), name, create);
   }
 
   async deleteBranch(name: string, force = false): Promise<GitStatus> {
-    return deleteBranch(this.branchCtx(), name, force);
+    return deleteBranch(this.gitContext(), name, force);
   }
 
   async renameBranch(from: string, to: string): Promise<GitStatus> {
-    return renameBranch(this.branchCtx(), from, to);
-  }
-
-  private branchCtx(): BranchContext {
-    return this.gitContext();
+    return renameBranch(this.gitContext(), from, to);
   }
 
   /* ── история и содержимое ─────────────────────────────────────────────── */
 
   async logText(limit = 20, filePath?: string): Promise<string> {
-    return logText(this.historyCtx(), limit, filePath);
+    return logText(this.gitContext(), limit, filePath);
   }
 
   async log(limit = 50, filePath?: string): Promise<GitCommit[]> {
-    return logHistory(this.historyCtx(), limit, filePath);
+    return logHistory(this.gitContext(), limit, filePath);
   }
 
   async blame(filePath: string, range?: { startLine?: number; endLine?: number }): Promise<BlameLine[]> {
-    return blame(this.historyCtx(), filePath, range);
+    return blame(this.gitContext(), filePath, range);
   }
 
   async conflictParts(filePath: string): Promise<GitConflictParts> {
-    return conflictParts(this.historyCtx(), filePath);
+    return conflictParts(this.gitContext(), filePath);
   }
 
   async compareRefs(base: string, head: string): Promise<GitRefDiff> {
-    return compareRefs(this.historyCtx(), base, head);
+    return compareRefs(this.gitContext(), base, head);
   }
 
   async diffRefs(base: string, head: string, filePath: string): Promise<GitDiff> {
-    return diffRefs(this.historyCtx(), base, head, filePath);
+    return diffRefs(this.gitContext(), base, head, filePath);
   }
 
   async reflog(limit = 50): Promise<GitReflogEntry[]> {
-    return reflog(this.historyCtx(), limit);
+    return reflog(this.gitContext(), limit);
   }
 
   async logGraph(limit = 100): Promise<string> {
-    return logGraph(this.historyCtx(), limit);
-  }
-
-  private historyCtx(): HistoryContext {
-    return this.gitContext();
+    return logGraph(this.gitContext(), limit);
   }
 
   /* ── индекс и рабочее дерево ──────────────────────────────────────────── */
 
   async stage(paths: string[]): Promise<GitStatus> {
-    return stage(this.stagingCtx(), paths);
+    return stage(this.gitContext(), paths);
   }
 
   async unstage(paths: string[]): Promise<GitStatus> {
-    return unstage(this.stagingCtx(), paths);
+    return unstage(this.gitContext(), paths);
   }
 
   async stageHunk(filePath: string, index: number): Promise<GitStatus> {
-    return stageHunk(this.stagingCtx(), filePath, index);
+    return stageHunk(this.gitContext(), filePath, index);
   }
 
   async unstageHunk(filePath: string, index: number): Promise<GitStatus> {
-    return unstageHunk(this.stagingCtx(), filePath, index);
+    return unstageHunk(this.gitContext(), filePath, index);
   }
 
   async discardHunk(filePath: string, index: number): Promise<GitStatus> {
-    return discardHunk(this.stagingCtx(), filePath, index);
+    return discardHunk(this.gitContext(), filePath, index);
   }
 
   async fileHunks(filePath: string): Promise<GitFileHunks> {
-    return fileHunks(this.stagingCtx(), filePath);
+    return fileHunks(this.gitContext(), filePath);
   }
 
   async discard(paths: string[]): Promise<GitStatus> {
-    return discard(this.stagingCtx(), paths);
+    return discard(this.gitContext(), paths);
   }
 
   async commitDiff(): Promise<GitCommitDiff> {
-    return commitDiff(this.stagingCtx());
-  }
-
-  private stagingCtx(): WorktreeContext {
-    return this.gitContext();
+    return commitDiff(this.gitContext());
   }
 
   /* ── Git LFS (хранение больших файлов) ─────────────────────────────────── */
 
   async lfsInfo(): Promise<GitLfsInfo> {
-    return gitLfsInfo(this.lfsCtx());
+    return gitLfsInfo(this.gitContext());
   }
 
   async lfsTrack(pattern: string): Promise<GitLfsInfo> {
-    return gitLfsTrack(this.lfsCtx(), pattern);
+    return gitLfsTrack(this.gitContext(), pattern);
   }
 
   async lfsUntrack(pattern: string): Promise<GitLfsInfo> {
-    return gitLfsUntrack(this.lfsCtx(), pattern);
+    return gitLfsUntrack(this.gitContext(), pattern);
   }
 
   /** Как fetch, только для больших файлов. */
   async lfsPull(): Promise<GitLfsInfo> {
-    return gitLfsPull(this.lfsCtx());
+    return gitLfsPull(this.gitContext());
   }
 
   /** Подготовить репозиторий к LFS: `git lfs install --local` (ставит хуки). */
   async lfsInstall(): Promise<GitLfsInfo> {
-    return gitLfsInstall(this.lfsCtx());
-  }
-
-  private lfsCtx(): LfsContext {
-    return this.gitContext();
+    return gitLfsInstall(this.gitContext());
   }
 
   /* ── дополнительные рабочие каталоги (worktree) ───────────────────────── */
