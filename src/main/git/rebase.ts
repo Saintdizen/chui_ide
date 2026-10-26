@@ -7,6 +7,11 @@ import { RpcFailure } from '../ipc/router';
 import type { RepositoryContext, StatusContext, GitDirContext } from './contexts';
 import { execGit, type GitResult } from './exec';
 
+/**
+ * Что нужно `rebase`: корень, `gitPath` (файл `rebase-merge` бывает и папкой)
+ * и пересчёт статуса после каждого шага. `status()` модуль не зовёт ни разу —
+ * просить его значило бы разрешить рассылку там, где её никто не ждёт.
+ */
 export interface RebaseContext extends RepositoryContext, StatusContext, GitDirContext {}
 
 const SEQUENCE_EDITOR_SCRIPT = `

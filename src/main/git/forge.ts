@@ -18,6 +18,12 @@ import { NETWORK_TIMEOUT_MS, runForge } from './exec';
 import { RpcErrorCode, type GitStatus } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
 
+/**
+ * Что форжу нужно от репозитория: корень, удалённые адреса и пересчёт статуса
+ * после смены ветки. Шире не просим: `root()` зовётся 5 раз, а `status()` —
+ * ни разу, и модуль, объявив его, звал бы `refresh()` там, где нужен статус
+ * без рассылки.
+ */
 export interface ForgeContext extends RepositoryContext, StatusContext, RemoteContext {}
 
 export async function forgeInfo(ctx: ForgeContext, remote?: string): Promise<ForgeInfo> {
