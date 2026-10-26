@@ -29,8 +29,11 @@ import { mergeRefDiff, type GitRefDiff } from '../../shared/git-ref-diff';
 import { type GitBisectState } from '../../shared/git-bisect';
 import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, type InspectContext, reset, revert } from './inspect';
+import { applyToIndex as gitApplyToIndex, applyToWorktree as gitApplyToWorktree } from './apply';
 import { nameArg as gitNameArg, refArg as gitRefArg } from './args';
 import { rawDiff as gitRawDiff } from './diff-text';
+import { readFileText, showFile } from './file-text';
+import { locateFile, locatePaths } from './locate';
 import { RepositoryWatcher } from './repository-watcher';
 import { parseStatus, writeLocalConfig } from './status';
 import { parseSubmodules, type GitSubmodule } from '../../shared/git-submodules';
@@ -81,7 +84,7 @@ import { COMMIT_DIFF_MAX_CHARS, truncateDiff } from '../../shared/commit-message
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
 export { gitTemplateDir } from './exec';
-import { CLONE_TIMEOUT_MS, execGit, gitTemplateDir, GIT_TIMEOUT_MS, MAX_DIFF_BYTES, NETWORK_TIMEOUT_MS } from './exec';
+import { CLONE_TIMEOUT_MS, execGit, gitTemplateDir, GIT_TIMEOUT_MS, NETWORK_TIMEOUT_MS } from './exec';
 
 /**
  * Редактор списка шагов для `git rebase -i`: кладёт наш готовый список на место
@@ -1637,100 +1640,28 @@ export class GitService {
     return value || null;
   }
 
-  /** Общий вход для операций с файлами: проверяем, что всё это про наш репозиторий. */
-  private async locate(paths: string[]): Promise<{ repoRoot: string; relative: string[] }> {
-    const status = await this.status();
-    const repoRoot = status.repository?.root;
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    const known = new Map(status.files.map((file) => [file.path, file]));
-    const relative = paths.map((target) => {
-      const absolute = path.resolve(target);
-      const file = known.get(absolute);
-      if (!file) throw new RpcFailure(RpcErrorCode.NotFound, `Вне репозитория или без изменений: ${absolute}`);
-      return file.relative;
-    });
-
-    return { repoRoot, relative };
+  private locate(paths: string[]): Promise<{ repoRoot: string; relative: string[] }> {
+    return locatePaths(() => this.status(), paths);
   }
 
-  /** Один файл для операции с блоком: должен быть в нашем репозитории и с правками. */
-  private async locateHunk(filePath: string): Promise<{ repoRoot: string; relative: string }> {
-    const status = await this.status();
-    const repoRoot = status.repository?.root;
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    const known = status.files.find((file) => file.path === path.resolve(filePath));
-    if (!known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
-    return { repoRoot, relative: known.relative };
+  private locateHunk(filePath: string): Promise<{ repoRoot: string; relative: string }> {
+    return locateFile(() => this.status(), filePath);
   }
 
-  /**
-   * Приложить патч к индексу (`--cached`), не трогая рабочее дерево. `reverse`
-   * убирает блок из индекса. Патч идёт на stdin: так не нужен временный файл,
-   * а `git apply` читает его оттуда без оговорок.
-   */
   private applyToIndex(patch: string, repoRoot: string, reverse: boolean): Promise<void> {
-    const args = ['apply', '--cached', '--whitespace=nowarn'];
-    if (reverse) args.push('--reverse');
-    return this.runApply(args, repoRoot, patch);
+    return gitApplyToIndex(patch, repoRoot, reverse);
   }
 
-  /**
-   * Приложить обратный патч к РАБОЧЕМУ ДЕРЕВУ (без `--cached`): правка исчезает из
-   * файла, индекс не меняется. Тем же путём, что `applyToIndex`, только цель другая.
-   */
   private applyToWorktree(patch: string, repoRoot: string): Promise<void> {
-    return this.runApply(['apply', '--whitespace=nowarn', '--reverse'], repoRoot, patch);
+    return gitApplyToWorktree(patch, repoRoot);
   }
 
-  /**
-   * Запустить `git apply` с патчем на входе. Оба применения (в индекс и в рабочее
-   * дерево) отличаются только аргументами — общий запуск живёт здесь.
-   */
-  private runApply(args: readonly string[], repoRoot: string, patch: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const child = spawn('git', ['--no-optional-locks', ...args], {
-        cwd: repoRoot,
-        windowsHide: true,
-        env: {
-          ...process.env,
-          // Никаких диалогов и редакторов: всё, что требует ввода, в IDE решается иначе.
-          GIT_TERMINAL_PROMPT: '0',
-          GIT_EDITOR: 'true',
-          GIT_PAGER: 'cat',
-        },
-      });
-
-      let stderr = '';
-      child.stderr.setEncoding('utf8');
-      child.stderr.on('data', (chunk: string) => {
-        stderr += chunk;
-      });
-      child.on('error', (error) => reject(new RpcFailure(RpcErrorCode.Internal, `git: ${error.message}`)));
-      child.on('close', (code) => {
-        if (code === 0) resolve();
-        else reject(new RpcFailure(RpcErrorCode.Internal, `git apply: ${stderr.trim() || `код ${code}`}`));
-      });
-      child.stdin.end(patch);
-    });
+  private show(spec: string, cwd: string): Promise<string> {
+    return showFile(spec, cwd);
   }
 
-  /** Содержимое из дерева git; если объекта нет (новый файл) — пустая строка. */
-  private async show(spec: string, cwd: string): Promise<string> {
-    const result = await execGit(['show', spec], cwd, { allowFailure: true });
-    return result.ok ? result.stdout : '';
-  }
-
-  private async readText(absolute: string): Promise<string> {
-    const stat = await fs.stat(absolute).catch(() => null);
-    if (!stat?.isFile()) return '';
-    if (stat.size > MAX_DIFF_BYTES) {
-      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Файл слишком большой для сравнения');
-    }
-    const buffer = await fs.readFile(absolute);
-    if (buffer.includes(0)) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Двоичный файл — сравнение недоступно');
-    return buffer.toString('utf8');
+  private readText(absolute: string): Promise<string> {
+    return readFileText(absolute);
   }
 
   /**
