@@ -1,8 +1,9 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { shell } from 'electron';
+import { runTool } from '../tool';
 import {
   PushTopic,
   RpcErrorCode,
@@ -85,7 +86,7 @@ import { COMMIT_DIFF_MAX_CHARS, truncateDiff } from '../../shared/commit-message
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
 export { gitTemplateDir } from './exec';
-import { CLONE_TIMEOUT_MS, execGit, gitTemplateDir, GIT_TIMEOUT_MS, NETWORK_TIMEOUT_MS } from './exec';
+import { CLONE_TIMEOUT_MS, execGit, gitTemplateDir, type GitResult, NETWORK_TIMEOUT_MS } from './exec';
 
 /**
  * Редактор списка шагов для `git rebase -i`: кладёт наш готовый список на место
@@ -122,12 +123,6 @@ let map = {};
 try { map = JSON.parse(fs.readFileSync(process.env.CHUI_REBASE_MESSAGES, 'utf8')); } catch { map = {}; }
 if (Object.prototype.hasOwnProperty.call(map, message)) fs.writeFileSync(target, map[message]);
 `;
-
-interface GitResult {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-}
 
 /**
  * Git через обычный CLI, а не через библиотеку: git установлен у того, кто
@@ -1305,16 +1300,7 @@ export class GitService {
 
   /** Запуск не-git инструмента (gpg, ssh-keygen): сбой — это `ok: false`, а не исключение. */
   private tool(file: string, args: string[]): Promise<GitResult> {
-    return new Promise((resolve) => {
-      execFile(
-        file,
-        args,
-        { timeout: GIT_TIMEOUT_MS, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
-        (error, stdout, stderr) => {
-          resolve({ ok: error === null, stdout: stdout ?? '', stderr: stderr ?? '' });
-        },
-      );
-    });
+    return runTool(file, args);
   }
 
   /* ── разреженный рабочий каталог (sparse checkout) ─────────────── */
