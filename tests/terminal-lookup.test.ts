@@ -357,3 +357,47 @@ describe('читалка поверх уже прочитанного', () => {
     expect(box.calls, 'шелл не понадобился').toEqual([]);
   });
 });
+
+/**
+ * Относительный `cwd` — от корня проекта. Модель видит в контексте «Рабочая папка
+ * проекта: …» и пишет `cwd: "src"`; до 26.10 такой вызов падал «Путь вне рабочей
+ * папки», потому что относительное разворачивалось от текущего каталога процесса.
+ * `read`/`edit` относительный путь понимали — расхождение было только у шелла.
+ */
+describe('terminal: относительный cwd считается от корня проекта', () => {
+  // В песочнице монтируется только корень, поэтому подпапка едет в команде как `cd`,
+  // а `cwd` процесса остаётся корнем. Отсюда и проверка: команда стартует в подпапке.
+  const commandOf = (box: { calls: { command: string; cwd: string }[] }) => box.calls[0]?.command ?? '';
+
+  for (const cwd of ['src', './src', 'src/']) {
+    it(`cwd ${cwd} запускает команду в подпапке проекта`, async () => {
+      const box = sandbox();
+      const out = await runTool(context(box), 'terminal', JSON.stringify({ action: 'run', command: 'npm test', cwd }));
+      expect(out.ok).toBe(true);
+      expect(box.calls[0]?.cwd).toBe(dir);
+      expect(commandOf(box)).toContain("cd 'src'");
+    });
+  }
+
+  it('несуществующая папка — отказ, а не запуск в корне', async () => {
+    const box = sandbox();
+    const out = await runTool(
+      context(box),
+      'terminal',
+      JSON.stringify({ action: 'run', command: 'npm test', cwd: 'нет-такой' }),
+    );
+    expect(out.ok).toBe(false);
+    expect(box.calls).toHaveLength(0);
+  });
+
+  it('абсолютный cwd внутри проекта по-прежнему работает', async () => {
+    const box = sandbox();
+    const out = await runTool(
+      context(box),
+      'terminal',
+      JSON.stringify({ action: 'run', command: 'npm test', cwd: path.join(dir, 'src') }),
+    );
+    expect(out.ok).toBe(true);
+    expect(commandOf(box)).toContain("cd 'src'");
+  });
+});

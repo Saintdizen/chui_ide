@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { runShellCommand, type RunOptions } from './run-command';
 import type { SandboxRunner, ToolContext, ToolOutcome } from './tool-context';
 import { clipTail, condenseOutput, foldPassedTests, spillNote, trimCommandTail } from './output-trim';
@@ -115,7 +116,14 @@ export async function commandCwd(
   if (!root) return null;
   const raw = optionalString(args, 'cwd');
   if (!raw) return { root, path: root, relative: '' };
-  const stat = await ctx.workspace.stat(raw);
+  // Относительный `cwd` — от корня проекта, а не от текущего каталога процесса:
+  // модель видит в контексте «Рабочая папка проекта: …» и потому пишет `cwd: "src"`,
+  // а `safePath` разворачивает относительное от cwd процесса и отвечает «Путь вне
+  // рабочей папки» (проверено живьём 26.10: `src`, `./src`, `src/` — все три отказа).
+  // Те же слова, что и «пути абсолютные и внутри проекта», но вызов честнее принять:
+  // `read`/`edit` относительный путь тоже понимают — расхождение было только тут.
+  const target = path.isAbsolute(raw) ? raw : path.resolve(root, raw);
+  const stat = await ctx.workspace.stat(target);
   if (stat.kind !== 'directory') throw new Error(`Аргумент «cwd» — не папка: ${raw}`);
   const relative = relativeFrom(stat.path, root);
   return { root, path: stat.path, relative: relative === '.' ? '' : relative };
