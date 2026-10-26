@@ -46,7 +46,7 @@ import { rawDiff } from './diff-text';
 import { readFileText } from './file-text';
 
 import { RepositoryWatcher } from './repository-watcher';
-import { parseStatus, writeLocalConfig } from './status';
+import { readStatus, writeLocalConfig } from './status';
 import type { GitSubmodule } from '../../shared/git-submodules';
 import type { GitWorktree } from '../../shared/git-worktrees';
 import type { GitLfsInfo } from '../../shared/git-lfs';
@@ -164,9 +164,7 @@ export class GitService {
     // другой папке области статус активной не меняет.
     if (rootPath === undefined) this.watcher.sync(repoRoot);
     if (!repoRoot) return { repository: null, files: [] };
-
-    const result = await execGit(['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'], repoRoot);
-    return parseStatus(result.stdout, repoRoot);
+    return readStatus(repoRoot);
   }
 
   /**
@@ -282,7 +280,6 @@ export class GitService {
     return rawDiff(known.relative, repoRoot, { staged });
   }
 
-  /** Контекст для модуля `inspect`: три колбэка, состояние класса наружу не идёт. */
   /** Контекст для модуля `inspect`: три колбэка, состояние класса наружу не идёт. */
   private inspectContext(): InspectContext {
     return this.gitContext();

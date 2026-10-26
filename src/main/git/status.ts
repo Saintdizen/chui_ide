@@ -4,6 +4,20 @@ import { execGit } from './exec';
 import type { GitChange, GitFileStatus, GitRepository, GitStatus } from '../../shared/api';
 
 /**
+ * Прочитать статус репозитория.
+ *
+ * Вызов отдельно от разбора: разбор нужен и там, где текст уже есть, а здесь
+ * важен сам запуск. Флаги не случайны: `v2` — машиночитаемый формат, `-z` —
+ * имена без экранирования (пробелы и кириллица в путях не ломаются),
+ * `--untracked-files=all` — нераспознанные файлы видны внутри папок, а не
+ * целой папкой. `--branch` добавляет строку с веткой и расхождением с upstream.
+ */
+export async function readStatus(repoRoot: string): Promise<GitStatus> {
+  const result = await execGit(['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'], repoRoot);
+  return parseStatus(result.stdout, repoRoot);
+}
+
+/**
  * Разбор `git status --porcelain=v2 -z`.
  *
  * Живёт вне класса: функции нужны только текст ответа и корень репозитория,
