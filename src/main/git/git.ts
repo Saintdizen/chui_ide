@@ -31,7 +31,7 @@ import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState }
 import { headText, type InspectContext, reset, revert } from './inspect';
 import { commitDiff, discard, discardHunk, fileHunks, stage, stageHunk, unstage, unstageHunk } from './index-staging';
 
-import { type NetworkContext, runNetwork } from './network';
+import { runNetwork } from './network';
 import {
   stashApply as gitStashApply,
   stashDrop as gitStashDrop,
@@ -113,7 +113,7 @@ import { branches, checkout, deleteBranch, renameBranch } from './branches';
 import { blame, compareRefs, conflictParts, diffRefs, logGraph, logHistory, logText, reflog, show } from './history';
 import { locateFile } from './locate';
 export { gitTemplateDir } from './exec';
-import { execGit, gitTemplateDir, type GitResult, NETWORK_TIMEOUT_MS } from './exec';
+import { execGit, gitTemplateDir, type GitResult, NETWORK_TIMEOUT_MS, resolveRepositoryRoot } from './exec';
 
 /**
  * Редактор списка шагов для `git rebase -i`: кладёт наш готовый список на место
@@ -247,10 +247,10 @@ export class GitService {
     let modified: string;
     if (commit) {
       original = await show(`${commit}:${relative}`, repoRoot);
-      modified = await this.readText(absolute);
+      modified = await readFileText(absolute);
     } else {
       original = staged ? await show(`HEAD:${relative}`, repoRoot) : await show(`:${relative}`, repoRoot);
-      modified = staged ? await show(`:${relative}`, repoRoot) : await this.readText(absolute);
+      modified = staged ? await show(`:${relative}`, repoRoot) : await readFileText(absolute);
     }
 
     // Границы блоков нужны интерфейсу: у каждого будет своя кнопка. Считаем из
@@ -436,7 +436,7 @@ export class GitService {
 
   /** Перенести один коммит в текущую ветку. */
   async cherryPick(commit: string): Promise<GitStatus> {
-    const repoRoot = await this.requireRoot();
+    const repoRoot = this.requireRoot();
     await execGit(['cherry-pick', this.commitArg(commit)], repoRoot);
     return this.refresh();
   }
@@ -480,7 +480,7 @@ export class GitService {
 
   /** Поставить тег. С сообщением — аннотированный, без — лёгкий. */
   async createTag(name: string, options: { message?: string; commit?: string } = {}): Promise<GitStatus> {
-    const repoRoot = await this.requireRoot();
+    const repoRoot = this.requireRoot();
     const args = ['tag'];
     const message = options.message?.trim();
     if (message) args.push('-a', '-m', message);
@@ -492,14 +492,14 @@ export class GitService {
 
   /** Удалить тег из репозитория (удалённый не трогаем). */
   async deleteTag(name: string): Promise<GitStatus> {
-    const repoRoot = await this.requireRoot();
+    const repoRoot = this.requireRoot();
     await execGit(['tag', '-d', this.nameArg(name)], repoRoot);
     return this.refresh();
   }
 
   /** Отправить один тег в origin. */
   async pushTag(name: string): Promise<GitNetworkResult> {
-    return this.network(['push', 'origin', `refs/tags/${this.nameArg(name)}`]);
+    return runNetwork(this.gitContext(), ['push', 'origin', `refs/tags/${this.nameArg(name)}`]);
   }
 
   /* ── ветки, .gitignore и журнал ссылок ────────────────────────────────── */
@@ -512,7 +512,7 @@ export class GitService {
   async ignore(paths: string[]): Promise<GitStatus> {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-    const current = await this.readText(path.join(repoRoot, '.gitignore')).catch(() => '');
+    const current = await readFileText(path.join(repoRoot, '.gitignore')).catch(() => '');
     const lines = current.split('\n').filter((line) => line.trim() !== '');
     const known = new Set(lines.map((line) => line.trim()));
 
@@ -648,7 +648,7 @@ export class GitService {
    * этого проекта и не переписывает личность человека в его глобальных настройках.
    */
   async setIdentity(values: Partial<GitIdentity>): Promise<GitIdentity> {
-    const repoRoot = await this.requireRoot();
+    const repoRoot = this.requireRoot();
     const current = await this.identity();
     const patch = identityPatch(current, values);
     if (patch.length === 0) return current;
@@ -957,42 +957,24 @@ export class GitService {
     return gitNameArg(name);
   }
 
-  /* ── внутреннее ────────────────────────────────────────────────────────── */
-
-  /**
-   * Сетевая операция git: запуск, разбор итога и свежий статус. Сбой (нет remote,
-   * отказ авторизации, конфликт слияния) — не исключение, а ответ: `ok: false` и
-   * текст от git. Ожидание много больше обычного — здесь ждут сеть.
-   */
-  /** Сетевая команда: свой таймаут, «нечего пушить» — не исключение (см. network.ts). */
-  private network(args: string[]): Promise<GitNetworkResult> {
-    return runNetwork(this.networkCtx(), args);
-  }
-
-  private networkCtx(): NetworkContext {
-    return this.gitContext();
-  }
-
+  /** Корень рабочей папки или ошибка: операции записи без открытой папки не имеют смысла. */
   private requireRoot(): string {
     const root = this.root();
     if (!root) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Проект не открыт');
     return root;
   }
 
+  /* ── внутреннее ────────────────────────────────────────────────────────── */
+
   /**
    * Корень репозитория для рабочей папки. Если папка открыта внутри большего
    * репозитория, git вернёт его корень — это ожидаемое поведение.
    */
-  private async repositoryRoot(explicit?: string): Promise<string | null> {
-    const root = explicit ?? this.root();
-    if (!root) return null;
-    const result = await execGit(['rev-parse', '--show-toplevel'], root, { allowFailure: true });
-    if (!result.ok) return null;
-    const value = result.stdout.trim();
-    return value || null;
-  }
-
-  private readText(absolute: string): Promise<string> {
-    return readFileText(absolute);
+  /**
+   * Корень репозитория: один источник правды — `resolveRepositoryRoot` в exec.ts,
+   * рядом с самим запуском git.
+   */
+  private repositoryRoot(explicit?: string): Promise<string | null> {
+    return resolveRepositoryRoot({ root: () => this.root() }, explicit);
   }
 }

@@ -116,3 +116,19 @@ export function runForge(cli: string, args: string[], cwd: string, timeout = GIT
     );
   });
 }
+
+/**
+ * Корень репозитория для рабочей папки. Если папка открыта внутри большего
+ * репозитория, git вернёт его корень — это ожидаемое поведение, а не ошибка.
+ *
+ * `rev-parse --show-toplevel` не падает при запуске, а отвечает кодом: поэтому
+ * `allowFailure` и `null`, а не исключение. Так же поступает любой вызов, где
+ * «не репозиторий» — нормальный ответ (список веток, например).
+ */
+export async function resolveRepositoryRoot(ctx: { root(): string | null }, explicit?: string): Promise<string | null> {
+  const root = explicit ?? ctx.root();
+  if (!root) return null;
+  const result = await execGit(['rev-parse', '--show-toplevel'], root, { allowFailure: true });
+  if (!result.ok) return null;
+  return result.stdout.trim() || null;
+}
