@@ -45,6 +45,18 @@ export interface GitDirContext {
   gitPath(repoRoot: string, name: string): Promise<string | null>;
 }
 
+/** Свежий статус: его запрашивают `locate` и `discard`, а не берут из кеша. */
+export interface SnapshotContext {
+  status(): Promise<GitStatus>;
+}
+
+/**
+ * Индекс и рабочее дерево: галочки в списке изменений и полоски на полях файла.
+ * Нужны и свежий статус (он один знает корень и относительный путь файла), и
+ * рассылка `GitChanged` после каждого действия.
+ */
+export interface WorktreeContext extends SnapshotContext, StatusContext {}
+
 /** Удалённые репозитории: `forge.ts` и `network.ts` решают по ним, что показать. */
 export interface RemoteContext {
   remotes(): Promise<GitRemote[]>;

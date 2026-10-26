@@ -6,9 +6,9 @@ import { nameArg } from './args';
 import type { RepositoryContext } from './contexts';
 import { execGit, NETWORK_TIMEOUT_MS } from './exec';
 
-export interface WorktreeContext extends RepositoryContext {}
+export interface WorktreesContext extends RepositoryContext {}
 
-export async function listWorktrees(ctx: WorktreeContext): Promise<GitWorktree[]> {
+export async function listWorktrees(ctx: WorktreesContext): Promise<GitWorktree[]> {
   const repoRoot = await ctx.repositoryRoot();
   if (!repoRoot) return [];
   const result = await execGit(['worktree', 'list', '--porcelain'], repoRoot, { allowFailure: true });
@@ -18,7 +18,7 @@ export async function listWorktrees(ctx: WorktreeContext): Promise<GitWorktree[]
 }
 
 export async function addWorktree(
-  ctx: WorktreeContext,
+  ctx: WorktreesContext,
   target: string,
   options: { branch?: string; newBranch?: string } = {},
 ): Promise<GitWorktree[]> {
@@ -33,7 +33,7 @@ export async function addWorktree(
   return listWorktrees(ctx);
 }
 
-export async function removeWorktree(ctx: WorktreeContext, target: string, force: boolean): Promise<GitWorktree[]> {
+export async function removeWorktree(ctx: WorktreesContext, target: string, force: boolean): Promise<GitWorktree[]> {
   const repoRoot = await requireRoot(ctx);
   // Путь начинается с дефиса? Тогда за него примет git — подстрахуемся `--`.
   const args = ['worktree', 'remove'];
@@ -44,13 +44,13 @@ export async function removeWorktree(ctx: WorktreeContext, target: string, force
 }
 
 /** Убрать записи о каталогах, которых уже нет на диске. */
-export async function pruneWorktrees(ctx: WorktreeContext): Promise<GitWorktree[]> {
+export async function pruneWorktrees(ctx: WorktreesContext): Promise<GitWorktree[]> {
   const repoRoot = await requireRoot(ctx);
   await execGit(['worktree', 'prune'], repoRoot);
   return listWorktrees(ctx);
 }
 
-async function requireRoot(ctx: WorktreeContext): Promise<string> {
+async function requireRoot(ctx: WorktreesContext): Promise<string> {
   const repoRoot = await ctx.repositoryRoot();
   if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
   return repoRoot;

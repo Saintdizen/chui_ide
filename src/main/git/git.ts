@@ -2,7 +2,6 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { shell } from 'electron';
 import { runTool } from '../tool';
 import {
   PushTopic,
@@ -20,7 +19,7 @@ import {
   type GitStatus,
 } from '../../shared/api';
 import { parseBlamePorcelain, type BlameLine } from '../../shared/git-blame';
-import { hunkPatch, hunkRanges } from '../../shared/git-hunks';
+import { hunkRanges } from '../../shared/git-hunks';
 import { parseReflog, type GitReflogEntry } from '../../shared/git-reflog';
 import type { GitStashEntry } from '../../shared/git-stash';
 import { parseTagList, type GitTag } from '../../shared/git-tags';
@@ -30,7 +29,8 @@ import { mergeRefDiff, type GitRefDiff } from '../../shared/git-ref-diff';
 import { type GitBisectState } from '../../shared/git-bisect';
 import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, type InspectContext, reset, revert } from './inspect';
-import { applyToIndex as gitApplyToIndex, applyToWorktree as gitApplyToWorktree } from './apply';
+import { commitDiff, discard, discardHunk, fileHunks, stage, stageHunk, unstage, unstageHunk } from './index-staging';
+
 import { type NetworkContext, runNetwork } from './network';
 import {
   stashApply as gitStashApply,
@@ -42,9 +42,9 @@ import {
   type StashContext,
 } from './stash';
 import { nameArg as gitNameArg, refArg as gitRefArg } from './args';
-import { rawDiff as gitRawDiff } from './diff-text';
+import { rawDiff } from './diff-text';
 import { readFileText, showFile } from './file-text';
-import { locateFile, locatePaths } from './locate';
+
 import { RepositoryWatcher } from './repository-watcher';
 import { parseStatus, writeLocalConfig } from './status';
 import type { GitSubmodule } from '../../shared/git-submodules';
@@ -95,7 +95,6 @@ import {
 } from './forge';
 import type { GitSparseInfo } from '../../shared/git-sparse';
 import { summarizeRoot, type GitRootFetch, type GitRootSummary } from '../../shared/git-multiroot';
-import { COMMIT_DIFF_MAX_CHARS, truncateDiff } from '../../shared/commit-message';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import {
   lfsInfo as gitLfsInfo,
@@ -105,8 +104,10 @@ import {
   lfsUntrack as gitLfsUntrack,
   type LfsContext,
 } from './lfs';
-import { addWorktree, listWorktrees, pruneWorktrees, removeWorktree, type WorktreeContext } from './worktree';
+import { addWorktree, listWorktrees, pruneWorktrees, removeWorktree, type WorktreesContext } from './worktree';
 import { RpcFailure } from '../ipc/router';
+import type { WorktreeContext } from './contexts';
+import { locateFile } from './locate';
 export { gitTemplateDir } from './exec';
 import { CLONE_TIMEOUT_MS, execGit, gitTemplateDir, type GitResult, NETWORK_TIMEOUT_MS } from './exec';
 
@@ -188,148 +189,6 @@ export class GitService {
   }
 
   /**
-   * Diff того, что попадёт в коммит. С индексированными правками — индекс против
-   * HEAD (ровно содержимое будущего коммита), без них — рабочее дерево против
-   * индекса: человек просит сообщение по тому, что видит в панели изменений.
-   *
-   * Новые файлы в `git diff` не видны вовсе: их отдаём отдельным списком имён —
-   * по названиям уже понятно, что за правка («тесты», «миграция»), а тянуть их
-   * содержимое в промпт незачем. Diff режем по потолку здесь же: гнать через IPC
-   * мегабайты смысла нет, а в промпт они всё равно не поместятся.
-   */
-  async commitDiff(): Promise<GitCommitDiff> {
-    const status = await this.status();
-    const repoRoot = status.repository?.root;
-    if (!repoRoot) {
-      return { diff: '', staged: false, truncated: false, files: 0, untracked: [] };
-    }
-
-    const staged = status.files.some((file) => file.staged);
-    const untracked = status.files.filter((file) => file.change === 'untracked').map((file) => file.relative);
-    const args = staged
-      ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff']
-      : ['diff', '-U3', '--no-color', '--no-ext-diff'];
-    const result = await execGit(args, repoRoot, { allowFailure: true });
-
-    // Обрезка по потолку — общей функцией: её же проверяют тесты сборки промпта.
-    const limited = truncateDiff(result.stdout, COMMIT_DIFF_MAX_CHARS);
-    // Сколько файлов уйдёт в коммит: проиндексированные, а без них — все с правками.
-    const files = staged ? status.files.filter((file) => file.staged).length : status.files.length;
-    return {
-      diff: limited.text,
-      staged,
-      truncated: limited.truncated,
-      files,
-      untracked,
-    };
-  }
-
-  async stage(paths: string[]): Promise<GitStatus> {
-    const { repoRoot, relative } = await this.locate(paths);
-    // `-A` нужен, чтобы одной командой уходили и удаления: `add --` их не замечает.
-    await execGit(['add', '-A', '--', ...relative], repoRoot);
-    return this.refresh();
-  }
-
-  /**
-   * Проиндексировать только один блок изменений файла. Блок берётся из diff
-   * рабочего дерева против индекса и прикладывается к индексу (`apply --cached`),
-   * не трогая остальные правки: файл целиком в индекс не попадает.
-   */
-  async stageHunk(filePath: string, index: number): Promise<GitStatus> {
-    const { repoRoot, relative } = await this.locateHunk(filePath);
-    const patch = hunkPatch(await this.rawDiff(relative, repoRoot, { staged: false }), index);
-    if (!patch) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Блок изменений не найден');
-    await this.applyToIndex(patch, repoRoot, false);
-    return this.refresh();
-  }
-
-  /** Убрать из индекса один блок: обратный патч индекса против HEAD. */
-  async unstageHunk(filePath: string, index: number): Promise<GitStatus> {
-    const { repoRoot, relative } = await this.locateHunk(filePath);
-    const patch = hunkPatch(await this.rawDiff(relative, repoRoot, { staged: true }), index);
-    if (!patch) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Блок изменений не найден');
-    await this.applyToIndex(patch, repoRoot, true);
-    return this.refresh();
-  }
-
-  /**
-   * Блоки изменений файла: что в рабочем дереве и что уже в индексе.
-   *
-   * Нужно действиям из жёлоба: щёлкнули по полоске на строке — приложение
-   * спрашивает блоки и решает, что предложить. Считаем ДВА diff-а, потому что
-   * вопросы разные: `unstaged` (рабочее дерево против индекса) — что ещё можно
-   * проиндексировать или откатить, `staged` (индекс против HEAD) — что уже в
-   * индексе и оттуда убирается.
-   */
-  async fileHunks(filePath: string): Promise<GitFileHunks> {
-    // Между щелчком по полоске и этим запросом файл могли сохранить или закоммитить:
-    // тогда правок уже нет, и это нормальный ответ «блоков нет», а не ошибка.
-    const located = await this.locateHunk(filePath).catch(() => null);
-    if (!located) return { unstaged: [], staged: [] };
-    const { repoRoot, relative } = located;
-    const unstaged = await this.rawDiff(relative, repoRoot, { staged: false });
-    const staged = await this.rawDiff(relative, repoRoot, { staged: true });
-    return { unstaged: hunkRanges(unstaged), staged: hunkRanges(staged) };
-  }
-
-  /**
-   * Откатить ОДИН блок файла в рабочем дереве: обратный патч прикладывается без
-   * `--cached` — правка исчезает из файла, но индекс не трогается. Это и есть
-   * «отменить это изменение» из жёлоба. Блок берётся из diff рабочего дерева
-   * против индекса: откатывать имеет смысл только то, чего ещё нет в индексе.
-   */
-  async discardHunk(filePath: string, index: number): Promise<GitStatus> {
-    const { repoRoot, relative } = await this.locateHunk(filePath);
-    const patch = hunkPatch(await this.rawDiff(relative, repoRoot, { staged: false }), index);
-    if (!patch) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Блок изменений не найден');
-    await this.applyToWorktree(patch, repoRoot);
-    return this.refresh();
-  }
-
-  async unstage(paths: string[]): Promise<GitStatus> {
-    const { repoRoot, relative } = await this.locate(paths);
-    // `restore --staged` требует HEAD, а в репозитории без коммитов его нет —
-    // там файл просто убирается из индекса.
-    const result = await execGit(['restore', '--staged', '--', ...relative], repoRoot, { allowFailure: true });
-    if (!result.ok) await execGit(['rm', '--cached', '-q', '--', ...relative], repoRoot);
-    return this.refresh();
-  }
-
-  /**
-   * Откат правок: у отслеживаемых файлов — к состоянию HEAD, у новых —
-   * файл отправляется в корзину. Совсем удалять чужие файлы IDE не должна.
-   */
-  async discard(paths: string[]): Promise<GitStatus> {
-    const status = await this.status();
-    const repoRoot = status.repository?.root;
-    if (!repoRoot || !status.repository) {
-      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-    }
-
-    const known = new Map(status.files.map((file) => [file.path, file]));
-    const tracked: string[] = [];
-    const loose: string[] = [];
-
-    for (const target of paths) {
-      const file = known.get(path.resolve(target));
-      if (!file) continue;
-      // Нет коммитов — откатывать не к чему, значит файл для git новый.
-      if (file.change === 'untracked' || status.repository.head === null) loose.push(file.path);
-      else tracked.push(file.relative);
-    }
-
-    if (tracked.length) {
-      await execGit(['restore', '--source=HEAD', '--staged', '--worktree', '--', ...tracked], repoRoot);
-    }
-    for (const file of loose) {
-      await shell.trashItem(file).catch(() => undefined);
-    }
-
-    return this.refresh();
-  }
-
-  /**
    * Коммит. С путями — только они, как «закоммитить этот файл» в других IDE.
    * `amend` заменяет последний коммит: пустое сообщение сохраняет прежнее.
    */
@@ -394,7 +253,7 @@ export class GitService {
 
     // Границы блоков нужны интерфейсу: у каждого будет своя кнопка. Считаем из
     // того же diff, что приложит `git apply`, — тогда номера блоков совпадают.
-    const hunks = hunkRanges(await this.rawDiff(relative, repoRoot, { staged, commit }));
+    const hunks = hunkRanges(await rawDiff(relative, repoRoot, { staged, commit }));
     return { original, modified, hunks };
   }
 
@@ -411,12 +270,12 @@ export class GitService {
 
     // Путь не задан — весь рабочий diff: «покажи, что я наменял» одним вызовом.
     // Без него агент перебирал бы файлы по одному, а это шаг и вызов на каждый.
-    if (!filePath) return this.rawDiff('', repoRoot, { staged });
+    if (!filePath) return rawDiff('', repoRoot, { staged });
 
     const known = status.files.find((file) => file.path === path.resolve(filePath));
     if (!known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
 
-    return this.rawDiff(known.relative, repoRoot, { staged });
+    return rawDiff(known.relative, repoRoot, { staged });
   }
 
   /**
@@ -476,6 +335,7 @@ export class GitService {
       root: () => this.requireRoot(),
       repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit),
       refresh: () => this.refresh(),
+      status: () => this.refresh(),
       gitPath: (repoRoot: string, name: string) => this.gitPath(repoRoot, name),
       remotes: () => this.remotes(),
     };
@@ -534,11 +394,6 @@ export class GitService {
 
   private refArg(value: string): string {
     return gitRefArg(value);
-  }
-
-  /** Сырой diff файла (контекст, цвет, внешний diff — см. diff-text.ts). */
-  private rawDiff(relative: string, repoRoot: string, target: { staged: boolean; commit?: string }): Promise<string> {
-    return gitRawDiff(relative, repoRoot, target);
   }
 
   /**
@@ -647,7 +502,7 @@ export class GitService {
    * Отдельно от `stage`: `add -A` тронул бы и соседние пути, а тут нужен ровно этот.
    */
   async markResolved(filePath: string): Promise<GitStatus> {
-    const { repoRoot, relative } = await this.locateHunk(filePath);
+    const { repoRoot, relative } = await locateFile(() => this.status(), filePath);
     await execGit(['add', '--', relative], repoRoot);
     return this.refresh();
   }
@@ -864,7 +719,7 @@ export class GitService {
     return pruneWorktrees(this.worktreeCtx());
   }
 
-  private worktreeCtx(): WorktreeContext {
+  private worktreeCtx(): WorktreesContext {
     return this.gitContext();
   }
 
@@ -1154,6 +1009,44 @@ export class GitService {
     return listSshKeys();
   }
 
+  /* ── индекс и рабочее дерево ──────────────────────────────────────────── */
+
+  async stage(paths: string[]): Promise<GitStatus> {
+    return stage(this.stagingCtx(), paths);
+  }
+
+  async unstage(paths: string[]): Promise<GitStatus> {
+    return unstage(this.stagingCtx(), paths);
+  }
+
+  async stageHunk(filePath: string, index: number): Promise<GitStatus> {
+    return stageHunk(this.stagingCtx(), filePath, index);
+  }
+
+  async unstageHunk(filePath: string, index: number): Promise<GitStatus> {
+    return unstageHunk(this.stagingCtx(), filePath, index);
+  }
+
+  async discardHunk(filePath: string, index: number): Promise<GitStatus> {
+    return discardHunk(this.stagingCtx(), filePath, index);
+  }
+
+  async fileHunks(filePath: string): Promise<GitFileHunks> {
+    return fileHunks(this.stagingCtx(), filePath);
+  }
+
+  async discard(paths: string[]): Promise<GitStatus> {
+    return discard(this.stagingCtx(), paths);
+  }
+
+  async commitDiff(): Promise<GitCommitDiff> {
+    return commitDiff(this.stagingCtx());
+  }
+
+  private stagingCtx(): WorktreeContext {
+    return this.gitContext();
+  }
+
   /* ── Git LFS (хранение больших файлов) ─────────────────────────────────── */
 
   async lfsInfo(): Promise<GitLfsInfo> {
@@ -1326,22 +1219,6 @@ export class GitService {
     if (!result.ok) return null;
     const value = result.stdout.trim();
     return value || null;
-  }
-
-  private locate(paths: string[]): Promise<{ repoRoot: string; relative: string[] }> {
-    return locatePaths(() => this.status(), paths);
-  }
-
-  private locateHunk(filePath: string): Promise<{ repoRoot: string; relative: string }> {
-    return locateFile(() => this.status(), filePath);
-  }
-
-  private applyToIndex(patch: string, repoRoot: string, reverse: boolean): Promise<void> {
-    return gitApplyToIndex(patch, repoRoot, reverse);
-  }
-
-  private applyToWorktree(patch: string, repoRoot: string): Promise<void> {
-    return gitApplyToWorktree(patch, repoRoot);
   }
 
   private show(spec: string, cwd: string): Promise<string> {

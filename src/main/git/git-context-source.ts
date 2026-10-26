@@ -12,6 +12,8 @@ export interface Source {
   root(): string;
   repositoryRoot(explicit?: string): Promise<string | null>;
   refresh(): Promise<GitStatus>;
+  /** Свежий статус без рассылки: его берёт тот, кто уже разошлёт сам. */
+  status(): Promise<GitStatus>;
   gitPath(repoRoot: string, name: string): Promise<string | null>;
   remotes(): Promise<GitRemote[]>;
 }
