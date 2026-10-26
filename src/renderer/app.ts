@@ -569,7 +569,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       showContextMenu(items, event.clientX, event.clientY);
     },
   });
-  const edits = new EditService({ documents, editors, rpc });
+  /**
+   * Политика записи: хвосты, перевод строки, формат — та же, что у Ctrl+S.
+   * Один файл не должен получать разный текст в зависимости от того, кто его
+   * записал — человек, таймер автосохранения или ассистент.
+   */
+  const writePolicy = () => settings.editor;
+
+  const edits = new EditService({ documents, editors, rpc, policy: writePolicy });
 
   /**
    * Исполнить команду сервера (быстрого исправления или клика по линзе): ответ бывает
@@ -2254,13 +2261,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Запись на диск — `core/file-write.ts`: Ctrl+S, «Сохранить как», сохранение перед
   // git и закрытие окна. Спрашивать про расхождение с диском умеет каждый вход, а сама
   // запись — одна.
-
-  /**
-   * Политика записи для автосохранения — та же, что у Ctrl+S (хвосты, перевод строки,
-   * формат): один файл не должен получать разный текст в зависимости от того, кто
-   * его записал — человек или таймер.
-   */
-  const writePolicy = () => settings.editor;
 
   const fileWrite = createFileWrite({
     documents,

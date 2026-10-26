@@ -232,3 +232,64 @@ describe('EditService.revertToDisk', () => {
     expect(document.dirty).toBe(false);
   });
 });
+
+/**
+ * Один файл — один текст, кто бы его ни записал. Правки ассистента шли в обход
+ * `applySaveEdits`, и файл, записанный агентом, получал другой текст, чем тот же
+ * файл, записанный человеком через Ctrl+S: без перевода строки в конце, с хвостами.
+ * Настройка называется «Перевод строки в конце файла» и живёт в `settings.editor`,
+ * а `writePolicy` в `app.ts` говорит прямо: политика одна для всех, кто пишет.
+ */
+describe('saveDocument: правки текста те же, что у Ctrl+S', () => {
+  it('перевод строки в конце ставится и при записи из сервиса правок', async () => {
+    const documents = new DocumentStore();
+    let written = '';
+    const rpc = {
+      request: vi.fn(async (method: string, params: { text?: string }) => {
+        if (method === 'workspace.stat') return { path: '/p/a.ts', kind: 'file', size: 1, mtimeMs: 1000 };
+        if (method === 'workspace.writeFile') {
+          written = params.text ?? '';
+          return { mtimeMs: 2000 };
+        }
+        return {};
+      }),
+    } as unknown as RpcClient;
+    const service = new EditService({
+      documents,
+      editors: {} as never,
+      rpc,
+      policy: () => ({ trimTrailingWhitespace: true, insertFinalNewline: true }),
+    });
+    const document = documents.open('/p/a.ts', 'текст');
+    document.markDisk(1000);
+    document.setText('правка агента  ', 'programmatic');
+
+    expect(await service.saveDocument(document)).toBe('saved');
+    // Хвост подрезан, перевод строки поставлен — ровно как на Ctrl+S.
+    expect(written).toBe('правка агента\n');
+    // Буфер на экране совпал с диском: иначе вкладка осталась бы «грязной» после записи.
+    expect(document.dirty).toBe(false);
+  });
+
+  it('политики нет — пишем как есть, ничего не выдумывая', async () => {
+    const documents = new DocumentStore();
+    let written = '';
+    const rpc = {
+      request: vi.fn(async (method: string, params: { text?: string }) => {
+        if (method === 'workspace.stat') return { path: '/p/a.ts', kind: 'file', size: 1, mtimeMs: 1000 };
+        if (method === 'workspace.writeFile') {
+          written = params.text ?? '';
+          return { mtimeMs: 2000 };
+        }
+        return {};
+      }),
+    } as unknown as RpcClient;
+    const service = new EditService({ documents, editors: {} as never, rpc });
+    const document = documents.open('/p/a.ts', 'текст');
+    document.markDisk(1000);
+    document.setText('без хвоста', 'programmatic');
+
+    await service.saveDocument(document);
+    expect(written).toBe('без хвоста');
+  });
+});

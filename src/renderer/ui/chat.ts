@@ -1165,6 +1165,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       try {
         // Пишем через сервис правок: он сверяет время файла и не даёт молча
         // перетереть чужую правку (того же файла мог коснуться другой инструмент).
+        // Правки текста при сохранении (хвосты, перевод строки в конце) сервис
+        // берёт из той же настройки, что и Ctrl+S — см. `prepareForDisk`.
         const result = await deps.edits.saveDocument(document);
         if (result === 'conflict') {
           reasons.set(path, 'conflict');

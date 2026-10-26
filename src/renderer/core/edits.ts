@@ -2,6 +2,7 @@ import type { ApplyFailure, ApplyReport, ApplyResult, FileEdit } from '../../sha
 import { isImagePath } from '../../shared/images';
 import { isOfficePath } from '../../shared/office';
 import { diskConflict, normalize, type TextDocument } from './document';
+import { applySaveEdits, type SaveEditOptions } from '../../shared/save-edits';
 import type { DocumentStore } from './document-store';
 import type { EditSource } from './document';
 import type { EditorApi } from './editor-api';
@@ -11,6 +12,8 @@ export interface EditServiceDeps {
   documents: DocumentStore;
   editors: EditorApi;
   rpc: RpcClient;
+  /** Настройки сохранения: те же, что у Ctrl+S. Нет — пишем как есть. */
+  policy?(): SaveEditOptions;
 }
 
 /**
@@ -62,9 +65,18 @@ export class EditService {
         return 'conflict';
       }
     }
+    // Последние штрихи текста — те же, что при Ctrl+S (`applySaveEdits`):
+    // подрезать хвосты и поставить перевод строки в конце. Делаем это здесь, а не
+    // у вызывающих: `saveDocument` — единственная дверь на диск, и текст не должен
+    // зависеть от того, кто стучится, — человек кнопкой, таймер или ассистент.
+    // Раньше правки агента шли мимо настройки, и файл, записанный ассистентом,
+    // получал другой текст, чем тот же файл, записанный человеком.
+    const policy = this.deps.policy?.();
+    const prepared = policy ? applySaveEdits(document.value, policy) : document.value;
+    if (prepared !== document.value) document.setText(prepared, 'programmatic');
     const { mtimeMs } = await this.deps.rpc.request('workspace.writeFile', {
       path: document.path,
-      text: document.value,
+      text: prepared,
     });
     document.markSaved(mtimeMs);
     return 'saved';
