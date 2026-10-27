@@ -1,7 +1,14 @@
 import { agentPrompt } from '../src/shared/agent-prompt';
-import { AGENT_TOOLS, LINE_NUMBERING } from '../src/shared/tools';
+import { AGENT_TOOLS, LINE_NUMBERING, type JsonSchema } from '../src/shared/tools';
 import { describe, expect, it } from 'vitest';
-import { describeShape, missingArguments, toolSpec, wrongArguments } from '../src/shared/tool-schema';
+import {
+  describeShape,
+  missingArguments,
+  missingFieldsDetail,
+  argumentsShape,
+  toolSpec,
+  wrongArguments,
+} from '../src/shared/tool-schema';
 
 /**
  * Проверка обязательных полей до исполнения. Поводом была живая ошибка: модель
@@ -253,5 +260,129 @@ describe('описания аргументов', () => {
     );
     expect(all.filter((text) => /absolute/i.test(text))).toEqual([]);
     expect(agentPrompt('full', { confirm: false })).toContain('абсолютные');
+  });
+});
+
+describe('wrongArguments: перечни внутри вложенных полей', () => {
+  it('промах внутри элемента массива назван путём с индексом', () => {
+    // Именно этот случай увидит модель после вызова `mind steps` с недопустимым
+    // `status`: отказ должен назвать место, а не пересказывать всю схему.
+    const spec = toolSpec('mind')!;
+    const wrong = wrongArguments(spec.inputSchema, {
+      action: 'steps',
+      steps: [
+        { text: 'x', status: 'done' },
+        { text: 'y', status: 'сделано' },
+      ],
+    });
+    expect(wrong).toEqual([{ path: 'steps[1].status', value: 'сделано', allowed: ['pending', 'in_progress', 'done'] }]);
+  });
+
+  it('верное значение во вложенном поле промахом не считается', () => {
+    const spec = toolSpec('mind')!;
+    const args = { action: 'steps', steps: [{ text: 'x', status: 'in_progress' }] };
+    expect(wrongArguments(spec.inputSchema, args)).toEqual([]);
+  });
+
+  it('не-объект вместо элемента не роняет проверку', () => {
+    const spec = toolSpec('mind')!;
+    expect(wrongArguments(spec.inputSchema, { action: 'steps', steps: ['строка', 7, null] })).toEqual([]);
+  });
+
+  it('чужое действие с перечнем названо вместе с допустимыми', () => {
+    const spec = toolSpec('mind')!;
+    const action = spec.inputSchema.properties?.action as { enum: string[] } | undefined;
+    expect(wrongArguments(spec.inputSchema, { action: 'телеметрия' })).toEqual([
+      {
+        path: 'action',
+        value: 'телеметрия',
+        allowed: action?.enum,
+      },
+    ]);
+  });
+});
+
+describe('тексты отказа', () => {
+  it('missingFieldsDetail называет поле вместе с типом', () => {
+    const spec = toolSpec('edit')!;
+    const detail = missingFieldsDetail('edit', spec.inputSchema, ['edits']);
+    expect(detail).toBe('Аргументы edit: нужны edits: array');
+  });
+
+  it('missingFieldsDetail приписывает перечень, если он есть у поля', () => {
+    const spec = toolSpec('mind')!;
+    const detail = missingFieldsDetail('mind', spec.inputSchema, ['action']);
+    expect(detail).toMatch(/^Аргументы mind: нужны action: string=[a-z_|]+$/);
+  });
+
+  it('путь, которого нет в схеме, называется как есть: пустое лучше неверного', () => {
+    const spec = toolSpec('edit')!;
+    expect(missingFieldsDetail('edit', spec.inputSchema, ['edits[0].чего-то'])).toContain('edits[0].чего-то');
+  });
+
+  it('argumentsShape перечисляет поля верхнего уровня и помечает необязательные', () => {
+    const spec = toolSpec('read')!;
+    const shape = argumentsShape(spec.inputSchema);
+    expect(shape.startsWith('{')).toBe(true);
+    expect(shape).toContain('path?:string');
+  });
+});
+
+describe('вложенные объекты в схеме', () => {
+  const nested: JsonSchema = {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      box: {
+        type: 'object',
+        required: ['mode'],
+        properties: { mode: { type: 'string', enum: ['a', 'b'] } },
+      },
+    },
+    required: ['id'],
+  };
+
+  it('missingArguments доходит до обязательного поля вложенного объекта', () => {
+    expect(missingArguments(nested, { id: 'x', box: { mode: 'a' } })).toEqual([]);
+    expect(missingArguments(nested, { id: 'x', box: {} })).toEqual(['box.mode']);
+  });
+
+  it('wrongArguments называет промах внутри вложенного объекта', () => {
+    expect(wrongArguments(nested, { id: 'x', box: { mode: 'c' } })).toEqual([
+      { path: 'box.mode', value: 'c', allowed: ['a', 'b'] },
+    ]);
+  });
+
+  it('argumentsShape показывает вложенный объект', () => {
+    expect(argumentsShape(nested)).toContain('box?: {');
+  });
+});
+
+describe('условные требования (allOf)', () => {
+  // Ни один из наших инструментов этого пока не использует — проверка написана
+  // на синтетической схеме, чтобы ветка не гнила непроверенной.
+  const conditional: JsonSchema = {
+    type: 'object',
+    properties: { action: { type: 'string', enum: ['read', 'clear'] }, id: { type: 'string' } },
+    required: ['action'],
+    // biome-ignore lint/suspicious/noThenProperty: `then` здесь ключ JSON-Schema, а не thenable.
+    allOf: [{ if: { properties: { action: { enum: ['read'] } } }, then: { required: ['id'] } }],
+  };
+
+  it('id требуется только для read', () => {
+    expect(missingArguments(conditional, { action: 'read' })).toEqual(['id']);
+    expect(missingArguments(conditional, { action: 'clear' })).toEqual([]);
+    expect(missingArguments(conditional, { action: 'read', id: 'job-1' })).toEqual([]);
+  });
+
+  it('условие по const тоже работает', () => {
+    const schema: JsonSchema = {
+      type: 'object',
+      properties: { mode: { type: 'string' }, file: { type: 'string' } },
+      // biome-ignore lint/suspicious/noThenProperty: `then` здесь ключ JSON-Schema, а не thenable.
+      allOf: [{ if: { properties: { mode: { const: 'file' } } }, then: { required: ['file'] } }],
+    };
+    expect(missingArguments(schema, { mode: 'file' })).toEqual(['file']);
+    expect(missingArguments(schema, { mode: 'text' })).toEqual([]);
   });
 });

@@ -197,7 +197,8 @@ export function argumentsShape(schema: JsonSchema, depth = 0): string {
     const mark = required.has(name) ? '' : '?';
     const enumList = property.enum ? `=${property.enum.join('|')}` : '';
     const inner = depth >= 3 ? '' : shapeTail(property, depth);
-    return `${name}${mark}:${property.type ?? 'any'}${enumList}${inner}`;
+    // Вложенная форма уже говорит «объект/массив» сама — второй раз это не пишем.
+    return inner ? `${name}${mark}${inner}` : `${name}${mark}:${property.type ?? 'any'}${enumList}`;
   });
   return parts.length > 0 ? `{${parts.join(', ')}}` : '{}';
 }
