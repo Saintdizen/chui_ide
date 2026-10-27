@@ -1,7 +1,12 @@
 import type { LspChip } from '../../shared/lsp-status';
 import { lspOriginLabel } from '../../shared/lsp-status';
 import { h, svgIcon } from './dom';
+import { problemsWidget } from './problems-widget';
+import type { ProjectProblemCounts } from './problems-widget';
 import type { VimMode } from '../editor/input/vim';
+
+// Вид счётчиков живёт в чистом модуле, а тип — там же: его читают тесты без DOM.
+export type { ProjectProblemCounts };
 
 /** Короткое слово режима Vim для строки состояния. */
 const VIM_LABEL: Record<VimMode, string> = {
@@ -18,14 +23,6 @@ const VIM_TITLE: Record<VimMode, string> = {
   visual: 'визуальный режим',
   'visual-line': 'визуально-строчный режим',
 };
-
-/** Счётчики проблем в статус-баре: числа плюс признак «проект сейчас проверяется». */
-export interface ProjectProblemCounts {
-  errors: number;
-  warnings: number;
-  /** Идёт проверка всего проекта — числа ещё не про неё. */
-  checking?: boolean;
-}
 
 export interface StatusState {
   /** Файл открыт только для чтения (большой): показываем это словом. */
@@ -112,14 +109,6 @@ export interface StatusBarDeps {
 }
 
 /** Русское склонение по числу: 1 ошибка, 2 ошибки, 5 ошибок. */
-function plural(count: number, one: string, few: string, many: string): string {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
-  return many;
-}
-
 /**
  * Статусбар: слева путь к активному файлу и ветка git,
  * справа «строка:столбец», перевод строки, кодировка, отступ, окружение и язык.
@@ -309,24 +298,15 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
         : `Python-окружение: ${state.env}`
       : '';
     versionItem.textContent = state.version ? `v${state.version}` : '';
-    const { errors, warnings, checking } = state.problems;
-    problemsItem.hidden = !checking && errors === 0 && warnings === 0;
-    problemsItem.classList.toggle('is-checking', Boolean(checking));
-    problemsItem.classList.toggle('has-errors', !checking && errors > 0);
-    problemsItem.classList.toggle('has-warnings', !checking && errors === 0 && warnings > 0);
-    problemsCounts.textContent = checking
-      ? 'проверяю…'
-      : [
-          errors > 0 ? `${errors} ${plural(errors, 'ошибка', 'ошибки', 'ошибок')}` : '',
-          warnings > 0 ? `${warnings} ${plural(warnings, 'предупреждение', 'предупреждения', 'предупреждений')}` : '',
-        ]
-          .filter(Boolean)
-          .join(', ');
-    problemsItem.title = checking
-      ? 'Идёт проверка проекта: линтер и зависимости'
-      : errors === 0 && warnings === 0
-        ? 'Ошибок и предупреждений нет'
-        : `Ошибок: ${errors}, предупреждений: ${warnings}. Нажмите, чтобы перейти к первой`;
+    // Вид виджета решает чистый модуль: ноль — не всегда «чисто» (правила там).
+    const problems = problemsWidget(state.problems);
+    problemsItem.hidden = problems.hidden;
+    problemsItem.classList.toggle('is-checking', problems.tone === 'checking');
+    problemsItem.classList.toggle('is-unchecked', problems.tone === 'unchecked');
+    problemsItem.classList.toggle('has-errors', problems.tone === 'errors');
+    problemsItem.classList.toggle('has-warnings', problems.tone === 'warnings');
+    problemsCounts.textContent = problems.text;
+    problemsItem.title = problems.title;
     gitItem.hidden = state.branch === null;
     gitLabel.textContent = state.branch ? `${state.branch}${state.changes > 0 ? `  ±${state.changes}` : ''}` : '';
     gitItem.title = state.branch

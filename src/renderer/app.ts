@@ -1180,6 +1180,15 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // Пометки обычных источников (языковой сервер, проверка импортов) приходят только
   // по открытым файлам, поэтому сразу после старта «Проблемы» пусты — эту дыру
   // закрывает один фон, запускаемый при открытии проекта (см. вызов ниже).
+  // Один источник для всех мест, где обновляется виджет: числа плюс признаки
+  // прохода. Иначе обновление по пометкам (ниже) стирало бы «проверяю…» и
+  // «не проверено», и виджет снова говорил бы «0 значит чисто».
+  const problemsStatus = () => ({
+    ...editors.problemCounts(),
+    checking: projectCheck.checking(),
+    unchecked: projectCheck.unchecked(),
+    partial: projectCheck.partial(),
+  });
   const projectCheck = new ProjectCheck({
     root: () => workspace.root,
     analyze: () => rpc.request('project.analyze'),
@@ -1187,7 +1196,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     onState: (state) => {
       // Провал проверки не прячем: без него числа в виджете вечно нулевые.
       if (state.phase === 'failed' && state.note) showToast(state.note);
-      statusBar.update({ problems: { ...editors.problemCounts(), checking: projectCheck.checking() } });
+      statusBar.update({ problems: problemsStatus() });
       dock.refreshBadges();
       if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
     },
@@ -3055,7 +3064,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       lspChip: lspChipFor(language, lspStatus),
       git: { branch: git.branch, changeCount: git.changeCount },
       projectKind: projectScan?.kind ?? null,
-      problems: { ...editors.problemCounts(), checking: projectCheck.checking() },
+      problems: problemsStatus(),
       vim: settings.editor.vimMode ? editors.vimMode() : null,
       macro: editors.isRecordingMacro() ? { steps: editors.macroSteps().length } : null,
       tools: projectTools,
@@ -3509,7 +3518,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // Счётчик проблем: пометки приходят из нескольких источников (LSP,
   // проверка импортов), поэтому слушаем одно событие сервиса и пересчитываем всё.
   editors.onDidChangeMarkers(() => {
-    statusBar.update({ problems: editors.problemCounts() });
+    statusBar.update({ problems: problemsStatus() });
     // Значок вкладки и список проблем читают те же пометки: обновляем их вместе.
     dock.refreshBadges();
     if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();

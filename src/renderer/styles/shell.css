@@ -259,6 +259,14 @@
   color: var(--yellow_prime_background);
 }
 
+/* Проверка не состоялась (нет линтера, отказ, не уложилась во время): числам
+   верить нельзя, поэтому вместо них слова. Курсив отличает «не знаем» от
+   «знаем, что чисто» — второе просто молчит. */
+.status-problems.is-unchecked {
+  color: var(--text_color_tertiary);
+  font-style: italic;
+}
+
 .status-problems:hover {
   background: var(--element_background_hover);
 }

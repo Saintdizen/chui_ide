@@ -129,3 +129,59 @@ describe('ProjectCheck: отмены и отказы', () => {
     expect(analyze).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ProjectCheck: когда нолю верить нельзя', () => {
+  it('линтера нет — unchecked объясняет, а не молчит', async () => {
+    const { check } = setup({ answer: { tool: null, problems: [], timedOut: false, note: null } });
+
+    await check.run();
+
+    expect(check.state().phase).toBe('done');
+    expect(check.unchecked()).toContain('нет линтера');
+    expect(check.partial()).toBe(false);
+  });
+
+  it('своя причина от main важнее общей формулировки', async () => {
+    const { check } = setup({
+      answer: { tool: null, problems: [], timedOut: false, note: 'ruff не найден в окружении' },
+    });
+
+    await check.run();
+
+    expect(check.unchecked()).toBe('ruff не найден в окружении');
+  });
+
+  it('отказ связи — unchecked берёт причину из note', async () => {
+    const { check } = setup({ answer: () => Promise.reject(new Error('канал закрыт')) });
+
+    await check.run();
+
+    expect(check.unchecked()).toContain('канал закрыт');
+  });
+
+  it('не уложились во время — partial, но проверка считается сделанной', async () => {
+    const { check } = setup({
+      answer: { tool: 'biome', problems: [problem('/proj/a.ts', 1)], timedOut: true, note: null },
+    });
+
+    await check.run();
+
+    expect(check.partial()).toBe(true);
+    expect(check.unchecked()).toBeNull();
+    expect(check.state().timedOut).toBe(true);
+  });
+
+  it('успешный проход не подставляет причин', async () => {
+    const { check } = setup();
+
+    await check.run();
+
+    expect(check.unchecked()).toBeNull();
+    expect(check.partial()).toBe(false);
+  });
+
+  it('холодный старт с проектом — «ещё не проверялся», без проекта — молчание', () => {
+    expect(setup().check.unchecked()).toBe('Проект ещё не проверялся');
+    expect(setup({ root: null }).check.unchecked()).toBeNull();
+  });
+});

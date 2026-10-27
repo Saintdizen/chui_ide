@@ -29,6 +29,8 @@ export interface ProjectCheckState {
   /** Сколько файлов получило пометки. */
   files: number;
   problems: number;
+  /** Проход не уложился во время: список может быть неполным. */
+  timedOut: boolean;
   /** Причина отказа или что не удалось проверить. */
   note: string | null;
 }
@@ -70,7 +72,14 @@ export function groupByPath(problems: readonly ProjectProblem[]): Map<string, Ls
 }
 
 export class ProjectCheck {
-  private current: ProjectCheckState = { phase: 'idle', tool: null, files: 0, problems: 0, note: null };
+  private current: ProjectCheckState = {
+    phase: 'idle',
+    tool: null,
+    files: 0,
+    problems: 0,
+    timedOut: false,
+    note: null,
+  };
   /** Пути, куда мы положили пометки: их же и снимаем перед следующим проходом. */
   private touched: string[] = [];
   /** Номер прохода: ответ из прошлого проекта не должен попасть в новый. */
@@ -88,11 +97,31 @@ export class ProjectCheck {
     return this.current.phase === 'running';
   }
 
+  /**
+   * Почему нолям верить нельзя, или `null`, если проверка работу сделала.
+   * Пустой список без линтера и проваленный проход — это не «всё чисто»:
+   * без этой строки виджет молчит, и молчание читается как чистота.
+   */
+  unchecked(): string | null {
+    if (this.current.phase === 'failed') return this.current.note ?? 'Проверка проекта не удалась';
+    if (this.current.phase === 'done' && this.current.tool === null) {
+      return this.current.note ?? 'Проверять код нечем: в проекте нет линтера';
+    }
+    // Холодный старт: прохода ещё не было. Без проекта это не проблема — молчим.
+    if (this.current.phase === 'idle' && this.ports.root()) return 'Проект ещё не проверялся';
+    return null;
+  }
+
+  /** Проход был, но не уложился во время: найденное верно, а список — не весь. */
+  partial(): boolean {
+    return this.current.phase === 'done' && this.current.timedOut;
+  }
+
   /** Сменить проект: снять свои пометки — у нового корня они про чужой код. */
   reset(): void {
     this.token += 1;
     this.dropMarkers();
-    this.emit({ phase: 'idle', tool: null, files: 0, problems: 0, note: null });
+    this.emit({ phase: 'idle', tool: null, files: 0, problems: 0, timedOut: false, note: null });
   }
 
   /** Один проход. Повторный вызов во время прохода — no-op: второй ответ ничего не уточнит. */
@@ -102,7 +131,7 @@ export class ProjectCheck {
     this.busy = true;
     const token = ++this.token;
     this.dropMarkers();
-    this.emit({ phase: 'running', tool: null, files: 0, problems: 0, note: null });
+    this.emit({ phase: 'running', tool: null, files: 0, problems: 0, timedOut: false, note: null });
 
     try {
       const analysis = await this.ports.analyze();
@@ -118,6 +147,7 @@ export class ProjectCheck {
         tool: analysis.tool,
         files: grouped.size,
         problems: analysis.problems.length,
+        timedOut: analysis.timedOut,
         note: analysis.note,
       });
     } catch (error) {
@@ -128,6 +158,7 @@ export class ProjectCheck {
         tool: null,
         files: 0,
         problems: 0,
+        timedOut: false,
         note:
           typeof reason === 'string' && reason
             ? `Проверка проекта не удалась: ${reason}`
