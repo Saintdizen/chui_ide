@@ -1579,11 +1579,24 @@ export class LspService {
     // открытии того же проекта. Сменился корень — заход нужен новый.
     const mark = `${root}\u0000${language}`;
     if (this.swept.has(mark)) return;
-    this.swept.add(mark);
-    this.sweptClosed.clear();
     const listing = await listProjectFiles(root).catch(() => null);
     if (!listing) return;
+    // Отметка — только после удачного чтения проекта: сорвавшийся обход диска
+    // (папку переносят, корень ещё не готов) — не повод молчать до перезапуска.
+    this.swept.add(mark);
     const files = listing.files.filter((file) => languageInfoForPath(file)?.id === language).slice(0, SWEEP_MAX_FILES);
+    if (files.length === 0) return;
+    // Свой прошлый заход начинается заново, чужой (другой корень, другой язык) — нет:
+    // второй язык не должен стереть отметки первого, иначе эхо его закрытий просочится.
+    for (const closed of [...this.sweptClosed]) if (closed.startsWith(root + path.sep)) this.sweptClosed.delete(closed);
+    // Держим память под контролем: файлов в больших проектах тысячи, а нам хватает
+    // помнить только последние заходы. Выкидываем самые старые поштучно, а не разом:
+    // общий `clear()` сорвал бы чужой заход, и эхо его закрытий стёрло бы найденное.
+    while (this.sweptClosed.size > SWEEP_MAX_FILES * 2) {
+      const oldest = this.sweptClosed.values().next().value;
+      if (oldest === undefined) break;
+      this.sweptClosed.delete(oldest);
+    }
     const queue = [...files];
     const worker = async (): Promise<void> => {
       for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
@@ -1641,13 +1654,19 @@ export class LspService {
     const runtime = this.runtimes.get(language);
     if (!runtime) return;
     this.runtimes.delete(language);
-    // Ждущие пометок ждут мёртвого сервера: отпускаем сразу, а не по сроку.
-    this.transient.clear();
     // Следующий заход — уже на новом сервере, старые отметки обхода не в счёт.
-    this.swept.clear();
-    this.sweptClosed.clear();
-    for (const path of [...this.diagnosticWaiters.keys()]) this.settleDiagnostics(path);
+    // Только своих: у другого языка сервер жив и его заход продолжается.
+    for (const mark of [...this.swept]) if (mark.endsWith(`\u0000${language}`)) this.swept.delete(mark);
+    for (const closed of [...this.sweptClosed]) {
+      if (languageInfoForPath(closed)?.id === language) this.sweptClosed.delete(closed);
+    }
+    for (const path of [...this.diagnosticWaiters.keys()]) {
+      if (languageInfoForPath(path)?.id === language) this.settleDiagnostics(path);
+    }
     this.diagnosticWaiters.clear();
+    // `transient` здесь НЕ чистим: каждый, кто открывал документ, снимает свою пометку
+    // сам (`closeAfterDiagnostics`/`sweepFile`). Очистка здесь снесла бы пометки
+    // живого сервера другого языка — и следующий запрос открыл бы документ дважды.
     this.kill(runtime);
   }
 }

@@ -51,6 +51,9 @@ function service(root: string, server: FakeServer): LspService {
  * именно поэтому мгновенный `didClose` успевал выбросить пометки.
  */
 const FAKE_SERVER = [
+  "const { appendFileSync } = require('node:fs');",
+  '// Журнал открытий: по нему видно, сколько раз обход трогал файл.',
+  'const LOG = process.argv[2];',
   'let buffer = Buffer.alloc(0);',
   'function send(message) {',
   '  const body = JSON.stringify(message);',
@@ -80,6 +83,7 @@ const FAKE_SERVER = [
   '    return;',
   '  }',
   '  const uri = message.params.textDocument.uri;',
+  "  if (LOG) appendFileSync(LOG, 'open\\n');",
   '  // Как tsserver: без объявленной клиентом capability пометок не шлёт вообще.',
   '  if (!publishOk) return;',
   '  setTimeout(() => {',
@@ -118,20 +122,23 @@ const FAKE_SERVER = [
   '',
 ].join('\n');
 
-async function project(): Promise<{ root: string; file: string; server: FakeServer }> {
+async function project(): Promise<{ root: string; file: string; log: string; server: FakeServer }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-lsp-sweep-'));
   dirs.push(root);
   const script = path.join(root, 'fake-lsp.cjs');
   await fs.writeFile(script, FAKE_SERVER, 'utf8');
   const file = path.join(root, 'sample.ts');
   await fs.writeFile(file, 'const value = 1;\n', 'utf8');
+  const log = path.join(root, 'opens.log');
+  await fs.writeFile(log, '', 'utf8');
   return {
     root,
     file,
+    log,
     server: {
       language: 'typescript',
       command: process.execPath,
-      args: [script],
+      args: [script, log],
       enabled: true,
       label: 'заглушка',
     },
@@ -162,6 +169,26 @@ describe('пометки проекта приходят после обхода
     // И не стёрлась эхом на закрытие: пустой список после `didClose` — не «стало чисто».
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(got.get(file)?.[0]).toMatchObject({ severity: 'error', message: 'нарочно' });
+  });
+
+  it('повторный prewarm не обходит проект второй раз', async () => {
+    const { root, file, log, server } = await project();
+    const lsp = service(root, server);
+    const got = new Map<string, LspDiagnostic[]>();
+    lsp.collectDiagnostics((target, diagnostics) => got.set(target, diagnostics));
+
+    await lsp.prewarm(['typescript']);
+    await until(() => got.has(file));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const opens = (await fs.readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length;
+
+    // `prewarm` зовут и при повторном открытии того же проекта, и при смене настроек:
+    // второй заход — та же работа на том же сервере, файлы трогать второй раз нечего.
+    await lsp.prewarm(['typescript']);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const after = (await fs.readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length;
+    expect(opens).toBeGreaterThan(0);
+    expect(after).toBe(opens);
   });
 
   it('без приёмника обход не вредит: просто тишина', async () => {
