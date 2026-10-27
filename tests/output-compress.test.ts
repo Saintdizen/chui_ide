@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { collapsePassedTests, compressToolOutput, looksLikeTestRun } from '../src/shared/output-compress';
+import {
+  collapsePassedTests,
+  compressToolOutput,
+  looksLikeTestRun,
+  summarizeInstall,
+} from '../src/shared/output-compress';
 
 /**
  * Сжатие вывода инструментов. Проверяем обе стороны: шум уходит, а содержание —
@@ -119,5 +124,55 @@ describe('свёртка прошедших тестов', () => {
     expect(looksLikeTestRun('# pass 7')).toBe(true);
     expect(looksLikeTestRun('Tests:       1 passed, 1 total')).toBe(true);
     expect(looksLikeTestRun('собрано 12 файлов')).toBe(false);
+  });
+});
+
+/**
+ * Сжатие установки пакетов: модели нужны ошибки и итог, а не лог дерева
+ * зависимостей. Полный вывод остаётся у вызывающего (spill-файл), здесь
+ * проверяем только то, что уходит в контекст.
+ */
+describe('summarizeInstall', () => {
+  const log = [
+    'npm http fetch GET 200 https://registry/npm',
+    'npm http fetch GET 200 https://registry/npm2',
+    '⡀ idealTree:chui-ide: sill',
+    'added 3 packages, and audited 4 packages in 1s',
+    '1 package is looking for funding',
+    '  run `npm fund` for details',
+    'found 0 vulnerabilities',
+  ].join('\n');
+
+  it('сворачивает лог установки до итога', () => {
+    const result = summarizeInstall('npm install', log);
+    expect(result).not.toBeNull();
+    expect(result?.text).toContain('added 3 packages');
+    expect(result?.text).toContain('found 0 vulnerabilities');
+    expect(result?.text).not.toContain('idealTree');
+    expect(result?.hidden).toBeGreaterThan(0);
+  });
+
+  it('не трогает команды не про установку', () => {
+    expect(summarizeInstall('npm test', log)).toBeNull();
+    expect(summarizeInstall('git status', log)).toBeNull();
+  });
+
+  it('не трогает короткий вывод: прятать нечего', () => {
+    expect(summarizeInstall('npm ci', 'added 0 packages')).toBeNull();
+  });
+
+  it('сохраняет ошибки и предупреждения', () => {
+    const failed = [
+      'npm http fetch GET 200 https://registry/npm',
+      'npm http fetch GET 200 https://registry/npm2',
+      'npm error code ERESOLVE',
+      'npm error unable to resolve dependency tree',
+      'npm warn deprecated left-pad@1.0.0',
+      'added 1 package in 0.4s',
+    ].join('\n');
+    const result = summarizeInstall('pnpm add left-pad', failed);
+    expect(result?.text).toContain('ERESOLVE');
+    expect(result?.text).toContain('unable to resolve');
+    expect(result?.text).toContain('deprecated');
   });
 });

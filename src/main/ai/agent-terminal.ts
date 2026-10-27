@@ -9,6 +9,7 @@
 import path from 'node:path';
 import type { DirEntry } from '../../shared/api';
 import { asLookupCall } from './agent-lookup';
+import { summarizeInstall } from '../../shared/output-compress';
 import { clipTail, condenseOutput, foldPassedTests, spillNote, trimCommandTail } from './output-trim';
 import { createSpillStream } from './spill';
 import { missingForAction, optionalBoolean, optionalInteger, optionalString, requireString } from './tool-args';
@@ -209,27 +210,6 @@ export async function terminalStart(ctx: ToolContext, args: Record<string, unkno
   };
 }
 
-export function terminalRead(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
-  if (!ctx.terminals) return { ok: false, summary: 'Терминал недоступен' };
-
-  const id = requireString(args, 'id');
-  const from = optionalInteger(args, 'from') ?? 0;
-  const { data, offset, alive, exitCode } = ctx.terminals.read(id, from);
-  // Как в terminal_start: хвост важнее начала, пустые простыни сжимаем.
-  const output = clipTail(ctx, 'terminal_read', condenseOutput(stripAnsi(data)));
-
-  return {
-    ok: true,
-    summary: `${id}: ${output ? `${output.split('\n').length} строк нового вывода` : 'нового вывода нет'}${alive ? '' : ' (процесс завершён)'}`,
-    detail: [
-      `offset: ${offset}`,
-      `alive: ${alive}${exitCode !== undefined ? ` (код ${exitCode})` : ''}`,
-      '',
-      output || '(нового вывода нет)',
-    ].join('\n'),
-  };
-}
-
 export async function terminalWrite(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.terminals) return { ok: false, summary: 'Терминал недоступен' };
   const refuses = sandboxRefusesTerminal(ctx);
@@ -368,8 +348,9 @@ export async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<st
     : await runShellCommand(command, cwd.path, options);
   // Файл оставляем только тогда, когда вывод действительно не поместился в потолок.
   const full = spillStream?.close(result.truncated) ?? null;
-  // Причёсываем и держим хвост: один `npm install` иначе завалит контекст логом.
-  const condensed = foldPassedTests(ctx, 'terminal', condenseOutput(result.output));
+  // Установка пакетов: модели нужны итог и ошибки, а не лог дерева зависимостей.
+  const install = summarizeInstall(command, result.output);
+  const condensed = foldPassedTests(ctx, 'terminal', install ? install.text : condenseOutput(result.output));
   const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'terminal', condensed);
   const notes: string[] = [];
   if (result.timedOut) notes.push('превышено время выполнения');
@@ -381,7 +362,7 @@ export async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<st
   return {
     ok: result.code === 0 && !result.timedOut,
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
-    detail: `${commandLine(ctx, command, cwd.relative)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
+    detail: `${commandLine(ctx, command, cwd.relative)}\n${output.length ? output : '(пустой вывод)'}${install && !full ? `\n… (скрыто строк установки: ${install.hidden})` : ''}${spillNote(full)}`,
     ...(didWork(result, command) ? { applied: true } : {}),
   };
 }
