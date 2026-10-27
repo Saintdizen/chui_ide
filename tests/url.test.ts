@@ -1,5 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { isSafeExternalUrl, isSameUrlOrigin } from '../src/shared/url';
+import { isSafeExternalUrl, isSameUrlOrigin, isWebPageUrl } from '../src/shared/url';
+
+/**
+ * Что можно показать во встроенном браузере. Решается до создания `<webview>`:
+ * всё, что не `http`/`https`, в него не попадает никогда.
+ */
+describe('isWebPageUrl', () => {
+  it('сетевые адреса — можно', () => {
+    expect(isWebPageUrl('http://localhost:5273/x')).toBe(true);
+    expect(isWebPageUrl('https://example.com')).toBe(true);
+  });
+
+  it('регистр схемы не важен', () => {
+    expect(isWebPageUrl('HTTPS://Example.com/Path')).toBe(true);
+  });
+
+  it('файл мимо дерева и прав — нельзя', () => {
+    // `file:` показал бы локальный файл, которого нет в дереве проекта.
+    expect(isWebPageUrl('file:///etc/passwd')).toBe(false);
+    expect(isWebPageUrl('app://bundle/index.html')).toBe(false);
+  });
+
+  it('запуск чужого кода — нельзя', () => {
+    expect(isWebPageUrl('javascript:alert(1)')).toBe(false);
+    expect(isWebPageUrl('data:text/html,<script></script>')).toBe(false);
+  });
+
+  it('не адрес — нельзя', () => {
+    expect(isWebPageUrl('example.com')).toBe(false);
+    expect(isWebPageUrl('')).toBe(false);
+  });
+});
 
 /**
  * Какие адреса можно отдать системе. Опасны не столько «странные» адреса,
