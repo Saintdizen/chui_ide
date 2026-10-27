@@ -180,7 +180,7 @@ describe('движение отключается системной настр�
     const names = [...MAIN.matchAll(/animation:\s*([\w-]+)[^;]*\binfinite\b/g)].map((match) => match[1]);
     expect(names.length).toBeGreaterThan(0);
     expect(new Set(names)).toEqual(
-      new Set(['tab-pulse', 'activity-dot', 'tool-spin', 'macro-pulse', 'skeleton-pulse', 'status-check-run']),
+      new Set(['tab-pulse', 'activity-dot', 'tool-spin', 'macro-pulse', 'skeleton-pulse', 'status-meter-run']),
     );
   });
 

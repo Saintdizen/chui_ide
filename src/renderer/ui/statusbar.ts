@@ -64,10 +64,10 @@ export interface StatusState {
    */
   progress: { label: string; percentage: number | null } | null;
   /**
-   * Карта символов собирается: подпись и подсказка. `null` — карта готова или её нет,
-   * и виджета тогда тоже нет (см. `symbolIndexChip`).
+   * Карта символов собирается: подпись и, если известно «сколько всего», доля
+   * прочитанных файлов для полосы. `null` — карта готова (её сборка — фон, а не событие).
    */
-  symbols: { text: string; title: string } | null;
+  symbols: { text: string; title: string; progress: { done: number; total: number } | null } | null;
   /**
    * Идёт запись макроса: сколько действий уже записано. `null` — записи нет.
    * Показываем точкой и числом: забыть про идущую запись легко.
@@ -189,18 +189,36 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   );
   const lspLabel = h('span', {});
   lspItem.appendChild(lspLabel);
-  // Прогресс языкового сервера: значок-вертушка и подпись. Крутится, пока сервер занят, —
-  // так долгая работа видна и не выглядит зависанием (см. `$/progress`).
+  // Прогресс языкового сервера (индексация, поиск ссылок): полоса с процентом, если
+  // сервер его назвал, иначе бегущий штрих. Занятый сервер молчать не должен.
   const progressItem = h(
     'span',
-    { class: 'status-item status-progress' },
-    svgIcon('spinner', 12),
-    h('span', { class: 'status-progress-label' }),
+    { class: 'status-item status-meter is-metered' },
+    h(
+      'span',
+      { class: 'status-meter-track' },
+      h('span', { class: 'status-meter-fill' }),
+      h('span', { class: 'status-meter-run' }),
+    ),
+    h('span', { class: 'status-meter-label' }),
   );
-  const progressLabel = progressItem.querySelector<HTMLElement>('.status-progress-label')!;
-  // Карта символов собирается: «Символы: 812…». Как и прогресс сервера, это признак
-  // идущей работы, поэтому стоит рядом с ним.
-  const symbolsItem = h('span', { class: 'status-item status-symbols' });
+  const progressFill = progressItem.querySelector<HTMLElement>('.status-meter-fill')!;
+  const progressLabel = progressItem.querySelector<HTMLElement>('.status-meter-label')!;
+  // Карта символов собирается: полоса с числом пройденных файлов. Числа — файлы,
+  // а не проценты: обход идёт файл за файлом, и это единственное, что известно точно.
+  const symbolsItem = h(
+    'span',
+    { class: 'status-item status-meter' },
+    h(
+      'span',
+      { class: 'status-meter-track' },
+      h('span', { class: 'status-meter-fill' }),
+      h('span', { class: 'status-meter-run' }),
+    ),
+    h('span', { class: 'status-meter-label' }),
+  );
+  const symbolsFill = symbolsItem.querySelector<HTMLElement>('.status-meter-fill')!;
+  const symbolsLabel = symbolsItem.querySelector<HTMLElement>('.status-meter-label')!;
   // Идёт запись макроса: точка и число действий. Молчит, когда записи нет.
   const macroItem = h(
     'span',
@@ -231,17 +249,17 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   // Цифры только про шаги: проценты внутри шага были бы выдуманными.
   const checkItem = h(
     'span',
-    { class: 'status-item status-check' },
+    { class: 'status-item status-meter is-metered' },
     h(
       'span',
-      { class: 'status-check-track' },
-      h('span', { class: 'status-check-fill' }),
-      h('span', { class: 'status-check-run' }),
+      { class: 'status-meter-track' },
+      h('span', { class: 'status-meter-fill' }),
+      h('span', { class: 'status-meter-run' }),
     ),
-    h('span', { class: 'status-check-label' }),
+    h('span', { class: 'status-meter-label' }),
   );
-  const checkFill = checkItem.querySelector<HTMLElement>('.status-check-fill')!;
-  const checkLabel = checkItem.querySelector<HTMLElement>('.status-check-label')!;
+  const checkFill = checkItem.querySelector<HTMLElement>('.status-meter-fill')!;
+  const checkLabel = checkItem.querySelector<HTMLElement>('.status-meter-label')!;
 
   // Статус ассистента (одна кнопка «Информация о сессии»: значок режима, кольцо
   // контекста, искра) приходит из чата и встаёт последним — в правом углу полосы.
@@ -298,10 +316,18 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
           ? progress.label
           : `${progress.label} ${Math.round(progress.percentage)}%`;
     progressItem.title = progress ? `Языковой сервер: ${progress.label}` : '';
+    // Процент сервер сообщает сам ($/progress); без него — бегущий штрих.
+    progressItem.classList.toggle('is-busy', progress !== null && progress.percentage === null);
+    progressFill.style.width = `${Math.round(progress?.percentage ?? 0)}%`;
     const symbols = state.symbols;
     symbolsItem.hidden = symbols === null;
-    symbolsItem.textContent = symbols?.text ?? '';
+    symbolsLabel.textContent = symbols?.text ?? '';
     symbolsItem.title = symbols?.title ?? '';
+    // Дорожка нужна там, где есть что мерить: у одного числа делить нечего.
+    const meter = symbols?.progress ?? null;
+    symbolsItem.classList.toggle('is-metered', meter !== null);
+    symbolsItem.classList.toggle('is-busy', meter !== null);
+    symbolsFill.style.width = meter ? `${Math.round((meter.done / Math.max(1, meter.total)) * 100)}%` : '0';
     const macro = state.macro;
     macroItem.hidden = macro === null;
     macroCount.textContent = macro ? `МАКРО ${macro.steps}` : '';
@@ -334,7 +360,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     const check = checkProgress(state.check);
     checkItem.hidden = check.hidden;
     checkItem.classList.toggle('is-busy', check.busy);
-    checkItem.classList.toggle('is-indeterminate', check.indeterminate);
     checkFill.style.width = `${Math.round(check.fill * 100)}%`;
     checkLabel.textContent = check.label;
     checkItem.title = check.title;

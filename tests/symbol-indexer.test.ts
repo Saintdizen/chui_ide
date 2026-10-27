@@ -88,6 +88,39 @@ describe('SymbolIndexer', () => {
     expect(index.find('zzz')).toEqual([]);
   });
 
+  it('во время обхода отдаёт прогресс, после — забывает его', async () => {
+    const root = project({ 'a.py': 'class A:\n    pass\n', 'b.py': 'class B:\n    pass\n', 'c.py': 'x = 1\n' });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const index = new SymbolIndexer({
+      root: () => root,
+      outline: async () => {
+        entered();
+        await gate;
+        return [];
+      },
+      store: new SymbolStore(path.join(root, '.idx')),
+    });
+
+    index.refresh();
+    await started;
+
+    // «Сколько всего» известно до чтения — это длина списка файлов, а не догадка.
+    expect(index.status().progress).toMatchObject({ total: 3, stage: 'project' });
+
+    release();
+    await index.settled();
+
+    // Карта готова — полосе больше нечего показывать.
+    expect(index.status().progress).toBeNull();
+  });
+
   it('предков берёт из текста: сервер их не сообщает', async () => {
     const root = project({ 'main.py': 'class Parser(Base):\n    def run(self):\n        pass\n' });
     const { outline } = fakeOutline({ 'main.py': parserSkeleton });

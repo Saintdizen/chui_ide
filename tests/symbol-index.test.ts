@@ -243,4 +243,27 @@ describe('виджет карты в строке состояния', () => {
     expect(chip?.title).toContain('1 из зависимостей');
     expect(chip?.title).toContain('3 пропущено');
   });
+
+  it('знаем «сколько всего» — есть и полоса, и счёт файлов в подписи', () => {
+    const chip = symbolIndexChip({
+      ...EMPTY_INDEX_STATUS,
+      phase: 'warming',
+      files: 20,
+      progress: { done: 20, total: 300, stage: 'project' },
+    });
+
+    expect(chip?.text).toBe('читаю проект: 20 из 300');
+    expect(chip?.progress).toEqual({ done: 20, total: 300 });
+  });
+
+  it('заход по зависимостям назван своим именем', () => {
+    const chip = symbolIndexChip({
+      ...EMPTY_INDEX_STATUS,
+      phase: 'warming',
+      files: 20,
+      progress: { done: 0, total: 40, stage: 'dependencies' },
+    });
+
+    expect(chip?.text).toBe('читаю зависимости: 0 из 40');
+  });
 });

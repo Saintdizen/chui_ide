@@ -11,6 +11,7 @@ import {
   toIndexDecls,
   type IndexedFile,
   type InheritedResult,
+  type SymbolIndexStage,
   type SymbolIndexStatus,
 } from '../../shared/symbol-index';
 import { listProjectFiles } from '../project/scan';
@@ -80,6 +81,12 @@ export class SymbolIndexer {
   private root: string | null = null;
   private files = new Map<string, IndexedFile>();
   private skipped = 0;
+  /**
+   * Сколько файлов пройдено и сколько было в списке на старте захода. Число здесь
+   * движется по мере чтения, а `files` — рывками (карта подменяется пачками), поэтому
+   * для полосы в строке состояния нужно именно это.
+   */
+  private progress: { done: number; total: number; stage: SymbolIndexStage } | null = null;
   private running: Promise<void> | null = null;
   /** Файлы, которые правили после сборки: их объявления уже устарели. */
   private readonly touched = new Set<string>();
@@ -109,6 +116,7 @@ export class SymbolIndexer {
       dependencyFiles,
       dependencyPackages: packages.size,
       skipped: this.skipped,
+      progress: this.phase === 'warming' ? this.progress : null,
     };
   }
 
@@ -288,6 +296,7 @@ export class SymbolIndexer {
       this.root = null;
       this.files.clear();
       this.skipped = 0;
+      this.progress = null;
       return;
     }
 
@@ -299,11 +308,13 @@ export class SymbolIndexer {
     }
 
     this.phase = 'warming';
+    this.progress = { done: 0, total: 0, stage: 'project' };
     const cached = new Map<string, IndexedFile>();
     for (const file of await this.deps.store.load(root)) cached.set(file.path, file);
 
     const listing = await listProjectFiles(root).catch(() => null);
     if (!listing) {
+      this.progress = null;
       this.phase = 'ready';
       return;
     }
@@ -312,8 +323,14 @@ export class SymbolIndexer {
     let parsed = 0;
     let skipped = 0;
     let sinceSave = 0;
+    const ordered = orderFiles(listing.files);
+    // Список файлов — единственное честное «сколько всего»: число известно до чтения.
+    this.progress = { done: 0, total: ordered.length, stage: 'project' };
 
-    for (const relative of orderFiles(listing.files)) {
+    for (const relative of ordered) {
+      // Пройденным файл считается и тогда, когда взят из кэша или пропущен: полоса
+      // меряет обход, а не разбор, иначе на тёплом кэше она бы стояла на нуле.
+      if (this.progress) this.progress.done += 1;
       // Проект могли сменить, пока шёл обход: чужие объявления не сохраняем.
       if (this.deps.root() !== root) return;
 
@@ -374,11 +391,13 @@ export class SymbolIndexer {
 
     // Зависимости — вторым заходом: проект уже в карте, и если обход прервётся здесь,
     // потеряются только чужие объявления, а не свои.
+    this.progress = { done: 0, total: 0, stage: 'dependencies' };
     const dependencies = await this.dependencyPass(root, cached, next);
     skipped += dependencies.skipped;
 
     this.files = next;
     this.skipped = skipped;
+    this.progress = null;
     this.phase = 'ready';
     await this.deps.store.save(root, [...next.values()]);
   }
@@ -403,7 +422,11 @@ export class SymbolIndexer {
 
     let skipped = 0;
     let parsed = 0;
-    for (const file of await listDependencyFiles(roots)) {
+    const listing = await listDependencyFiles(roots);
+    // Заход по зависимостям — отдельный: полоса начинает его с нуля и с своего списка.
+    this.progress = { done: 0, total: listing.length, stage: 'dependencies' };
+    for (const file of listing) {
+      if (this.progress) this.progress.done += 1;
       if (this.deps.root() !== root) return { skipped };
       const stat = await fs.stat(file.path).catch(() => null);
       if (!stat?.isFile()) continue;

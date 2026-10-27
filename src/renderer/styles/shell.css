@@ -242,10 +242,10 @@
   color: var(--blue_prime_background);
 }
 
-/* Полоса проверки проекта: заливка — законченные шаги, бегущий штрих — работа идёт.
-   Числа тут только про шаги: середину шага не знает никто (линтер и tsc молчат до конца).
-   Ширину заливки не анимируем — это геометрия и лишние пересчёты раскладки. */
-.status-check {
+/* Общая полоса долгой работы в строке состояния (карта символов, проверка проекта):
+   заливка — пройденные шаги, бегущий штрих — работа идёт. Шаг — это файл или этап,
+   а не проценты: середину никто не знает. Ширину заливки не анимируем — геометрия. */
+.status-meter {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -253,7 +253,8 @@
   color: var(--text_color_tertiary);
 }
 
-.status-check-track {
+.status-meter-track {
+  display: none;
   position: relative;
   width: 64px;
   height: 4px;
@@ -262,7 +263,11 @@
   background: var(--element_background_hover);
 }
 
-.status-check-fill {
+.status-meter.is-metered .status-meter-track {
+  display: block;
+}
+
+.status-meter-fill {
   display: block;
   width: 0;
   height: 100%;
@@ -271,7 +276,7 @@
 
 /* Бегущий штрих — единственный индикатор «в работе» у этой полосы: застывшая
    полоса читается как зависание. */
-.status-check-run {
+.status-meter-run {
   display: none;
   position: absolute;
   top: 0;
@@ -281,19 +286,19 @@
   opacity: 0.5;
 }
 
-.status-check.is-busy .status-check-run {
+.status-meter.is-busy .status-meter-run {
   display: block;
-  animation: status-check-run var(--motion_slow) linear infinite;
+  animation: status-meter-run var(--motion_slow) linear infinite;
 }
 
-.status-check-label {
+.status-meter-label {
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-@keyframes status-check-run {
+@keyframes status-meter-run {
   from {
     transform: translateX(-100%);
   }

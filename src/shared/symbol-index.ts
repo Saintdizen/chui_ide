@@ -102,7 +102,16 @@ export interface SymbolIndexStatus {
   dependencyPackages: number;
   /** Сколько файлов языка осталось вне карты: сервер не ответил или файл слишком велик. */
   skipped: number;
+  /**
+   * Сколько файлов прочитано и сколько их всего в текущем заходе; `null` — сборка
+   * не идёт. Счёт — именно файлы: файл либо прочитан сервером и разобран, либо
+   * нет, середины у него нет.
+   */
+  progress: { done: number; total: number; stage: SymbolIndexStage } | null;
 }
+
+/** Заход сборки: свой код проекта или чужой код из пакетов. */
+export type SymbolIndexStage = 'project' | 'dependencies';
 
 /** Пустая карта: проекта нет. */
 export const EMPTY_INDEX_STATUS: SymbolIndexStatus = {
@@ -113,6 +122,7 @@ export const EMPTY_INDEX_STATUS: SymbolIndexStatus = {
   dependencyFiles: 0,
   dependencyPackages: 0,
   skipped: 0,
+  progress: null,
 };
 
 /**
@@ -122,14 +132,25 @@ export const EMPTY_INDEX_STATUS: SymbolIndexStatus = {
  * Показываем только сборку: это единственное состояние, в котором человеку полезно
  * знать, что поиск по структуре ещё неполон. Готовая карта — рабочий фон, а не событие.
  */
-export function symbolIndexChip(status: SymbolIndexStatus): { text: string; title: string } | null {
+export interface SymbolIndexChip {
+  text: string;
+  title: string;
+  progress: { done: number; total: number } | null;
+}
+
+export function symbolIndexChip(status: SymbolIndexStatus): SymbolIndexChip | null {
   if (status.phase !== 'warming') return null;
   const parts = [`${status.files} ${declinations(status.files, 'файл', 'файла', 'файлов')}`];
   if (status.dependencyFiles > 0) parts.push(`из них ${status.dependencyFiles} из зависимостей`);
   if (status.skipped > 0) parts.push(`${status.skipped} пропущено`);
+  // Всего файлов не знает никто до обхода каталога: пока его нет, полосы не будет —
+  // показывать долю от выдуманного числа хуже, чем просто сказать «читаю…».
+  const progress = status.progress;
+  const work = progress?.stage === 'dependencies' ? 'читаю зависимости' : 'читаю проект';
   return {
-    text: `Символы: ${status.files}…`,
+    text: progress ? `${work}: ${progress.done} из ${progress.total}` : `Символы: ${status.files}…`,
     title: `Карта символов собирается: ${parts.join(', ')}. Поиск по структуре отвечает уже сейчас, но пока неполно.`,
+    progress: progress ? { done: progress.done, total: progress.total } : null,
   };
 }
 
