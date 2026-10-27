@@ -2,7 +2,7 @@ import { asPath, type DefineCommand } from './command-args';
 import type { PopupMenuItem } from '../ui/popup-menu';
 import type { ToastKind } from '../ui/toast';
 import type { GitModel } from './git-model';
-import { type GitResult, rebaseNotice } from './git-notice';
+import { type GitResult, gitStepNotice, rebaseNotice } from './git-notice';
 
 /**
  * История и теги: там, где человек выбирает коммит или ветку в списке.
@@ -41,6 +41,15 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
     showToast(notice.message, notice.kind);
   };
 
+  /**
+   * Пропуск шага: rebase после него продолжается, поэтому «исправьте коммит
+   * и продолжите» тут было бы прямой подсказкой сделать не то.
+   */
+  const reportStep = (result: GitResult, done: string): void => {
+    const notice = gitStepNotice(result, done);
+    showToast(notice.message, notice.kind);
+  };
+
   /** Интерактивный rebase: список коммитов собирает своё окно. */
   define(
     {
@@ -69,7 +78,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
 
   define({ id: 'git.rebaseSkip', title: 'Rebase: пропустить коммит', category: 'Git' }, async () => {
     try {
-      reportRebase(await git.rebaseSkip());
+      reportStep(await git.rebaseSkip(), 'Коммит пропущен, rebase идёт дальше');
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error');
     }
