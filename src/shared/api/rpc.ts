@@ -5,6 +5,7 @@ import type { ApplyResult, FileEdit, TextEdit } from '../edits';
 import type { BlameLine } from '../git-blame';
 import type { PatchFile } from '../patch';
 import type { ProjectScan } from '../project-scan';
+import type { ProjectAnalysis } from '../project-analysis';
 import type { ProjectSettings } from '../project-config';
 import type { ReviewThread } from '../review';
 import type { HistoryEntry } from '../file-history';
@@ -359,6 +360,16 @@ export interface ChuiMethods {
    * имён без чтения содержимого — дёшево и без последствий для больших проектов.
    */
   'project.scan': { params: void; result: ProjectScan };
+  /**
+   * Анализ проекта целиком: линтер по корню плюс сверка зависимостей
+   * с `node_modules`. Нужен, чтобы «Проблемы» и счётчики в статус-баре не
+   * пустовали до открытия первого файла: пометки обычных источников (LSP,
+   * проверка импортов) приходят только по открытым документам.
+   *
+   * Вызов долгий (секунды, у линтера есть свой потолок в main) — зовётся фоном
+   * при открытии проекта, а не на каждое сохранение.
+   */
+  'project.analyze': { params: void; result: ProjectAnalysis };
   /**
    * Настройки уровня проекта из `<root>/.chui_ide/`: редактор, дерево, запуск и
    * LSP. Лежат в самом проекте, чтобы их можно было версионировать вместе с кодом,

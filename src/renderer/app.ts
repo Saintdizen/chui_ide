@@ -24,6 +24,7 @@ import { createBlameController } from './core/blame';
 import { createChangeGutterController } from './core/change-gutter';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import { createDiskConflict } from './core/disk-conflict';
+import { ProjectCheck } from './core/project-check';
 import type { TextDocument } from './core/document';
 import { uriToPath } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -1174,6 +1175,22 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Из панели файла может и не быть на экране — открываем его тем же путём, что и всё.
     reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
     label: (path) => workspace.relative(path),
+  });
+  // Проверка всего проекта: линтер по корню и сверка зависимостей с `node_modules`.
+  // Пометки обычных источников (языковой сервер, проверка импортов) приходят только
+  // по открытым файлам, поэтому сразу после старта «Проблемы» пусты — эту дыру
+  // закрывает один фон, запускаемый при открытии проекта (см. вызов ниже).
+  const projectCheck = new ProjectCheck({
+    root: () => workspace.root,
+    analyze: () => rpc.request('project.analyze'),
+    setMarkers: (path, owner, list) => editors.setExternalMarkers(path, owner, list),
+    onState: (state) => {
+      // Провал проверки не прячем: без него числа в виджете вечно нулевые.
+      if (state.phase === 'failed' && state.note) showToast(state.note);
+      statusBar.update({ problems: { ...editors.problemCounts(), checking: projectCheck.checking() } });
+      dock.refreshBadges();
+      if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
+    },
   });
   // Задачи: пометки берём обычным поиском по проекту — тем же путём, что панель поиска
   // и инструмент агента. Свой обход файлов панели не нужен, а разбор находок и
@@ -2456,7 +2473,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     openPath,
   });
 
-  // Сравнение двух папок: список различий, клик по файлу открывает его сравнение.
+  // Ручной запуск проверки проекта: после установки зависимостей окно не надо перезапускать.
+  define({ id: 'project.check', title: 'Проверить проект', category: 'Проект' }, () => projectCheck.run());
 
   // Сравнение двух файлов — из дерева, тем же экраном, что показывает git-различия.
   // Это просмотр: блоки без кнопок индексации (см. `openFiles`).
@@ -3037,7 +3055,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       lspChip: lspChipFor(language, lspStatus),
       git: { branch: git.branch, changeCount: git.changeCount },
       projectKind: projectScan?.kind ?? null,
-      problems: editors.problemCounts(),
+      problems: { ...editors.problemCounts(), checking: projectCheck.checking() },
       vim: settings.editor.vimMode ? editors.vimMode() : null,
       macro: editors.isRecordingMacro() ? { steps: editors.macroSteps().length } : null,
       tools: projectTools,
@@ -3433,6 +3451,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         syncRunControl();
         await refreshScan();
         preloadEnvironment();
+        // Активный корень сменился — старые пометки про чужой код: снять и проверить заново.
+        projectCheck.reset();
+        void projectCheck.run();
         // Смена активного корня может сменить языки проекта — греем их серверы.
         await lspServers.ensure();
         void lspServers.prewarm();
@@ -3452,6 +3473,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       syncRunControl();
       await refreshScan();
       preloadEnvironment();
+      // У нового проекта всё другое, включая пометки: снять старые и проверить заново.
+      projectCheck.reset();
+      void projectCheck.run();
       // У нового проекта мог появиться свой сервер в окружении (pylsp в его venv):
       // сначала подхватываем серверы, затем греем языки проекта.
       await lspServers.ensure();
@@ -3508,8 +3532,10 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   const current = await rpc.request('workspace.current');
   if (current.root) await workspace.open(current.root);
 
-  await tools.refresh(workspace.root);
   await refreshScan();
+  // Вслед за картой проекта — проверка всего корня: до открытия файлов «Проблемы»
+  // пусты, потому что языковой сервер говорит только про открытые документы.
+  void projectCheck.run();
   await lspServers.ensure();
   // Состав серверов читаем сразу: чип в статусбаре покажет, что поднято и откуда.
   void refreshLspStatus();

@@ -1313,6 +1313,13 @@ module.exports = [
       entryPoints: [],
       topDirs: [],
     }),
+    // Проверка проекта целиком: в моке линтера нет, а врать нулями нельзя.
+    'project.analyze': () => ({
+      tool: null,
+      problems: [],
+      timedOut: false,
+      note: 'В браузере проверять нечем: линтер живёт в main',
+    }),
     'python.environments': () => [],
     // Проверка импортов в моке ничего не находит: окружение не настоящее.
     'imports.missing': () => ({ missing: [] }),

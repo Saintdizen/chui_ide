@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { RpcErrorCode } from '../../../shared/api';
 import { scanProject } from '../../project/scan';
+import { analyzeProject } from '../../project/analyze';
 import { findPackages } from '../../project/packages';
 import { loadSpellDictionary } from '../../spell/dictionary';
 import type { RpcServices } from '../context';
@@ -23,6 +24,13 @@ import { RpcFailure, type RpcRouter } from '../router';
 export function registerProjectMethods(router: RpcRouter, deps: RpcServices): void {
   // Карта проекта: обход имён без чтения содержимого, поэтому можно звать часто.
   router.register('project.scan', async () => scanProject(deps.requireRoot()));
+
+  // Анализ целиком (линтер + зависимости): запускается фоном при открытии
+  // проекта. Потолок времени у проверки свой — в `project/analyze.ts`.
+  router.register('project.analyze', async () => {
+    const root = deps.requireRoot();
+    return analyzeProject(root, deps.resolvePython(root));
+  });
 
   // Сессия проекта: renderer собирает состояние и кладёт сюда, а при следующем
   // открытии забирает обратно. Без хранилища (пробники) отвечаем пустой сессией.

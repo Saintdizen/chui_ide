@@ -19,6 +19,14 @@ const VIM_TITLE: Record<VimMode, string> = {
   'visual-line': 'визуально-строчный режим',
 };
 
+/** Счётчики проблем в статус-баре: числа плюс признак «проект сейчас проверяется». */
+export interface ProjectProblemCounts {
+  errors: number;
+  warnings: number;
+  /** Идёт проверка всего проекта — числа ещё не про неё. */
+  checking?: boolean;
+}
+
 export interface StatusState {
   /** Файл открыт только для чтения (большой): показываем это словом. */
   readOnly: boolean;
@@ -38,7 +46,7 @@ export interface StatusState {
   /** Ключ вида проекта (`python`, `node`, …): выбирает, какой попап открыть. */
   projectKindId: string | null;
   /** Пометки в открытых файлах: числа ошибок и предупреждений для виджета проблем. */
-  problems: { errors: number; warnings: number };
+  problems: ProjectProblemCounts;
   /** Выбранное Python-окружение (`.venv`, `python3`); null — виджет скрыт. */
   env: string | null;
   /**
@@ -301,18 +309,22 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
         : `Python-окружение: ${state.env}`
       : '';
     versionItem.textContent = state.version ? `v${state.version}` : '';
-    const { errors, warnings } = state.problems;
-    problemsItem.hidden = errors === 0 && warnings === 0;
-    problemsItem.classList.toggle('has-errors', errors > 0);
-    problemsItem.classList.toggle('has-warnings', errors === 0 && warnings > 0);
-    problemsCounts.textContent = [
-      errors > 0 ? `${errors} ${plural(errors, 'ошибка', 'ошибки', 'ошибок')}` : '',
-      warnings > 0 ? `${warnings} ${plural(warnings, 'предупреждение', 'предупреждения', 'предупреждений')}` : '',
-    ]
-      .filter(Boolean)
-      .join(', ');
-    problemsItem.title =
-      errors === 0 && warnings === 0
+    const { errors, warnings, checking } = state.problems;
+    problemsItem.hidden = !checking && errors === 0 && warnings === 0;
+    problemsItem.classList.toggle('is-checking', Boolean(checking));
+    problemsItem.classList.toggle('has-errors', !checking && errors > 0);
+    problemsItem.classList.toggle('has-warnings', !checking && errors === 0 && warnings > 0);
+    problemsCounts.textContent = checking
+      ? 'проверяю…'
+      : [
+          errors > 0 ? `${errors} ${plural(errors, 'ошибка', 'ошибки', 'ошибок')}` : '',
+          warnings > 0 ? `${warnings} ${plural(warnings, 'предупреждение', 'предупреждения', 'предупреждений')}` : '',
+        ]
+          .filter(Boolean)
+          .join(', ');
+    problemsItem.title = checking
+      ? 'Идёт проверка проекта: линтер и зависимости'
+      : errors === 0 && warnings === 0
         ? 'Ошибок и предупреждений нет'
         : `Ошибок: ${errors}, предупреждений: ${warnings}. Нажмите, чтобы перейти к первой`;
     gitItem.hidden = state.branch === null;
