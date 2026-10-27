@@ -57,6 +57,20 @@ export interface LspDiagnosticsPayload {
   diagnostics: LspDiagnostic[];
 }
 
+/**
+ * Пометки обхода проекта: сервер публикует их только для открытых документов,
+ * поэтому проект обходим сами (см. `SymbolIndexer`) и отдаём пачками.
+ */
+export interface LspProjectDiagnosticsPayload {
+  /**
+   * Начался новый заход: прежние пометки обхода к нынешнему состоянию проекта
+   * уже не относятся, и их надо снять, иначе числа в строке состояния врут.
+   */
+  start: boolean;
+  /** Пометки по файлам, накопленные с прошлой пачки. */
+  files: Array<{ path: string; diagnostics: LspDiagnostic[] }>;
+}
+
 /** Полезная нагрузка события `PushTopic.ThemeChanged`: сменилась тема из файла. */
 export interface ThemeChangedPayload {
   /** Активная тема из файла — или `null`, если работает встроенная палитра. */

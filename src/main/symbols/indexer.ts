@@ -74,6 +74,12 @@ export interface SymbolIndexDeps {
    * рабочей папки» — в том числе у окружения, лежащего вне проекта.
    */
   onDependencyDirs?: (dirs: readonly string[]) => void;
+  /**
+   * Начался полный обход проекта. Обход открывает серверу каждый файл, и вместе
+   * с объявлениями оттуда приходят пометки — по этому сигналу их приём начинается
+   * заново (см. `main/lsp/project-diagnostics.ts`), чтобы старые пометки снялись.
+   */
+  onWalkStart?: () => void;
 }
 
 export class SymbolIndexer {
@@ -290,6 +296,7 @@ export class SymbolIndexer {
   }
 
   private async run(): Promise<void> {
+    this.deps.onWalkStart?.();
     const root = this.deps.root();
     if (!root) {
       this.phase = 'idle';

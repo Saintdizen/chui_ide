@@ -16,7 +16,9 @@ import { createSymbolPoller } from './core/symbol-poll';
 import { perf } from '../shared/perf';
 import type { FileOperation } from '../shared/lsp-workspace-edit';
 import type { LspProgress } from '../shared/lsp-progress';
+import type { LspProjectDiagnosticsPayload } from '../shared/api';
 import { createLspProgressController } from './core/lsp-progress';
+import { createProjectDiagnosticsApplier } from './core/project-diagnostics';
 import { PROJECT_STAGE_EVENT } from '../shared/project-analysis';
 import type { ProjectStageEvent } from '../shared/project-analysis';
 import { DEFAULT_SNIPPETS } from '../shared/snippets';
@@ -3063,6 +3065,15 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     show: (view) => statusBar.update({ progress: view }),
   });
 
+  /**
+   * Пометки всего проекта: обход карты открывает серверу каждый файл, и его ответ
+   * ложится отдельным источником (`lsp-project`). Отдельным — потому что живой сервер
+   * на закрытие файла шлёт пустой список и стёр бы счёт (см. `core/project-diagnostics.ts`).
+   */
+  const applyProjectDiagnostics = createProjectDiagnosticsApplier({
+    setMarkers: (path, diagnostics) => editors.setExternalMarkers(path, 'lsp-project', diagnostics),
+  });
+
   const refreshStatus = (): void => {
     const active = openEditors.active;
     const projectTools = tools.get();
@@ -3275,6 +3286,11 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         break;
       case PushTopic.LspProgress:
         lspProgress.apply(message.payload as LspProgress);
+        break;
+      case PushTopic.LspProjectDiagnostics:
+        // Пометки закрытых файлов, снятые обходом проекта: источник отдельный от живого
+        // сервера, иначе закрытие файла обнуляло бы счёт (см. `core/project-diagnostics.ts`).
+        applyProjectDiagnostics(message.payload as LspProjectDiagnosticsPayload);
         break;
       case PushTopic.BrowserNav: {
         const payload = message.payload as BrowserEventPayload;

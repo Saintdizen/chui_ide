@@ -15,6 +15,7 @@ import { HostClient } from './ipc/host';
 import { pushToRenderers } from './ipc/push';
 import { openProjectFolder, registerIpc } from './ipc/register';
 import { LspService } from './lsp/lsp';
+import { createProjectDiagnostics, isProjectSource } from './lsp/project-diagnostics';
 import { detectLspSources } from './lsp/detect';
 import { createSeedProvider } from './lsp/seed';
 import { McpService } from './mcp/mcp';
@@ -272,6 +273,17 @@ if (!app.requestSingleInstanceLock()) {
     // (своего парсера у нас нет), а карта лишь хранит ответ и переживает перезапуск:
     // поиск символов перестаёт ждать первого прогрева, а пока сервер не поднялся —
     // отвечает тем, что уже знает (см. `SymbolIndexer`).
+    // Пометки всего проекта в строку состояния: сервер говорит о файле, только пока
+    // тот открыт, а обход карты и так открывает ему каждый файл и забирает объявления —
+    // пометки приходят тем же окном `didOpen` и второго прохода не стоят.
+    // Чужие файлы (пакеты, сборка) в счёт не идут: это не наш долг.
+    const projectDiagnostics = createProjectDiagnostics({
+      collect: (sink) => lsp.collectDiagnostics(sink),
+      include: (file) => isProjectSource(workspace.rootPath(), file),
+      publish: (payload) => pushToRenderers(PushTopic.LspProjectDiagnostics, payload),
+    });
+    // Приём включён всегда: дорого стоит не он, а обход, который его питает.
+    projectDiagnostics.start();
     const symbolIndex = new SymbolIndexer({
       root: () => workspace.rootPath(),
       outline: (target, languageId, text) => lsp.outline(target, languageId, text),
@@ -286,6 +298,8 @@ if (!app.requestSingleInstanceLock()) {
       // По этим каталогам рабочая папка разрешает чтение: щелчок по символу из пакета
       // открывает исходник библиотеки, даже если пакет лежит вне проекта.
       onDependencyDirs: (dirs) => workspace.setDependencyDirs(dirs),
+      // Полный обход начинается — значит, пометки собираем заново (см. выше).
+      onWalkStart: () => projectDiagnostics.begin(),
     });
     // Сервер отвечает точно и по всему проекту, карта — мгновенно и без него:
     // в поиске символов они дополняют друг друга.

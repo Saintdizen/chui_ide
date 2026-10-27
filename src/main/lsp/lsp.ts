@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { appendFile } from 'node:fs/promises';
+import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PushTopic, type LspDiagnostic, type LspServerConfig, type LspSettings } from '../../shared/api';
@@ -9,6 +9,7 @@ import type { LspServerOrigin, LspStatus } from '../../shared/lsp-status';
 import type { FileEdit } from '../../shared/edits';
 import { toWorkspaceFileEdits } from '../../shared/lsp-workspace-edit';
 import { languageInfoForPath } from '../../shared/languages';
+import { listProjectFiles } from '../project/scan';
 import { prewarmLanguages, serverCandidates } from '../../shared/lsp-bundled';
 import { toLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { parseProgress } from '../../shared/lsp-progress';
@@ -82,6 +83,25 @@ export interface SymbolIndexSource {
  * бесконечный — не дождавшись, отпускаем сервер спокойно, индекс догреется сам.
  */
 const PROJECT_SCAN_TIMEOUT_MS = 60_000;
+
+/**
+ * Сколько файлов проекта держим открытыми серверу разом при сборе пометок. Пометки
+ * приходят своим темпом, и ждать их по одному файлу — минуты впустую; пачка держит
+ * сервер занятым, но не заваливает его сотнями `didOpen` сразу.
+ */
+const SWEEP_CONCURRENCY = 24;
+
+/**
+ * Сколько ждём пометок по одному файлу. Срок нужен молчащим серверам (и файлам вне
+ * проекта в `tsconfig`): иначе документ держал бы сервер вечно и обход не кончился бы.
+ */
+const SWEEP_FILE_WAIT_MS = 4_000;
+
+/** Сколько файлов вообще берём в заход: за этим пределом счётчик не стоит обхода. */
+const SWEEP_MAX_FILES = 4_000;
+
+/** Файл больше этого — не документ проекта, а свалка: читать его в сервер незачем. */
+const SWEEP_MAX_BYTES = 2_000_000;
 
 /**
  * Запросы к документу, у которых свежий запрос вытесняет устаревший. Набор идёт быстрее,
@@ -444,6 +464,25 @@ export class LspService {
 
   /** Карта символов проекта: второй источник объявлений (см. `SymbolIndexSource`). */
   private indexSource: SymbolIndexSource | null = null;
+  /**
+   * Приёмник пометок обхода проекта (см. `collectDiagnostics`). Обход и так открывает
+   * каждый файл серверу ради символов — пометки приходят тем же окном `didOpen`,
+   * и брать их оттуда дешевле, чем открывать файлы второй раз.
+   */
+  private diagnosticsSink: ((path: string, diagnostics: LspDiagnostic[]) => void) | null = null;
+
+  /**
+   * Файлы, открытые серверу ради запроса (`withDocument`) или обхода пометок. Сервер
+   * не любит второй `didOpen` одного пути, а обход символов и обход пометок идут
+   * вразнобой — оба спрашивают этот набор, прежде чем открывать.
+   */
+  private readonly transient = new Set<string>();
+
+  /** Языки, чей проект уже обоше́н ради пометок: повторный заход — та же работа. */
+  private readonly swept = new Set<string>();
+
+  /** Кто ждёт пометок по файлу: отпускается первым словом сервера о файле (см. `awaitDiagnostics`). */
+  private readonly diagnosticWaiters = new Map<string, Set<() => void>>();
 
   constructor(
     private readonly root: () => string | null,
@@ -546,7 +585,13 @@ export class LspService {
         const runtime = await this.runtimeFor(language).catch(() => null);
         // Подняли впервые — сразу просим сервер обойти проект: с этого момента индекс
         // готов, и поиск по символам не ждёт первого запроса человека.
-        if (runtime) await this.scanProject(runtime);
+        if (runtime) {
+          await this.scanProject(runtime);
+          // Пометки — сразу после обхода и в фоне: счётчик ошибок и предупреждений
+          // в строке состояния должен быть заполнен, пока человек ещё ничего не открыл.
+          const root = this.root();
+          if (root) void this.sweepDiagnostics(runtime, root).catch(() => undefined);
+        }
       }),
     );
   }
@@ -1366,6 +1411,7 @@ export class LspService {
       // описывали код, которого в файле уже нет. Отдаём ему тот текст, который спросили.
       this.change(path, text);
     } else {
+      this.transient.add(path);
       runtime.connection.notify('textDocument/didOpen', {
         textDocument: { uri, languageId, version: 1, text },
       });
@@ -1373,11 +1419,37 @@ export class LspService {
     try {
       return await run(uri);
     } finally {
-      if (!opened)
-        runtime.connection.notify('textDocument/didClose', {
-          textDocument: { uri },
-        });
+      if (!opened) this.closeAfterDiagnostics(runtime, path, uri);
     }
+  }
+
+  /**
+   * Закрыть документ, который открывали сами, — но сперва дать серверу сказать про него
+   * пометки.
+   *
+   * `publishDiagnostics` приходит уже ПОСЛЕ `didOpen`, и мгновенный `didClose` выбрасывал
+   * их вместе с ответом: обход проекта читал файлы, а счётчик ошибок оставался пустым.
+   * Ждём ровно до первого слова сервера (или до срока) и тогда закрываем.
+   *
+   * Есть приёмник пометок (обход проекта) — иначе закрываем сразу: чужому запросу
+   * (ссылки, переход) держать файл открытым незачем.
+   */
+  private closeAfterDiagnostics(runtime: ServerRuntime, path: string, uri: string): void {
+    const close = (): void => {
+      this.transient.delete(path);
+      // Сервер мог перезапуститься, пока мы ждали: чужому процессу `didClose` не нужен.
+      if (this.runtimes.get(runtime.config.language) !== runtime) return;
+      runtime.connection.notify('textDocument/didClose', { textDocument: { uri } });
+    };
+    if (!this.diagnosticsSink || this.languageOfPath.has(path)) {
+      close();
+      return;
+    }
+    const wait = this.awaitDiagnostics(path);
+    void wait.done.then(() => {
+      wait.cancel();
+      close();
+    });
   }
 
   /**
@@ -1418,10 +1490,111 @@ export class LspService {
       const known = runtime.versions.get(path);
       if (known !== undefined && payload.version < known) return;
     }
-    this.publish(PushTopic.LspDiagnostics, {
-      path,
-      diagnostics: toDiagnostics(payload.diagnostics),
+    const diagnostics = toDiagnostics(payload.diagnostics);
+    this.publish(PushTopic.LspDiagnostics, { path, diagnostics });
+    // Обход проекта берёт пометки тем же окном `didOpen` (см. `collectDiagnostics`).
+    // Открытые в редакторе файлы туда не идут: их пометки и так приходят своим путём,
+    // иначе одни и те же ошибки посчитались бы дважды.
+    if (this.diagnosticsSink && !this.languageOfPath.has(path)) this.diagnosticsSink(path, diagnostics);
+    // Кто держал файл открытым ради пометок — дождался: можно закрывать.
+    this.settleDiagnostics(path);
+  }
+
+  /**
+   * Включить сбор пометок по всему проекту. Сервер шлёт их только для открытых
+   * документов, а обход символов (см. `SymbolIndexer`) всё равно открывает каждый
+   * файл — пометки приходят тем же окном и не стоят нам отдельного обхода.
+   *
+   * Возвращает выключатель: сбор живёт ровно столько, сколько идёт обход.
+   */
+  collectDiagnostics(sink: (path: string, diagnostics: LspDiagnostic[]) => void): () => void {
+    this.diagnosticsSink = sink;
+    return () => {
+      if (this.diagnosticsSink === sink) this.diagnosticsSink = null;
+    };
+  }
+
+  /**
+   * Подписаться на пометки файла: `done` отпускается первым словом сервера об этом
+   * файле или сроком (молчащий сервер файл не удержит). `cancel` — отпустить сразу.
+   */
+  private awaitDiagnostics(path: string): { done: Promise<void>; cancel: () => void } {
+    let release = (): void => {};
+    const done = new Promise<void>((resolve) => {
+      release = () => {
+        const waiters = this.diagnosticWaiters.get(path);
+        waiters?.delete(release);
+        if (waiters?.size === 0) this.diagnosticWaiters.delete(path);
+        resolve();
+      };
+      const waiters = this.diagnosticWaiters.get(path) ?? new Set<() => void>();
+      waiters.add(release);
+      this.diagnosticWaiters.set(path, waiters);
     });
+    const timer = setTimeout(release, SWEEP_FILE_WAIT_MS);
+    timer.unref?.();
+    return {
+      done,
+      cancel: () => {
+        clearTimeout(timer);
+        release();
+      },
+    };
+  }
+
+  private settleDiagnostics(path: string): void {
+    const waiters = this.diagnosticWaiters.get(path);
+    if (!waiters) return;
+    for (const release of [...waiters]) release();
+  }
+
+  /**
+   * Пометки всего проекта: открыть серверу каждый файл языка и дать ему сказать своё.
+   *
+   * Сервер публикует `publishDiagnostics` только для открытых документов, а карта
+   * символов на тёплом кэше файлы ему не показывает — и счётчик ошибок в строке
+   * состояния оставался пустым, пока человек не откроет файл. Здесь файл открывается
+   * ровно на время ответа сервера и закрывается; пометки уезжают тем же приёмником,
+   * что и у обхода (`collectDiagnostics`).
+   */
+  async sweepDiagnostics(runtime: ServerRuntime, root: string): Promise<void> {
+    if (!this.diagnosticsSink) return;
+    const language = runtime.config.language;
+    // Проект обходим один раз: `prewarm` зовут и при повторном открытии того же проекта.
+    if (this.swept.has(language)) return;
+    this.swept.add(language);
+    const listing = await listProjectFiles(root).catch(() => null);
+    if (!listing) return;
+    const files = listing.files.filter((file) => languageInfoForPath(file)?.id === language).slice(0, SWEEP_MAX_FILES);
+    const queue = [...files];
+    const worker = async (): Promise<void> => {
+      for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
+        // Проект сменили или сервер перезапустили — заход больше ни к чему.
+        if (this.runtimes.get(language) !== runtime) return;
+        await this.sweepFile(runtime, path.join(root, file), language);
+      }
+    };
+    await Promise.all(Array.from({ length: SWEEP_CONCURRENCY }, worker));
+  }
+
+  private async sweepFile(runtime: ServerRuntime, file: string, languageId: string): Promise<void> {
+    // Второй `didOpen` одного пути серверу не нужен: открытая вкладка и обход символов
+    // сами принесут его пометки.
+    if (this.languageOfPath.has(file) || this.transient.has(file)) return;
+    const text = await readFile(file, 'utf8').catch(() => null);
+    if (text === null || text.length > SWEEP_MAX_BYTES) return;
+    if (this.languageOfPath.has(file) || this.transient.has(file)) return;
+    const uri = pathToFileURL(file).toString();
+    const wait = this.awaitDiagnostics(file);
+    this.transient.add(file);
+    runtime.connection.notify('textDocument/didOpen', {
+      textDocument: { uri, languageId, version: 1, text },
+    });
+    await wait.done;
+    wait.cancel();
+    this.transient.delete(file);
+    if (this.runtimes.get(runtime.config.language) !== runtime) return;
+    runtime.connection.notify('textDocument/didClose', { textDocument: { uri } });
   }
 
   /**
@@ -1448,6 +1621,11 @@ export class LspService {
     const runtime = this.runtimes.get(language);
     if (!runtime) return;
     this.runtimes.delete(language);
+    // Ждущие пометок ждут мёртвого сервера: отпускаем сразу, а не по сроку.
+    this.transient.clear();
+    this.swept.delete(language);
+    for (const path of [...this.diagnosticWaiters.keys()]) this.settleDiagnostics(path);
+    this.diagnosticWaiters.clear();
     this.kill(runtime);
   }
 }

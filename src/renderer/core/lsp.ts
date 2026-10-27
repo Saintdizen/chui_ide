@@ -53,6 +53,9 @@ export class LspClient {
   }
 
   private sendOpen(path: string, languageId: string, text: string): void {
+    // Файл теперь открыт: его пометки придут от сервера вживую, а снятые обходом —
+    // уже история. Оставить их — значит посчитать одни и те же ошибки дважды.
+    this.editors.setExternalMarkers(path, 'lsp-project', []);
     void this.rpc.request('lsp.open', { path, languageId, text }).catch(() => undefined);
   }
 }

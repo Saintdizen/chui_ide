@@ -32,6 +32,8 @@ export const PushTopic = {
   ThemeChanged: 'theme:changed',
   WindowStateChanged: 'window:state',
   LspDiagnostics: 'lsp:diagnostics',
+  /** Пометки, снятые обходом проекта: сервер смотрит и закрытые файлы. */
+  LspProjectDiagnostics: 'lsp:project-diagnostics',
   LspProgress: 'lsp:progress',
   DebugState: 'debug:state',
   DebugStopped: 'debug:stopped',

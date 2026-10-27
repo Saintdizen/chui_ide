@@ -76,9 +76,14 @@ export function problemsWidget(counts: ProjectProblemCounts): ProblemsWidgetView
         ? 'Ошибок и предупреждений нет'
         : `Ошибок: ${errors}, предупреждений: ${warnings}.${reason ? ` ${reason}.` : ''} Нажмите, чтобы перейти к первой`;
 
+  // Пока идёт проход, числа не выбрасываем: пометки предыдущего прохода и обхода
+  // проекта живут до новых, и это лучшее, что известно. Пропадающие цифры читаются
+  // как «ошибки исчезли» — а они просто ждут ответа линтера.
+  const text = blind ? 'не проверено' : checking ? (numbers ? `${numbers} · проверяю…` : 'проверяю…') : numbers;
+
   return {
     hidden: !checking && blank && reason === null,
-    text: checking ? 'проверяю…' : blind ? 'не проверено' : numbers,
+    text,
     tone,
     title,
   };

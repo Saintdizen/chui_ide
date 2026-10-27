@@ -31,12 +31,16 @@ describe('problemsWidget: слова вместо врущего ноля', () =
     expect(view).toMatchObject({ hidden: true, tone: 'plain', text: '' });
   });
 
-  it('идёт проход — слово и признак, числа ещё не про него', () => {
+  it('идёт проход — найденное уже видно, проход не прячет числа', () => {
     const view = problemsWidget({ errors: 3, warnings: 1, checking: true });
 
-    expect(view.text).toBe('проверяю…');
+    expect(view.text).toBe('3 ошибки, 1 предупреждение · проверяю…');
     expect(view.tone).toBe('checking');
     expect(view.hidden).toBe(false);
+  });
+
+  it('проход идёт, а чисел ещё нет — только слово', () => {
+    expect(problemsWidget({ errors: 0, warnings: 0, checking: true }).text).toBe('проверяю…');
   });
 });
 
