@@ -22,7 +22,11 @@ const services: LspService[] = [];
 
 afterEach(async () => {
   for (const instance of services.splice(0)) instance.dispose();
-  for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
+  // `dispose()` только посылает сигнал: процесс-заглушка может жить ещё миг и
+  // держать открытыми файлы скрипта. На Linux удаление такого каталога проходит
+  // молча, на Windows — `EBUSY`/`EPERM`. Поэтому удаляем с повторами: `fs.rm`
+  // сам ждёт освобождения файлов, а не падает с первого раза.
+  for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 interface FakeServer {
