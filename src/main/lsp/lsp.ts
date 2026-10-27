@@ -481,6 +481,9 @@ export class LspService {
   /** Языки, чей проект уже обоше́н ради пометок: повторный заход — та же работа. */
   private readonly swept = new Set<string>();
 
+  /** Файлы, которые обход открывал сами и уже закрыл: их пустая публикация — эхо `didClose`. */
+  private readonly sweptClosed = new Set<string>();
+
   /** Кто ждёт пометок по файлу: отпускается первым словом сервера о файле (см. `awaitDiagnostics`). */
   private readonly diagnosticWaiters = new Map<string, Set<() => void>>();
 
@@ -981,6 +984,12 @@ export class LspService {
               },
             },
             definition: { linkSupport: true },
+            // Диагностика — по этому ключу серверы решают, слать ли `publishDiagnostics`
+            // вообще: `typescript-language-server` v6 читает его как `diagnosticsSupport`
+            // и без объявления молчит совсем — ни пометок открытого файла, ни обхода
+            // проекта. Объявляем то, что умеем: `version` отбрасываем, если он старше
+            // нашей правки (см. обработчик `publishDiagnostics`).
+            publishDiagnostics: { versionSupport: true },
             // Дерево символов файла: у объявления появляются дети — так и показываем.
             documentSymbol: { hierarchicalDocumentSymbolSupport: true },
             rename: { prepareSupport: true },
@@ -1495,7 +1504,13 @@ export class LspService {
     // Обход проекта берёт пометки тем же окном `didOpen` (см. `collectDiagnostics`).
     // Открытые в редакторе файлы туда не идут: их пометки и так приходят своим путём,
     // иначе одни и те же ошибки посчитались бы дважды.
-    if (this.diagnosticsSink && !this.languageOfPath.has(path)) this.diagnosticsSink(path, diagnostics);
+    //
+    // Пустой список для файла, который обход уже закрыл, — служебное эхо закрытия
+    // (`didClose` у части серверов отвечает пустым списком), а не «ошибки исчезли».
+    // Без этой отсечки обход сам стирал бы всё, что только что нашёл.
+    if (this.diagnosticsSink && !this.languageOfPath.has(path)) {
+      if (diagnostics.length > 0 || !this.sweptClosed.has(path)) this.diagnosticsSink(path, diagnostics);
+    }
     // Кто держал файл открытым ради пометок — дождался: можно закрывать.
     this.settleDiagnostics(path);
   }
@@ -1560,9 +1575,12 @@ export class LspService {
   async sweepDiagnostics(runtime: ServerRuntime, root: string): Promise<void> {
     if (!this.diagnosticsSink) return;
     const language = runtime.config.language;
-    // Проект обходим один раз: `prewarm` зовут и при повторном открытии того же проекта.
-    if (this.swept.has(language)) return;
-    this.swept.add(language);
+    // Проект обходим один раз на корень и язык: `prewarm` зовут и при повторном
+    // открытии того же проекта. Сменился корень — заход нужен новый.
+    const mark = `${root}\u0000${language}`;
+    if (this.swept.has(mark)) return;
+    this.swept.add(mark);
+    this.sweptClosed.clear();
     const listing = await listProjectFiles(root).catch(() => null);
     if (!listing) return;
     const files = listing.files.filter((file) => languageInfoForPath(file)?.id === language).slice(0, SWEEP_MAX_FILES);
@@ -1593,6 +1611,8 @@ export class LspService {
     await wait.done;
     wait.cancel();
     this.transient.delete(file);
+    // Дальше сервер может прислать пустой список на закрытие — его не слушаем.
+    this.sweptClosed.add(file);
     if (this.runtimes.get(runtime.config.language) !== runtime) return;
     runtime.connection.notify('textDocument/didClose', { textDocument: { uri } });
   }
@@ -1623,7 +1643,9 @@ export class LspService {
     this.runtimes.delete(language);
     // Ждущие пометок ждут мёртвого сервера: отпускаем сразу, а не по сроку.
     this.transient.clear();
-    this.swept.delete(language);
+    // Следующий заход — уже на новом сервере, старые отметки обхода не в счёт.
+    this.swept.clear();
+    this.sweptClosed.clear();
     for (const path of [...this.diagnosticWaiters.keys()]) this.settleDiagnostics(path);
     this.diagnosticWaiters.clear();
     this.kill(runtime);

@@ -56,9 +56,23 @@ const FAKE_SERVER = [
   '  const body = JSON.stringify(message);',
   "  process.stdout.write('Content-Length: ' + Buffer.byteLength(body) + '\\r\\n\\r\\n' + body);",
   '}',
+  'let publishOk = false;',
   'function handle(message) {',
   "  if (message.method === 'initialize') {",
+  '    publishOk = Boolean(message.params.capabilities.textDocument.publishDiagnostics);',
   "    send({ jsonrpc: '2.0', id: message.id, result: { capabilities: { documentSymbolProvider: true } } });",
+  '    return;',
+  '  }',
+  "  if (message.method === 'textDocument/didClose') {",
+  '    // Серверы отвечают на закрытие пустым списком (tsserver, pyright): это эхо, а не',
+  '    // «ошибки исчезли» — обход не должен сам стирать найденное.',
+  '    if (publishOk) {',
+  '      send({',
+  "        jsonrpc: '2.0',",
+  "        method: 'textDocument/publishDiagnostics',",
+  '        params: { uri: message.params.textDocument.uri, diagnostics: [] },',
+  '      });',
+  '    }',
   '    return;',
   '  }',
   "  if (message.method !== 'textDocument/didOpen') {",
@@ -66,6 +80,8 @@ const FAKE_SERVER = [
   '    return;',
   '  }',
   '  const uri = message.params.textDocument.uri;',
+  '  // Как tsserver: без объявленной клиентом capability пометок не шлёт вообще.',
+  '  if (!publishOk) return;',
   '  setTimeout(() => {',
   '    send({',
   "      jsonrpc: '2.0',",
@@ -142,6 +158,9 @@ describe('пометки проекта приходят после обхода
     await until(() => got.has(file));
 
     // Ошибка сервера доехала — значит, файл держали открытым до ответа.
+    expect(got.get(file)?.[0]).toMatchObject({ severity: 'error', message: 'нарочно' });
+    // И не стёрлась эхом на закрытие: пустой список после `didClose` — не «стало чисто».
+    await new Promise((resolve) => setTimeout(resolve, 400));
     expect(got.get(file)?.[0]).toMatchObject({ severity: 'error', message: 'нарочно' });
   });
 
