@@ -91,7 +91,9 @@ for (const messages of sample.messages) {
         failures.set(name, (failures.get(name) ?? 0) + 1);
         // Текст отказа — то, что реально чинить: «переделки» показывают цену,
         // а причину видно только здесь. Храним по одной строке на вид отказа.
-        const reason = `${name}: ${(result.content ?? '').split('\n')[0].slice(0, 110)}`;
+        // `content` из JSON бывает и не строкой: берём только текст, иначе нечего сокращать.
+        const text = typeof result.content === 'string' ? result.content : '';
+        const reason = `${name}: ${text.split('\n')[0].slice(0, 110)}`;
         refusalReasons.set(reason, (refusalReasons.get(reason) ?? 0) + 1);
       }
     }

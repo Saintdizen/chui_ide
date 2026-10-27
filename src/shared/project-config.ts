@@ -9,8 +9,11 @@
  */
 import type { Settings } from './api';
 
+/** Частичность на любую глубину: файл настроек пишут по одному ключу за раз. */
+type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
+
 /** Секции настроек, которые разрешено переопределять на уровне проекта. */
-export type ProjectSettings = Partial<Pick<Settings, 'editor' | 'explorer' | 'run' | 'lsp' | 'git'>>;
+export type ProjectSettings = DeepPartial<Pick<Settings, 'editor' | 'explorer' | 'run' | 'lsp' | 'git'>>;
 
 export const PROJECT_SETTINGS_SECTIONS = ['editor', 'explorer', 'run', 'lsp', 'git'] as const;
 

@@ -49,7 +49,7 @@ function bigSource(lines) {
     else if (mod === 3) out.push(`  // шаг ${i}: обычный комментарий для раскладки`);
     else out.push(`  return ${i};`);
   }
-  return out.join('\n') + '\n';
+  return `${out.join('\n')}\n`;
 }
 
 const ask = (w, expression, t = 30000) =>
@@ -208,9 +208,9 @@ app.whenReady().then(async () => {
   if (Array.isArray(errors) && errors.length) report.push(`ОШИБКИ СТРАНИЦЫ: ${JSON.stringify(errors)}`);
 
   const text = report.join('\n');
-  console.log('\n' + text + '\n');
+  console.log(`\n${text}\n`);
   await fs.mkdir(path.dirname(REPORT), { recursive: true });
-  await fs.writeFile(REPORT, text + '\n', 'utf8');
+  await fs.writeFile(REPORT, `${text}\n`, 'utf8');
 
   await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   app.exit(0);

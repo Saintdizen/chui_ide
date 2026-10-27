@@ -96,7 +96,9 @@ export interface ChatPersistence {
 export function createChatPersistence(deps: ChatPersistenceDeps): ChatPersistence {
   /** Корень папки, к которой привязана текущая история: ключ сохранения. */
   let chatRoot: string | null = null;
-  let saveTimer = 0;
+  // Тип таймера — от окружения: в окне это number, в тестах и main — объект.
+  // Хранить именно результат `setTimeout` — единственный переносимый вариант.
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Записать беседы этой папки немедленно: снимок берём синхронно, до отправки. */
   function persistTo(root: string): void {
@@ -110,7 +112,7 @@ export function createChatPersistence(deps: ChatPersistenceDeps): ChatPersistenc
   function flush(): void {
     if (saveTimer) {
       clearTimeout(saveTimer);
-      saveTimer = 0;
+      saveTimer = undefined;
     }
     if (chatRoot) persistTo(chatRoot);
   }
@@ -119,7 +121,7 @@ export function createChatPersistence(deps: ChatPersistenceDeps): ChatPersistenc
     if (!chatRoot) return;
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      saveTimer = 0;
+      saveTimer = undefined;
       if (chatRoot) persistTo(chatRoot);
     }, SAVE_DELAY);
   }

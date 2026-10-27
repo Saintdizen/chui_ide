@@ -75,7 +75,7 @@ async function main() {
       setTimeout(ask, 8000);
     }
     if (message.id === 2) {
-      const items = Array.isArray(message.result) ? message.result : (message.result && message.result.items) || [];
+      const items = Array.isArray(message.result) ? message.result : message.result?.items || [];
       console.log(`подсказок: ${items.length}`);
       console.log(
         `первые: ${

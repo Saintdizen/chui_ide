@@ -296,13 +296,13 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
     const label = element.name || element.tag;
     deps.attachContext({
       kind: 'note',
-      label: 'Элемент: ' + element.tag + ' «' + label + '»',
-      title: 'Элемент страницы ' + currentUrl,
+      label: `Элемент: ${element.tag} «${label}»`,
+      title: `Элемент страницы ${currentUrl}`,
       text: formatPickedElement(element, currentUrl),
     });
     if (result.shot) {
       deps.attachImage({
-        name: 'Элемент ' + element.tag + '.png',
+        name: `Элемент ${element.tag}.png`,
         mime: 'image/png',
         bytes: result.shot.bytes,
         dataUrl: result.shot.dataUrl,
@@ -334,7 +334,7 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
   async function openPage(page: BrowserPage): Promise<void> {
     if (!created.has(page.id)) {
       const result = await deps.rpc.request('browser.viewCreate', { id: page.id, url: page.url }).catch(() => null);
-      if (!result || !result.ok) {
+      if (!result?.ok) {
         deps.notify(result?.reason ?? 'Не удалось открыть страницу');
         return;
       }
@@ -373,7 +373,7 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
     zoomInButton.disabled = zoom >= ZOOM_MAX;
     zoomActualButton.disabled = zoom === 1;
     zoomFitButton.disabled = false;
-    zoomLabel.textContent = Math.round(zoom * 100) + '%';
+    zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
     zoomLabel.title = 'Масштаб страницы: Ctrl+колесо тоже меняет его';
     // Кнопка показывает, поделена ли ИМЕННО эта страница: агент работает в ней же.
     const shared = sharedId === activeId;
@@ -550,14 +550,14 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
   /** Снимок страницы уходит в чат картинкой: полотно — слой окна, снимает его main. */
   async function addScreenshot(id: string): Promise<void> {
     const result = await deps.rpc.request('browser.viewCapture', { id }).catch(() => null);
-    if (!result || !result.ok || !result.dataUrl) {
+    if (!result?.ok || !result.dataUrl) {
       deps.notify(result?.reason ?? 'Не удалось снять страницу');
       return;
     }
     const comma = result.dataUrl.indexOf(',');
     const bytes = Math.round(Math.max(0, result.dataUrl.length - comma - 1) * 0.75);
     deps.attachImage({
-      name: 'Страница ' + id + '.png',
+      name: `Страница ${id}.png`,
       mime: 'image/png',
       bytes,
       dataUrl: result.dataUrl,
@@ -568,7 +568,7 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
   /** Журнал консоли уходит в чат текстовым контекстом. */
   async function addConsole(id: string): Promise<void> {
     const result = await deps.rpc.request('browser.viewConsole', { id }).catch(() => null);
-    if (!result || !result.ok) {
+    if (!result?.ok) {
       deps.notify('Не удалось прочитать журнал консоли');
       return;
     }
@@ -578,11 +578,11 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
     }
     deps.attachContext({
       kind: 'note',
-      label: 'Журнал консоли (' + result.lines.length + ' строк)',
-      title: 'Журнал консоли страницы ' + currentUrl,
+      label: `Журнал консоли (${result.lines.length} строк)`,
+      title: `Журнал консоли страницы ${currentUrl}`,
       text: result.lines.join('\n'),
     });
-    deps.notify('Журнал консоли добавлен в чат: ' + result.lines.length);
+    deps.notify(`Журнал консоли добавлен в чат: ${result.lines.length}`);
   }
 
   return {

@@ -30,7 +30,7 @@ function textSse(text) {
     { choices: [{ delta: { content: text } }] },
     { choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 40, completion_tokens: 12 } },
   ];
-  return chunks.map((payload) => `data: ${JSON.stringify(payload)}\n\n`).join('') + 'data: [DONE]\n\n';
+  return `${chunks.map((payload) => `data: ${JSON.stringify(payload)}\n\n`).join('')}data: [DONE]\n\n`;
 }
 
 // Модель отвечает «как есть» — с ограждением, точкой в конце темы и подписью:

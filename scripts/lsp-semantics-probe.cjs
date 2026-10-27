@@ -37,15 +37,15 @@ registerAppScheme();
 
 let failed = false;
 const check = (label, condition, extra) => {
-  const tail = extra === undefined ? '' : ': ' + JSON.stringify(extra);
-  console.log('  ' + (condition ? 'ok  ' : 'FAIL') + ' ' + label + tail);
+  const tail = extra === undefined ? '' : `: ${JSON.stringify(extra)}`;
+  console.log(`  ${condition ? 'ok  ' : 'FAIL'} ${label}${tail}`);
   if (!condition) failed = true;
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const ask = (window, expression, timeoutMs = 20000) =>
   Promise.race([
-    window.webContents.executeJavaScript(expression).catch((error) => 'ошибка: ' + error.message),
+    window.webContents.executeJavaScript(expression).catch((error) => `ошибка: ${error.message}`),
     wait(timeoutMs).then(() => 'нет ответа'),
   ]);
 

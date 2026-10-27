@@ -73,7 +73,7 @@ export async function netFetch(input: string | URL | Request, init: RequestInit 
   // Типы undici и глобального `fetch` расходятся только объявлением: и там, и
   // там `Response` — структура с потоком в теле.
   const undiciInit = { ...init, dispatcher } as unknown as Parameters<typeof undiciFetch>[1];
-  return (await undiciFetch(input, undiciInit)) as unknown as Response;
+  return (await undiciFetch(input as unknown as Parameters<typeof undiciFetch>[0], undiciInit)) as unknown as Response;
 }
 
 /**

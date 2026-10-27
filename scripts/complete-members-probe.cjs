@@ -84,7 +84,7 @@ app.whenReady().then(async () => {
         character: lines[line].indexOf(marker) + marker.length + extraChars,
       },
     });
-    return Array.isArray(result) ? result : (result && result.items) || [];
+    return Array.isArray(result) ? result : result?.items || [];
   };
 
   const failures = [];

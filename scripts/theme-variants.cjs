@@ -197,7 +197,7 @@ const SET_CODE = (code) => `(() => {
   return nodes;
 })()`;
 
-const hex = (r, g, b) => '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('');
+const hex = (r, g, b) => `#${[r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
 
 /** Каналы цвета, относительная яркость и контраст по WCAG: токен обязан читаться на полотне. */
 const channelsOf = (value) => [1, 3, 5].map((index) => Number.parseInt(value.slice(index, index + 2), 16));

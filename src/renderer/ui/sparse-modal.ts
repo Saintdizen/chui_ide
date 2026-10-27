@@ -86,7 +86,7 @@ export function createSparseModal(deps: SparseModalDeps): SparseModalView {
 
   const renderDirs = (): void => {
     clear(dirsList);
-    if (!info || !info.enabled) {
+    if (!info?.enabled) {
       dirsList.append(h('p', { class: 'sparse-empty' }, 'Разреженный режим не включён — на диске весь репозиторий.'));
       return;
     }

@@ -60,14 +60,14 @@ export function parseMemory(text: string): MemoryNote[] {
 /** Собрать файл памяти (.md) вместе с шапкой-пояснением, как его править руками. */
 export function serializeMemory(notes: readonly MemoryNote[], title: string): string {
   const head = [
-    '# ' + title,
+    `# ${title}`,
     '',
     'Заметки ассистента. Строка, начинающаяся с дефиса и пробела, — отдельная заметка.',
     'Файл можно править вручную: правки подхватятся при следующем ответе.',
   ];
-  const body = notes.map((note) => '- ' + note.text);
+  const body = notes.map((note) => `- ${note.text}`);
   const lines = body.length > 0 ? head.concat([''], body) : head;
-  return lines.join('\n') + '\n';
+  return `${lines.join('\n')}\n`;
 }
 
 /** Итог добавления: либо новая память, либо причина отказа (её видит агент). */
@@ -122,7 +122,7 @@ export function formatMemory(notes: readonly MemoryNote[], scope: MemoryScope = 
   const shown: string[] = [];
   let size = 0;
   for (let at = notes.length - 1; at >= 0; at -= 1) {
-    const line = '- ' + notes[at]!.text;
+    const line = `- ${notes[at]!.text}`;
     if (shown.length > 0 && size + line.length > MEMORY_PROMPT_CHARS) break;
     shown.push(line);
     size += line.length + 1;
@@ -137,7 +137,7 @@ export function formatMemory(notes: readonly MemoryNote[], scope: MemoryScope = 
       ? [`(ещё ${hidden}: не показаны — не вместились в бюджет промпта; весь список — mind (action: notes))`]
       : [];
   return [
-    'Память ' + SCOPE_LABEL[scope] + ' (заметки, которые ты оставил ранее; они переживают беседу):',
+    `Память ${SCOPE_LABEL[scope]} (заметки, которые ты оставил ранее; они переживают беседу):`,
     ...shown,
     ...tail,
   ].join('\n');
@@ -151,7 +151,7 @@ export function formatMemory(notes: readonly MemoryNote[], scope: MemoryScope = 
  * Нумеруем для чтения глазами; `forget` по-прежнему ищет подстроку.
  */
 export function formatAllNotes(notes: readonly MemoryNote[], scope: MemoryScope = 'workspace'): string {
-  if (notes.length === 0) return 'Память ' + SCOPE_LABEL[scope] + ' пуста.';
-  const head = 'Память ' + SCOPE_LABEL[scope] + ' — все заметки (' + notes.length + ' из ' + MAX_NOTES + '):';
-  return [head, ...notes.map((note, at) => at + 1 + '. ' + note.text)].join('\n');
+  if (notes.length === 0) return `Память ${SCOPE_LABEL[scope]} пуста.`;
+  const head = `Память ${SCOPE_LABEL[scope]} — все заметки (${notes.length} из ${MAX_NOTES}):`;
+  return [head, ...notes.map((note, at) => `${at + 1}. ${note.text}`)].join('\n');
 }

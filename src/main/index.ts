@@ -350,7 +350,7 @@ if (!app.requestSingleInstanceLock()) {
       // и он влезает в предел просмотрщика.
       localFile: async (target) => {
         const entry = await workspace.stat(target).catch(() => null);
-        if (!entry || entry.kind !== 'file') return `Файл не найден: ${path.basename(target)}`;
+        if (entry?.kind !== 'file') return `Файл не найден: ${path.basename(target)}`;
         if (!isPdfPath(entry.path)) return 'Вкладкой-страницей открывается только PDF';
         if (entry.size > MAX_VIEW_PDF_BYTES) {
           const limit = MAX_VIEW_PDF_BYTES / 1024 / 1024;

@@ -219,7 +219,7 @@ app.whenReady().then(async () => {
   if (tokens) for (const name of TOKENS) lines.push(`  --${name} = ${tokens[name]}`);
   if (paint) for (const [name, value] of Object.entries(paint)) lines.push(`  ${name} = ${value}`);
 
-  await fs.writeFile(REPORT, lines.join('\n') + '\n', 'utf8');
+  await fs.writeFile(REPORT, `${lines.join('\n')}\n`, 'utf8');
   console.log(lines.join('\n'));
   console.log(`\nОтчёт: ${REPORT}`);
 

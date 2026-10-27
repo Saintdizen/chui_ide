@@ -36,10 +36,10 @@ export interface SeedDocument {
   text: string;
 }
 
-export interface SeedProvider {
+export type SeedProvider = (
   /** Файл языка и его текст; `null` — файлов этого языка в проекте нет. */
-  (language: string): Promise<SeedDocument | null>;
-}
+  language: string,
+) => Promise<SeedDocument | null>;
 
 /**
  * Поставщик затравок для текущего корня. Корень берём функцией: он меняется вместе

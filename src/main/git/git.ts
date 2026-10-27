@@ -25,7 +25,7 @@ import { parseTagList, type GitTag } from '../../shared/git-tags';
 import type { RebaseTodoItem } from '../../shared/git-rebase';
 import type { PullMode } from '../../shared/git-pull';
 import type { GitRefDiff } from '../../shared/git-ref-diff';
-import { type GitBisectState } from '../../shared/git-bisect';
+import type { GitBisectState } from '../../shared/git-bisect';
 import { bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, reset, revert } from './inspect';
 import { commitDiff, discard, discardHunk, fileHunks, stage, stageHunk, unstage, unstageHunk } from './index-staging';

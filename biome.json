@@ -24,7 +24,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "style": {
         "noNonNullAssertion": "off",
         "noParameterAssign": "off",
@@ -52,5 +52,20 @@
       }
     }
   },
-  "assist": { "enabled": true, "actions": { "source": { "organizeImports": "off" } } }
+  "assist": { "enabled": true, "actions": { "source": { "organizeImports": "off" } } },
+  "overrides": [
+    {
+      "includes": [
+        "src/shared/snippets.ts",
+        "tests/snippets.test.ts",
+        "tests/lsp-completions.test.ts",
+        "tests/editor-lsp-features.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": { "noTemplateCurlyInString": "off" }
+        }
+      }
+    }
+  ]
 }

@@ -22,7 +22,7 @@ app.whenReady().then(async () => {
   await fs.mkdir(path.join(project, 'node_modules', 'pkg'), { recursive: true });
   await fs.writeFile(
     path.join(project, 'src', 'a.ts'),
-    ['const needle = 1;', '// needle в комментарии', 'const other = 2;'].join('\n') + '\n',
+    `${['const needle = 1;', '// needle в комментарии', 'const other = 2;'].join('\n')}\n`,
     'utf8',
   );
   await fs.writeFile(path.join(project, 'src', 'b.py'), 'needle = "строка"\n', 'utf8');

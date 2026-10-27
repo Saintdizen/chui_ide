@@ -48,7 +48,7 @@ async function tryServer(label, servers, pythonPath) {
     textDocument: { uri: `file://${FILE}` },
     position: { line: lineIdx, character },
   });
-  const items = Array.isArray(raw) ? raw : (raw && raw.items) || [];
+  const items = Array.isArray(raw) ? raw : raw?.items || [];
   console.log(`[${label}] строка ${lineIdx + 1}; запущено: ${JSON.stringify(lsp.status().running)}`);
   console.log(
     `[${label}] подсказок: ${items.length}; первые: ${

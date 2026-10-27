@@ -58,7 +58,7 @@ app.whenReady().then(async () => {
     textDocument: { uri: `file://${FILE}` },
     position: { line: lineIdx, character },
   });
-  const items = Array.isArray(raw) ? raw : (raw && raw.items) || [];
+  const items = Array.isArray(raw) ? raw : raw?.items || [];
   console.log(`[итог] запущено: ${JSON.stringify(lsp.status().running)}`);
   console.log(
     `[итог] подсказок: ${items.length}; первые: ${

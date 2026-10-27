@@ -195,7 +195,7 @@ app.whenReady().then(async () => {
     // путь внутри проекта, это PDF и файл влезает в предел просмотрщика.
     localFile: async (target) => {
       const entry = await workspace.stat(target).catch(() => null);
-      if (!entry || entry.kind !== 'file') return 'Файл не найден';
+      if (entry?.kind !== 'file') return 'Файл не найден';
       if (!isPdfPath(entry.path)) return 'Вкладкой-страницей открывается только PDF';
       if (entry.size > MAX_VIEW_PDF_BYTES) return 'Файл больше предела просмотрщика';
       return null;
@@ -489,11 +489,7 @@ app.whenReady().then(async () => {
       };
     })()`,
   );
-  check(
-    'вкладка агента помечена',
-    agentMark !== null && agentMark.подсказка.includes('открыта ассистентом'),
-    agentMark,
-  );
+  check('вкладка агента помечена', agentMark?.подсказка.includes('открыта ассистентом'), agentMark);
   // Читаем ту же страницу, что и человек: тот же адрес, то же содержимое.
   const agentTitle = await agent.evaluate('document.title');
   check('агент видит ту же страницу', agentTitle === 'Домашняя страница', agentTitle);
@@ -545,7 +541,7 @@ app.whenReady().then(async () => {
 
   // Без общего доступа агент снова заводит СВОЮ вкладку во временной сессии.
   const ownAgent = new AgentBrowser(panel, externalStub, () => true);
-  await ownAgent.open(base + '/').catch(() => undefined);
+  await ownAgent.open(`${base}/`).catch(() => undefined);
   const ownTab = await waitFor(() => panel.ids().some((id) => id.startsWith('agent-')));
   check('без общего доступа агент завёл свою вкладку', ownTab === true, panel.ids());
   await ownAgent.close();
@@ -555,15 +551,15 @@ app.whenReady().then(async () => {
   const opener = panel
     .ids()
     .map((id) => panel.contents(id))
-    .find((item) => item && item.getURL().endsWith('/third'));
+    .find((item) => item?.getURL().endsWith('/third'));
   check('страница-источник найдена', opener !== undefined, panel.ids());
-  if (opener) await opener.executeJavaScript('window.open(' + JSON.stringify(base + '/popup') + "); 'ок'");
+  if (opener) await opener.executeJavaScript(`window.open(${JSON.stringify(`${base}/popup`)}); 'ок'`);
   const popupTab = await waitFor(async () => {
     const state = await ask(ide, UI_STATE);
     return state.вкладки.length === 2 ? state : null;
   });
   check('window.open завёл вторую вкладку', popupTab !== null, popupTab?.вкладки);
-  const popupGuest = await waitFor(() => guestAt(base + '/popup'));
+  const popupGuest = await waitFor(() => guestAt(`${base}/popup`));
   check('вложение новой вкладки загрузило адрес', popupGuest !== null, popupGuest?.getURL());
 
   /* --- 11. Снимок и консоль страницы — в чат ------------------------------------- */
@@ -845,7 +841,7 @@ app.whenReady().then(async () => {
     const state = await ask(ide, AREA_STATE);
     return state.чат === true ? state : null;
   });
-  check('в полосе появилась вкладка чата', chatShown !== null && chatShown.видов.includes('aux'), {
+  check('в полосе появилась вкладка чата', chatShown?.видов.includes('aux'), {
     виды: chatShown?.видов,
   });
   check('на экране чат, страница уступила', chatShown !== null && chatShown.страница === false, chatShown);
@@ -936,7 +932,7 @@ app.whenReady().then(async () => {
     return state.видов.includes('aux') === false ? state : null;
   });
   check('Ctrl+W убрал вкладку чата в панель', closedChat !== null, closedChat?.видов);
-  check('страница от этого не закрылась', closedChat !== null && closedChat.видов.includes('page'), closedChat?.видов);
+  check('страница от этого не закрылась', closedChat?.видов.includes('page'), closedChat?.видов);
 
   /* --- 13. Меню не уходит под страницу -------------------------------------------- */
   // Вложение — слой окна поверх DOM. Меню (`.context-menu`), которое НАКРЫВАЕТ сцену,

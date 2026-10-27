@@ -85,7 +85,7 @@ export function createModal(options: ModalOptions = {}): ModalView {
   const title = h('span', { class: 'modal-title' }, options.title ?? '');
   const headerActions = options.headerActions ?? [];
   modalSeq += 1;
-  const titleId = options.label ? null : 'modal-title-' + modalSeq;
+  const titleId = options.label ? null : `modal-title-${modalSeq}`;
   if (titleId) title.id = titleId;
 
   const closeButton = h(
@@ -175,7 +175,7 @@ export function createModal(options: ModalOptions = {}): ModalView {
     // Фокус возвращаем тому, у кого его забрали: элемент мог исчезнуть из DOM.
     const target = restoreFocus;
     restoreFocus = null;
-    if (target && target.isConnected) target.focus();
+    if (target?.isConnected) target.focus();
   }
 
   closeButton.addEventListener('click', () => close());
