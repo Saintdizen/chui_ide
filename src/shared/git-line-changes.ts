@@ -79,8 +79,8 @@ export function lineChanges(original: string, modified: string): GitLineChange[]
     for (let j = cols - 1; j >= 0; j -= 1) {
       dp[i * width + j] =
         midA[i] === midB[j]
-          ? dp[(i + 1) * width + (j + 1)] + 1
-          : Math.max(dp[(i + 1) * width + j], dp[i * width + (j + 1)]);
+          ? dp[(i + 1) * width + (j + 1)]! + 1
+          : Math.max(dp[(i + 1) * width + j]!, dp[i * width + (j + 1)]!);
     }
   }
 
@@ -102,7 +102,7 @@ export function lineChanges(original: string, modified: string): GitLineChange[]
       if (i < rows && j < cols && midA[i] === midB[j]) break;
       // При равной длине остатка предпочитаем провести строку как удаление: так
       // «переписанная» строка читается изменением, а не парой «удалил — добавил».
-      if (i < rows && (j >= cols || dp[(i + 1) * width + j] >= dp[i * width + (j + 1)])) {
+      if (i < rows && (j >= cols || dp[(i + 1) * width + j]! >= dp[i * width + (j + 1)]!)) {
         i += 1;
         deleted += 1;
       } else {

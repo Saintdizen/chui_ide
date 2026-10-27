@@ -56,7 +56,7 @@ const examples: string[] = [];
 
 for (const messages of sample.messages) {
   for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
+    const message = messages[index]!;
     if (message.role !== 'assistant' || !message.toolCalls?.length) continue;
     steps += 1;
     for (const call of message.toolCalls) {
@@ -93,7 +93,7 @@ for (const messages of sample.messages) {
         // а причину видно только здесь. Храним по одной строке на вид отказа.
         // `content` из JSON бывает и не строкой: берём только текст, иначе нечего сокращать.
         const text = typeof result.content === 'string' ? result.content : '';
-        const reason = `${name}: ${text.split('\n')[0].slice(0, 110)}`;
+        const reason = `${name}: ${(text.split('\n')[0] ?? '').slice(0, 110)}`;
         refusalReasons.set(reason, (refusalReasons.get(reason) ?? 0) + 1);
       }
     }

@@ -22,8 +22,8 @@ export function shortenShellTitle(title: string): string {
   const match = /^(.*?):\s+(\S.*)$/.exec(text);
   if (!match) return text;
 
-  const head = match[1];
-  const path = match[2].replace(/\/+$/, '');
+  const head = match[1]!;
+  const path = match[2]!.replace(/\/+$/, '');
   // Домашний каталог и корень уже короткие: отнимать у них нечего.
   if (path === '' || path === '~' || path === '/') return text;
 

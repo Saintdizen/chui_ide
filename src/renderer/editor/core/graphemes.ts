@@ -129,15 +129,15 @@ function boundsAt(bounds: readonly number[], offset: number): { start: number; e
   let found = 0;
   while (low <= high) {
     const middle = (low + high) >> 1;
-    if (bounds[middle] <= offset) {
+    if (bounds[middle]! <= offset) {
       found = middle;
       low = middle + 1;
     } else {
       high = middle - 1;
     }
   }
-  const start = bounds[found];
-  const end = found + 1 < bounds.length ? bounds[found + 1] : start;
+  const start = bounds[found]!;
+  const end = found + 1 < bounds.length ? bounds[found + 1]! : start;
   return { start, end };
 }
 

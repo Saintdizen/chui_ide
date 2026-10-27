@@ -79,16 +79,16 @@ describe('buildTestTree', () => {
     const tree = buildTestTree(suite.tests);
     expect(tree.map((node) => node.label)).toEqual(['tests/test_math.py', 'tests/other.py']);
 
-    const math = tree[0];
+    const math = tree[0]!;
     // Сначала одиночный тест, затем группа класса.
     expect(math.children.map((node) => node.label)).toEqual(['test_add', 'TestSum']);
-    expect(math.children[1].children.map((node) => node.label)).toEqual(['test_sum', 'test_mul']);
+    expect(math.children[1]!.children.map((node) => node.label)).toEqual(['test_sum', 'test_mul']);
 
     // У каждого узла есть селектор для запуска: ▶ у файла и класса должен запускать
     // именно их, а не все тесты проекта (панель шлёт `id ?? null`).
     expect(math.id).toBe('tests/test_math.py');
-    expect(math.children[0].id).toBe('tests/test_math.py::test_add');
-    expect(math.children[1].id).toBe('tests/test_math.py::TestSum');
+    expect(math.children[0]!.id).toBe('tests/test_math.py::test_add');
+    expect(math.children[1]!.id).toBe('tests/test_math.py::TestSum');
   });
 });
 

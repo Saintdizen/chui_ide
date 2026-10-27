@@ -117,7 +117,7 @@ function makeRef(module: string, line: number, column: number, kind: ImportKind 
     module,
     // У локального импорта верхнеуровневым именем считаем его самого: дробление по
     // точке дало бы пустую строку (`.mod`), а сверять его с пакетами не с чем.
-    top: kind === 'local' ? module : module.split('.')[0],
+    top: kind === 'local' ? module : module.split('.')[0]!,
     kind,
     line,
     startColumn: column + 1,
@@ -139,7 +139,7 @@ function parseStatement(statement: string, line: number, offset: number): Import
   // `from a.b import c, d` — модуль между `from` и `import`.
   const from = /^from\s+([A-Za-z_.][\w.]*)\s+import\b/.exec(body);
   if (from) {
-    const module = from[1];
+    const module = from[1]!;
     const at = start + body.indexOf(module);
     if (module.startsWith('.')) {
       // Относительный импорт — свой модуль проекта, проверяется по диску. Берём
@@ -160,7 +160,7 @@ function parseStatement(statement: string, line: number, offset: number): Import
   const rest = body.slice(plain[0].length);
   const cursor = start + plain[0].length;
   for (const match of rest.matchAll(/(?:^|,)\s*([A-Za-z_][\w.]*)/g)) {
-    const module = match[1];
+    const module = match[1]!;
     const at = (match.index ?? 0) + match[0].length - module.length;
     refs.push(makeRef(module, line, cursor + at));
   }
@@ -174,7 +174,7 @@ export function parsePythonImports(text: string): ImportRef[] {
   const lines = text.split(/\r?\n/);
 
   for (let index = 0; index < lines.length; index += 1) {
-    const code = blankLine(lines[index], state);
+    const code = blankLine(lines[index]!, state);
     if (!/\b(?:import|from)\b/.test(code)) continue;
 
     // Операторы в строке разделены `;` — разбираем каждый на своём месте.
@@ -231,7 +231,7 @@ export function packageNameOf(specifier: string): string {
     const parts = specifier.split('/');
     return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : specifier;
   }
-  return specifier.split('/')[0];
+  return specifier.split('/')[0]!;
 }
 
 /**
@@ -288,7 +288,7 @@ function scriptTokens(text: string): ScriptToken[] {
   let index = 0;
 
   while (index < text.length) {
-    const char = text[index];
+    const char = text[index]!;
 
     if (char === '/' && text[index + 1] === '/') {
       const newline = text.indexOf('\n', index);
@@ -332,7 +332,7 @@ function scriptTokens(text: string): ScriptToken[] {
     }
     if (/[A-Za-z_$]/.test(char)) {
       const start = index;
-      while (index < text.length && /[\w$]/.test(text[index])) index += 1;
+      while (index < text.length && /[\w$]/.test(text[index]!)) index += 1;
       tokens.push({ kind: 'word', value: text.slice(start, index), start, end: index });
       continue;
     }
@@ -360,8 +360,8 @@ export function parseScriptImports(text: string): ImportRef[] {
   }
   const at = (offset: number): { line: number; startColumn: number } => {
     let line = 0;
-    while (line + 1 < lineStarts.length && lineStarts[line + 1] <= offset) line += 1;
-    return { line: line + 1, startColumn: offset - lineStarts[line] + 1 };
+    while (line + 1 < lineStarts.length && lineStarts[line + 1]! <= offset) line += 1;
+    return { line: line + 1, startColumn: offset - lineStarts[line]! + 1 };
   };
 
   const refs: ImportRef[] = [];
@@ -380,7 +380,7 @@ export function parseScriptImports(text: string): ImportRef[] {
   };
 
   for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
+    const token = tokens[index]!;
     if (token.kind !== 'word') continue;
 
     // `import('pkg')` — динамический импорт: имя сразу за скобкой.
@@ -392,14 +392,14 @@ export function parseScriptImports(text: string): ImportRef[] {
 
     // `import 'pkg'` — побочный импорт: подключают ради эффекта.
     if (token.value === 'import' && tokens[index + 1]?.kind === 'string') {
-      push(tokens[index + 1]);
+      push(tokens[index + 1]!);
       continue;
     }
 
     // `import … from 'pkg'` и `export … from 'pkg'`: имя после `from`.
     if (token.value === 'import' || token.value === 'export') {
       for (let cursor = index + 1; cursor < tokens.length && cursor < index + 60; cursor += 1) {
-        const next = tokens[cursor];
+        const next = tokens[cursor]!;
         if (next.kind === 'punct' && next.value === ';') break;
         if (next.kind === 'word' && next.value === 'from') {
           const target = tokens[cursor + 1];

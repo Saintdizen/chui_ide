@@ -107,12 +107,12 @@ export function nextBookmark(
   const index = ordered.findIndex((record) => record.path === from.path && record.line === from.line);
   if (index < 0) {
     // Позиции нет среди закладок: берём ближайшую в нужную сторону, иначе — с края.
-    if (direction === 1) return ordered.find((record) => after(record, from)) ?? ordered[0];
+    if (direction === 1) return ordered.find((record) => after(record, from)) ?? ordered[0]!;
     const before = ordered.filter((record) => after(from, record));
-    return before.length > 0 ? before[before.length - 1] : ordered[ordered.length - 1];
+    return before.length > 0 ? before[before.length - 1]! : ordered[ordered.length - 1]!;
   }
   const step = (index + direction + ordered.length) % ordered.length;
-  return ordered[step];
+  return ordered[step]!;
 }
 
 /** Позиция `a` строго после `b` в каноническом порядке. */

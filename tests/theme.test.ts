@@ -195,14 +195,17 @@ function luminance(color: Rgba): number {
 /** Контраст по WCAG: отношение яркостей светлого и тёмного из двух цветов. */
 function contrast(fg: Rgba, bg: Rgba): number {
   const solidBg = over(bg, { r: 255, g: 255, b: 255, a: 1 });
-  const [lighter, darker] = [luminance(over(fg, solidBg)), luminance(solidBg)].sort((a, b) => b - a);
+  const [lighter, darker] = [luminance(over(fg, solidBg)), luminance(solidBg)].sort((a, b) => b - a) as [
+    number,
+    number,
+  ];
   return (lighter + 0.05) / (darker + 0.05);
 }
 
 /** Значения `--токен` из блока: имя без `--` → значение. */
 function readTokens(block: string): Map<string, string> {
   const out = new Map<string, string>();
-  for (const [, name, value] of block.matchAll(/--([\w-]+)\s*:\s*([^;]+);/g)) out.set(name, value.trim());
+  for (const [, name, value] of block.matchAll(/--([\w-]+)\s*:\s*([^;]+);/g)) out.set(name!, value!.trim());
   return out;
 }
 
@@ -507,11 +510,11 @@ describe('токены стилей объявлены', () => {
     const used = new Set<string>();
     for (const file of STYLE_FILES) {
       const css = readFileSync(file, 'utf8');
-      for (const [, name] of css.matchAll(/--([\w-]+)\s*:/g)) defined.add(name);
+      for (const [, name] of css.matchAll(/--([\w-]+)\s*:/g)) defined.add(name!);
       // Запятая вторым символом — есть fallback, такой `var()` безопасен.
       for (const [, name, next] of css.matchAll(/var\(\s*--([\w-]+)\s*([,)])/g)) {
         if (next === ',') continue;
-        used.add(name);
+        used.add(name!);
       }
     }
 

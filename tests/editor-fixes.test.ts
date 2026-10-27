@@ -81,7 +81,6 @@ beforeEach(() => {
   shown.length = 0;
 });
 
-
 describe('editor-fixes: установка пакетов', () => {
   it('для обычного языка пунктов про установку пакетов нет', () => {
     const { api } = fixes({ documents: { get: () => ({ languageId: 'rust' }) } });
@@ -228,12 +227,7 @@ describe('editor-fixes: орфография', () => {
   it('предлагает замены, словарь и пропуск слова', () => {
     const { api } = fixes({ spelling: { suggestions: ['слово', 'слава'], replace: true } });
     const labels = api.spellingQuickFixes().map((item) => ('label' in item ? item.label : '—'));
-    expect(labels).toEqual([
-      'Заменить на «слово»',
-      'Заменить на «слава»',
-      'Добавить в словарь',
-      'Пропустить слово',
-    ]);
+    expect(labels).toEqual(['Заменить на «слово»', 'Заменить на «слава»', 'Добавить в словарь', 'Пропустить слово']);
   });
 
   it('без вариантов замены остаются только словарь и пропуск', () => {

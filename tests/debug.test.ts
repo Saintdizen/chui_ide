@@ -303,13 +303,13 @@ describe('DebugService', () => {
     expect(frames).toHaveLength(1);
     expect(frames[0]).toMatchObject({ id: 7, name: 'main', path: '/proj/app.py', line: 4 });
 
-    const scopes = await service.scopes(frames[0].id);
+    const scopes = await service.scopes(frames[0]!.id);
     expect(scopes.map((scope) => scope.name)).toEqual(['Locals']);
 
-    const variables = await service.variables(scopes[0].variablesReference);
+    const variables = await service.variables(scopes[0]!.variablesReference);
     expect(variables.map((variable) => variable.name)).toEqual(['total', 'items']);
     expect(variables[0]).toMatchObject({ value: '3', type: 'int' });
-    expect(variables[1].variablesReference).toBe(22);
+    expect(variables[1]!.variablesReference).toBe(22);
 
     await service.resume();
     expect(await waitPhase(service, 'idle')).toBe('idle');
@@ -397,7 +397,7 @@ describe('DebugService', () => {
     const stopped = events.find((event) => event.topic === 'debug:stopped');
     expect(stopped?.payload.reason).toBe('breakpoint');
     const frames = stopped?.payload.frames as Array<{ name: string }> | undefined;
-    expect(frames?.[0].name).toBe('main');
+    expect(frames?.[0]?.name).toBe('main');
 
     const phases = events.filter((event) => event.topic === 'debug:state').map((event) => event.payload.phase);
     expect(phases).toContain('starting');

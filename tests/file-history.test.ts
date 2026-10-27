@@ -114,6 +114,6 @@ describe('sanitizeHistoryEntries', () => {
 
   it('незнакомая причина сводится к сохранению', () => {
     const [only] = sanitizeHistoryEntries([{ id: 'x', path: '/p/a.ts', reason: 'ebf' }]);
-    expect(only.reason).toBe('save');
+    expect(only!.reason).toBe('save');
   });
 });

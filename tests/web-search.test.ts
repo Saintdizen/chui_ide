@@ -84,9 +84,9 @@ describe('адрес, заголовки и тело запроса', () => {
 
 describe('searchWeb: защита и разбор ответа', () => {
   it('неразрешённый адрес не открывается вовсе', async () => {
-    await expect(
-      searchWeb('q', { provider: 'searxng', endpoint: 'http://чужой-сервер.example' }),
-    ).rejects.toThrow(/не разрешён/);
+    await expect(searchWeb('q', { provider: 'searxng', endpoint: 'http://чужой-сервер.example' })).rejects.toThrow(
+      /не разрешён/,
+    );
     expect(netFetch).not.toHaveBeenCalled();
   });
 

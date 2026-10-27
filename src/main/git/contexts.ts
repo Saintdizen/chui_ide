@@ -89,12 +89,6 @@ export interface NetContext extends RepositoryContext, RemoteContext, StatusCont
 }
 
 /**
- * Клонирование: пишет в новый каталог, репозитория ещё нет, поэтому корня в
- * контексте и быть не может — только git.
- */
-export type CloneContext = Record<string, never>;
-
-/**
  * Разрешение конфликтов: отметка файла решённым.
  *
  * Свежий статус нужен не для чтения, а как граница: `locateFile` пускает только

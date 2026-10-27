@@ -54,7 +54,7 @@ describe('наблюдение за файлами', () => {
     await fs.writeFile(path.join(dir, 'a.ts'), 'const a = 2;\n', 'utf8');
     await until(() => events.length > 0);
 
-    expect(events[0].topic).toBe('workspace:changed');
+    expect(events[0]!.topic).toBe('workspace:changed');
   });
 
   it('правка .ai_ignore перечитывает правила сразу, а не при переоткрытии', async () => {

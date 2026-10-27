@@ -199,7 +199,7 @@ describe('наборы инструментов агента', () => {
       const family = /^(\w+)(Open|Output|Write|Stop|List)$/.exec(name);
       const record = family ? new RegExp(`(?:^|[ ,:])${family[1]}\\(([^)]*)\\)`).exec(note) : null;
       const inFamily =
-        family !== null && record !== null && record[1]!.split(/[|,]/).includes(name.slice(family[1].length));
+        family !== null && record !== null && record[1]!.split(/[|,]/).includes(name.slice(family[1]!.length));
       const shown = note.includes(`${name}(`) ? `${name}(` : inFamily ? `${family![1]}(` : null;
       expect(shown, `в ростере нет формы ${name}`).not.toBeNull();
       expect(toolPresetAllows('auto', name), `${name} не должен входить в схемы`).toBe(false);

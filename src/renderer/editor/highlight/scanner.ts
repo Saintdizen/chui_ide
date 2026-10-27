@@ -54,13 +54,13 @@ export function scanNumber(text: string, start: number): number {
 
   if (base === '0x' || base === '0b' || base === '0o') {
     index = start + 2;
-    while (index < text.length && /[0-9a-fA-F_]/.test(text[index])) index += 1;
+    while (index < text.length && /[0-9a-fA-F_]/.test(text[index]!)) index += 1;
   } else {
-    while (index < text.length && /[0-9_]/.test(text[index])) index += 1;
+    while (index < text.length && /[0-9_]/.test(text[index]!)) index += 1;
     // Дробная часть — только если после точки есть цифра, иначе это обращение к полю.
-    if (text[index] === '.' && isDigit(text[index + 1])) {
+    if (text[index] === '.' && isDigit(text[index + 1] ?? '')) {
       index += 1;
-      while (index < text.length && /[0-9_]/.test(text[index])) index += 1;
+      while (index < text.length && /[0-9_]/.test(text[index]!)) index += 1;
     }
     // Степень: `e` или `E`, необязательный знак и хотя бы одна цифра.
     const exponent = text[index];
@@ -68,13 +68,13 @@ export function scanNumber(text: string, start: number): number {
       const sign = text[index + 1] === '+' || text[index + 1] === '-' ? 1 : 0;
       if (isDigit(text[index + 1 + sign])) {
         index += 1 + sign;
-        while (index < text.length && isDigit(text[index])) index += 1;
+        while (index < text.length && isDigit(text[index]!)) index += 1;
       }
     }
   }
 
   // Суффиксы: `n` (BigInt), `L`/`U`/`UL` (C/Java), `f`/`d` (дробные), `i` (комплексные).
-  while (index < text.length && /[nLlUuFfDdi]/.test(text[index])) index += 1;
+  while (index < text.length && /[nLlUuFfDdi]/.test(text[index]!)) index += 1;
   return index;
 }
 

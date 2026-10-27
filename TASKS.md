@@ -34,3 +34,13 @@
 - `app.ts` (3572 строки): шапка (140) не вынимается одним куском, пока
   `syncViewButtons` зовут из 6 мест.
 - Скорость тестов: повод — CI дольше 2 минут (Windows-шаг «Тесты» ≈ 1м28с).
+
+## Правило новое (27.10): `noUncheckedIndexedAccess`
+
+Флаг включён в `tsconfig.json` (было 207 ошибок, стало 0). Разбор нового
+`Object is possibly 'undefined'`: если индекс уже проверен выше в том же
+теле (`i < arr.length`, `findIndex`/`indexOf` >= 0, группа regex после
+`match !== null`) — ставить `!`; если проверки нет или значение бывает
+пустым — `?? fallback`. Не писать `a?.b[0]!.c` (biome ловит
+`noNonNullAssertedOptionalChain`) — вместо этого `a?.b[0]?.c`.
+`exactOptionalPropertyTypes` замерен (67 main + 65 renderer = 132), не включали.

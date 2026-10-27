@@ -91,7 +91,7 @@ describe('combineMeaning', () => {
       10,
     );
     expect(hits).toHaveLength(1);
-    expect(hits[0].kind).toBe('symbol');
+    expect(hits[0]!.kind).toBe('symbol');
   });
 
   it('повторы одной строки схлопываются', () => {

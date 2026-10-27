@@ -112,8 +112,8 @@ describe('книга из архива', () => {
     expect(preview.kind).toBe('xlsx');
     if (preview.kind !== 'xlsx') return;
     expect(preview.sheets.map((sheet) => sheet.name)).toEqual(['Данные', 'Пусто']);
-    expect(preview.sheets[0].rows).toEqual([['Товар', '7']]);
-    expect(preview.sheets[1].rows).toEqual([]);
+    expect(preview.sheets[0]!.rows).toEqual([['Товар', '7']]);
+    expect(preview.sheets[1]!.rows).toEqual([]);
     expect(preview.truncated).toBe(false);
   });
 

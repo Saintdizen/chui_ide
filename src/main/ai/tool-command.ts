@@ -162,7 +162,7 @@ export async function liftCdPrefix(
   const match = /^cd\s+(?:'([^']*)'|"([^"]*)"|(\S+))\s*&&\s*(\S[\s\S]*)$/.exec(command);
   if (!match) return { command, args };
   const dir = match[1] ?? match[2] ?? match[3];
-  const rest = match[4];
+  const rest = match[4]!;
   if (!dir) return { command, args };
   try {
     const stat = await ctx.workspace.stat(dir);

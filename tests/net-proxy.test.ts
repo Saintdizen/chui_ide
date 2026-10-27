@@ -179,18 +179,14 @@ describe('netFetch: http через прокси обычным запросом
     installProxyFromEnv({ HTTP_PROXY: proxy.url });
 
     const body = new ReadableStream({ start: (controller) => controller.close() });
-    await expect(netFetch('http://example.com/api', { method: 'POST', body })).rejects.toThrow(
-      /потоковое тело/i,
-    );
+    await expect(netFetch('http://example.com/api', { method: 'POST', body })).rejects.toThrow(/потоковое тело/i);
     expect(proxy.requests).toHaveLength(0);
   });
 
   it('идёт по редиректу и подставляет адрес последней цели', async () => {
     const target = await stubServer(() => ({ body: 'финал' }));
     const proxy = await stubServer((request) =>
-      request.url?.includes('/next')
-        ? { body: 'финал' }
-        : { status: 302, headers: { location: `${target.url}/next` } },
+      request.url?.includes('/next') ? { body: 'финал' } : { status: 302, headers: { location: `${target.url}/next` } },
     );
     installProxyFromEnv({ HTTP_PROXY: proxy.url });
 
@@ -215,8 +211,6 @@ describe('netFetch: http через прокси обычным запросом
     const controller = new AbortController();
     controller.abort();
 
-    await expect(netFetch('http://example.com/slow', { signal: controller.signal })).rejects.toThrow(
-      /abort/i,
-    );
+    await expect(netFetch('http://example.com/slow', { signal: controller.signal })).rejects.toThrow(/abort/i);
   });
 });

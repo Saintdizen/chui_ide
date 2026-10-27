@@ -80,9 +80,7 @@ describe('checks: lint', () => {
     const stat = vi.fn(async () => ({}));
     const lint = vi.fn(async () => ({
       tool: 'ruff',
-      problems: [
-        { path: '/проект/src/a.py', line: 1, column: 1, severity: 'error', message: 'F401', code: 'F401' },
-      ],
+      problems: [{ path: '/проект/src/a.py', line: 1, column: 1, severity: 'error', message: 'F401', code: 'F401' }],
     }));
     const outcome = await checksAction(ctx({ stat, lint } as unknown as Parts), {
       action: 'lint',

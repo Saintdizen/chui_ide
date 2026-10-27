@@ -36,7 +36,7 @@ export function parsePytestCollect(output: string): CollectedSuite {
 
     const node = NODEID.exec(line);
     if (node) {
-      tests.push(describeTest(node[1], node[2]));
+      tests.push(describeTest(node[1]!, node[2]!));
       continue;
     }
 
@@ -68,7 +68,8 @@ export function collectFailure(output: string, limit = 3): string[] {
 
   let index = -1;
   for (let at = lines.length - 1; at >= 0; at -= 1) {
-    if (/\w*(?:Error|Exception)\b/.test(lines[at]) && lines[at].includes(':')) {
+    const line = lines[at]!;
+    if (/\w*(?:Error|Exception)\b/.test(line) && line.includes(':')) {
       index = at;
       break;
     }
@@ -260,8 +261,8 @@ export function parseCoverage(text: string): number | null {
 /** Разбор одной строки-идентификатора: `file.py::Class::name` или `file.py::name`. */
 export function describeTest(file: string, node: string): CollectedTest {
   const parts = node.split('::');
-  const name = parts[parts.length - 1];
-  const className = parts.length >= 2 ? parts[0] : null;
+  const name = parts[parts.length - 1]!;
+  const className = parts.length >= 2 ? (parts[0] ?? null) : null;
   return { id: `${file}::${node}`, file: file.split('\\').join('/'), className, name };
 }
 

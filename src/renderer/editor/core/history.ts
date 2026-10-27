@@ -64,7 +64,7 @@ export interface PushOptions {
 export function inverseChanges(entry: HistoryEntry): TextChange[] {
   const out: TextChange[] = [];
   for (let index = entry.changes.length - 1; index >= 0; index -= 1) {
-    const change = entry.changes[index];
+    const change = entry.changes[index]!;
     out.push({ start: change.start, removed: change.inserted, inserted: change.removed });
   }
   return out;

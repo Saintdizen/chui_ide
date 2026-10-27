@@ -26,7 +26,7 @@ describe('toProjectSymbols', () => {
 
   it('неизвестный вид символа — общая подпись', () => {
     const raw = [{ name: 'x', kind: 99, location: { uri: 'file:///p/a.py' } }];
-    expect(toProjectSymbols(raw, toPath)[0].kind).toBe('символ');
+    expect(toProjectSymbols(raw, toPath)[0]!.kind).toBe('символ');
   });
 
   it('записи без имени или ссылки пропускаются', () => {
@@ -68,7 +68,7 @@ describe('filterSymbols', () => {
   it('убирает повторы одного символа', () => {
     // 'Session' — подстрока и в 'session_open', поэтому дубли проверяем
     // на одном и том же символе, а не на разных именах.
-    const duplicated = [symbols[0], symbols[0]];
+    const duplicated = [symbols[0]!, symbols[0]!];
     expect(filterSymbols(duplicated, 'Session')).toHaveLength(1);
   });
 

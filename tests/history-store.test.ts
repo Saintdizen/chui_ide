@@ -47,10 +47,10 @@ describe('HistoryStore', () => {
     const list = await store.list(root, file);
     expect(list).toHaveLength(2);
     // Новый снимок — в начале списка, и это прежнее содержимое: capture снимает ДО записи.
-    expect(await store.read(root, file, list[0].id)).toBe('const a = 2;\n');
-    expect(await store.read(root, file, list[1].id)).toBe('const a = 1;\n');
-    expect(list[0].name).toBe('a.ts');
-    expect(list[0].reason).toBe('save');
+    expect(await store.read(root, file, list[0]!.id)).toBe('const a = 2;\n');
+    expect(await store.read(root, file, list[1]!.id)).toBe('const a = 1;\n');
+    expect(list[0]!.name).toBe('a.ts');
+    expect(list[0]!.reason).toBe('save');
   });
 
   it('тот же текст второй раз не сохраняет', async () => {
@@ -73,7 +73,7 @@ describe('HistoryStore', () => {
 
     const list = await store.list(root, file);
     expect(list).toHaveLength(2);
-    expect(list[0].reason).toBe('delete');
+    expect(list[0]!.reason).toBe('delete');
   });
 
   it('держит не больше MAX_HISTORY_ENTRIES и вытесненные снимки убирает с диска', async () => {
@@ -87,7 +87,9 @@ describe('HistoryStore', () => {
 
     expect(await store.list(root, file)).toHaveLength(MAX_HISTORY_ENTRIES);
     const [workspaceDir] = await readdir(path.join(base, 'history'));
-    const snapshots = (await readdir(path.join(base, 'history', workspaceDir))).filter((name) => name.endsWith('.txt'));
+    const snapshots = (await readdir(path.join(base, 'history', workspaceDir!))).filter((name) =>
+      name.endsWith('.txt'),
+    );
     expect(snapshots).toHaveLength(MAX_HISTORY_ENTRIES);
   });
 
@@ -97,7 +99,7 @@ describe('HistoryStore', () => {
     await store.capture(root, file);
     const [entry] = await store.list(root, file);
 
-    expect(await store.read(root, file, entry.id)).toBe('one\n');
+    expect(await store.read(root, file, entry!.id)).toBe('one\n');
     expect(await store.read(root, file, 'нет-такого')).toBeNull();
     // id — это имя файла в хранилище: выход из каталога недопустим.
     expect(await store.read(root, file, '../../../../etc/passwd')).toBeNull();
@@ -114,7 +116,9 @@ describe('HistoryStore', () => {
 
     expect(await store.list(root, file)).toEqual([]);
     const [workspaceDir] = await readdir(path.join(base, 'history'));
-    const snapshots = (await readdir(path.join(base, 'history', workspaceDir))).filter((name) => name.endsWith('.txt'));
+    const snapshots = (await readdir(path.join(base, 'history', workspaceDir!))).filter((name) =>
+      name.endsWith('.txt'),
+    );
     expect(snapshots).toEqual([]);
   });
 
@@ -137,6 +141,6 @@ describe('HistoryStore', () => {
 
     expect(await store.list(root, a)).toHaveLength(1);
     expect(await store.list(root, b)).toHaveLength(1);
-    expect(await store.read(root, a, (await store.list(root, a))[0].id)).toBe('aaa\n');
+    expect(await store.read(root, a, (await store.list(root, a))[0]!.id)).toBe('aaa\n');
   });
 });

@@ -85,12 +85,12 @@ export class TextBuffer {
   /** Текст строки по её номеру (с единицы), без разрыва строки на конце. */
   lineText(line: number): string {
     const index = this.clampLine(line) - 1;
-    return this.table.getText(this.starts[index], this.lineEndOffset(index));
+    return this.table.getText(this.starts[index]!, this.lineEndOffset(index));
   }
 
   /** Смещение начала строки (номер с единицы). */
   lineStart(line: number): number {
-    return this.starts[this.clampLine(line) - 1];
+    return this.starts[this.clampLine(line) - 1]!;
   }
 
   /** Номер строки (с единицы) для смещения. */
@@ -102,13 +102,13 @@ export class TextBuffer {
   positionAt(offset: number): Position {
     const at = Math.max(0, Math.min(offset, this.table.length));
     const index = this.lineIndexAt(at);
-    return { line: index + 1, column: at - this.starts[index] + 1 };
+    return { line: index + 1, column: at - this.starts[index]! + 1 };
   }
 
   /** Смещение для позиции. Столбец за концом строки прижимается к её концу — так же, как при клике мимо текста. */
   offsetAt(position: Position): number {
     const index = this.clampLine(position.line) - 1;
-    const start = this.starts[index];
+    const start = this.starts[index]!;
     const end = this.lineEndOffset(index);
     const offset = start + Math.max(0, position.column - 1);
     return Math.max(start, Math.min(offset, end));
@@ -161,11 +161,11 @@ export class TextBuffer {
 
     // Строки ДО правки не трогаем: их начала лежат левее и верны как были.
     const next = this.starts.slice(0, firstLine);
-    const windowStart = this.starts[firstLine];
+    const windowStart = this.starts[firstLine]!;
     const hasTail = lastLine + 1 < this.starts.length;
     // Правый край пересчёта: после правки — начало строки, следующей за задетой, либо
     // конец документа.
-    const windowEnd = hasTail ? this.starts[lastLine + 1] + delta : newLength;
+    const windowEnd = hasTail ? this.starts[lastLine + 1]! + delta : newLength;
 
     // Начала строк считаем заново ТОЛЬКО для задетого места и с одним знаком контекста
     // слева. Он нужен на стыке: возврат каретки до правки и перевод сразу за ней — ОДИН
@@ -184,14 +184,14 @@ export class TextBuffer {
 
     // Хвост документа лишь сдвигается на разницу длин — начала строк в нём те же.
     for (let index = lastLine + 1; index < this.starts.length; index += 1) {
-      next.push(this.starts[index] + delta);
+      next.push(this.starts[index]! + delta);
     }
     this.starts = next;
   }
 
   /** Смещение конца строки без разрыва строки на конце (перевод строки в текст не входит). */
   private lineEndOffset(index: number): number {
-    const next = index + 1 < this.starts.length ? this.starts[index + 1] : this.table.length;
+    const next = index + 1 < this.starts.length ? this.starts[index + 1]! : this.table.length;
     if (next <= 0) return 0;
     // Разрыв строки — один символ, кроме `\r\n`, где их два.
     const end = this.table.getText(Math.max(0, next - 2), next);
@@ -207,7 +207,7 @@ export class TextBuffer {
     let found = 0;
     while (low <= high) {
       const middle = (low + high) >> 1;
-      if (this.starts[middle] <= offset) {
+      if (this.starts[middle]! <= offset) {
         found = middle;
         low = middle + 1;
       } else {

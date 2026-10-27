@@ -94,7 +94,7 @@ export const yamlGrammar: Grammar = {
 function keyBoundary(text: string, start: number): number {
   let index = start;
   if (text[index] === '"' || text[index] === "'") {
-    const quote = text[index];
+    const quote = text[index]!;
     const close = text.indexOf(quote, index + 1);
     if (close < 0) return -1;
     index = close + 1;

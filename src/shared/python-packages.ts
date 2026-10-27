@@ -79,7 +79,7 @@ export function parseRequirements(text: string): Requirement[] {
   const lines = text.split(/\r?\n/);
 
   for (let index = 0; index < lines.length; index += 1) {
-    let line = lines[index].trim();
+    let line = lines[index]!.trim();
     if (!line || line.startsWith('#')) continue;
     // Хвостовой комментарий: `pytest==7  # тесты`.
     const hash = line.indexOf(' #');
@@ -90,7 +90,7 @@ export function parseRequirements(text: string): Requirement[] {
     // Имя до спецификатора: `name[extra]==1.2`, `name>=1`.
     const match = /^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*(.*)$/.exec(line);
     if (!match) continue;
-    result.push({ name: match[1], specifier: (match[3] ?? '').replace(/\s+/g, ''), line: index + 1 });
+    result.push({ name: match[1]!, specifier: (match[3] ?? '').replace(/\s+/g, ''), line: index + 1 });
   }
 
   return result;

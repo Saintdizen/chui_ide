@@ -30,7 +30,7 @@ export function parseEnvEntries(text: string): EnvEntry[] {
   const lines = text.split(/\r?\n/);
 
   for (let index = 0; index < lines.length; index += 1) {
-    const trimmed = lines[index].trim();
+    const trimmed = lines[index]!.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
 
     const withoutExport = trimmed.startsWith('export ') ? trimmed.slice('export '.length).trim() : trimmed;

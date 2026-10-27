@@ -1103,7 +1103,7 @@ export class NodeAdapter {
 
   private frameFor(frameId: unknown): CallFrame | null {
     const index = this.frameIds.indexOf(Number(frameId));
-    return index >= 0 ? this.callFrames[index] : null;
+    return index >= 0 ? (this.callFrames[index] ?? null) : null;
   }
 
   private addRef(objectId: string | undefined): number {

@@ -67,25 +67,6 @@ export function installSuggestions(
 }
 
 /**
- * Строки файла, которых касается выделение.
- *
- * Заменяет то, что раньше считали в `app.ts` для двух быстрых правок: «поставить
- * пакет» по диапазону выделения. Позиции — из выделения редактора (1-based),
- * поэтому перевод в номера строк отдельным правилом: иначе граница выделения
- * съезжает на строку при каждом подпакете.
- */
-export function linesInRange(startLine: number, endLine: number, endColumn: number): Set<number> {
-  const lines = new Set<number>();
-  const first = Math.max(1, Math.min(startLine, endLine));
-  const last = Math.max(startLine, endLine);
-  // Выделение до начала строки значит «строка не затронута»: конец выделения
-  // ровно на её нулевом столбце — это место ПЕРЕД первым символом.
-  const stop = endColumn <= 1 && last > first ? last - 1 : last;
-  for (let line = first; line <= stop; line += 1) lines.add(line);
-  return lines;
-}
-
-/**
  * Пункты меню для предложений «поставить пакет»: одно действие на пакет.
  *
  * Живёт здесь, а не в `app.ts`, потому что это подпись, а не поведение:

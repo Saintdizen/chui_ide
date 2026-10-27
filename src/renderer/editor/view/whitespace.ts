@@ -43,20 +43,20 @@ export function whitespaceMarks(text: string, mode: WhitespaceMode): WhitespaceM
   if (mode === 'trailing') {
     // Хвост — всё после последнего видимого знака. Строка из одних пробелов: хвост весь.
     let last = text.length;
-    while (last > 0 && isWhitespace(text[last - 1])) last -= 1;
+    while (last > 0 && isWhitespace(text[last - 1]!)) last -= 1;
     from = last;
   }
 
   const marks: WhitespaceMark[] = [];
   let at = from;
   while (at < text.length) {
-    if (!isWhitespace(text[at])) {
+    if (!isWhitespace(text[at]!)) {
       at += 1;
       continue;
     }
-    const kind = kindOf(text[at]);
+    const kind = kindOf(text[at]!);
     const start = at;
-    while (at < text.length && isWhitespace(text[at]) && kindOf(text[at]) === kind) at += 1;
+    while (at < text.length && isWhitespace(text[at]!) && kindOf(text[at]!) === kind) at += 1;
     marks.push({ start, end: at, kind });
   }
   return marks;

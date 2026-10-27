@@ -156,7 +156,7 @@ describe('TextBuffer', () => {
       const pick = random();
       const at = alignToCodepoint(naive, Math.floor(random() * (naive.length + 1)));
       if (pick < 0.6 || naive.length === 0) {
-        const text = BITS[Math.floor(random() * BITS.length)];
+        const text = BITS[Math.floor(random() * BITS.length)]!;
         buffer.insert(at, text);
         naive = naive.slice(0, at) + text + naive.slice(at);
       } else {

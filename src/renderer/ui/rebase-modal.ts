@@ -108,12 +108,14 @@ export function createRebaseModal(deps: RebaseModalDeps): RebaseModalView {
     const target = index + direction;
     if (target < 0 || target >= items.length) return;
     const [item] = items.splice(index, 1);
+    if (!item) return;
     items.splice(target, 0, item);
     render();
   };
 
   const setAction = async (index: number, action: RebaseAction): Promise<void> => {
     const item = items[index];
+    if (!item) return;
     if (item.action === 'reword' && action !== 'reword') item.message = undefined;
     item.action = action;
     // Новое сообщение спрашиваем сразу: без него список не пройдёт проверку.

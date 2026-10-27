@@ -90,7 +90,7 @@ export function lineWidth(offsets: readonly number[]): number {
 export function xForColumn(offsets: readonly number[], column: number): number {
   if (column <= 0) return offsets[0] ?? 0;
   if (column >= offsets.length - 1) return offsets[offsets.length - 1] ?? 0;
-  return offsets[column];
+  return offsets[column]!;
 }
 
 /**
@@ -108,13 +108,13 @@ export function columnForX(offsets: readonly number[], x: number): number {
   let high = last;
   while (low <= high) {
     const middle = (low + high) >> 1;
-    if (offsets[middle] <= x) low = middle + 1;
+    if (offsets[middle]! <= x) low = middle + 1;
     else high = middle - 1;
   }
   // `high` — граница слева от x, `low` — справа. Выбираем ту, что ближе.
   const left = high;
   const right = Math.min(low, last);
-  const leftDistance = x - offsets[left];
-  const rightDistance = offsets[right] - x;
+  const leftDistance = x - offsets[left]!;
+  const rightDistance = offsets[right]! - x;
   return rightDistance < leftDistance ? right : left;
 }

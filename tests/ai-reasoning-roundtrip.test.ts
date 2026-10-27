@@ -60,8 +60,8 @@ describe('reasoning_content в теле запроса', () => {
     );
 
     const assistant = bodyOf(fetchSpy).messages[1];
-    expect(assistant.reasoning_content).toBe('Надо сложить два числа.');
-    expect(assistant.tool_calls).toBeTruthy();
+    expect(assistant!.reasoning_content).toBe('Надо сложить два числа.');
+    expect(assistant!.tool_calls).toBeTruthy();
   });
 
   it('без размышлений поля в теле нет', async () => {

@@ -110,7 +110,7 @@ describe('digestHits', () => {
       line: 12,
       first: 'const readFile = 1;',
     });
-    expect(digest[1].path).toBe('b.ts');
+    expect(digest[1]!.path).toBe('b.ts');
   });
 
   it('порядок при равном числе совпадений — по пути', () => {

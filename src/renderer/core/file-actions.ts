@@ -9,7 +9,6 @@
  * Изменения диска — у вызывающего, в app.ts; здесь только порядок.
  */
 
-import { basename } from '../ui/dom';
 import type { MoveStep } from './tree-move';
 
 /**
@@ -126,11 +125,6 @@ export function undoRenamePlan(done: { from: string; to: string; touched: number
   restoreImports: boolean;
 } {
   return { from: done.to, to: done.from, restoreImports: done.touched > 0 };
-}
-
-/** Подпись отмены переименования: старое имя, которое вернётся человеку. */
-export function renameUndoLabel(done: { from: string }): string {
-  return `Вернуть ${basename(done.from)}`;
 }
 
 /**

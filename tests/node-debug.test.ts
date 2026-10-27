@@ -53,7 +53,7 @@ class DapClient {
     const deadline = Date.now() + timeout;
     for (;;) {
       const index = this.events.findIndex((message) => message.event === name && (!match || match(message)));
-      if (index >= 0) return this.events.splice(index, 1)[0];
+      if (index >= 0) return this.events.splice(index, 1)[0]!;
       if (Date.now() > deadline) throw new Error(`Не дождались события «${name}»`);
       await new Promise<void>((resolve) => setTimeout(resolve, 25));
     }
@@ -313,7 +313,7 @@ describe('NodeAdapter', () => {
     }>;
     expect(frames[0]?.source?.path).toBe(program);
     expect(frames[0]?.line).toBe(2);
-    const frameId = frames[0].id;
+    const frameId = frames[0]!.id;
 
     const scopes = await client.request('scopes', { frameId });
     const scopeList = scopes.body?.scopes as Array<{ name: string; variablesReference: number }>;
@@ -454,7 +454,7 @@ describe('NodeAdapter', () => {
     const frames = stack.body?.stackFrames as Array<{ id: number; line: number }>;
     expect(frames[0]?.line).toBe(3);
     // Третье попадание — это `i = 2`: счётчик считает попадания, а не строки.
-    const value = await client.request('evaluate', { expression: 'i', frameId: frames[0].id });
+    const value = await client.request('evaluate', { expression: 'i', frameId: frames[0]!.id });
     expect(value.body?.result).toBe('2');
 
     // Дальше счётчик уже не совпадёт: программа доходит до конца без остановов.

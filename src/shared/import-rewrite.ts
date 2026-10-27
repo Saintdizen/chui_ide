@@ -155,7 +155,7 @@ function rewriteJs(text: string, options: ImportRewriteOptions): ImportRewrite {
   let last = 0;
   let count = 0;
   for (const match of text.matchAll(JS_SPECIFIER)) {
-    const specifier = match[2];
+    const specifier = match[2]!;
     const at = match.index ?? 0;
     if (!precededByImportKeyword(text, at)) continue;
     const replaced = rewriteJsSpecifier(specifier, oldBase, newBase);
@@ -189,7 +189,7 @@ const PY_IMPORT = /^([ \t]*import[ \t]+)([^\n#]+)/gm;
 /** Путь файла-цели в виде модуля: `pkg/utils/foo.py` → `pkg.utils.foo`. */
 function pythonModule(target: string): string[] {
   const parts = target.split('/');
-  const last = parts[parts.length - 1];
+  const last = parts[parts.length - 1]!;
   if (last.endsWith('.py')) parts[parts.length - 1] = last.slice(0, -3);
   // `__init__.py` — это сам пакет, а не модуль внутри него.
   if (parts[parts.length - 1] === '__init__') parts.pop();
@@ -231,12 +231,12 @@ function rewriteFromLines(
   let last = 0;
   let count = 0;
   for (const match of text.matchAll(PY_FROM)) {
-    const module = match[2];
+    const module = match[2]!;
     const replaced = module.startsWith('.')
       ? prefixReplace(module, names.oldRelative, names.newRelative)
       : prefixReplace(module, names.oldAbsolute, names.newAbsolute);
     if (replaced === null) continue;
-    const at = (match.index ?? 0) + match[1].length;
+    const at = (match.index ?? 0) + match[1]!.length;
     out += text.slice(last, at) + replaced;
     last = at + module.length;
     count += 1;
@@ -251,21 +251,21 @@ function rewriteImportLines(text: string, names: { oldAbsolute: string; newAbsol
   let last = 0;
   let count = 0;
   for (const match of text.matchAll(PY_IMPORT)) {
-    const list = match[2];
+    const list = match[2]!;
     const parts = list.split(',');
     let changed = false;
     const next = parts.map((item) => {
       const token = /^(\s*)([\w.]+)([\s\S]*)$/.exec(item);
       if (!token) return item;
-      const replaced = prefixReplace(token[2], names.oldAbsolute, names.newAbsolute);
+      const replaced = prefixReplace(token[2]!, names.oldAbsolute, names.newAbsolute);
       if (replaced === null) return item;
       changed = true;
       count += 1;
       // `as псевдоним` и пробелы вокруг имени сохраняем как были.
-      return token[1] + replaced + token[3];
+      return token[1]! + replaced + token[3]!;
     });
     if (!changed) continue;
-    const at = (match.index ?? 0) + match[1].length;
+    const at = (match.index ?? 0) + match[1]!.length;
     out += text.slice(last, at) + next.join(',');
     last = at + list.length;
   }

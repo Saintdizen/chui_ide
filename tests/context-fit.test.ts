@@ -400,8 +400,8 @@ describe('condenseCallArguments', () => {
     const parsed = JSON.parse(condenseCallArguments(args, minChars)) as {
       edits: { path: string; contents: string }[];
     };
-    expect(parsed.edits[0].path).toBe('src/b.ts');
-    expect(parsed.edits[0].contents).not.toContain('строка');
+    expect(parsed.edits[0]!.path).toBe('src/b.ts');
+    expect(parsed.edits[0]!.contents).not.toContain('строка');
   });
 
   it('оставляет текст команды терминала целым', () => {

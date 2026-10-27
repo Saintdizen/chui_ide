@@ -85,7 +85,7 @@ export class BookmarkModel {
     // события нет: лишняя перерисовка значков никому не нужна.
     if (
       next.length === this.items.length &&
-      next.every((item, index) => item.path === this.items[index].path && item.line === this.items[index].line)
+      next.every((item, index) => item.path === this.items[index]!.path && item.line === this.items[index]!.line)
     ) {
       return;
     }

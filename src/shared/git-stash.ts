@@ -45,8 +45,8 @@ export function parseStashList(text: string): GitStashEntry[] {
     const branch = wip?.[1] ?? on?.[1] ?? null;
     // У записи без сообщения после ветки стоит короткий хеш коммита — от него
     // человеку толку нет, оставляем только заголовок.
-    const wipText = wip ? wip[2].replace(/^[0-9a-f]{7,40}\s+/, '').trim() : '';
-    const message = wip ? wipText || wip[2] : (on?.[2] ?? subject);
+    const wipText = wip ? wip[2]!.replace(/^[0-9a-f]{7,40}\s+/, '').trim() : '';
+    const message = wip ? wipText || wip[2]! : (on?.[2] ?? subject);
 
     entries.push({ index: Number(numbered[1]), ref, message, branch });
   }

@@ -161,7 +161,7 @@ describe('сжатие аргументов не трогает команды',
     };
     const out = condenseAppliedCalls(message, new Set(['call-2']));
     expect(out).toBe(message);
-    const text = (out as { toolCalls: { arguments: string }[] }).toolCalls[0].arguments;
+    const text = (out as { toolCalls: { arguments: string }[] }).toolCalls[0]!.arguments;
     expect(JSON.parse(text).command).toBe(long);
   });
 
@@ -180,7 +180,7 @@ describe('сжатие аргументов не трогает команды',
     };
     const out = condenseAppliedCalls(message, new Set(['call-3']));
     expect(out).not.toBe(message);
-    const args = JSON.parse((out as { toolCalls: { arguments: string }[] }).toolCalls[0].arguments);
+    const args = JSON.parse((out as { toolCalls: { arguments: string }[] }).toolCalls[0]!.arguments);
     const item = args.edits[0];
     expect(isCondenseMarker(item.contents)).toBe(true);
     expect(item.path).toBe('/tmp/x.ts');

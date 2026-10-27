@@ -89,8 +89,8 @@ export class PieceTable {
     let index = this.pieceIndexAt(from);
     let offset = from;
     while (offset < to && index < this.pieces.length) {
-      const piece = this.pieces[index];
-      const pieceStart = sums[index];
+      const piece = this.pieces[index]!;
+      const pieceStart = sums[index]!;
       const pieceEnd = pieceStart + piece.length;
       const sliceStart = Math.max(offset, pieceStart) - pieceStart;
       const sliceEnd = Math.min(to, pieceEnd) - pieceStart;
@@ -124,7 +124,7 @@ export class PieceTable {
 
     if (inside > 0) {
       // Смещение внутри куска: разрезаем его на две части и ставим новый между ними.
-      const target = this.pieces[index];
+      const target = this.pieces[index]!;
       const head: Piece = { buffer: target.buffer, start: target.start, length: inside };
       const tail: Piece = {
         buffer: target.buffer,
@@ -170,7 +170,7 @@ export class PieceTable {
     const tail = this.locate(to);
     const next: Piece[] = [];
 
-    for (let index = 0; index < head.index; index += 1) next.push(this.pieces[index]);
+    for (let index = 0; index < head.index; index += 1) next.push(this.pieces[index]!);
 
     // Хвост куска, в который попал НАЧАЛО удаления: он остаётся слева от правки.
     const first = this.pieces[head.index];
@@ -180,7 +180,7 @@ export class PieceTable {
 
     // Начало куска, в который попал КОНЕЦ удаления: остаётся справа от правки.
     if (tail.index < this.pieces.length) {
-      const last = this.pieces[tail.index];
+      const last = this.pieces[tail.index]!;
       if (tail.inside < last.length) {
         next.push({
           buffer: last.buffer,
@@ -190,7 +190,7 @@ export class PieceTable {
       }
       // Всё, что лежит ЗА правкой, она не задела — переносим как есть.
       for (let index = tail.index + 1; index < this.pieces.length; index += 1) {
-        next.push(this.pieces[index]);
+        next.push(this.pieces[index]!);
       }
     }
 
@@ -233,7 +233,7 @@ export class PieceTable {
     const sums = new Array<number>(this.pieces.length + 1);
     sums[0] = 0;
     for (let index = 0; index < this.pieces.length; index += 1) {
-      sums[index + 1] = sums[index] + this.pieces[index].length;
+      sums[index + 1] = sums[index]! + this.pieces[index]!.length;
     }
     this.sums = sums;
     return sums;
@@ -248,7 +248,7 @@ export class PieceTable {
     let found = 0;
     while (low <= high) {
       const middle = (low + high) >> 1;
-      if (sums[middle] <= offset) {
+      if (sums[middle]! <= offset) {
         found = middle;
         low = middle + 1;
       } else {
@@ -263,7 +263,7 @@ export class PieceTable {
     if (offset >= this.totalLength) return { index: this.pieces.length, inside: 0 };
     const sums = this.ensureSums();
     const index = this.pieceIndexAt(offset);
-    return { index, inside: offset - sums[index] };
+    return { index, inside: offset - sums[index]! };
   }
 
   /** Сдвинуть границу вниз, если она разрезает суррогатную пару (остаться на кодовой точке). */
@@ -285,8 +285,8 @@ export class PieceTable {
     if (offset < 0 || offset >= this.totalLength) return -1;
     const sums = this.ensureSums();
     const index = this.pieceIndexAt(offset);
-    const piece = this.pieces[index];
+    const piece = this.pieces[index]!;
     const buffer = piece.buffer === 'original' ? this.original : this.added;
-    return buffer.charCodeAt(piece.start + (offset - sums[index]));
+    return buffer.charCodeAt(piece.start + (offset - sums[index]!));
   }
 }

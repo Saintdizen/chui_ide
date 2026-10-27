@@ -193,7 +193,7 @@ function parseAttributes(raw: string): Record<string, string> {
   const pattern = /([^\s=/]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
   let match = pattern.exec(raw);
   while (match !== null) {
-    attrs[match[1]] = decodeXmlEntities(match[2] ?? match[3] ?? '');
+    attrs[match[1]!] = decodeXmlEntities(match[2] ?? match[3] ?? '');
     match = pattern.exec(raw);
   }
   return attrs;
@@ -263,7 +263,7 @@ function headingLevel(style: string): number {
   if (style === 'Title' || style === 'Заголовок') return 1;
   if (style === 'Subtitle' || style === 'Подзаголовок') return 2;
   const match = /^(?:Heading|heading|Заголовок)\s*(\d)$/.exec(style);
-  return match ? Math.min(6, Math.max(1, Number.parseInt(match[1], 10))) : 0;
+  return match ? Math.min(6, Math.max(1, Number.parseInt(match[1]!, 10))) : 0;
 }
 
 /**

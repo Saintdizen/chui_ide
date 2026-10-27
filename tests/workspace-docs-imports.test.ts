@@ -254,7 +254,7 @@ describe('updateImports: потолки', () => {
     // Крупный файл пропущен: его содержимое не читали и не переписывали.
     // Пути отдаются абсолютными — сверяем хвост, а не весь путь.
     expect(result.files).toHaveLength(1);
-    expect(result.files[0].split(path.sep).join('/')).toMatch(/\/src\/small\.ts$/);
+    expect(result.files[0]!.split(path.sep).join('/')).toMatch(/\/src\/small\.ts$/);
     expect(await fs.readFile(big, 'utf8')).toContain(`from './old'`);
     expect(await fs.readFile(small, 'utf8')).toContain(`from './new'`);
   });

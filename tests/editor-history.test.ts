@@ -34,7 +34,7 @@ describe('EditHistory', () => {
     const history = new EditHistory();
     const word = 'слово';
     for (let index = 0; index < word.length; index += 1) {
-      history.push(typing(index, word[index], 1000 + index * 10), { merge: true, now: 1000 + index * 10 });
+      history.push(typing(index, word[index]!, 1000 + index * 10), { merge: true, now: 1000 + index * 10 });
     }
     expect(history.depth).toBe(1);
     const entry = history.undo();
@@ -88,13 +88,13 @@ describe('EditHistory', () => {
     history.push(typing(3, 'два', 2000), { now: 2000 });
 
     const undone = history.undo();
-    expect(undone?.changes[0].inserted).toBe('два');
+    expect(undone?.changes[0]?.inserted).toBe('два');
     expect(history.canRedo).toBe(true);
-    expect(history.undo()?.changes[0].inserted).toBe('раз');
+    expect(history.undo()?.changes[0]?.inserted).toBe('раз');
     expect(history.canUndo).toBe(false);
 
-    expect(history.redo()?.changes[0].inserted).toBe('раз');
-    expect(history.redo()?.changes[0].inserted).toBe('два');
+    expect(history.redo()?.changes[0]?.inserted).toBe('раз');
+    expect(history.redo()?.changes[0]?.inserted).toBe('два');
     expect(history.canRedo).toBe(false);
   });
 
@@ -132,9 +132,9 @@ describe('EditHistory', () => {
     }
     expect(history.depth).toBe(3);
     // Отменяются только три последних.
-    expect(history.undo()?.changes[0].start).toBe(4);
-    expect(history.undo()?.changes[0].start).toBe(3);
-    expect(history.undo()?.changes[0].start).toBe(2);
+    expect(history.undo()?.changes[0]?.start).toBe(4);
+    expect(history.undo()?.changes[0]?.start).toBe(3);
+    expect(history.undo()?.changes[0]?.start).toBe(2);
     expect(history.undo()).toBeNull();
   });
 

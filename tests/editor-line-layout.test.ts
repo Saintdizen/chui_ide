@@ -70,7 +70,7 @@ describe('layoutLine', () => {
     const offsets = layoutLine('😀a', metrics);
     expect(offsets).toEqual([0, 20, 20, 30]);
     for (let index = 1; index < offsets.length; index += 1) {
-      expect(offsets[index]).toBeGreaterThanOrEqual(offsets[index - 1]);
+      expect(offsets[index]!).toBeGreaterThanOrEqual(offsets[index - 1]!);
     }
   });
 

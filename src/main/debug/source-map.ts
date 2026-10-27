@@ -271,7 +271,7 @@ function decodeVlq(segment: string): number[] {
   let shift = 0;
   for (let index = 0; index < segment.length; index += 1) {
     const code = segment.charCodeAt(index);
-    const digit = code < 128 ? DIGITS[code] : -1;
+    const digit = code < 128 ? (DIGITS[code] ?? -1) : -1;
     if (digit < 0) return []; // мусорный символ — сегмент целиком не наш
     value += (digit & 31) << shift;
     if ((digit & 32) !== 0) {
@@ -327,12 +327,12 @@ function decodeMappings(mappings: string): Mapping[] {
     index = end;
     if (fields.length === 0) continue;
 
-    generatedColumn += fields[0];
+    generatedColumn += fields[0]!;
     if (fields.length < 4) continue;
 
-    sourceIndex += fields[1];
-    originalLine += fields[2];
-    originalColumn += fields[3];
+    sourceIndex += fields[1]!;
+    originalLine += fields[2]!;
+    originalColumn += fields[3]!;
     if (generatedColumn < 0 || sourceIndex < 0 || originalLine < 0 || originalColumn < 0) continue;
     result.push({ generatedLine, generatedColumn, sourceIndex, originalLine, originalColumn });
   }

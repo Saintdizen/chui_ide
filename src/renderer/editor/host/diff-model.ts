@@ -120,8 +120,8 @@ function appendMiddle(rows: DiffRow[], midA: string[], midB: string[], base: num
     for (let j = colCount - 1; j >= 0; j -= 1) {
       dp[i * width + j] =
         midA[i] === midB[j]
-          ? dp[(i + 1) * width + (j + 1)] + 1
-          : Math.max(dp[(i + 1) * width + j], dp[i * width + (j + 1)]);
+          ? dp[(i + 1) * width + (j + 1)]! + 1
+          : Math.max(dp[(i + 1) * width + j]!, dp[i * width + (j + 1)]!);
     }
   }
 

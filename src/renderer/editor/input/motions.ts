@@ -122,7 +122,7 @@ export function moveWordLeft(buffer: TextBuffer, offset: number): number {
   } else {
     // Стоим в промежутке: идём влево до начала ближайшего слова.
     for (let index = parts.length - 1; index >= 0; index -= 1) {
-      const part = parts[index];
+      const part = parts[index]!;
       if (part.end > position) continue;
       position = part.start;
       if (part.isWordLike) break;

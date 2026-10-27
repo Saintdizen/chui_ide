@@ -113,7 +113,7 @@ describe('indexIsFresh', () => {
     const index = buildSessionIndex(chats);
     expect(indexIsFresh(index, [...chats, conversation('chat_c', 'Третья', [])])).toBe(false);
 
-    const edited = [{ ...chats[0], updatedAt: chats[0].updatedAt + 1 }, chats[1]];
+    const edited = [{ ...chats[0]!, updatedAt: chats[0]!.updatedAt + 1 }, chats[1]!];
     expect(indexIsFresh(index, edited)).toBe(false);
 
     const old: SessionIndexFile = { ...index, version: SESSION_INDEX_VERSION + 1 };
@@ -128,23 +128,23 @@ describe('журнал', () => {
 
   it('шаги прогона добавляются с пометкой «только в журнале»', () => {
     const [merged] = mergeJournal([entry()], [record('chat_a', 'Смотрю node-pty.')]);
-    expect(merged.messages.map((message) => message.zone)).toEqual(['context', 'journal', 'journal']);
-    expect(merged.messages[1].text).toBe('Смотрю node-pty.');
-    expect(merged.messages[2].text).toContain('read');
+    expect(merged!.messages.map((message) => message.zone)).toEqual(['context', 'journal', 'journal']);
+    expect(merged!.messages[1]!.text).toBe('Смотрю node-pty.');
+    expect(merged!.messages[2]!.text).toContain('read');
   });
 
   it('повтор того, что уже есть в беседе, второй раз в поиск не идёт', () => {
     const seen = new Set(['почему падает сборка?']);
     const messages = journalMessages(record('chat_a', 'Почему падает сборка?'), seen);
     expect(messages).toHaveLength(1);
-    expect(messages[0].text).toContain('read');
+    expect(messages[0]!.text).toContain('read');
   });
 
   it('беседа, известная только журналу, появляется с честным названием', () => {
     const extra = journalOnlyEntries([], [record('chat_gone', 'Разбирали лог.')]);
     expect(extra).toHaveLength(1);
-    expect(extra[0].uid).toBe('chat_gone');
-    expect(extra[0].title).toContain('Беседа вне истории');
+    expect(extra[0]!.uid).toBe('chat_gone');
+    expect(extra[0]!.title).toContain('Беседа вне истории');
     expect(journalOnlyEntries([entry()], [record('chat_a', 'Шаг.')])).toEqual([]);
   });
 
@@ -202,7 +202,7 @@ describe('SessionIndexStore', () => {
     const second = await store.search('/проект', 'линковка');
     expect(second.hits.map((hit) => hit.uid)).toEqual(['chat_a']);
     const rewrite = JSON.parse(await readFile(file, 'utf8')) as SessionIndexFile;
-    expect(rewrite.entries[0].fingerprint).not.toBe(saved.entries[0].fingerprint);
+    expect(rewrite.entries[0]!.fingerprint).not.toBe(saved.entries[0]!.fingerprint);
   });
 
   it('потерянный и битый индекс лечится пересборкой, а не потерей бесед', async () => {
@@ -225,7 +225,7 @@ describe('поиск по индексу', () => {
     );
     const [merged] = mergeJournal([entry], [record('chat_a', 'Шаг про линковку')]);
     const report = searchSessions(
-      [merged].map((item) => ({
+      [merged!].map((item) => ({
         uid: item.uid,
         title: item.title,
         updatedAt: item.updatedAt,
@@ -237,7 +237,7 @@ describe('поиск по индексу', () => {
       })),
       'сборка линков',
     );
-    const zones = report.hits[0].matches.map((match) => match.zone);
+    const zones = report.hits[0]!.matches.map((match) => match.zone);
     expect(zones).toContain('evicted');
     const text = formatSessionSearch(report);
     expect(text).toContain('(вне контекста)');

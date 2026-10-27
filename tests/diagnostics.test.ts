@@ -55,8 +55,8 @@ describe('describeError', () => {
     expect(message).toBe('TypeError: не число');
     expect(details.length).toBeGreaterThan(0);
     // Первая строка стека — то же «TypeError: не число», её в подробностях нет.
-    expect(details[0].includes('TypeError: не число')).toBe(false);
-    expect(details[0].trim().startsWith('at ')).toBe(true);
+    expect(details[0]!.includes('TypeError: не число')).toBe(false);
+    expect(details[0]!.trim().startsWith('at ')).toBe(true);
   });
 
   it('брошена строка — это и есть сообщение', () => {
