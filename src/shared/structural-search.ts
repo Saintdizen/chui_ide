@@ -495,12 +495,16 @@ export interface StructuralProjectMatches {
   scanned: number;
 }
 
-/** Параметры замены по структуре по проекту. */
-export interface StructuralProjectOptions {
+/** Где искать: образец и маска пути. Замены здесь нет — про неё знает только она сама. */
+export interface StructuralSearchOptions {
   pattern: string;
-  replacement: string;
-  /** Маска пути: правим только подходящие файлы (`**` — любая глубина). */
+  /** Маска пути: ищем только в подходящих файлах (`**` — любая глубина). */
   glob?: string;
+}
+
+/** Параметры замены по структуре по проекту. */
+export interface StructuralProjectOptions extends StructuralSearchOptions {
+  replacement: string;
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   structuralReplace,
   type StructuralFileMatches,
   type StructuralProjectMatches,
+  type StructuralSearchOptions,
   type StructuralProjectOptions,
 } from '../../shared/structural-search';
 import {
@@ -62,7 +63,7 @@ export interface CodeIndexPorts {
  * разбор каждого языка живёт в `shared/` — здесь только отбор и склейка ответа.
  */
 export function createCodeIndex(ports: CodeIndexPorts): {
-  findByStructure(options: StructuralProjectOptions): Promise<StructuralProjectMatches>;
+  findByStructure(options: StructuralSearchOptions): Promise<StructuralProjectMatches>;
   replaceByStructure(options: StructuralProjectOptions): Promise<{ files: string[]; replaced: number }>;
   findExports(options: ExportsQuery): Promise<ExportsResult>;
   findInheritance(options: InheritanceQuery): Promise<InheritanceResult>;
@@ -109,7 +110,7 @@ export function createCodeIndex(ports: CodeIndexPorts): {
      * поиска тем, что `{…}` в шаблоне — дырка, и находит он независимо от того,
      * что внутри.
      */
-    async findByStructure(options: StructuralProjectOptions): Promise<StructuralProjectMatches> {
+    async findByStructure(options: StructuralSearchOptions): Promise<StructuralProjectMatches> {
       const template = parseTemplate(options.pattern);
       if (template.error) throw new RpcFailure(RpcErrorCode.InvalidParams, template.error);
 

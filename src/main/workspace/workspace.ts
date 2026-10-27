@@ -30,7 +30,11 @@ import { parseRipgrepJson, ripgrepArgs } from '../../shared/ripgrep';
 import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
 import { importStyleOf, rewriteImports } from '../../shared/import-rewrite';
 import { replaceAll } from '../../shared/replace';
-import type { StructuralProjectMatches, StructuralProjectOptions } from '../../shared/structural-search';
+import type {
+  StructuralProjectMatches,
+  StructuralProjectOptions,
+  StructuralSearchOptions,
+} from '../../shared/structural-search';
 import type { ExportsQuery, ExportsResult } from '../../shared/symbol-exports';
 import { MAX_VIEW_IMAGE_BYTES, imageMimeType } from '../../shared/images';
 import type { InheritanceQuery, InheritanceResult } from '../../shared/type-inheritance';
@@ -1037,7 +1041,7 @@ export class WorkspaceService {
    * Возвращаем по файлу полное число совпадений и несколько первых мест для показа:
    * отдавать весь список не нужно, а человек видит, куда замена попадёт.
    */
-  async findByStructure(options: StructuralProjectOptions): Promise<StructuralProjectMatches> {
+  async findByStructure(options: StructuralSearchOptions): Promise<StructuralProjectMatches> {
     return this.codeIndex().findByStructure(options);
   }
 

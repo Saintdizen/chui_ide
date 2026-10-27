@@ -1,6 +1,7 @@
 import {
   type StructuralMatch,
   type StructuralProjectMatches,
+  type StructuralSearchOptions,
   type StructuralProjectOptions,
   type StructuralTemplate,
   hashCommentsForPath,
@@ -35,7 +36,7 @@ export interface StructuralSearchDeps {
    */
   apply(edit: { start: number; end: number; inserted: string }): Promise<boolean> | boolean;
   /** Поиск по структуре по всему проекту — предпросмотр, без правок. */
-  searchProject(options: StructuralProjectOptions): Promise<StructuralProjectMatches>;
+  searchProject(options: StructuralSearchOptions): Promise<StructuralProjectMatches>;
   /** Замена по структуре по всему проекту: изменённые пути и число замен. */
   replaceProject(options: StructuralProjectOptions): Promise<StructuralProjectResult>;
   /** Перечитать открытый файл после замены на диске. */

@@ -31,7 +31,7 @@ import type { InheritedResult, SymbolIndexStatus } from './symbol-index';
 import type { LineProfile } from './line-profile';
 import type { SemanticToken } from './lsp-semantic-tokens';
 import type { FolderCompareResult } from './folder-compare';
-import type { StructuralProjectMatches, StructuralProjectOptions } from './structural-search';
+import type { StructuralProjectMatches, StructuralProjectOptions, StructuralSearchOptions } from './structural-search';
 import type { ExportsQuery, ExportsResult } from './symbol-exports';
 import type { InheritanceQuery, InheritanceResult } from './type-inheritance';
 import type { ProjectPackage } from './monorepo';
@@ -2186,7 +2186,7 @@ export interface ChuiMethods {
    * Поиск по структуре кода по всему проекту — предпросмотр, без правок. Возвращает
    * файлы с местами и общим числом вхождений (по тому же образцу, что и в файле).
    */
-  'workspace.structuralSearch': { params: StructuralProjectOptions; result: StructuralProjectMatches };
+  'workspace.structuralSearch': { params: StructuralSearchOptions; result: StructuralProjectMatches };
   /** Замена по структуре по всему проекту: изменённые пути и число замен. */
   'workspace.structuralReplace': { params: StructuralProjectOptions; result: ReplaceFilesResult };
   /**

@@ -148,7 +148,8 @@ export function normalizeBase(base: string): string {
 /** Что спрашивают: имя типа, направление и, необязательно, маска пути. */
 export interface InheritanceQuery {
   name: string;
-  direction: InheritanceDirection;
+  /** Без направления ищем наследников: это частый вопрос. */
+  direction?: InheritanceDirection;
   glob?: string;
 }
 
