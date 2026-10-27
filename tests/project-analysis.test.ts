@@ -68,6 +68,21 @@ describe('lintProblems', () => {
     ]);
     expect(second?.path).toBe('/p/b.ts');
   });
+
+  it('Windows: разделитель берётся от корня, а не от того, что прислал инструмент', () => {
+    // eslint отдаёт путь с «/» даже на Windows, biome и ruff — тоже.
+    const [first] = lintProblems('C:\\work\\p', [
+      { path: 'src/a.ts', line: 1, column: 1, severity: 'error', message: 'x', code: 'c' },
+    ]);
+    expect(first?.path).toBe('C:\\work\\p\\src\\a.ts');
+
+    // Абсолютный путь с чужими разделителями приводим к своим: иначе он не совпадёт
+    // ни с одним файлом проекта (`C:/work/p/src/a.ts` ≠ `C:\\work\\p\\src\\a.ts`).
+    const [second] = lintProblems('C:\\work\\p', [
+      { path: 'C:/work/p/src/b.ts', line: 1, column: 1, severity: 'error', message: 'x', code: 'c' },
+    ]);
+    expect(second?.path).toBe('C:\\work\\p\\src\\b.ts');
+  });
 });
 
 describe('limitProblems', () => {

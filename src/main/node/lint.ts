@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 import {
   nodeLintOrder,
@@ -11,6 +10,7 @@ import {
 } from '../../shared/lint';
 import { resolvePackageBin } from './bin';
 import { declaredDependencyNames, nodeRuntime } from './environment';
+import { runTool } from '../project/tool-run';
 
 /**
  * Проверка кода линтером Node-проекта: eslint или biome.
@@ -30,7 +30,7 @@ function argsFor(tool: NodeLintTool, script: string, target: string): string[] {
   return tool === 'eslint' ? [script, target, '-f', 'json'] : [script, 'lint', '--reporter=json', target];
 }
 
-export async function lintNode(root: string, target: string): Promise<LintOutcome> {
+export async function lintNode(root: string, target: string, signal?: AbortSignal): Promise<LintOutcome> {
   const node = (await nodeRuntime()).command;
   const env = { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' };
   const order = nodeLintOrder(await declaredDependencyNames(root));
@@ -39,7 +39,7 @@ export async function lintNode(root: string, target: string): Promise<LintOutcom
     const script = await resolvePackageBin(root, nodeLintPackage(tool), tool);
     if (!script) continue;
 
-    const stdout = await run(node, argsFor(tool, script, target), root, env);
+    const stdout = await runTool(node, argsFor(tool, script, target), { cwd: root, env, signal });
     // Пустой вывод — инструмент не отработал (нет конфига, ошибка запуска).
     // Пробуем следующий, а не выдаём «проблем нет».
     if (stdout.trim() === '') continue;
@@ -58,21 +58,4 @@ export async function lintNode(root: string, target: string): Promise<LintOutcom
 function withRelativePath(problem: LintProblem, root: string): LintProblem {
   if (!path.isAbsolute(problem.path)) return problem;
   return { ...problem, path: path.relative(root, problem.path) };
-}
-
-/** Запустить линтер и вернуть его stdout; ошибки запуска не бросаем — вернём пусто. */
-function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd, env, windowsHide: true });
-
-    let out = '';
-    child.stdout.on('data', (chunk: Buffer) => {
-      out += chunk.toString('utf8');
-    });
-    // Сообщения линтера о себе самих (трейсбеки, предупреждения) нам не нужны.
-    child.stderr.on('data', () => undefined);
-
-    child.on('error', () => resolve(''));
-    child.on('close', () => resolve(out));
-  });
 }

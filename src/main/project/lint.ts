@@ -22,12 +22,17 @@ import { lintPython } from '../python/lint';
 const PYTHON_MANIFESTS: readonly string[] = ['pyproject.toml', 'requirements.txt', 'setup.py', 'setup.cfg', 'Pipfile'];
 const NODE_MANIFESTS: readonly string[] = ['package.json'];
 
-export async function lintProject(root: string, python: string, target?: string): Promise<LintOutcome> {
+export async function lintProject(
+  root: string,
+  python: string,
+  target?: string,
+  signal?: AbortSignal,
+): Promise<LintOutcome> {
   const engine = await pickEngine(root, target);
   // Линтер запускаем с cwd = корень проекта: пути к цели — от него же.
   const relative = target ? path.relative(root, target) || '.' : '.';
-  if (engine === 'python') return lintPython(root, python, relative);
-  if (engine === 'node') return lintNode(root, relative);
+  if (engine === 'python') return lintPython(root, python, relative, signal);
+  if (engine === 'node') return lintNode(root, relative, signal);
   return { tool: null, problems: [] };
 }
 

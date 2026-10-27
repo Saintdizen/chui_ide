@@ -12,8 +12,11 @@
  * фоном и один раз, а не на каждое сохранение.
  *
  * Время ограничено намеренно: анализ, повисший навсегда, хуже отсутствия анализа.
- * По истечении бюджета отдаём то, что успели, и честную пометку `timedOut`.
- * Убивать чужой процесс нечем (он живёт в своём дереве), поэтому просто отпускаем.
+ * По истечении бюджета отдаём то, что успели, и честную пометку `timedOut` — но
+ * перед этим **убиваем** линтер (`AbortController`). Раньше его просто отпускали:
+ * процесс продолжал жить, держал корень проекта рабочим каталогом и мешал убрать
+ * временную папку (на Windows — `EBUSY` при уборке, тест падал уборкой, а не
+ * разбором).
  */
 import { existsSync, readdirSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
@@ -95,7 +98,10 @@ interface CodePart {
 
 /** Линтер по всему корню с потолком времени. */
 async function codeProblems(root: string, python: string, budgetMs: number): Promise<CodePart> {
-  const outcome = await withBudget(lintProject(root, python), budgetMs);
+  // Не успели — линтер не отпускаем, а завершаем: иначе он живёт дальше и держит
+  // корень проекта (см. `project/tool-run.ts`).
+  const abort = new AbortController();
+  const outcome = await withBudget(lintProject(root, python, undefined, abort.signal), budgetMs, () => abort.abort());
   if (outcome === null) {
     return {
       tool: null,
@@ -110,12 +116,15 @@ async function codeProblems(root: string, python: string, budgetMs: number): Pro
   return { tool: outcome.tool, problems: lintProblems(root, outcome.problems), timedOut: false, note: null };
 }
 
-/** Тот же промис, но не дольше `budgetMs`; `null` — не успели. */
-async function withBudget<T>(work: Promise<T>, budgetMs: number): Promise<T | null> {
+/** Тот же промис, но не дольше `budgetMs`; `null` — не успели (и зовём `expire`). */
+async function withBudget<T>(work: Promise<T>, budgetMs: number, expire?: () => void): Promise<T | null> {
   if (budgetMs <= 0) return work;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const timeout = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), budgetMs);
+    timer = setTimeout(() => {
+      expire?.();
+      resolve(null);
+    }, budgetMs);
   });
   try {
     return await Promise.race([work, timeout]);

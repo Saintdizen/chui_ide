@@ -44,6 +44,21 @@ export function joinPath(parent: string, name: string): string {
   return `${trimmed}${separatorOf(parent)}${name}`;
 }
 
+/** Путь абсолютный — в любом из двух видов: `/x`, `C:\x`, `C:/x`, `\\сервер\x`. */
+export function isAbsolutePath(target: string): boolean {
+  return target.startsWith('/') || target.startsWith('\\') || /^[A-Za-z]:[/\\]/.test(target);
+}
+
+/**
+ * Один разделитель на весь путь — `sep`: внешние инструменты смешивают их как хотят
+ * (eslint на Windows отдаёт `C:/проект/src/a.js`, biome и ruff — `src/a.js`).
+ * Ведущий разделитель оставляем: без него абсолютный путь станет относительным.
+ */
+export function withSeparator(target: string, sep: string): string {
+  const lead = target.startsWith('/') || target.startsWith('\\') ? sep : '';
+  return lead + splitPath(target).join(sep);
+}
+
 /** Путь лежит внутри папки. Сравниваем по границе сегмента, а не по подстроке. */
 export function isInsidePath(folder: string, target: string): boolean {
   if (target === folder) return true;

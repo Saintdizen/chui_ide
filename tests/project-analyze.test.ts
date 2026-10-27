@@ -1,9 +1,25 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { analyzeProject } from '../src/main/project/analyze';
 import { removeTemp } from './temp';
+
+/**
+ * Ответ вместо настоящего `pip list`.
+ *
+ * `pip.ts` зовёт интерпретатор напрямую (`execFile(python, ['-m', 'pip', ...])`),
+ * а исполняемого файла с шебангом на Windows не бывает — заглушка-скрипт там просто
+ * не запустится, и тест падал бы не по делу. Сверка требований от способа спросить
+ * pip не зависит, поэтому подменяем именно ответ; `null` — pip молчит.
+ */
+const pip = vi.hoisted(() => ({ installed: null as Array<{ name: string }> | null }));
+vi.mock('../src/main/python/pip', () => ({
+  installedPackages: async () => {
+    if (pip.installed === null) throw new Error('pip не ответил');
+    return pip.installed;
+  },
+}));
 
 /**
  * Анализ проекта целиком — это процессы (линтер) и файлы (`package.json`,
@@ -186,24 +202,16 @@ describe('analyzeProject: сверка зависимостей', () => {
 });
 
 describe('analyzeProject: Python-зависимости', () => {
-  // Заглушка интерпретатора — исполняемый файл с шебангом: `pip.ts` зовёт
-  // `execFile(python, ...)`, поэтому путь должен быть одним исполняемым файлом.
-  const makePython = async (root: string, packages: string[]): Promise<string> => {
-    const script = path.join(root, 'fake-python');
-    await fs.writeFile(
-      script,
-      `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(${JSON.stringify(packages.map((name) => ({ name })))}));\n`,
-      { mode: 0o755 },
-    );
-    return script;
-  };
+  afterEach(() => {
+    pip.installed = null;
+  });
 
   it('требование не установлено — пометка на строке requirements.txt', async () => {
     const root = await makeProject({});
     await fs.writeFile(path.join(root, 'requirements.txt'), 'requests==2.31.0\nflask>=3\n');
-    const python = await makePython(root, ['requests']);
+    pip.installed = [{ name: 'requests' }];
 
-    const result = await analyzeProject(root, python, { budgetMs: 0 });
+    const result = await analyzeProject(root, 'python3', { budgetMs: 0 });
 
     const deps = result.problems.filter((problem) => problem.code === 'pip-missing');
     expect(deps).toHaveLength(1);
@@ -214,9 +222,9 @@ describe('analyzeProject: Python-зависимости', () => {
   it('всё установлено — пометок нет', async () => {
     const root = await makeProject({});
     await fs.writeFile(path.join(root, 'requirements.txt'), 'requests\n');
-    const python = await makePython(root, ['requests']);
+    pip.installed = [{ name: 'requests' }];
 
-    const result = await analyzeProject(root, python, { budgetMs: 0 });
+    const result = await analyzeProject(root, 'python3', { budgetMs: 0 });
 
     expect(result.problems.filter((problem) => problem.code === 'pip-missing')).toEqual([]);
   });
@@ -225,7 +233,8 @@ describe('analyzeProject: Python-зависимости', () => {
     const root = await makeProject({});
     await fs.writeFile(path.join(root, 'requirements.txt'), 'requests\n');
 
-    const result = await analyzeProject(root, 'python3-которого-нет', { budgetMs: 0 });
+    // `pip.installed` уже `null` — заглушка отвечает ошибкой, как чужое окружение.
+    const result = await analyzeProject(root, 'python3', { budgetMs: 0 });
 
     expect(result.problems.filter((problem) => problem.code === 'pip-missing')).toEqual([]);
   });

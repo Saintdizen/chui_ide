@@ -16,6 +16,7 @@
  * показать разницу.
  */
 import type { LintProblem, LintSeverity } from './lint';
+import { isAbsolutePath, separatorOf, splitPath, withSeparator } from './paths';
 
 /** Сколько проблем отдаём в редактор: больше — уже не список, а свалка. */
 export const MAX_PROJECT_PROBLEMS = 2000;
@@ -52,12 +53,19 @@ export function emptyAnalysis(note: string | null, tool: string | null = null): 
 /**
  * Проблемы линтера с абсолютными путями. Линтер называет путь от корня проекта
  * (так его и запускают), а пометки в редакторе живут по абсолютному.
- * `root` приходит уже в разделителях платформы: склейка — строкой, как в `join`.
+ *
+ * Склейка не строкой через «/», как было раньше: на Windows корень с обратными
+ * слэшами, и «C:\\проект/src/a.js» не совпадает ни с одним путём проекта — пометка
+ * находится, но не открывается и не считается. Разделитель берём у корня, а путь
+ * от инструмента к нему же и приводим: eslint бывает и с `C:/`, и с относительным.
  */
 export function lintProblems(root: string, problems: readonly LintProblem[]): ProjectProblem[] {
-  const base = root.endsWith('/') ? root.slice(0, -1) : root;
+  const sep = separatorOf(root);
+  const base = root.replace(/[/\\]+$/, '');
   return problems.map((problem) => ({
-    path: problem.path.startsWith('/') ? problem.path : `${base}/${problem.path}`,
+    path: isAbsolutePath(problem.path)
+      ? withSeparator(problem.path, sep)
+      : [base, ...splitPath(problem.path)].join(sep),
     line: problem.line,
     column: problem.column,
     severity: problem.severity,
