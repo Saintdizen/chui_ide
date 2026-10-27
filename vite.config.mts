@@ -54,7 +54,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5273,
+    // Порт можно переопределить: второй dev-экземпляр (другой профиль) — обычное дело,
+    // а `strictPort` иначе не даёт им жить рядом.
+    port: Number(process.env.CHUI_DEV_PORT) || 5273,
     strictPort: true,
   },
 });
