@@ -362,6 +362,14 @@ export class EditorHost {
   private readonly registry: DocumentRegistry;
   private readonly view: EditorView;
   private readonly controller: EditorController;
+  /**
+   * Сколько строк несёт семантическую подсветку от сервера. Только для проб — см.
+   * `EditorView.semanticLineCount`. Кто просил, тот и спрашивает; сам по себе не нужен.
+   */
+  semanticLineCount(): number {
+    return this.view.semanticLineCount();
+  }
+
   private readonly input: EditorInputBinding;
   private readonly find: FindWidget;
   private readonly goto: GotoLineWidget;

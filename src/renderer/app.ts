@@ -187,7 +187,9 @@ import { testMarkerSignature as testMarkerSignatureOf, testMarkersFor } from './
  * Точка сборки приложения: сервисы, команды, подписки.
  * Всё остальное — модули, которые друг о друге почти ничего не знают.
  */
-export async function startApplication(mount: HTMLElement): Promise<void> {
+export async function startApplication(mount: HTMLElement, options: { probe?: boolean } = {}): Promise<void> {
+  // Мост для проб — по просьбе снаружи (см. main.ts), а не по флагу сборки.
+  const probeBridge = options.probe === true;
   // Подсказки — свои, вместо системных: ставятся один раз на всё окно и ловят
   // наведение на документе (см. `ui/tooltip.ts`).
   installTooltips();
@@ -3578,9 +3580,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   syncEmptyState();
   void git.refresh();
   void windowFrame.refresh();
-  // В dev-режиме сервисы доступны из консоли и автотестов: удобно проверять
-  // программные правки (тот же путь, которым будет пользоваться ассистент).
-  if (import.meta.env.DEV) {
+  // Мост для проб: сервисы окна видны снаружи. По умолчанию выключен —
+  // включается флагом `chui:probe` (см. main.ts). Не по `import.meta.env.DEV`:
+  // в vite 8 этот флаг вырезался даже при `--mode development`, и мост молча
+  // исчезал вместе с ним — проба видела `undefined` вместо сервисов.
+  if (probeBridge) {
     (window as unknown as { __chui?: Record<string, unknown> }).__chui = {
       rpc,
       commands,
@@ -3599,6 +3603,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       diffView,
       git,
       tools,
+      /**
+       * Сколько строк несёт семантическую подсветку от сервера. Нужно пробам: живые токены
+       * живут в карте вида, а снаружи панель видна как DOM — иначе их не спросить.
+       */
+      semanticLines: () => editors.semanticLineCount(),
     };
   }
 }

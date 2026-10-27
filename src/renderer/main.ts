@@ -23,7 +23,12 @@ if (perfOn) {
     JSON.stringify(perfBaselineFrom(perf.spans()), null, 2);
 }
 
-void startApplication(mount)
+// Мост для проб: окно отдаёт сервисы наружу. По умолчанию выключен — включается
+// адресом (`?probe=1`) или флагом в localStorage, тем же способом, что замеры.
+const probeOn =
+  new URLSearchParams(location.search).has('probe') || localStorage.getItem('chui:probe') === '1';
+
+void startApplication(mount, { probe: probeOn })
   .then(() => {
     // Смонтировано — это нарисованный кадр, а не решённый промис: два rAF
     // дают ровно один кадр, первый срабатывает до отрисовки.

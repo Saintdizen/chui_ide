@@ -184,6 +184,14 @@ export class EditorView {
   private rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
   /** Версия семантической подсветки: она меняет цвета строк, минуя правку текста. */
   private semanticVersion = 0;
+  /**
+   * Сколько строк сейчас несёт семантическую подсветку от сервера. Только для проб:
+   * снаружи панель видна как DOM, а токены живут в карте — иначе их не спросить.
+   */
+  semanticLineCount(): number {
+    return this.semantic.size;
+  }
+
   private layoutCache: LineLayoutCache | null = null;
   /**
    * Свёрнутые строки. Пока ничего не свёрнуто, ряд совпадает со строкой и вся

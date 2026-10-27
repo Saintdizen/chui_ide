@@ -313,6 +313,17 @@ export class EditorWorkspace {
   private readonly selectionRanges: EditorWorkspaceOptions['selectionRanges'];
   /** Семантическая подсветка — тот же шов. */
   private readonly semanticTokens: EditorWorkspaceOptions['semanticTokens'];
+  /**
+   * Сколько строк сейчас несёт семантическую подсветку от сервера. Только для проб:
+   * до пикселей иначе не добраться — `setSemanticTokens` зовётся изнутри, а не снаружи.
+   * Панелей две (разделение), поэтому складываем: главная первой.
+   */
+  semanticLineCount(): number {
+    let total = 0;
+    for (const pane of this.panes) total += pane.semanticLineCount();
+    return total;
+  }
+
   /** Короткий путь для подписи места в списке. */
   private readonly relativePath: ((path: string) => string) | undefined;
   /** Сообщить, что мест не нашлось. */
