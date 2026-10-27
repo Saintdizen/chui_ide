@@ -155,7 +155,8 @@ async function listMcpResources(ctx: ToolContext, args: Record<string, unknown>)
     return {
       ok: false,
       summary: 'Каталог ресурсов недоступен',
-      detail: describeValue(error),
+      // Модели нужна причина, а не вид значения: иначе отказ «объект» ничего не говорит.
+      detail: error instanceof Error ? error.message : describeValue(error),
     };
   }
 
