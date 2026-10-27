@@ -135,7 +135,8 @@ SparseContext, StashContext, SubmoduleContext, WorktreesContext + строка
 (общий репозиторий на файл), `git-gitlab-forge` 1.25 → 0.64с (настройки одной
 дописью в `.git/config`).
 
-- [ ] **`tests/git-service.test.ts` — 6.1с, потолок замерен.** Ревизия сцен
+- [x] ~~**`tests/git-service.test.ts` — 6.1с, потолок замерен.**~~ 27.10: закрыто —
+       резать нечего. Ревизия сцен
        сделана: пять читающих сцен переведены на готовый снимок (`readOnlyRepo`),
        три сцены про `pull` — на один хелпер, у `makeRepos` появился хук
        `afterClone`. Итог — **было 6.14с, стало 6.47с, то есть хуже на 5%**
