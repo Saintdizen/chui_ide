@@ -28,7 +28,7 @@ export class ChatStore {
   async load(root: string): Promise<ChatHistory> {
     if (!root) return { conversations: [] };
     try {
-      const raw: unknown = JSON.parse(await fs.readFile(this.fileFor(root), 'utf8'));
+      const raw: unknown = JSON.parse(await fs.readFile(await this.existingFile(root), 'utf8'));
       return sanitizeHistory(raw);
     } catch {
       // Файла нет или он повреждён — начинаем с чистой истории, а не с ошибки:
@@ -52,10 +52,13 @@ export class ChatStore {
     };
 
     const file = this.fileFor(root);
+    const legacy = this.legacyFileFor(root);
     await fs.mkdir(path.dirname(file), { recursive: true });
     const temporary = `${file}.tmp`;
     await fs.writeFile(temporary, `${JSON.stringify(payload)}\n`, 'utf8');
     await fs.rename(temporary, file);
+    // Файл под прежним именем больше не нужен: история уже в новом.
+    if (legacy !== file) await fs.rm(legacy, { force: true });
   }
 
   /**
@@ -72,14 +75,53 @@ export class ChatStore {
    * короткий хеш пути: две одинаково названные папки не затирают друг друга.
    */
   private fileFor(root: string): string {
-    const resolved = path.resolve(root);
-    const hash = createHash('sha1').update(resolved).digest('hex').slice(0, 12);
+    return path.join(this.dirOf(), `${this.stem(root)}-${this.hash(root)}.json`);
+  }
+
+  /**
+   * Файл беседы этого проекта, а если его нет — файл под прежним именем.
+   * Старое имя вырезало кириллицу: `\w` в JS знает только латиницу, и у всех
+   * русских папок читаемая часть схлопывалась в `_`. Кто обновился — у того
+   * история лежит под `_-<хеш>.json`. Читаем её и при первой же записи
+   * переезжаем на читаемое имя: молча потерять беседу хуже, чем подержать
+   * в каталоге лишний файл до следующего сохранения.
+   */
+  private async existingFile(root: string): Promise<string> {
+    const file = this.fileFor(root);
+    const legacy = this.legacyFileFor(root);
+    if (legacy === file) return file;
+    try {
+      await fs.access(file);
+      return file;
+    } catch {
+      return legacy;
+    }
+  }
+
+  private dirOf(): string {
+    return this.dir ?? path.join(app.getPath('userData'), 'chats');
+  }
+
+  private hash(root: string): string {
+    return createHash('sha1').update(path.resolve(root)).digest('hex').slice(0, 12);
+  }
+
+  /** Читаемая часть имени: буквы любого алфавита, цифры, точка, тире, подчёркивание. */
+  private stem(root: string): string {
+    const stem = path
+      .basename(path.resolve(root))
+      .replace(/[^\p{L}\p{N}._-]+/gu, '_')
+      .slice(0, 40);
+    return stem || 'workspace';
+  }
+
+  /** Прежнее имя: удаляется при записи, чтобы в каталоге не копился мусор. */
+  private legacyFileFor(root: string): string {
     const safe =
       path
-        .basename(resolved)
+        .basename(path.resolve(root))
         .replace(/[^\w.-]+/g, '_')
         .slice(0, 40) || 'workspace';
-    const dir = this.dir ?? path.join(app.getPath('userData'), 'chats');
-    return path.join(dir, `${safe}-${hash}.json`);
+    return path.join(this.dirOf(), `${safe}-${this.hash(root)}.json`);
   }
 }
