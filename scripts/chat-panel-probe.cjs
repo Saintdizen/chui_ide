@@ -99,8 +99,25 @@ app.whenReady().then(async () => {
   // Провайдера у пробы нет, а проверить переименование беседы нужно в живом окне.
   // Поэтому подменяем два ответа сервиса: обычный ответ беседы и название по ней.
   // Всё остальное (поток событий, история, вкладки, запись в файл) — настоящее.
+  // План для проверки отображения в композере: чек-лист агента виден только во
+  // время прогона (в конце панель гаснет). Поэтому по просьбе пробы следующий
+  // ответ отдаёт шаги и держит панель открытой, пока её не снимут.
+  const planDemo = {
+    steps: [
+      { text: 'Прочитать индексатор', status: 'done' },
+      { text: 'Поправить отпечаток сборки', status: 'in_progress' },
+      { text: 'Прогнать сборку', status: 'pending' },
+    ],
+    holdMs: 0,
+  };
   ai.chat = async (_request, emit) => {
     const text = 'Ответ на вопрос пробы.';
+    if (planDemo.holdMs > 0) {
+      const holdMs = planDemo.holdMs;
+      planDemo.holdMs = 0;
+      emit('plan', { steps: planDemo.steps });
+      await wait(holdMs);
+    }
     // События идут одним тактом, без паузы: инструмент, который ответил сразу
     // (чтение кэша, готовый снимок), отвечает именно так. Порядок доставки с
     // ответом на вызов при этом не обещан — ответ обгоняет события, — и лента
@@ -701,46 +718,47 @@ app.whenReady().then(async () => {
   // Чип снимаем: проба ниже сверяет уже другое состояние композера.
   await ask(ide, `(() => { document.querySelector('.composer-chips .chip-remove')?.click(); return true; })()`);
 
-  /* ── вёрстка тулбара композера ──────────────────────────────────────────── */
+  /* ── вёрстка действий композера ─────────────────────────────────────────── */
 
-  // Панель ассистента узкая: все контролы в один ряд не встают. Регрессия:
-  // тулбар-флекс ставил группу действий («приложить», «отправить») ОТДЕЛЬНОЙ
-  // строкой ПОД настройками, и кнопка отправки висела одна на почти пустом
-  // ряду. Теперь тулбар — сетка из двух колонок, и группа действий прижата к
-  // НИЖНЕМУ краю: её низ совпадает с низом настроек, а правая кромка — с правой
-  // кромкой тулбара. Проверяем геометрию: рядами это по разметке не видно.
-  const toolbar = await ask(
+  // Панель ассистента узкая: все контролы в один ряд не встают. Регрессия была в
+  // обратную сторону — «приложить» и «отправить» жили внутри КАРТОЧКИ отдельным
+  // тулбаром под полем и теснили ввод. Теперь они в общем ряду настроек беседы,
+  // в правом краю (`margin-left: auto`). Проверяем геометрию: по разметке этого
+  // не видно.
+  const actionsBox = await ask(
     ide,
     `(() => {
-      const tb = document.querySelector('.composer-toolbar');
-      const group = document.querySelector('.composer-toolbar .composer-group');
-      const end = document.querySelector('.composer-group-end');
-      if (!tb || !group || !end) return null;
-      const t = tb.getBoundingClientRect();
-      const g = group.getBoundingClientRect();
-      const e = end.getBoundingClientRect();
+      const inCard = document.querySelector('.composer-box .composer-actions');
+      const bar = document.querySelector('.composer-settings');
+      const act = document.querySelector('.composer-actions');
+      const send = document.querySelector('.composer-action-send');
+      if (!bar || !act || !send) return null;
+      const b = bar.getBoundingClientRect();
+      const a = act.getBoundingClientRect();
+      const s = send.getBoundingClientRect();
       return {
-        display: getComputedStyle(tb).display,
-        overflow: tb.scrollWidth > tb.clientWidth,
-        endBottom: Math.round(e.bottom),
-        groupBottom: Math.round(g.bottom),
-        endRight: Math.round(e.right),
-        barRight: Math.round(t.right),
+        вКарточке: inCard !== null,
+        display: getComputedStyle(act).display,
+        overflow: bar.scrollWidth > bar.clientWidth,
+        sendRight: Math.round(s.right),
+        barRight: Math.round(b.right),
+        sendInside: a.left >= b.left - 1 && a.right <= b.right + 1,
       };
     })()`,
   );
-  check('тулбар композера — сетка в две колонки', toolbar?.display === 'grid', toolbar?.display);
-  check('тулбар не переполняется по ширине', toolbar?.overflow === false, toolbar?.overflow);
   check(
-    'кнопки «приложить» и «отправить» прижаты к низу тулбара, а не отдельной строкой',
-    toolbar !== null && Math.abs(toolbar.endBottom - toolbar.groupBottom) <= 1,
-    toolbar && { endBottom: toolbar.endBottom, groupBottom: toolbar.groupBottom },
+    'действия композера вынесены из карточки в ряд настроек',
+    actionsBox !== null && actionsBox.вКарточке === false,
+    actionsBox?.вКарточке,
   );
+  check('ряд действий — инлайн-флекс', actionsBox?.display === 'inline-flex', actionsBox?.display);
+  check('ряд настроек не переполняется по ширине', actionsBox?.overflow === false, actionsBox?.overflow);
   check(
-    'группа действий выровнена по правой кромке тулбара',
-    toolbar !== null && toolbar.endRight === toolbar.barRight,
-    toolbar && { endRight: toolbar.endRight, barRight: toolbar.barRight },
+    '«отправить» прижата к правой кромке ряда настроек',
+    actionsBox !== null && Math.abs(actionsBox.sendRight - actionsBox.barRight) <= 1,
+    actionsBox && { sendRight: actionsBox.sendRight, barRight: actionsBox.barRight },
   );
+  check('кнопки действий внутри ряда настроек', actionsBox?.sendInside === true, actionsBox?.sendInside);
 
   /* ── «Информация о сессии» поверх области редактора ─────────────────────── */
 
@@ -1166,6 +1184,47 @@ app.whenReady().then(async () => {
   check('в беседе без цели панели нет', restoredGoal.вПустойНет === true, restoredGoal);
   check('цель пережила переоткрытие окна', restoredGoal.уСвоейБеседы === 'Довести сборку до зелёного', restoredGoal);
   check('значок закрывает цель', restoredGoal.скрылась === true, restoredGoal);
+
+  /* ── план агента в композере ───────────────────────────────────────────── */
+  // Чек-лист плана живёт ВНУТРИ карточки композера, над полем ввода, и виден
+  // только во время прогона. Просим ответ с планом и придержанным завершением:
+  // снимаем геометрию и снимок, пока панель ещё открыта.
+  planDemo.holdMs = 2500;
+  const planView = await ask(
+    second,
+    `(async () => {
+      const input = document.querySelector('.chat-input');
+      if (!input) return { нет: 'поля' };
+      input.value = 'Составь план и покажи его в композере';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+      const started = Date.now();
+      let panel = null;
+      while (Date.now() - started < 1200) {
+        panel = document.querySelector('.composer-plan');
+        if (panel && panel.hidden === false && panel.querySelector('.plan-step')) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      const box = document.querySelector('.composer-box');
+      const field = document.querySelector('.chat-input');
+      const rect = panel?.getBoundingClientRect() ?? null;
+      const fieldRect = field?.getBoundingClientRect() ?? null;
+      return {
+        виден: panel ? panel.hidden === false : false,
+        вКарточке: panel ? box?.contains(panel) === true : false,
+        шаги: [...(panel?.querySelectorAll('.plan-step .plan-text') ?? [])].map((n) => n.textContent),
+        счётчик: panel?.querySelector('.plan-count')?.textContent ?? null,
+        надПолем: rect && fieldRect ? rect.bottom <= fieldRect.top + 1 : false,
+      };
+    })()`,
+  );
+  check('план показан в композере', planView.виден === true, planView);
+  check('панель плана живёт в карточке композера', planView.вКарточке === true, planView);
+  check('шаги плана отрисованы', Array.isArray(planView.шаги) && planView.шаги.length === 3, planView);
+  check('счётчик плана посчитал готовые шаги', planView.счётчик === '1/3', planView);
+  check('план стоит над полем ввода', planView.надПолем === true, planView);
+  console.log(`  снимок плана: ${await shot(second, 'plan')}`);
+  await wait(2200);
 
   /* ── «Утвердить план» ──────────────────────────────────────────────────── */
   // Агент в режиме «План» отдаёт план человеку вызовом `exit_plan_mode`: в ленте

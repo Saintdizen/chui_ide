@@ -1782,10 +1782,11 @@
   background: transparent;
 }
 
-/* Композер — карточка: поле ввода и ряд действий лежат одной поверхностью.
-   Подложка — основной фон приложения (тот же, что в швах между островами): карточка
-   светлее острова чата и читается приподнятой над ним. Рамка намеренно тише её тона,
-   чтобы карточка читалась фоном, а не контуром. */
+/* Композер — карточка: поле ввода и его надстройки (план, изменения, чипы) лежат
+   одной поверхностью. Кнопки «приложить» и «отправить» живут в ряду настроек
+   беседы под карточкой — см. `.composer-actions`.
+   Подложка — тон шва между островами: карточка читается вровень с полотном чата,
+   границу держит только рамка. */
 .composer-box {
   display: flex;
   flex-direction: column;
@@ -1794,8 +1795,7 @@
   padding: 5px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--main_background);
-  margin: 0 5px;
+  background: var(--sunken_background);
 }
 
 /* ── меню композера: команды «/» и контекст «#» ─────────────────────────── */
@@ -2166,7 +2166,7 @@
   outline-offset: -3px;
 }
 
-/* Ряд настроек беседы — над карточкой композера, на полотне футера. Своей рамки
+/* Ряд настроек беседы — под карточкой композера, на полотне футера. Своей рамки
    и подложки не несёт: это не ввод, а свойства беседы. Панель ассистента узкая,
    поэтому ряд переносит контролы (`flex-wrap`), а не режет их. */
 .composer-settings {
@@ -2178,32 +2178,14 @@
   min-width: 0;
 }
 
-.composer-toolbar {
-  /* Две колонки: слева пусто, справа — «приложить» и «отправить». Настройки
-     беседы ушли из карточки в `.composer-settings` над ней, но сетка осталась:
-     действие должно прижиматься к правому краю поля ввода, а не ехать за ним. */
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  column-gap: 6px;
-  min-width: 0;
-  margin-top: 0;
-  padding: 0;
-}
-
-.composer-group {
-  display: flex;
-  flex-wrap: wrap;
+.composer-actions {
+  /* «Приложить» и «отправить» — в правом краю ряда настроек: `margin-left: auto`
+     прижимает их к краю, когда в строке ещё есть место, а на узкой панели ряд
+     переносится и действия остаются справа. */
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
-  row-gap: 6px;
-  min-width: 0;
-}
-
-/* Правый край ряда — «приложить» и «отправить»: во второй колонке тулбара. */
-.composer-group-end {
-  justify-content: flex-end;
   gap: 6px;
+  margin-left: auto;
 }
 
 .composer-select,
@@ -2284,9 +2266,9 @@
   min-width: 0;
 }
 
-/* Кнопки-иконки тулбара композера держат высоту строки (24px), а не панельную
+/* Кнопки-иконки композера держат высоту строки (24px), а не панельную
    (28px): иначе «+», замок и «отправить» выше селектов, и ряд выглядит рвано. */
-.chat-footer .composer-toolbar .icon-btn {
+.chat-footer .composer-actions .icon-btn {
   width: 24px;
   height: 24px;
 }
@@ -2320,7 +2302,7 @@
    видно сразу. Круг держим высотой строки (24px, как ряд иконок). Форму задаём
    селектором с весом не ниже ряда иконок — иначе `.icon-btn { 24px }` перебьёт
    скругление. */
-.chat-footer .composer-toolbar .composer-action {
+.chat-footer .composer-actions .composer-action {
   width: 24px;
   height: 24px;
   border-radius: var(--radius_circle);
@@ -2334,7 +2316,7 @@
   animation: popup-fade var(--motion_fast) var(--motion_ease);
 }
 
-.chat-footer .composer-toolbar .composer-action-send {
+.chat-footer .composer-actions .composer-action-send {
   background: var(--accent_fill);
   color: var(--text_color_hover);
 }
@@ -2342,11 +2324,11 @@
 /* Наведение залитой акцентом кнопки — та же ступень, что у «основного»
    действия: заливка не меняет цвет, а светлеет (у акцента под белым текстом
    своя ступень — `--accent_fill`). */
-.chat-footer .composer-toolbar .composer-action-send:hover {
+.chat-footer .composer-actions .composer-action-send:hover {
   filter: brightness(1.08);
 }
 
-.chat-footer .composer-toolbar .composer-action-stop {
+.chat-footer .composer-actions .composer-action-stop {
   background: var(--element_background);
   color: var(--text_color);
 }
