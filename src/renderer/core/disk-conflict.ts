@@ -86,7 +86,7 @@ export function createDiskConflict(ports: DiskConflictPorts): DiskConflict {
       if (!document.dirty || warned.has(path)) return;
       warned.add(path);
       showToast(`Файл «${fileName(path)}» изменился на диске: ваши правки в редакторе целы`, 'info', {
-        action: { label: 'Перечитать', run: () => void confirmRevert([path]) },
+        action: { label: 'Перечитать', run: () => void diskConflict.revertFilesToDisk([path]) },
       });
     },
 
@@ -104,20 +104,26 @@ export function createDiskConflict(ports: DiskConflictPorts): DiskConflict {
       }
       if (!(await confirmRevert(dirty))) return;
 
-      let done = 0;
+      // Что именно прочиталось: тост должен называть файл, который вернулся к диску,
+      // а не первый грязный в списке (он мог и не прочитаться).
+      const reverted: string[] = [];
       for (const target of dirty) {
         try {
           await revertToDisk(target);
-          done += 1;
+          reverted.push(target);
         } catch {
           showToast(`Не удалось прочитать файл: ${fileName(target)}`, 'error');
         }
       }
-      if (done === 0) return;
+      if (reverted.length === 0) return;
       // Файл мог измениться и за пределами буфера (его переписал другой инструмент) —
       // поэтому вместе с документами обновляем и дерево.
       scheduleTreeRefresh();
-      showToast(done === 1 ? `Перечитано с диска: ${fileName(dirty[0] ?? '')}` : `Перечитано с диска: файлов ${done}`);
+      showToast(
+        reverted.length === 1
+          ? `Перечитано с диска: ${fileName(reverted[0] ?? '')}`
+          : `Перечитано с диска: файлов ${reverted.length}`,
+      );
     },
   };
 

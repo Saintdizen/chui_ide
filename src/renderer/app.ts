@@ -23,6 +23,7 @@ import { AutoSave } from './core/auto-save';
 import { createBlameController } from './core/blame';
 import { createChangeGutterController } from './core/change-gutter';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
+import { createDiskConflict } from './core/disk-conflict';
 import type { TextDocument } from './core/document';
 import { uriToPath } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -3148,100 +3149,40 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     syncViewButtons();
   });
 
-  /**
-   * О расхождении с диском уже сказали: повторять на каждое событие наблюдателя
-   * незачем. Из набора путь уходит, когда буфер снова совпал с диском, — тогда
-   * следующий разлом стоит объяснить заново.
-   */
-  const diskDiffWarned = new Set<string>();
-  documents.onDidChangeDirty((document) => {
-    if (!document.dirty) diskDiffWarned.delete(document.path);
+  // Буфер разошёлся с диском — в `core/disk-conflict.ts`: там тихое перечитывание,
+  // громкий возврат к версии файла и память «про этот файл уже сказали».
+  const diskConflict = createDiskConflict({
+    documents,
+    reloadFromDisk: (path) => edits.reloadFromDisk(path),
+    revertToDisk: (path) => edits.revertToDisk(path),
+    // Картинка и документ Office в буфер не читаются — обновляется только экран.
+    refreshView: (path) => {
+      if (isImagePath(path)) imageView.refresh(path);
+      else docView.refresh(path);
+    },
+    scheduleTreeRefresh: () => explorer.scheduleRefresh(),
+    confirmRevert: async (targets) => {
+      const prompt = revertPrompt(targets);
+      const { confirmed } = await rpc.request('dialog.confirm', {
+        title: 'Перечитать с диска',
+        message: prompt.message,
+        detail: prompt.detail,
+        confirmLabel: 'Отменить правки',
+      });
+      return confirmed;
+    },
+    showToast,
   });
-  // Закрытая вкладка: набор не должен держать путь вечно — иначе после повторного
-  // открытия о расхождении с диском уже не скажем.
+  const { reloadIfOpen, revertFilesToDisk } = diskConflict;
+
+  // Закрытая вкладка: путь не должен держать память о расхождении вечно.
   documents.onDidClose((document) => {
-    diskDiffWarned.delete(document.path);
     // Режим разметки у закрытого файла больше не нужен.
     markdownPreviews.delete(document.path);
     // Прочитанную картинку и документ забываем: файл мог на диске и измениться.
     imageView.forget(document.path);
     docView.forget(document.path);
   });
-
-  /**
-   * Файл изменился на диске. Открытый документ перечитываем: иначе в редакторе
-   * останется старая версия — например, после правки во внешнем инструменте или в
-   * терминале. Несохранённые правки при этом НЕ теряются — решение принимает сам
-   * `reloadFromDisk` (содержимое совпало — снимаем «грязность», разошлось — оставляем буфер).
-   *
-   * О разошедшемся буфере говорим вслух и сразу предлагаем перечитать: иначе пометка
-   * «не сохранён» висит без объяснения, а Ctrl+S спрашивает про файл, которого человек
-   * не трогал, — и непонятно, чьи правки в буфере и что с ними делать.
-   */
-  const reloadIfOpen = async (path: string): Promise<void> => {
-    const document = documents.get(path);
-    if (!document) return;
-    // Картинка — не текст: перечитывать её в документ нельзя (в буфер попадёт
-    // бинарь). Файл мог смениться на диске — об этом узнаёт вьюер, а не буфер.
-    if (isImagePath(path)) {
-      imageView.refresh(path);
-      return;
-    }
-    // Документ Office — та же история: в буфер он не читается, обновится экран.
-    if (isOfficePath(path)) {
-      docView.refresh(path);
-      return;
-    }
-    await edits.reloadFromDisk(path).catch(() => undefined);
-    // Буфер остался правленым — значит версия на диске с ним разошлась: совпавший
-    // текст снял бы «грязность» (см. `reloadFromDisk`).
-    if (!document.dirty || diskDiffWarned.has(path)) return;
-    diskDiffWarned.add(path);
-    showToast(`Файл «${basename(path)}» изменился на диске: ваши правки в редакторе целы`, 'info', {
-      action: {
-        label: 'Перечитать',
-        run: () => void commands.execute('file.revertFromDisk', path),
-      },
-    });
-  };
-
-  /**
-   * Вернуть файлы к версии на диске: перечитать и отбросить правки в буфере.
-   *
-   * Спрашиваем всегда: правки в буфере — работа человека, терять их без спроса
-   * нельзя. Файл, который и так равен диску, в список не идёт — там терять нечего.
-   */
-  const revertFilesToDisk = async (targets: readonly string[]): Promise<void> => {
-    const dirty = targets.filter((target) => documents.get(target)?.dirty === true);
-    if (dirty.length === 0) {
-      showToast('Правок в буфере нет', 'info');
-      return;
-    }
-
-    const prompt = revertPrompt(dirty);
-    const { confirmed } = await rpc.request('dialog.confirm', {
-      title: 'Перечитать с диска',
-      message: prompt.message,
-      detail: prompt.detail,
-      confirmLabel: 'Отменить правки',
-    });
-    if (!confirmed) return;
-
-    let done = 0;
-    for (const target of dirty) {
-      try {
-        await edits.revertToDisk(target);
-        done += 1;
-      } catch {
-        showToast(`Не удалось прочитать файл: ${basename(target)}`, 'error');
-      }
-    }
-    if (done === 0) return;
-    // Файл мог измениться и за пределами буфера (его переписал другой инструмент) —
-    // поэтому вместе с документами обновляем и дерево.
-    explorer.scheduleRefresh();
-    showToast(done === 1 ? `Перечитано с диска: ${basename(dirty[0] ?? '')}` : `Перечитано с диска: файлов ${done}`);
-  };
 
   rpc.onPush((message) => {
     switch (message.topic) {
