@@ -242,8 +242,68 @@
   color: var(--blue_prime_background);
 }
 
-/* Проблемы: значок и число словами. Цвет различает ошибку и предупреждение, но
-   различить их можно и по порядку — сначала ошибки, потом предупреждения. */
+/* Полоса проверки проекта: заливка — законченные шаги, бегущий штрих — работа идёт.
+   Числа тут только про шаги: середину шага не знает никто (линтер и tsc молчат до конца).
+   Ширину заливки не анимируем — это геометрия и лишние пересчёты раскладки. */
+.status-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: var(--text_color_tertiary);
+}
+
+.status-check-track {
+  position: relative;
+  width: 64px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius_xs);
+  background: var(--element_background_hover);
+}
+
+.status-check-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent_fill);
+}
+
+/* Бегущий штрих — единственный индикатор «в работе» у этой полосы: застывшая
+   полоса читается как зависание. */
+.status-check-run {
+  display: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 34%;
+  background: var(--accent_fill);
+  opacity: 0.5;
+}
+
+.status-check.is-busy .status-check-run {
+  display: block;
+  animation: status-check-run var(--motion_slow) linear infinite;
+}
+
+.status-check-label {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes status-check-run {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/* Проблемы: значок и число словами. Цвет различает ошибку и предупреждение.
+   По порядку тоже видно: сначала ошибки, потом предупреждения. */
 .status-problems {
   display: inline-flex;
   align-items: center;

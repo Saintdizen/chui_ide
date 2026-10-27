@@ -175,10 +175,12 @@ describe('движение отключается системной настр�
     // Значок состояния вызова «идёт работа» — круг, который вращается: движение тут
     // показывает, что процесс жив, а не украшает. Точка записи макроса — из того же
     // ряда: незаметная запись собрала бы все нажатия, и о ней надо помнить.
+    // Штрих проверки проекта — тоже индикатор: шаг линтера идёт секунды и о своей
+    // середине молчит, а застывшая на месте полоса неотличима от зависания.
     const names = [...MAIN.matchAll(/animation:\s*([\w-]+)[^;]*\binfinite\b/g)].map((match) => match[1]);
     expect(names.length).toBeGreaterThan(0);
     expect(new Set(names)).toEqual(
-      new Set(['tab-pulse', 'activity-dot', 'tool-spin', 'macro-pulse', 'skeleton-pulse']),
+      new Set(['tab-pulse', 'activity-dot', 'tool-spin', 'macro-pulse', 'skeleton-pulse', 'status-check-run']),
     );
   });
 

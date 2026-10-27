@@ -1,6 +1,8 @@
 import type { LspChip } from '../../shared/lsp-status';
 import { lspOriginLabel } from '../../shared/lsp-status';
 import { h, svgIcon } from './dom';
+import { checkProgress } from './check-progress';
+import type { CheckProgressInput } from './check-progress';
 import { problemsWidget } from './problems-widget';
 import type { ProjectProblemCounts } from './problems-widget';
 import type { VimMode } from '../editor/input/vim';
@@ -44,6 +46,11 @@ export interface StatusState {
   projectKindId: string | null;
   /** Пометки в открытых файлах: числа ошибок и предупреждений для виджета проблем. */
   problems: ProjectProblemCounts;
+  /**
+   * Идёт проверка проекта: сколько шагов сделано (см. `check-progress.ts`). `null` — прохода
+   * нет. Числа здесь — шаги, а не проценты: середину шага не знает никто.
+   */
+  check: CheckProgressInput | null;
   /** Выбранное Python-окружение (`.venv`, `python3`); null — виджет скрыт. */
   env: string | null;
   /**
@@ -135,6 +142,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     macro: null,
     vim: null,
     problems: { errors: 0, warnings: 0 },
+    check: null,
   };
 
   // Виджет окружения один, а попапов два: у Node открываем Node, иначе Python.
@@ -219,6 +227,21 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h('span', { class: 'status-problems-counts' }),
   );
   const problemsCounts = problemsItem.querySelector<HTMLElement>('.status-problems-counts')!;
+  // Полоса проверки проекта: заливка — завершённые шаги, бегущий штрих — работа идёт.
+  // Цифры только про шаги: проценты внутри шага были бы выдуманными.
+  const checkItem = h(
+    'span',
+    { class: 'status-item status-check' },
+    h(
+      'span',
+      { class: 'status-check-track' },
+      h('span', { class: 'status-check-fill' }),
+      h('span', { class: 'status-check-run' }),
+    ),
+    h('span', { class: 'status-check-label' }),
+  );
+  const checkFill = checkItem.querySelector<HTMLElement>('.status-check-fill')!;
+  const checkLabel = checkItem.querySelector<HTMLElement>('.status-check-label')!;
 
   // Статус ассистента (одна кнопка «Информация о сессии»: значок режима, кольцо
   // контекста, искра) приходит из чата и встаёт последним — в правом углу полосы.
@@ -234,6 +257,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       progressItem,
       symbolsItem,
       macroItem,
+      checkItem,
       problemsItem,
       versionItem,
       positionItem,
@@ -307,6 +331,13 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     problemsItem.classList.toggle('has-warnings', problems.tone === 'warnings');
     problemsCounts.textContent = problems.text;
     problemsItem.title = problems.title;
+    const check = checkProgress(state.check);
+    checkItem.hidden = check.hidden;
+    checkItem.classList.toggle('is-busy', check.busy);
+    checkItem.classList.toggle('is-indeterminate', check.indeterminate);
+    checkFill.style.width = `${Math.round(check.fill * 100)}%`;
+    checkLabel.textContent = check.label;
+    checkItem.title = check.title;
     gitItem.hidden = state.branch === null;
     gitLabel.textContent = state.branch ? `${state.branch}${state.changes > 0 ? `  ±${state.changes}` : ''}` : '';
     gitItem.title = state.branch

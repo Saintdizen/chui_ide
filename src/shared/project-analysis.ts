@@ -159,3 +159,21 @@ export function tscProblems(root: string, text: string): ProjectProblem[] {
   }
   return problems.slice(0, MAX_PROJECT_PROBLEMS);
 }
+
+/**
+ * Шаги прохода по проекту. Список живёт здесь, а не в рендерере: «сколько всего»
+ * обязан знать тот, кто работу делает, иначе число на полосе высосано из пальца.
+ */
+export const PROJECT_STAGES = ['code', 'deps', 'python-deps'] as const;
+
+/** Один шаг проверки проекта. */
+export type ProjectStage = (typeof PROJECT_STAGES)[number];
+
+/** Событие хода `project.analyze`: шаг начался или закончился. */
+export interface ProjectStageEvent {
+  stage: ProjectStage;
+  phase: 'start' | 'done';
+}
+
+/** Имя RPC-события хода проверки проекта. */
+export const PROJECT_STAGE_EVENT = 'project:stage';

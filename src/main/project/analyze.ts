@@ -21,6 +21,7 @@ import path from 'node:path';
 import type { NodePackageManager } from '../../shared/node-env';
 import { installCommand } from '../../shared/node-env';
 import { diffRequirements, parseRequirements } from '../../shared/python-packages';
+import type { ProjectStage, ProjectStageEvent } from '../../shared/project-analysis';
 import {
   limitProblems,
   lintProblems,
@@ -39,6 +40,12 @@ const DEFAULT_BUDGET_MS = 20_000;
 export interface AnalyzeOptions {
   /** Потолок времени на линтер; ноль — без ограничения (нужно тестам). */
   budgetMs?: number;
+  /**
+   * Ход проверки по шагам: по этим событиям строка состояния рисует полосу.
+   * Внутри шага чисел нет — линтер один процесс и о середине ничего не говорит,
+   * поэтому врём только тем, что показываем: сколько шагов из скольких.
+   */
+  onStage?: (event: ProjectStageEvent) => void;
 }
 
 /**
@@ -53,10 +60,15 @@ export async function analyzeProject(
   options: AnalyzeOptions = {},
 ): Promise<ProjectAnalysis> {
   const budgetMs = options.budgetMs ?? DEFAULT_BUDGET_MS;
+  /** Отметить шаг начатым и законченным: больше о ходе проверки мы не знаем. */
+  const step = <T>(stage: ProjectStage, work: Promise<T>): Promise<T> => {
+    options.onStage?.({ stage, phase: 'start' });
+    return work.finally(() => options.onStage?.({ stage, phase: 'done' }));
+  };
   const [code, deps, pyDeps] = await Promise.all([
-    codeProblems(root, python, budgetMs),
-    dependencyProblems(root),
-    pythonDependencyProblems(root, python),
+    step('code', codeProblems(root, python, budgetMs)),
+    step('deps', dependencyProblems(root)),
+    step('python-deps', pythonDependencyProblems(root, python)),
   ]);
   const limited = limitProblems([...pyDeps, ...deps.problems, ...code.problems]);
   const notes = [deps.note, code.note].filter((item): item is string => item !== null);

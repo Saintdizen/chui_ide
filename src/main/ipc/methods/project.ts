@@ -3,6 +3,7 @@ import { app } from 'electron';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { RpcErrorCode } from '../../../shared/api';
+import { PROJECT_STAGE_EVENT } from '../../../shared/project-analysis';
 import { scanProject } from '../../project/scan';
 import { analyzeProject } from '../../project/analyze';
 import { typecheckProject } from '../../project/typecheck';
@@ -28,9 +29,11 @@ export function registerProjectMethods(router: RpcRouter, deps: RpcServices): vo
 
   // Анализ целиком (линтер + зависимости): запускается фоном при открытии
   // проекта. Потолок времени у проверки свой — в `project/analyze.ts`.
-  router.register('project.analyze', async () => {
+  router.register('project.analyze', async (_params, ctx) => {
     const root = deps.requireRoot();
-    return analyzeProject(root, deps.resolvePython(root));
+    return analyzeProject(root, deps.resolvePython(root), {
+      onStage: (event) => ctx.emit(PROJECT_STAGE_EVENT, event),
+    });
   });
 
   // Проверка типов — отдельным проходом: tsc на большом проекте идёт десятками секунд,

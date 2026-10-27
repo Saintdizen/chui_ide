@@ -16,7 +16,13 @@
  *   • отказ связи — фаза `failed` с человеческой причиной, а не тишина.
  */
 import type { LspDiagnostic } from '../../shared/api';
-import type { ProjectAnalysis, ProjectProblem } from '../../shared/project-analysis';
+import {
+  PROJECT_STAGES,
+  type ProjectAnalysis,
+  type ProjectProblem,
+  type ProjectStage,
+  type ProjectStageEvent,
+} from '../../shared/project-analysis';
 
 /** Владелец пометок проекта. Отличие от `lsp`/`imports` — их никто не чистит вместе. */
 export const PROJECT_CHECK_OWNER = 'project';
@@ -35,6 +41,18 @@ export interface ProjectCheckState {
   timedOut: boolean;
   /** Причина отказа или что не удалось проверить. */
   note: string | null;
+  /**
+   * Ход прохода для полосы в строке состояния; `null` — показывать нечего.
+   * Числа здесь только одни — сколько шагов сделано: середину шага не знает никто.
+   */
+  progress: ProjectCheckProgress | null;
+}
+
+/** Что знает полоса прогресса: готовые шаги и те, что ещё идут. */
+export interface ProjectCheckProgress {
+  done: number;
+  total: number;
+  running: ProjectStage[];
 }
 
 /**
@@ -44,7 +62,11 @@ export interface ProjectCheckState {
  */
 export interface ProjectCheckPorts {
   root: () => string | null;
-  analyze: () => Promise<ProjectAnalysis>;
+  /**
+   * Проход целиком. `onStage` зовут события хода — они есть у линтера
+   * (`project.analyze`) и нет у tsc: там одна неделимая команда.
+   */
+  analyze: (onStage: (event: ProjectStageEvent) => void) => Promise<ProjectAnalysis>;
   /** Положить пометки файла под владельцем (чужие владельцы не трогаются). */
   setMarkers: (path: string, owner: string, diagnostics: readonly LspDiagnostic[]) => void;
   /** Владелец пометок; по умолчанию `project`. */
@@ -87,6 +109,7 @@ export class ProjectCheck {
     problems: 0,
     timedOut: false,
     note: null,
+    progress: null,
   };
   /** Пути, куда мы положили пометки: их же и снимаем перед следующим проходом. */
   private touched: string[] = [];
@@ -94,7 +117,16 @@ export class ProjectCheck {
   private token = 0;
   private busy = false;
 
-  constructor(private readonly ports: ProjectCheckPorts) {}
+  constructor(
+    private readonly ports: ProjectCheckPorts,
+    /** План прохода: его длина и есть «сколько всего» для полосы. Пусто — проход неделим. */
+    private readonly stages: readonly ProjectStage[] = PROJECT_STAGES,
+  ) {}
+
+  /** Ход прохода для строки состояния; `null` — говорить нечего. */
+  progress(): ProjectCheckProgress | null {
+    return this.current.phase === 'running' ? this.current.progress : null;
+  }
 
   /** Владелец пометок: у линтера `project`, у типов — свой (см. `owner` в портах). */
   private get owner(): string {
@@ -134,7 +166,7 @@ export class ProjectCheck {
   reset(): void {
     this.token += 1;
     this.dropMarkers();
-    this.emit({ phase: 'idle', tool: null, files: 0, problems: 0, timedOut: false, note: null });
+    this.emit({ phase: 'idle', tool: null, files: 0, problems: 0, timedOut: false, note: null, progress: null });
   }
 
   /** Один проход. Повторный вызов во время прохода — no-op: второй ответ ничего не уточнит. */
@@ -144,10 +176,34 @@ export class ProjectCheck {
     this.busy = true;
     const token = ++this.token;
     this.dropMarkers();
-    this.emit({ phase: 'running', tool: null, files: 0, problems: 0, timedOut: false, note: null });
+    // До первого события все шаги считаются незакончёнными: полоса появляется сразу,
+    // а не через секунду, когда придёт первый ответ. У неделимого прохода (tsc)
+    // их ноль — значит, полоса будет бежать без чисел, и это правда.
+    const done = new Set<ProjectStage>();
+    this.emit({
+      phase: 'running',
+      tool: null,
+      files: 0,
+      problems: 0,
+      timedOut: false,
+      note: null,
+      progress: { done: 0, total: this.stages.length, running: [...this.stages] },
+    });
+    const onStage = (event: ProjectStageEvent): void => {
+      if (token !== this.token) return;
+      if (event.phase === 'done') done.add(event.stage);
+      this.emit({
+        ...this.current,
+        progress: {
+          done: done.size,
+          total: this.stages.length,
+          running: this.stages.filter((stage) => !done.has(stage)),
+        },
+      });
+    };
 
     try {
-      const analysis = await this.ports.analyze();
+      const analysis = await this.ports.analyze(onStage);
       // Ответ мог прийти уже после смены проекта — тогда он про чужой корень.
       if (token !== this.token) return;
       const grouped = groupByPath(analysis.problems);
@@ -162,6 +218,7 @@ export class ProjectCheck {
         problems: analysis.problems.length,
         timedOut: analysis.timedOut,
         note: analysis.note,
+        progress: null,
       });
     } catch (error) {
       if (token !== this.token) return;
@@ -176,6 +233,7 @@ export class ProjectCheck {
           typeof reason === 'string' && reason
             ? `Проверка проекта не удалась: ${reason}`
             : 'Проверка проекта не удалась',
+        progress: null,
       });
     } finally {
       this.busy = false;

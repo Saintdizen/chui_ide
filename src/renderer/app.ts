@@ -17,6 +17,8 @@ import { perf } from '../shared/perf';
 import type { FileOperation } from '../shared/lsp-workspace-edit';
 import type { LspProgress } from '../shared/lsp-progress';
 import { createLspProgressController } from './core/lsp-progress';
+import { PROJECT_STAGE_EVENT } from '../shared/project-analysis';
+import type { ProjectStageEvent } from '../shared/project-analysis';
 import { DEFAULT_SNIPPETS } from '../shared/snippets';
 import { revertPrompt } from '../shared/unsaved';
 import { AutoSave } from './core/auto-save';
@@ -1188,10 +1190,16 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     checking: projectCheck.checking(),
     unchecked: projectCheck.unchecked(),
     partial: projectCheck.partial(),
+    // Два прохода сразу не запускаются: показываем тот, что идёт.
+    check: projectCheck.progress() ?? typeCheck.progress(),
   });
   const projectCheck = new ProjectCheck({
     root: () => workspace.root,
-    analyze: () => rpc.request('project.analyze'),
+    // Потоком, а не обычным запросом: по событиям хода рисуется полоса в строке состояния.
+    analyze: (onStage) =>
+      rpc.stream('project.analyze', undefined, (event, payload) => {
+        if (event === PROJECT_STAGE_EVENT) onStage(payload as ProjectStageEvent);
+      }),
     setMarkers: (path, owner, list) => editors.setExternalMarkers(path, owner, list),
     onState: (state) => {
       // Провал проверки не прячем: без него числа в виджете вечно нулевые.
@@ -1203,19 +1211,23 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   });
   // Проверка типов — отдельный проход со своим владельцем пометок: tsc идёт десятками
   // секунд, поэтому только по команде, и его находки не затирают находки линтера.
-  const typeCheck = new ProjectCheck({
-    root: () => workspace.root,
-    analyze: () => rpc.request('project.types'),
-    setMarkers: (path, owner, list) => editors.setExternalMarkers(path, owner, list),
-    owner: PROJECT_TYPES_OWNER,
-    onState: (state) => {
-      if (state.phase === 'failed' && state.note) showToast(state.note);
-      if (state.phase === 'done' && state.tool === null && state.note) showToast(state.note);
-      statusBar.update({ problems: problemsStatus() });
-      dock.refreshBadges();
-      if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
+  const typeCheck = new ProjectCheck(
+    {
+      root: () => workspace.root,
+      analyze: () => rpc.request('project.types'),
+      setMarkers: (path, owner, list) => editors.setExternalMarkers(path, owner, list),
+      owner: PROJECT_TYPES_OWNER,
+      onState: (state) => {
+        if (state.phase === 'failed' && state.note) showToast(state.note);
+        if (state.phase === 'done' && state.tool === null && state.note) showToast(state.note);
+        statusBar.update({ problems: problemsStatus() });
+        dock.refreshBadges();
+        if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
+      },
     },
-  });
+    // Шагов нет: tsc идёт одним куском и о середине молчит — полоса бежит без чисел.
+    [],
+  );
   // Задачи: пометки берём обычным поиском по проекту — тем же путём, что панель поиска
   // и инструмент агента. Свой обход файлов панели не нужен, а разбор находок и
   // группировку отдаёт `shared/todo-list.ts`.

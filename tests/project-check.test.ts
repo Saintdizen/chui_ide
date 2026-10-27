@@ -185,3 +185,73 @@ describe('ProjectCheck: когда нолю верить нельзя', () => {
     expect(setup({ root: null }).check.unchecked()).toBeNull();
   });
 });
+
+describe('ProjectCheck: ход прохода для полосы прогресса', () => {
+  it('события шагов дают «сколько сделано, какие идут»', async () => {
+    let release: (value: ProjectAnalysis) => void = () => {};
+    const check = new ProjectCheck({
+      root: () => '/proj',
+      analyze: (onStage) => {
+        onStage({ stage: 'deps', phase: 'start' });
+        onStage({ stage: 'deps', phase: 'done' });
+        return new Promise<ProjectAnalysis>((resolve) => {
+          release = resolve;
+        });
+      },
+      setMarkers: () => {},
+    });
+
+    const run = check.run();
+
+    // Пока ответа нет: один шаг позади, два ещё идут. Числа — шаги, не проценты.
+    expect(check.progress()).toEqual({ done: 1, total: 3, running: ['code', 'python-deps'] });
+
+    release(analysis([]));
+    await run;
+
+    // Проход кончился — полосе больше нечего показывать.
+    expect(check.progress()).toBeNull();
+  });
+
+  it('неделимый проход (пустой план) — шагов ноль, чисел нет', async () => {
+    let release: (value: ProjectAnalysis) => void = () => {};
+    const check = new ProjectCheck(
+      {
+        root: () => '/proj',
+        analyze: () =>
+          new Promise<ProjectAnalysis>((resolve) => {
+            release = resolve;
+          }),
+        setMarkers: () => {},
+      },
+      [],
+    );
+
+    const run = check.run();
+
+    expect(check.progress()).toEqual({ done: 0, total: 0, running: [] });
+
+    release(analysis([]));
+    await run;
+    expect(check.progress()).toBeNull();
+  });
+
+  it('событие от прошлого прохода не сдвигает полосу нового', async () => {
+    let stale: (event: { stage: 'code'; phase: 'done' }) => void = () => {};
+    const check = new ProjectCheck({
+      root: () => '/proj',
+      analyze: (onStage) => {
+        stale = onStage as (event: { stage: 'code'; phase: 'done' }) => void;
+        return new Promise<ProjectAnalysis>((resolve) => setTimeout(() => resolve(analysis([])), 0));
+      },
+      setMarkers: () => {},
+    });
+
+    const run = check.run();
+    check.reset();
+    stale({ stage: 'code', phase: 'done' });
+
+    expect(check.progress()).toBeNull();
+    await run;
+  });
+});
