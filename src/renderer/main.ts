@@ -25,8 +25,7 @@ if (perfOn) {
 
 // Мост для проб: окно отдаёт сервисы наружу. По умолчанию выключен — включается
 // адресом (`?probe=1`) или флагом в localStorage, тем же способом, что замеры.
-const probeOn =
-  new URLSearchParams(location.search).has('probe') || localStorage.getItem('chui:probe') === '1';
+const probeOn = new URLSearchParams(location.search).has('probe') || localStorage.getItem('chui:probe') === '1';
 
 void startApplication(mount, { probe: probeOn })
   .then(() => {

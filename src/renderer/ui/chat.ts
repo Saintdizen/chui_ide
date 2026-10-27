@@ -1299,13 +1299,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // Ряд настроек беседы лежит ПОД карточкой композера, в самой полосе футера:
   // режим, права, набор, модель и усилие — свойства беседы, а не набираемого
   // вопроса, и внутри узкой карточки они теснили поле ввода.
-  const footer = h(
-    'div',
-    { class: 'chat-footer' },
-    composer.element,
-    composer.settingsBar,
-    menu.element,
-  );
+  const footer = h('div', { class: 'chat-footer' }, composer.element, composer.settingsBar, menu.element);
   footer.appendChild(jumpButton);
 
   // План, изменённые файлы и приложенный контекст — ВНУТРИ карточки композера, над
