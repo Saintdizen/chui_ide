@@ -24,7 +24,7 @@ import { createBlameController } from './core/blame';
 import { createChangeGutterController } from './core/change-gutter';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import { createDiskConflict } from './core/disk-conflict';
-import { ProjectCheck } from './core/project-check';
+import { PROJECT_TYPES_OWNER, ProjectCheck } from './core/project-check';
 import type { TextDocument } from './core/document';
 import { uriToPath } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -1196,6 +1196,21 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     onState: (state) => {
       // Провал проверки не прячем: без него числа в виджете вечно нулевые.
       if (state.phase === 'failed' && state.note) showToast(state.note);
+      statusBar.update({ problems: problemsStatus() });
+      dock.refreshBadges();
+      if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
+    },
+  });
+  // Проверка типов — отдельный проход со своим владельцем пометок: tsc идёт десятками
+  // секунд, поэтому только по команде, и его находки не затирают находки линтера.
+  const typeCheck = new ProjectCheck({
+    root: () => workspace.root,
+    analyze: () => rpc.request('project.types'),
+    setMarkers: (path, owner, list) => editors.setExternalMarkers(path, owner, list),
+    owner: PROJECT_TYPES_OWNER,
+    onState: (state) => {
+      if (state.phase === 'failed' && state.note) showToast(state.note);
+      if (state.phase === 'done' && state.tool === null && state.note) showToast(state.note);
       statusBar.update({ problems: problemsStatus() });
       dock.refreshBadges();
       if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
@@ -2388,7 +2403,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     root: () => workspace.root,
     projectTools: () => tools.get(),
     runInTerminal: (target) => runTarget(target),
-    refreshImports: () => importChecker.refresh(),
+    // Пакеты поставили — сразу оба следствия: подчёркнутые импорты и пометки о
+    // недостающих зависимостях. Иначе старые пометки висят до ручной команды.
+    refreshImports: () => {
+      importChecker.refresh();
+      void projectCheck.run();
+    },
     onInterpreterChanged: () => {
       // Подсказки подняты со старым интерпретатором — перезапускаем: у нового
       // окружения может найтись и свой pylsp.
@@ -2484,6 +2504,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
 
   // Ручной запуск проверки проекта: после установки зависимостей окно не надо перезапускать.
   define({ id: 'project.check', title: 'Проверить проект', category: 'Проект' }, () => projectCheck.run());
+  // Медленная проверка — по команде: на большом проекте tsc идёт десятками секунд.
+  define({ id: 'project.types', title: 'Проверить типы', category: 'Проект' }, () => typeCheck.run());
 
   // Сравнение двух файлов — из дерева, тем же экраном, что показывает git-различия.
   // Это просмотр: блоки без кнопок индексации (см. `openFiles`).
@@ -3462,6 +3484,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         preloadEnvironment();
         // Активный корень сменился — старые пометки про чужой код: снять и проверить заново.
         projectCheck.reset();
+        typeCheck.reset();
         void projectCheck.run();
         // Смена активного корня может сменить языки проекта — греем их серверы.
         await lspServers.ensure();
@@ -3484,6 +3507,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       preloadEnvironment();
       // У нового проекта всё другое, включая пометки: снять старые и проверить заново.
       projectCheck.reset();
+      typeCheck.reset();
       void projectCheck.run();
       // У нового проекта мог появиться свой сервер в окружении (pylsp в его venv):
       // сначала подхватываем серверы, затем греем языки проекта.

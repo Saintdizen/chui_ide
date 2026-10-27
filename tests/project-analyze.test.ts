@@ -155,3 +155,32 @@ describe('analyzeProject: чего не хватило', () => {
     expect(result.note).toContain('не уложилась');
   });
 });
+
+describe('analyzeProject: сверка зависимостей', () => {
+  it('установленная зависимость пометок не даёт', async () => {
+    const root = await makeProject({
+      declared: ['react'],
+      installed: [{ pkg: 'react', tool: 'react', script: 'process.exit(0);' }],
+    });
+
+    const result = await analyzeProject(root, 'python3');
+
+    expect(result.problems.filter((problem) => problem.source === 'deps')).toEqual([]);
+  });
+
+  it('сверяем объявленное, а не всё дерево: чужие пакеты не в счёт', async () => {
+    // Ловушка на потолок `installedPackages`: в node_modules лежит лишнее, и
+    // объявленный пакет не должен из-за этого выглядеть неустановленным.
+    const root = await makeProject({
+      declared: ['react'],
+      installed: [
+        { pkg: 'left-pad', tool: 'left-pad', script: 'process.exit(0);' },
+        { pkg: 'react', tool: 'react', script: 'process.exit(0);' },
+      ],
+    });
+
+    const result = await analyzeProject(root, 'python3');
+
+    expect(result.problems.filter((problem) => problem.source === 'deps')).toEqual([]);
+  });
+});

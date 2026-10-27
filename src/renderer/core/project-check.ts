@@ -20,6 +20,8 @@ import type { ProjectAnalysis, ProjectProblem } from '../../shared/project-analy
 
 /** Владелец пометок проекта. Отличие от `lsp`/`imports` — их никто не чистит вместе. */
 export const PROJECT_CHECK_OWNER = 'project';
+/** Пометки проверки типов — свой владелец: линтер и tsc друг друга не стирают. */
+export const PROJECT_TYPES_OWNER = 'project-types';
 
 /** Что видно снаружи: чем кончилась проверка и в каком она состоянии. */
 export interface ProjectCheckState {
@@ -35,12 +37,18 @@ export interface ProjectCheckState {
   note: string | null;
 }
 
-/** Что сервису нужно от окружения: `root` — чтобы отбросить устаревший ответ. */
+/**
+ * Что сервису нужно от окружения: `root` — чтобы отбросить устаревший ответ.
+ * `owner` разводит независимые проходы (линтер и типы): пометки у каждого свои
+ * и закрытие одного не стирает пометки другого.
+ */
 export interface ProjectCheckPorts {
   root: () => string | null;
   analyze: () => Promise<ProjectAnalysis>;
   /** Положить пометки файла под владельцем (чужие владельцы не трогаются). */
   setMarkers: (path: string, owner: string, diagnostics: readonly LspDiagnostic[]) => void;
+  /** Владелец пометок; по умолчанию `project`. */
+  owner?: string;
   onState?: (state: ProjectCheckState) => void;
 }
 
@@ -87,6 +95,11 @@ export class ProjectCheck {
   private busy = false;
 
   constructor(private readonly ports: ProjectCheckPorts) {}
+
+  /** Владелец пометок: у линтера `project`, у типов — свой (см. `owner` в портах). */
+  private get owner(): string {
+    return this.ports.owner ?? PROJECT_CHECK_OWNER;
+  }
 
   state(): ProjectCheckState {
     return { ...this.current };
@@ -139,7 +152,7 @@ export class ProjectCheck {
       if (token !== this.token) return;
       const grouped = groupByPath(analysis.problems);
       for (const [filePath, diagnostics] of grouped) {
-        this.ports.setMarkers(filePath, PROJECT_CHECK_OWNER, diagnostics);
+        this.ports.setMarkers(filePath, this.owner, diagnostics);
       }
       this.touched = [...grouped.keys()];
       this.emit({
@@ -170,7 +183,7 @@ export class ProjectCheck {
   }
 
   private dropMarkers(): void {
-    for (const filePath of this.touched) this.ports.setMarkers(filePath, PROJECT_CHECK_OWNER, []);
+    for (const filePath of this.touched) this.ports.setMarkers(filePath, this.owner, []);
     this.touched = [];
   }
 

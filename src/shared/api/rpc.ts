@@ -370,6 +370,8 @@ export interface ChuiMethods {
    * при открытии проекта, а не на каждое сохранение.
    */
   'project.analyze': { params: void; result: ProjectAnalysis };
+  // Отдельно от analyze: tsc идёт десятками секунд — только по команде.
+  'project.types': { params: void; result: ProjectAnalysis };
   /**
    * Настройки уровня проекта из `<root>/.chui_ide/`: редактор, дерево, запуск и
    * LSP. Лежат в самом проекте, чтобы их можно было версионировать вместе с кодом,

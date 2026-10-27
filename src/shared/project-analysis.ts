@@ -126,3 +126,36 @@ export function limitProblems(problems: readonly ProjectProblem[]): {
     dropped: problems.length - MAX_PROJECT_PROBLEMS,
   };
 }
+
+/**
+ * Пометки `tsc --noEmit --pretty false`.
+ *
+ * Две формы строки: `src/a.ts(3,5): error TS2322: текст` — так печатает обычный
+ * запуск, и `src/a.ts:3:5 - error TS2322: текст` — так приходит из `tsc -b` и из
+ * отчётов, скопированных руками. Разбираем обе: иначе половина проекта «чиста».
+ *
+ * Строки-продолжения (`  Тип A несовместим…`) пропускаем: у пометки уже есть
+ * первая строка, а вторая повторила бы её в списке дважды.
+ */
+const TSC_DIAGNOSTIC = /^(.+?)(?:\((\d+),(\d+)\)|:(\d+):(\d+))(?:\s*:\s*|\s*-\s*)(error|warning)\s+TS(\d+):\s*(.+)$/;
+
+export function tscProblems(root: string, text: string): ProjectProblem[] {
+  const base = root.endsWith('/') ? root.slice(0, -1) : root;
+  const problems: ProjectProblem[] = [];
+  for (const raw of text.split('\n')) {
+    const match = TSC_DIAGNOSTIC.exec(raw.trim());
+    if (!match) continue;
+    const [, file, lineA, columnA, lineB, columnB, severity, code, message] = match;
+    if (!file || !message) continue;
+    problems.push({
+      path: file.startsWith('/') ? file : `${base}/${file}`,
+      line: Number(lineA ?? lineB),
+      column: Number(columnA ?? columnB),
+      severity: severity === 'warning' ? 'warning' : 'error',
+      message: message.trim(),
+      source: 'types',
+      code: `TS${code}`,
+    });
+  }
+  return problems.slice(0, MAX_PROJECT_PROBLEMS);
+}

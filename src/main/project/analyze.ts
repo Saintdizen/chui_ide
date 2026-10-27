@@ -15,7 +15,7 @@
  * По истечении бюджета отдаём то, что успели, и честную пометку `timedOut`.
  * Убивать чужой процесс нечем (он живёт в своём дереве), поэтому просто отпускаем.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { NodePackageManager } from '../../shared/node-env';
@@ -28,7 +28,7 @@ import {
   type ProjectAnalysis,
   type ProjectProblem,
 } from '../../shared/project-analysis';
-import { declaredDependencyNames, installedPackages } from '../node/environment';
+import { declaredDependencyNames } from '../node/environment';
 import { lintProject } from './lint';
 
 /** Сколько даём анализа целиком: дальше окно и так уже показало бы всё нужное. */
@@ -129,16 +129,24 @@ async function dependencyProblems(root: string): Promise<DependencyPart> {
 
   const declared = await declaredDependencyNames(root).catch(() => []);
   if (declared.length === 0) return { problems: [], note: null };
-
-  const installed = await installedPackages(root).catch(() => []);
   const command = installCommand(packageManagerOf(root));
-  if (installed.length === 0) {
+
+  // Пустой `node_modules` — это не «нет одной зависимости», а «не устанавливали»:
+  // полсотни одинаковых пометок хуже одной честной.
+  const nodeModules = path.join(root, 'node_modules');
+  const hasTree = existsSync(nodeModules) && readdirSync(nodeModules).length > 0;
+  if (!hasTree) {
     const message = `Зависимости объявлены (${declared.length}), но node_modules пуст — выполните ${command}`;
     return { problems: [manifestProblem(manifestPath, message, 'error')], note: null };
   }
 
-  const have = new Set(installed.map((item) => item.name));
-  const missing = declared.filter((name) => !have.has(name));
+  // Сверяем каждый объявленный пакет напрямую, а не через `installedPackages`: там
+  // внутри потолок на число пакетов и чтение версии каждого — на большом дереве
+  // объявленная зависимость может не попасть в срез и стать «не установленной».
+  const missing: string[] = [];
+  for (const name of declared) {
+    if (!existsSync(path.join(nodeModules, name, 'package.json'))) missing.push(name);
+  }
   return { problems: missingDependencyProblems(manifestPath, text, missing, command), note: null };
 }
 

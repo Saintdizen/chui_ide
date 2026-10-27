@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs';
 import { RpcErrorCode } from '../../../shared/api';
 import { scanProject } from '../../project/scan';
 import { analyzeProject } from '../../project/analyze';
+import { typecheckProject } from '../../project/typecheck';
 import { findPackages } from '../../project/packages';
 import { loadSpellDictionary } from '../../spell/dictionary';
 import type { RpcServices } from '../context';
@@ -31,6 +32,10 @@ export function registerProjectMethods(router: RpcRouter, deps: RpcServices): vo
     const root = deps.requireRoot();
     return analyzeProject(root, deps.resolvePython(root));
   });
+
+  // Проверка типов — отдельным проходом: tsc на большом проекте идёт десятками секунд,
+  // поэтому это команда, а не фон при открытии (в отличие от analyze).
+  router.register('project.types', () => typecheckProject(deps.requireRoot()));
 
   // Сессия проекта: renderer собирает состояние и кладёт сюда, а при следующем
   // открытии забирает обратно. Без хранилища (пробники) отвечаем пустой сессией.

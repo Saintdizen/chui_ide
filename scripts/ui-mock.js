@@ -1320,6 +1320,12 @@ module.exports = [
       timedOut: false,
       note: 'В браузере проверять нечем: линтер живёт в main',
     }),
+    'project.types': () => ({
+      tool: null,
+      problems: [],
+      timedOut: false,
+      note: 'В браузере проверять нечем: tsc живёт в main',
+    }),
     'python.environments': () => [],
     // Проверка импортов в моке ничего не находит: окружение не настоящее.
     'imports.missing': () => ({ missing: [] }),
