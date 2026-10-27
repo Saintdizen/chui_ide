@@ -43,7 +43,7 @@ const REFRESH_DEBOUNCE_MS = 400;
 export function createTodoPanel(deps: TodoPanelDeps): TodoPanel {
   const summary = h('span', { class: 'todo-summary' });
   const filter = h('input', {
-    class: 'todo-filter',
+    class: 'field-input todo-filter',
     type: 'search',
     placeholder: 'Фильтр…',
     title: 'Отбор по тексту пометки, виду или файлу',

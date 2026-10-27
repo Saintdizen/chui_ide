@@ -43,7 +43,7 @@ const MAX_ROWS = 500;
 export function createProblemPanel(deps: ProblemPanelDeps): ProblemPanel {
   const summary = h('span', { class: 'problems-summary' });
   const filter = h('input', {
-    class: 'problems-filter',
+    class: 'field-input problems-filter',
     type: 'search',
     placeholder: 'Фильтр…',
     title: 'Отбор по тексту сообщения, источнику или файлу',

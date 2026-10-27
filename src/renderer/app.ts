@@ -121,6 +121,7 @@ import { createEmptyState } from './ui/empty-state';
 import { createImageView } from './ui/image-view';
 import { createBrowserView } from './ui/browser-view';
 import { createExplorer } from './ui/explorer';
+import { mountProjectSelect } from './ui/project-select';
 import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
 import { createLspPopover } from './ui/lsp-popover';
@@ -1761,8 +1762,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     svgIcon('menu', 16),
   );
   layout.topBarLeft.appendChild(menuButton);
-  // Отдельного виджета проекта в шапке нет: имя проекта показывает заголовок
-  // панели проекта, а открыть другую папку можно из меню (Ctrl+O).
+  // Имя проекта и переключение между недавними — в шапке окна, сразу за меню:
+  // проект решает всё прочее (дерево, поиск, терминал, задачи), поэтому он должен
+  // быть под рукой и при закрытом проводнике. Список недавних тот же, что у
+  // стартового окна. Проводник этот селект больше не рисует.
+  const projectSlot = mountProjectSelect({ rpc, workspace });
+  layout.topBarLeft.appendChild(projectSlot.element);
   // Слева — действия над содержимым: сохранить, поиск, страница рядом с кодом.
   addTopButton(layout.topBarLeft, 'save', 'save', 'Сохранить всё (Ctrl+Alt+S)', 'file.saveAll');
   addTopButton(layout.topBarLeft, 'search', 'search', 'Поиск по проекту (Ctrl+Shift+F)', 'search.project');
@@ -3474,6 +3479,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   workspace.onDidChange(({ info, reason }) => {
     refreshStatus();
     syncEmptyState();
+    // Шапка показывает имя проекта и недавние — при смене корня или проекта
+    // перечитываем: иначе там осталось бы имя прошлой папки.
+    projectSlot.sync(workspace.root);
 
     // Другая рабочая папка в ТОЙ ЖЕ области (добавили, убрали или переключили):
     // проект тот же, вкладки закрывать нельзя. Обновляем то, что считается по

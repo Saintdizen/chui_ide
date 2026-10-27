@@ -569,7 +569,7 @@ textarea {
   gap: 3px;
   flex: 0 0 auto;
   height: max-content;
-  padding: 0 var(--space_sm) 0 var(--space_lg);
+  padding: 5px;
   color: var(--text_color_tertiary);
 }
 
@@ -1795,31 +1795,43 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
-/* Фильтр по дереву. Живёт в шапке панели между заголовком и кнопками, поэтому
-   растягивается по остатку ширины, а не занимает свою строку: дерево начинается
-   сразу под шапкой. Высота меньше кнопок (18px против 22), чтобы шапка не
-   подрастала и нижняя граница дерева не съезжала при появлении поля. */
+/* Селект проекта — в шапке окна, рядом с меню. Ширину не отбирает у действий:
+   его доля ограничена, а имя именем и остаётся — длинный путь живёт в подсказке
+   и в раскрытом списке. Обёртка нужна, чтобы подмена селекта при смене проекта
+   не трогала раскладку шапки. */
+.project-slot {
+  display: flex;
+  min-width: 0;
+  max-width: 240px;
+  margin-left: 2px;
+}
+
+.project-select {
+  flex: 0 1 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  /* Высота — как у кнопок шапки: имя проекта стоит в одном ряду с ними. */
+  min-height: var(--topbar_control_size);
+  padding: 0 6px;
+  font-size: var(--font_small_size);
+}
+
+.project-select .select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Фильтр — обычное поле приложения (`.field-input`): та же рамка, та же заливка,
+   тот же отклик на наведение и фокус. Здесь только то, что диктует узкая строка
+   шапки: высота и отступы, чтобы он не распирал её. */
 .tree-filter {
   flex: 1 1 auto;
   min-width: 0;
-  height: 18px;
-  margin: 0 4px;
-  padding: 0 6px;
-  border: 1px solid var(--border_color);
-  border-radius: var(--radius_xs);
-  background: var(--sunken_background);
-  color: var(--text_color);
+  min-height: calc(var(--control_height) - 6px);
+  padding: 0 5px;
   font-size: var(--font_small_size);
-  font-family: inherit;
-}
-
-.tree-filter:focus {
-  outline: none;
-  border-color: var(--focus_ring_color);
-}
-
-.tree-filter::placeholder {
-  color: var(--text_color_tertiary);
 }
 
 /* Счётчик отфильтрованного не помещаем: строка шапки узкая, и подпись «3 из 40»

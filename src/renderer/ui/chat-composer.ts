@@ -52,6 +52,11 @@ export interface ChatComposerView {
   /** Панель ввода целиком: поле вопроса и тулбар. */
   element: HTMLElement;
   /**
+   * Ряд настроек беседы — режим, права, набор, модель, усилие. Панель чата ставит
+   * его НАД карточкой ввода: на узкой панели эти контролы теснили поле вопроса.
+   */
+  settingsBar: HTMLElement;
+  /**
    * Слот над полем внутри карточки: сюда панель чата кладёт план, изменённые файлы
    * и чипы приложенного контекста. Они про набираемый вопрос, а не про ленту.
    */
@@ -349,20 +354,23 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     { class: 'composer-box' },
     extras,
     input,
-    h(
-      'div',
-      { class: 'composer-toolbar' },
-      h(
-        'div',
-        { class: 'composer-group' },
-        modeSelect.element,
-        permSelect.element,
-        presetSelect.element,
-        modelButton,
-        effortField,
-      ),
-      h('div', { class: 'composer-group composer-group-end' }, contextButton, actionButton),
-    ),
+    h('div', { class: 'composer-toolbar' }, contextButton, actionButton),
+  );
+
+  /**
+   * Настройки беседы — режим, права, набор, модель, усилие. Стоят НАД карточкой
+   * композера, в общей полосе окна: это свойства беседы, а не набираемого вопроса,
+   * и на узкой панели они теснили поле ввода. Отдельный элемент — потому что
+   * карточка носит свой фон и рамку, а ряд настроек лежит на полотне чата.
+   */
+  const settingsBar = h(
+    'div',
+    { class: 'composer-settings' },
+    modeSelect.element,
+    permSelect.element,
+    presetSelect.element,
+    modelButton,
+    effortField,
   );
 
   syncMode();
@@ -370,6 +378,8 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
 
   return {
     element,
+    /** Ряд настроек беседы — панель чата ставит его над карточкой композера. */
+    settingsBar,
     /** Куда панель чата кладёт свои надстройки над полем (план, изменения, чипы). */
     extras,
     input,
