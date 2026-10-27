@@ -184,3 +184,49 @@ describe('analyzeProject: сверка зависимостей', () => {
     expect(result.problems.filter((problem) => problem.source === 'deps')).toEqual([]);
   });
 });
+
+describe('analyzeProject: Python-зависимости', () => {
+  // Заглушка интерпретатора — исполняемый файл с шебангом: `pip.ts` зовёт
+  // `execFile(python, ...)`, поэтому путь должен быть одним исполняемым файлом.
+  const makePython = async (root: string, packages: string[]): Promise<string> => {
+    const script = path.join(root, 'fake-python');
+    await fs.writeFile(
+      script,
+      `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(${JSON.stringify(packages.map((name) => ({ name })))}));\n`,
+      { mode: 0o755 },
+    );
+    return script;
+  };
+
+  it('требование не установлено — пометка на строке requirements.txt', async () => {
+    const root = await makeProject({});
+    await fs.writeFile(path.join(root, 'requirements.txt'), 'requests==2.31.0\nflask>=3\n');
+    const python = await makePython(root, ['requests']);
+
+    const result = await analyzeProject(root, python, { budgetMs: 0 });
+
+    const deps = result.problems.filter((problem) => problem.code === 'pip-missing');
+    expect(deps).toHaveLength(1);
+    expect(deps[0]).toMatchObject({ path: path.join(root, 'requirements.txt'), line: 2, source: 'deps' });
+    expect(deps[0]?.message).toContain('flask');
+  });
+
+  it('всё установлено — пометок нет', async () => {
+    const root = await makeProject({});
+    await fs.writeFile(path.join(root, 'requirements.txt'), 'requests\n');
+    const python = await makePython(root, ['requests']);
+
+    const result = await analyzeProject(root, python, { budgetMs: 0 });
+
+    expect(result.problems.filter((problem) => problem.code === 'pip-missing')).toEqual([]);
+  });
+
+  it('pip молчит — не выдумываем нехватку', async () => {
+    const root = await makeProject({});
+    await fs.writeFile(path.join(root, 'requirements.txt'), 'requests\n');
+
+    const result = await analyzeProject(root, 'python3-которого-нет', { budgetMs: 0 });
+
+    expect(result.problems.filter((problem) => problem.code === 'pip-missing')).toEqual([]);
+  });
+});

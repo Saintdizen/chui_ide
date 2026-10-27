@@ -20,6 +20,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { NodePackageManager } from '../../shared/node-env';
 import { installCommand } from '../../shared/node-env';
+import { diffRequirements, parseRequirements } from '../../shared/python-packages';
 import {
   limitProblems,
   lintProblems,
@@ -29,6 +30,7 @@ import {
   type ProjectProblem,
 } from '../../shared/project-analysis';
 import { declaredDependencyNames } from '../node/environment';
+import { installedPackages as installedPythonPackages } from '../python/pip';
 import { lintProject } from './lint';
 
 /** Сколько даём анализа целиком: дальше окно и так уже показало бы всё нужное. */
@@ -51,8 +53,12 @@ export async function analyzeProject(
   options: AnalyzeOptions = {},
 ): Promise<ProjectAnalysis> {
   const budgetMs = options.budgetMs ?? DEFAULT_BUDGET_MS;
-  const [code, deps] = await Promise.all([codeProblems(root, python, budgetMs), dependencyProblems(root)]);
-  const limited = limitProblems([...deps.problems, ...code.problems]);
+  const [code, deps, pyDeps] = await Promise.all([
+    codeProblems(root, python, budgetMs),
+    dependencyProblems(root),
+    pythonDependencyProblems(root, python),
+  ]);
+  const limited = limitProblems([...pyDeps, ...deps.problems, ...code.problems]);
   const notes = [deps.note, code.note].filter((item): item is string => item !== null);
   if (limited.dropped > 0) {
     notes.push(`Показано ${limited.problems.length} пометок — ещё ${limited.dropped} осталось за потолком`);
@@ -162,4 +168,37 @@ function packageManagerOf(root: string): NodePackageManager {
     if (existsSync(path.join(root, file))) return manager;
   }
   return 'npm';
+}
+
+/**
+ * Python-зависимости: `requirements.txt` против `pip list`.
+ *
+ * `pip list` — процесс на доли секунды, поэтому идём только когда сверять есть
+ * что: файл есть и в нём есть требования. Молчание pip (нет интерпретатора, чужое
+ * окружение) не превращаем в пометки: это про окружение, а не про код, и об этом
+ * уже говорит попап окружения — здесь достаточно не мешать.
+ *
+ * `pyproject.toml` не разбираем: там произвольный TOML с группами и extras, и
+ * честнее промолчать, чем угадать состав зависимостей.
+ */
+async function pythonDependencyProblems(root: string, python: string): Promise<ProjectProblem[]> {
+  const manifestPath = path.join(root, 'requirements.txt');
+  const text = await fs.readFile(manifestPath, 'utf8').catch(() => null);
+  if (text === null) return [];
+
+  const requirements = parseRequirements(text);
+  if (requirements.length === 0) return [];
+
+  const installed = await installedPythonPackages(python, root).catch(() => null);
+  if (installed === null) return [];
+
+  return diffRequirements(requirements, installed).missing.map((item) => ({
+    path: manifestPath,
+    line: item.line,
+    column: 1,
+    severity: 'error' as const,
+    message: `Пакет ${item.name}${item.specifier} не установлен — pip install '${item.name}${item.specifier}'`,
+    source: 'deps',
+    code: 'pip-missing',
+  }));
 }
