@@ -20,9 +20,9 @@ const read = (relative: string): string => readFileSync(resolve(process.cwd(), r
 
 /** Имена методов, объявленных в интерфейсе `ChuiMethods`. */
 function contractMethods(): string[] {
-  const source = read('src/shared/api.ts');
+  const source = read('src/shared/api/rpc.ts');
   const start = source.indexOf('export interface ChuiMethods');
-  expect(start, 'в shared/api.ts нет интерфейса ChuiMethods').toBeGreaterThanOrEqual(0);
+  expect(start, 'в shared/api/rpc.ts нет интерфейса ChuiMethods').toBeGreaterThanOrEqual(0);
   // Интерфейс закрывается строкой `}` без отступа — вложенные объектные типы
   // закрываются с отступом, поэтому первый `\n}` и есть конец ChuiMethods.
   const end = source.indexOf('\n}', start);

@@ -24,9 +24,9 @@ const read = (relative: string): string => readFileSync(resolve(process.cwd(), r
 
 /** Имена методов, объявленных в интерфейсе `ChuiMethods`. */
 function contractMethods(): string[] {
-  const source = read('src/shared/api.ts');
+  const source = read('src/shared/api/rpc.ts');
   const start = source.indexOf('export interface ChuiMethods');
-  expect(start, 'в shared/api.ts нет интерфейса ChuiMethods').toBeGreaterThanOrEqual(0);
+  expect(start, 'в shared/api/rpc.ts нет интерфейса ChuiMethods').toBeGreaterThanOrEqual(0);
   const body = source.slice(start, source.indexOf('\n}', start));
   return [...body.matchAll(/^\s*'([a-z]+(?:\.[A-Za-z0-9]+)+)'\s*:/gm)].map((match) => match[1]!);
 }
