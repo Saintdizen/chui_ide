@@ -230,7 +230,7 @@ function fakeService(
 
   const events: Push[] = [];
   const service = new DebugService(
-    (topic, payload) => events.push({ topic, payload }),
+    (topic, payload) => events.push({ topic, payload: payload as Record<string, unknown> }),
     () => null,
     () => 'python3',
     async () => ({}),
@@ -265,7 +265,7 @@ async function tcpPythonService(): Promise<{ service: DebugService; events: Push
 
   const events: Push[] = [];
   const service = new DebugService(
-    (topic, payload) => events.push({ topic, payload }),
+    (topic, payload) => events.push({ topic, payload: payload as Record<string, unknown> }),
     () => null,
     () => 'python3',
     async () => ({}),

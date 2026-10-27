@@ -14,6 +14,7 @@ const tools: ProjectTools = {
   hasPackageJson: false,
   tsRunner: null,
   tsRunnerFrom: null,
+  testRunner: null,
 };
 
 const SYSTEM: ProjectTools = {

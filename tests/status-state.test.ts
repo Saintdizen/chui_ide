@@ -12,7 +12,9 @@ const tools: ProjectTools = {
   scripts: [],
   hasPackageJson: true,
   tsRunner: 'tsx',
-} as ProjectTools;
+  tsRunnerFrom: 'project',
+  testRunner: null,
+};
 
 function inputs(over: Partial<StatusInputs> = {}): StatusInputs {
   return {

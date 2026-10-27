@@ -215,7 +215,7 @@ describe('бюджет шага под окно модели', () => {
    * (общий предел честный), но пропажа уже объявленного — регрессия.
    */
   it('таблица потолков говорит об именах, которые существуют', () => {
-    const names = new Set(AGENT_TOOLS.map((tool) => tool.name));
+    const names = new Set<string>(AGENT_TOOLS.map((tool) => tool.name));
     const orphans = Object.keys(TOOL_OUTPUT_CHARS).filter((key) => !names.has(key));
     expect(orphans, `в TOOL_OUTPUT_CHARS нет таких инструментов: ${orphans.join(', ')}`).toEqual([]);
 

@@ -41,7 +41,9 @@ class DapClient {
   request(command: string, args?: Record<string, unknown>): Promise<DapResponse> {
     const seq = this.seq;
     this.seq += 1;
-    const answered = new Promise<DapResponse>((resolve) => this.pending.set(seq, (message) => resolve(message)));
+    const answered = new Promise<DapResponse>((resolve) =>
+      this.pending.set(seq, (message) => resolve(message as DapResponse)),
+    );
     this.toAdapter.write(encodeDap({ seq, type: 'request', command, ...(args ? { arguments: args } : {}) }));
     return answered;
   }

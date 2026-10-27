@@ -63,7 +63,12 @@ describe('registerGitSyncCommands', () => {
 
   it('конфликт открывается по аргументу, иначе по текущему файлу', async () => {
     const asked: string[] = [];
-    const { commands } = setup({ openConflict: async (path: string) => (asked.push(path), true) });
+    const { commands } = setup({
+      openConflict: async (path: string) => {
+        asked.push(path);
+        return true;
+      },
+    });
     await commands.get('git.resolveConflicts')!('/p/x.ts');
     await commands.get('git.resolveConflicts')!();
     expect(asked).toEqual(['/p/x.ts', '/p/a.ts']);

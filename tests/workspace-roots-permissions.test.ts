@@ -32,10 +32,7 @@ async function write(dir: string, relative: string, text: string): Promise<void>
 }
 
 function service(): WorkspaceService {
-  return new WorkspaceService(
-    () => undefined,
-    () => undefined,
-  );
+  return new WorkspaceService(() => undefined, {});
 }
 
 describe('корни рабочей области', () => {
@@ -57,7 +54,7 @@ describe('корни рабочей области', () => {
     await ws.open(first);
     await ws.addRoot(second);
 
-    const listed = ws.rootList().map((root) => path.resolve(root.path ?? root.root ?? String(root)));
+    const listed = ws.rootList().map((root) => path.resolve(root.root));
     expect(listed).toContain(path.resolve(first));
     expect(listed).toContain(path.resolve(second));
   });
@@ -69,9 +66,7 @@ describe('корни рабочей области', () => {
     await ws.addRoot(dir);
     // Корень в списке ровно один: дубль сломал бы выбор активного.
     const built = ws.rootList();
-    expect(
-      built.filter((root) => path.resolve(root.path ?? root.root ?? String(root)) === path.resolve(dir)),
-    ).toHaveLength(1);
+    expect(built.filter((root) => path.resolve(root.root) === path.resolve(dir))).toHaveLength(1);
   });
 
   it('setActiveRoot переключает корень, а чужой путь — отказ', async () => {
@@ -125,7 +120,7 @@ describe('разрешения на чтение', () => {
     ws.allowReadDir(allowed);
 
     // Копию вывода читать можно, а править её — нет.
-    await expect(ws.writeFile(path.join(allowed, 'spill.txt'), 'испорчено', {})).rejects.toThrow();
+    await expect(ws.writeFile(path.join(allowed, 'spill.txt'), 'испорчено')).rejects.toThrow();
     expect(await fs.readFile(path.join(allowed, 'spill.txt'), 'utf8')).toBe('x\n');
   });
 

@@ -21,12 +21,12 @@ const tools: ProjectTools = {
   pythonLabel: 'python3',
   pythonFromProject: false,
   nodeVersion: null,
-  pythonVersion: null,
-  pythonEnvs: [],
+  scripts: [],
+  hasPackageJson: true,
   tsRunner: null,
   tsRunnerFrom: null,
   testRunner: null,
-} as ProjectTools;
+};
 
 /** RPC-шпион: запоминает вызовы и отдаёт заранее заданные ответы по имени метода. */
 function makeRpc(answers: Record<string, unknown> = {}) {
@@ -62,7 +62,9 @@ function setup(overrides: Partial<Parameters<typeof createInstallActions>[0]> = 
     settings: () => ({ run: { pythonPath: 'python3', pythonByRoot: {} } }),
     root: () => '/p',
     projectTools: () => tools,
-    runInTerminal: (target) => terminals.push(target),
+    runInTerminal: async (target) => {
+      terminals.push(target);
+    },
     refreshImports: () => refreshed.push(1),
     onInterpreterChanged: () => undefined,
     ...overrides,

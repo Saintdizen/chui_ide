@@ -3,7 +3,9 @@ import { canonicalCall } from '../src/shared/tool-aliases';
 import { AGENT_TOOLS } from '../src/shared/tools';
 
 /** Схемы по нынешним именам: псевдоним обязан приводить к существующему. */
-const names = new Set(AGENT_TOOLS.map((tool) => tool.name));
+// Множество строк, а не имён: сравниваем с именем, которое вернул псевдоним, — оно может
+// и не быть известным именем, и именно это проверяется.
+const names = new Set<string>(AGENT_TOOLS.map((tool) => tool.name));
 
 describe('старые имена инструментов', () => {
   it('read_file, read_files, list_dir, find_files меняются на read и list', () => {

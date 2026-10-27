@@ -185,7 +185,7 @@ describe('rebase: конфликт, continue, abort', () => {
     expect(after.repository?.root).toBeTruthy();
     // Ни одного шага вперёд: файл вернулся к состоянию main.
     expect(await fs.readFile(path.join(dir, 'a.txt'), 'utf8')).toBe('мастер\n');
-    expect(after.branch).toBe(before.branch);
+    expect(after.repository?.branch).toBe(before.repository?.branch);
   });
 });
 

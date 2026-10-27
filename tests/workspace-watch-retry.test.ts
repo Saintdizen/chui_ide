@@ -46,8 +46,12 @@ vi.mock('node:fs', async (importOriginal) => {
 
 const { WorkspaceService } = await import('../src/main/workspace/workspace');
 
+// Значение импортируется динамически (см. выше), а аннотациям нужно имя во время
+// компиляции — отсюда отдельный псевдоним типа.
+type Workspace = import('../src/main/workspace/workspace').WorkspaceService;
+
 const roots: string[] = [];
-const services: WorkspaceService[] = [];
+const services: Workspace[] = [];
 
 /**
  * Считаем вызовы `watch` и ловим наблюдателей по ЭМИТУ. Заглядывать в
@@ -74,14 +78,11 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
 });
 
-async function openProject(): Promise<WorkspaceService> {
+async function openProject(): Promise<Workspace> {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-wretry-')));
   roots.push(root);
   await fs.writeFile(path.join(root, 'a.ts'), 'x\n', 'utf8');
-  const ws = new WorkspaceService(
-    () => undefined,
-    () => undefined,
-  );
+  const ws = new WorkspaceService(() => undefined, {});
   services.push(ws);
   await ws.open(root);
   return ws;

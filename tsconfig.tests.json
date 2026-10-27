@@ -1,0 +1,14 @@
+{
+  // Тесты лежат вне обоих сборок и до сих пор не проверялись типами: моки успевали
+  // разъехаться с API, оставаясь «зелёными». Здесь только проверка — ничего не пишем.
+  // Импорты тянут и main, и renderer, поэтому lib и types — объединение двух наборов.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "ES2024", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"],
+    "noEmit": true
+  },
+  "include": ["tests/**/*.ts"]
+}

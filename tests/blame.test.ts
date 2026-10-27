@@ -16,13 +16,22 @@ const blameLine = (over: Partial<BlameLine> = {}): BlameLine => ({
 /** Контроллер с подставными источниками: следим, что и когда он показывает. */
 function makeController(respond: (path: string, line: number) => Promise<BlameLine | null>) {
   const shown: Array<BlameAnnotation | null> = [];
+  const shownAll: Array<{ path: string; annotations: BlameAnnotation[] }> = [];
   const request = vi.fn(respond);
-  const controller = createBlameController({ blameLine: request, show: (annotation) => shown.push(annotation) });
-  return { controller, shown, request };
+  const controller = createBlameController({
+    blameLine: request,
+    // Режим «подписи у всего файла» — своя ветка; здесь проверяется только подпись у строки.
+    blameFile: async () => [],
+    show: (annotation) => shown.push(annotation),
+    showAll: (path, annotations) => shownAll.push({ path, annotations }),
+  });
+  return { controller, shown, shownAll, request };
 }
 
 /** Проматывает задержку запроса и даёт промисам разрешиться. */
-const settle = (): Promise<void> => vi.advanceTimersByTimeAsync(200);
+const settle = async (): Promise<void> => {
+  await vi.advanceTimersByTimeAsync(200);
+};
 
 afterEach(() => {
   vi.useRealTimers();
@@ -72,11 +81,11 @@ describe('createBlameController', () => {
   it('устаревший ответ не перекрывает свежую строку', async () => {
     vi.useFakeTimers();
     // Первая строка «отвечает» медленно, вторая — сразу: показывать должна вторая.
-    let releaseFirst: (() => void) | null = null;
+    const releaseFirst: { run: (() => void) | null } = { run: null };
     const { controller, shown } = makeController((_path, line) => {
       if (line === 1) {
         return new Promise<BlameLine | null>((resolve) => {
-          releaseFirst = () => resolve(blameLine({ line: 1, author: 'Старый' }));
+          releaseFirst.run = () => resolve(blameLine({ line: 1, author: 'Старый' }));
         });
       }
       return Promise.resolve(blameLine({ line: line, author: 'Свежий' }));
@@ -87,7 +96,7 @@ describe('createBlameController', () => {
     await settle();
     controller.update('/p/a.ts', 2);
     await settle();
-    releaseFirst?.();
+    releaseFirst.run?.();
     await settle();
 
     const last = shown.at(-1);

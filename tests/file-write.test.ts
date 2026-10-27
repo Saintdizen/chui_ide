@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { TextDocument } from '../src/renderer/core/document';
 import { createFileWrite, type FileWritePorts } from '../src/renderer/core/file-write';
 
 /**
@@ -17,7 +18,7 @@ interface Doc {
   setText(value: string, origin: string): void;
 }
 
-function doc(path: string, value = 'on-disk', readOnly = false): Doc {
+function doc(path: string, value = 'on-disk', readOnly = false): TextDocument {
   const d: Doc = {
     path,
     value,
@@ -26,7 +27,8 @@ function doc(path: string, value = 'on-disk', readOnly = false): Doc {
       d.value = next;
     },
   };
-  return d;
+  // Фейк: модулю от документа нужны только эти четыре члена.
+  return d as unknown as TextDocument;
 }
 
 function setup(

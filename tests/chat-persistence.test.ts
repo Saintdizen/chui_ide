@@ -81,11 +81,11 @@ describe('serializeSession', () => {
     const call = { id: 'c1', name: 'search', arguments: '{}' };
     const session = makeSession({
       history: [{ role: 'assistant', content: '', toolCalls: [call] }],
-      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      usage: { promptTokens: 10, completionTokens: 5 },
       trace: {
         steps: 1,
-        tools: 0,
-        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        toolCalls: 0,
+        usage: { promptTokens: 10, completionTokens: 5 },
         toolsTokens: 0,
       },
     });
@@ -93,7 +93,7 @@ describe('serializeSession', () => {
     expect(conversation.messages[0]?.toolCalls?.[0]).toEqual(call);
     // Копия: правка оригинала не должна утекать в уже собранный снимок.
     expect(conversation.messages[0]?.toolCalls?.[0]).not.toBe(call);
-    expect(conversation.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
+    expect(conversation.usage).toEqual({ promptTokens: 10, completionTokens: 5 });
     expect(conversation.usage).not.toBe(session.usage);
     expect(conversation.trace?.usage).not.toBe(session.trace?.usage);
   });

@@ -1,0 +1,14 @@
+{
+  // Скрипты-инструменты (перепись, замеры) числились вне обоих tsconfig —
+  // в шапках «Запуск: npx tsx …», а `tsx` не было в devDependencies. Теперь
+  // и запуск (npm run census:*), и проверка типов у них есть.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["scripts/**/*.ts"]
+}

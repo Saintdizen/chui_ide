@@ -52,7 +52,9 @@ function setup(
     showToast: (message: string) => toasts.push(message),
   } as unknown as FormatDeps;
   registerFormatCommands(define, deps);
-  return { commands, toasts, deps, doc };
+  // Стенд всегда отдаёт живой документ (вариант с null только у `openEditors.active`),
+  // а тесты читают его текст напрямую — отсюда точный тип, а не союз с null.
+  return { commands, toasts, deps, doc: doc as ReturnType<typeof document> };
 }
 
 describe('registerFormatCommands', () => {

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ApplyEditsHostResult } from '../src/shared/api';
+import type { PatchFile } from '../src/shared/patch';
 import { mergePatchResult } from '../src/renderer/ui/chat-patches';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import type { WorkspaceService } from '../src/main/workspace/workspace';
@@ -27,7 +28,9 @@ function context(overrides: Partial<ToolContext> = {}): ToolContext {
 
 /** Мост правок: отдаём готовый ответ renderer и считаем вызовы. */
 function bridge(result: ApplyEditsHostResult) {
-  return vi.fn(async () => result);
+  // Аргументы — как у настоящего порта: без них `mock.calls[0][0]` — пустой кортеж,
+  // и проверку «что ушло в мост» не напишешь.
+  return vi.fn(async (..._args: unknown[]): Promise<ApplyEditsHostResult> => result);
 }
 
 describe('edit — слитая запись', () => {
@@ -63,9 +66,9 @@ describe('edit — слитая запись', () => {
       '{"path":"/proj/a.ts","oldText":"a","newText":"b"}',
     );
     expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
-    const sent = applyPatches.mock.calls[0]?.[0] as { path?: string; patches?: { oldText?: string }[] }[];
+    const sent = applyPatches.mock.calls[0]?.[0] as PatchFile[] | undefined;
     // Плоская запись упакована в элемент списка: якоря верхнего уровня больше нет.
-    expect(sent[0]?.patches?.[0]?.oldText).toBe('a');
+    expect(sent?.[0]?.patches?.[0]?.oldText).toBe('a');
   });
 
   // Ростер (п.45) даёт имя и действие, но не поля формы. Отказ обязан их назвать,

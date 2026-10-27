@@ -667,7 +667,7 @@ describe('parseGlabTodos', () => {
 
 describe('unreadNotificationCount', () => {
   it('считает только ждущие внимания', () => {
-    const note = (unread) => ({ id: '1', title: '', kind: '', reason: '', unread, updatedAt: '', url: '' });
+    const note = (unread: boolean) => ({ id: '1', title: '', kind: '', reason: '', unread, updatedAt: '', url: '' });
     expect(unreadNotificationCount([note(true), note(false), note(true)])).toBe(2);
   });
 });

@@ -23,10 +23,7 @@ async function makeRoot(): Promise<string> {
 }
 
 function service(): WorkspaceService {
-  const ws = new WorkspaceService(
-    () => undefined,
-    () => undefined,
-  );
+  const ws = new WorkspaceService(() => undefined, {});
   services.push(ws);
   return ws;
 }
@@ -132,7 +129,7 @@ describe('наследование', () => {
     const ws = service();
     await ws.open(root);
 
-    const result = await ws.findInheritance({ name: 'Base', direction: '' });
+    const result = await ws.findInheritance({ name: 'Base' });
     expect(result.direction).toBe('subtypes');
     expect(result.total).toBe(1);
   });

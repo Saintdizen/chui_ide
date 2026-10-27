@@ -24,10 +24,7 @@ const services: WorkspaceService[] = [];
 beforeEach(async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-vanish-')));
   roots.push(root);
-  const ws = new WorkspaceService(
-    () => undefined,
-    () => undefined,
-  );
+  const ws = new WorkspaceService(() => undefined, {});
   services.push(ws);
   await ws.open(root);
 });

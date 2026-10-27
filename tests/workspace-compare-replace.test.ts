@@ -24,10 +24,7 @@ async function makeDir(): Promise<string> {
 }
 
 function service(): WorkspaceService {
-  return new WorkspaceService(
-    () => undefined,
-    () => undefined,
-  );
+  return new WorkspaceService(() => undefined, {});
 }
 
 async function write(dir: string, relative: string, text: string): Promise<void> {

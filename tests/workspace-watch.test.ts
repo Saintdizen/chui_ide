@@ -28,10 +28,7 @@ async function makeDir(): Promise<string> {
 }
 
 function service(events: Array<{ topic: string; payload: unknown }>): WorkspaceService {
-  const ws = new WorkspaceService(
-    (topic, payload) => events.push({ topic, payload }),
-    () => undefined,
-  );
+  const ws = new WorkspaceService((topic, payload) => events.push({ topic, payload }), {});
   services.push(ws);
   return ws;
 }

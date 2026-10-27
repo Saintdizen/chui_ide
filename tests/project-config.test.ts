@@ -27,11 +27,11 @@ describe('sanitizeProjectSettings', () => {
 
 describe('applyProjectSettingsPatch', () => {
   it('дополняет секции рекурсивно и не мутирует вход', () => {
-    const current = { editor: { tabSize: 2, font: { size: 12 } } };
-    const patch = { editor: { font: { size: 14 } } };
+    const current = { editor: { tabSize: 2, fontSize: 12 } };
+    const patch = { editor: { fontSize: 14 } };
     const next = applyProjectSettingsPatch(current, patch);
-    expect(next).toEqual({ editor: { tabSize: 2, font: { size: 14 } } });
-    expect(current).toEqual({ editor: { tabSize: 2, font: { size: 12 } } });
+    expect(next).toEqual({ editor: { tabSize: 2, fontSize: 14 } });
+    expect(current).toEqual({ editor: { tabSize: 2, fontSize: 12 } });
   });
 });
 

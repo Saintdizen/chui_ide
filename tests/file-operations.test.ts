@@ -1,9 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { failedOperationLabel, fileOperationError, outcomeOfFailure } from '../src/renderer/core/file-operations';
+import type { FileOperation } from '../src/shared/lsp-workspace-edit';
 
-const create = (ignoreIfExists: boolean) => ({ kind: 'create' as const, path: '/p/a.ts', ignoreIfExists });
-const rename = { kind: 'rename' as const, from: '/p/a.ts', to: '/p/b.ts', ignoreIfExists: false };
-const del = (ignoreIfNotExists: boolean) => ({ kind: 'delete' as const, path: '/p/a.ts', ignoreIfNotExists });
+const create = (ignoreIfExists: boolean): FileOperation => ({
+  kind: 'create',
+  path: '/p/a.ts',
+  overwrite: false,
+  ignoreIfExists,
+});
+const rename: FileOperation = {
+  kind: 'rename',
+  from: '/p/a.ts',
+  to: '/p/b.ts',
+  overwrite: false,
+  ignoreIfExists: false,
+};
+const del = (ignoreIfNotExists: boolean): FileOperation => ({
+  kind: 'delete',
+  path: '/p/a.ts',
+  recursive: false,
+  ignoreIfNotExists,
+});
 
 describe('outcomeOfFailure', () => {
   it('создание с ignoreIfExists: файл уже есть — это не ошибка', () => {

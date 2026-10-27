@@ -17,6 +17,8 @@ import {
 
 const BASE: ExplorerSettings = {
   icons: true,
+  // Значки расширений из настроек темы: без них дерево работает на своих значках.
+  badges: [],
   showHidden: true,
   foldersFirst: true,
   sort: 'name',

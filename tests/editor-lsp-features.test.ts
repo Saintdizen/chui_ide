@@ -139,7 +139,7 @@ describe('LspFeatures', () => {
     await expect(features.documentSymbols('/p/a.py')).resolves.toEqual([]);
     await expect(features.completion('/p/a.py', { line: 1, column: 1 })).resolves.toEqual([]);
     await expect(features.rename('/p/a.py', { line: 1, column: 1 }, 'bar')).resolves.toBeNull();
-    await expect(features.semanticTokens('/p/a.py')).resolves.toEqual([]);
+    await expect(features.semanticTokens('/p/a.py', 'python')).resolves.toEqual([]);
     await expect(
       features.inlineValues(
         '/p/a.py',
@@ -177,8 +177,8 @@ describe('LspFeatures', () => {
     const { rpc, calls } = fakeRpc([token]);
     const features = new LspFeatures(rpc);
 
-    await expect(features.semanticTokens('/p/a.py')).resolves.toEqual([token]);
+    await expect(features.semanticTokens('/p/a.py', 'python')).resolves.toEqual([token]);
     expect(calls[0]!.method).toBe('lsp.semanticTokens');
-    expect(calls[0]!.params).toEqual({ path: '/p/a.py' });
+    expect(calls[0]!.params).toEqual({ path: '/p/a.py', languageId: 'python' });
   });
 });

@@ -22,7 +22,7 @@ describe('tests/mocks/electron', () => {
   });
 
   it('ipcMain.handle записывает канал — его можно проверить', async () => {
-    const { ipcMain, ipcHandlers } = await import('electron');
+    const { ipcMain, ipcHandlers } = (await import('electron')) as unknown as typeof import('./mocks/electron');
     const handler = (): void => {};
     ipcMain.handle('probe:call', handler);
     expect(ipcHandlers.get('probe:call')).toBe(handler);

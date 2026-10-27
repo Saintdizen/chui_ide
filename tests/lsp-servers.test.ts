@@ -4,8 +4,8 @@ import type { RpcClient } from '../src/renderer/core/rpc';
 import type { LspServerConfig } from '../src/shared/api';
 import type { ProjectScan } from '../src/shared/project-scan';
 
-const python: LspServerConfig = { language: 'python', command: 'pylsp', args: [], source: 'found' };
-const ts: LspServerConfig = { language: 'typescript', command: 'tsserver', args: [], source: 'found' };
+const python: LspServerConfig = { language: 'python', command: 'pylsp', args: [], enabled: true };
+const ts: LspServerConfig = { language: 'typescript', command: 'tsserver', args: [], enabled: true };
 
 const scan = { root: '/p', kind: { id: 'python', label: 'Python' }, languages: [] } as unknown as ProjectScan;
 

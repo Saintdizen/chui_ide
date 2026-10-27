@@ -44,7 +44,7 @@ function terminals(): TerminalAgent & { created: (string | undefined)[] } {
     list: () => [],
     create: async (options) => {
       created.push(options.cwd);
-      return { id: 't1', shell: 'sh', cwd: options.cwd ?? ROOT, pid: 1 };
+      return { id: 't1', title: 'терминал', shell: 'sh', cwd: options.cwd ?? ROOT, pid: 1 };
     },
     write: () => {},
     read: () => ({ data: '', offset: 0, alive: true }),

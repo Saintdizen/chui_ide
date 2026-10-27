@@ -7,8 +7,8 @@ import {
   matchPresets,
   mergeLspServers,
   presetCommands,
-  type LspServerConfig,
 } from '../src/shared/lsp-presets';
+import type { LspServerConfig } from '../src/shared/api';
 import { VENV_INSTALL_OPTIONS } from '../src/shared/python-env';
 
 describe('presetCommands', () => {

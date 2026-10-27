@@ -23,7 +23,7 @@ function fixture() {
           messages: [
             {
               role: 'assistant',
-              toolCalls: [{ id: 'r', name: 'read_file', arguments: '{"path":"a.ts",\"startLine\":5,\"endLine\":10}' }],
+              toolCalls: [{ id: 'r', name: 'read_file', arguments: '{"path":"a.ts","startLine":5,"endLine":10}' }],
             },
             { role: 'tool', toolCallId: 'r', content: '5 | code' },
           ],

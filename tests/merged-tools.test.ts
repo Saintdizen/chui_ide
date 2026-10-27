@@ -64,7 +64,7 @@ describe('слитые инструменты: разбор', () => {
     expect(stop.summary).toContain('id');
     // Вывод без id — список заданий, а не ошибка: реестр заданий есть всегда.
     const jobs = await runTool(
-      { ...ctx, jobs: { list: () => [], get: () => undefined } } as ToolContext,
+      { ...ctx, jobs: { list: () => [], get: () => undefined } } as unknown as ToolContext,
       'terminalOutput',
       JSON.stringify({}),
     );

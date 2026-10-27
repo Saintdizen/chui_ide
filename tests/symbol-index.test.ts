@@ -30,6 +30,8 @@ const file = (path: string, decls: IndexedFile['decls']): IndexedFile => ({
   size: 10,
   mtime: 1000,
   decls,
+  origin: 'project',
+  package: null,
 });
 
 /** Скелет, каким его отдаёт сервер: класс с методами и функция на верхнем уровне. */

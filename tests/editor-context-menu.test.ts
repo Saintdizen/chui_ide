@@ -84,14 +84,16 @@ describe('editorContextMenuPlan', () => {
     const { deps: d, calls } = deps({ isBookmarked: () => true });
     const items = editorContextMenuPlan(info({ line: 12 }), d);
     expect(labels(items)).toContain('Убрать закладку');
-    items.find((item) => 'label' in item && item.label === 'Убрать закладку')?.onSelect?.();
+    const bookmark = items.find((item) => 'label' in item && item.label === 'Убрать закладку');
+    if (bookmark && 'onSelect' in bookmark) bookmark.onSelect?.();
     expect(calls).toEqual(['toggle:/p/a.ts:12']);
   });
 
   it('быстрые исправления зовутся с местом клика', () => {
     const { deps: d, calls } = deps({ hasAction: () => true });
     const items = editorContextMenuPlan(info({ line: 4, column: 9 }), d);
-    items.find((item) => 'label' in item && item.label === 'Быстрые исправления…')?.onSelect?.();
+    const quickFix = items.find((item) => 'label' in item && item.label === 'Быстрые исправления…');
+    if (quickFix && 'onSelect' in quickFix) quickFix.onSelect?.();
     expect(calls).toEqual(['codeActions:/p/a.ts:4:9']);
   });
 

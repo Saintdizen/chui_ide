@@ -41,7 +41,7 @@ describe('workspace.findByStructure', () => {
     await write('b.ts', 'foo(e, f);\n');
     await write('c.ts', 'bar(1);\n');
 
-    const result = await workspace.findByStructure({ pattern: 'foo($x, $y)', replacement: 'bar($y, $x)' });
+    const result = await workspace.findByStructure({ pattern: 'foo($x, $y)' });
 
     expect(result.total).toBe(3);
     expect(result.files.map((file) => path.relative(dir, file.path)).sort()).toEqual(['a.ts', 'b.ts']);
@@ -50,13 +50,13 @@ describe('workspace.findByStructure', () => {
 
   it('не находит — пустой список, а не ошибка', async () => {
     await write('a.ts', 'bar(1);\n');
-    const result = await workspace.findByStructure({ pattern: 'foo($x)', replacement: 'baz($x)' });
+    const result = await workspace.findByStructure({ pattern: 'foo($x)' });
     expect(result.total).toBe(0);
     expect(result.files).toEqual([]);
   });
 
   it('пустой образец — ошибка, а не «ничего не нашлось»', async () => {
-    await expect(workspace.findByStructure({ pattern: '   ', replacement: 'x' })).rejects.toThrow();
+    await expect(workspace.findByStructure({ pattern: '   ' })).rejects.toThrow();
   });
 });
 

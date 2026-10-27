@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProjectMemory } from '../src/main/ai/project-memory';
-import { MAX_NOTES } from '../src/shared/memory';
+import { MAX_NOTES, type MemoryScope, type RememberResult } from '../src/shared/memory';
 import { runTool, type MemoryTools, type ToolContext } from '../src/main/ai/agent-tools';
 import type { WorkspaceService } from '../src/main/workspace/workspace';
 import { removeTemp } from './temp';
@@ -131,7 +131,13 @@ describe('инструменты remember/forget', () => {
 
   it('remember записывает и отвечает числом заметок', async () => {
     const memory: MemoryTools = {
-      remember: vi.fn(async () => ({ ok: true, notes: [{ text: 'x' }], added: true })),
+      remember: vi.fn(
+        async (_text: string, _scope?: MemoryScope): Promise<RememberResult> => ({
+          ok: true,
+          notes: [{ text: 'x' }],
+          added: true,
+        }),
+      ),
       forget: vi.fn(),
       notes: vi.fn(async () => []),
     };
@@ -145,7 +151,13 @@ describe('инструменты remember/forget', () => {
 
   it('scope: "global" уходит в глобальную область', async () => {
     const memory: MemoryTools = {
-      remember: vi.fn(async () => ({ ok: true, notes: [{ text: 'x' }], added: true })),
+      remember: vi.fn(
+        async (_text: string, _scope?: MemoryScope): Promise<RememberResult> => ({
+          ok: true,
+          notes: [{ text: 'x' }],
+          added: true,
+        }),
+      ),
       forget: vi.fn(),
       notes: vi.fn(async () => []),
     };
@@ -158,7 +170,12 @@ describe('инструменты remember/forget', () => {
 
   it('переполнение — понятный отказ с подсказкой', async () => {
     const memory: MemoryTools = {
-      remember: vi.fn(async () => ({ ok: false, reason: 'full' as const })),
+      remember: vi.fn(
+        async (_text: string, _scope?: MemoryScope): Promise<RememberResult> => ({
+          ok: false,
+          reason: 'full',
+        }),
+      ),
       forget: vi.fn(),
       notes: vi.fn(async () => []),
     };

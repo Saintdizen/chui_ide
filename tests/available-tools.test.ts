@@ -16,7 +16,7 @@ const empty: ToolAvailability = {
   symbols: undefined,
   browser: undefined,
   browserEnabled: false,
-  webSearch: { enabled: false, provider: 'none' } as ToolAvailability['webSearch'],
+  webSearch: { enabled: false, provider: 'none' } as unknown as ToolAvailability['webSearch'],
   webFetchEnabled: false,
   webSearchKey: undefined,
 };

@@ -30,10 +30,7 @@ async function makeDir(): Promise<string> {
 }
 
 function service(): WorkspaceService {
-  return new WorkspaceService(
-    () => undefined,
-    () => undefined,
-  );
+  return new WorkspaceService(() => undefined, {});
 }
 
 async function write(dir: string, relative: string, text: string): Promise<void> {
@@ -185,10 +182,7 @@ describe('updateImports', () => {
     await write(root, 'src/util.ts', 'export const x = 1;\n');
     await write(root, 'src/app.ts', "import { x } from './util';\n");
     const saved: string[] = [];
-    const ws = new WorkspaceService(
-      () => undefined,
-      () => undefined,
-    );
+    const ws = new WorkspaceService(() => undefined, {});
     // onBeforeChange — порт «до правки»: без него перезапись необратима.
     (ws as unknown as { onBeforeChange?: (file: string, kind: string) => void }).onBeforeChange = (file) => {
       saved.push(path.relative(root, file).split(path.sep).join('/'));

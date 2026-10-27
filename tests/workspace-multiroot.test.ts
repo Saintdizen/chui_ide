@@ -24,10 +24,7 @@ async function makeDir(name: string): Promise<string> {
 }
 
 function service(): WorkspaceService {
-  return new WorkspaceService(
-    () => undefined,
-    () => undefined,
-  );
+  return new WorkspaceService(() => undefined, {});
 }
 
 describe('WorkspaceService: корни рабочей области', () => {

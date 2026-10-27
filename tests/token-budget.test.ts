@@ -131,7 +131,7 @@ describe('бюджет схем', () => {
   });
 
   it('отчёт: вес по семействам и кандидаты на слияние', () => {
-    const byName = new Map(rows.map((row) => [row.name, row.tokens]));
+    const byName = new Map<string, number>(rows.map((row) => [row.name, row.tokens]));
     const sum = (names: readonly string[]): number => names.reduce((total, name) => total + (byName.get(name) ?? 0), 0);
 
     const groups = TOOL_GROUPS.map((group) => {

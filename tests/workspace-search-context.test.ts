@@ -34,10 +34,7 @@ async function write(dir: string, relative: string, text: string): Promise<void>
 
 async function open(): Promise<{ ws: WorkspaceService; root: string }> {
   const root = await makeDir();
-  const ws = new WorkspaceService(
-    () => undefined,
-    () => undefined,
-  );
+  const ws = new WorkspaceService(() => undefined, {});
   services.push(ws);
   await ws.open(root);
   return { ws, root };

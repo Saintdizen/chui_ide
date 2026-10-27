@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import type { ApplyEditsHostResult } from '../src/shared/api';
 import type { SearchSymbol } from '../src/shared/code-search';
 import type { FileEdit } from '../src/shared/edits';
 import type { SymbolLocation } from '../src/shared/lsp-locations';
@@ -54,11 +55,18 @@ function context(symbols: SymbolSearch | undefined, options: Partial<ToolContext
 
 /** Мост применения правок: запоминает, что ушло в документную модель. */
 function applySpy(rejected = false) {
-  return vi.fn(async (edits: FileEdit[]) => ({
-    ...(rejected
-      ? { rejected: true as const }
-      : { result: { reports: edits.map((f) => ({ path: f.path, applied: f.edits.length, version: 1 })), failed: [] } }),
-  }));
+  return vi.fn(
+    async (edits: FileEdit[], _autoApprove: boolean): Promise<ApplyEditsHostResult> =>
+      rejected
+        ? { rejected: true }
+        : {
+            rejected: false,
+            result: {
+              reports: edits.map((f) => ({ path: f.path, applied: f.edits.length, version: 1 })),
+              failed: [],
+            },
+          },
+  );
 }
 
 describe('find_references', () => {

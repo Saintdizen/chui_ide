@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AnthropicProvider } from '../src/main/ai/anthropic';
+import { AnthropicProvider, type toAnthropicMessages } from '../src/main/ai/anthropic';
+import type { ChatMessage } from '../src/shared/api';
 import { OpenAiCompatibleProvider } from '../src/main/ai/openai-compatible';
+
+/** Формат сообщений Anthropic: модуль его не экспортирует — берём из функции сборки. */
+type AnthropicMessage = ReturnType<typeof toAnthropicMessages>['messages'][number];
 
 /**
  * Хвост потока провайдера.
@@ -187,11 +191,13 @@ describe('кеш Anthropic держит только префикс прогон
     const spy = vi.fn(async () => sse(['data: {"type":"message_stop"}\n\n']));
     vi.stubGlobal('fetch', spy);
     const provider = new AnthropicProvider({ id: 'a', label: 'A', baseUrl: 'http://localhost:1', apiKey: 'k' });
-    const messages = Array.from({ length: turns }, (_, index) => ({ role: 'user' as const, content: `шаг ${index}` }));
+    const messages: ChatMessage[] = [
+      { role: 'system', content: 'ты агент' },
+      ...Array.from({ length: turns }, (_, index) => ({ role: 'user' as const, content: `шаг ${index}` })),
+    ];
     await provider.streamChat(
       {
         model: 'm',
-        system: 'ты агент',
         messages,
         tools: [{ name: 'read', description: 'd', parameters: { type: 'object', properties: {} } }],
       },

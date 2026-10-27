@@ -14,6 +14,24 @@ function sequence(source: string) {
   return result.diagram;
 }
 
+/**
+ * Раскладка с сужением типа: `MermaidLayout` — объединение по виду диаграммы, и без
+ * проверки `kind` поля `nodes`/`participants` недоступны. Заодно проверка, что вид
+ * диаграммы и правда тот, о котором говорит блок тестов.
+ */
+function flowLayout(source: string) {
+  const layout = layoutMermaid(flow(source));
+  if (layout.kind !== 'flow') throw new Error(`ожидалась раскладка блок-схемы, а вышла «${layout.kind}»`);
+  return layout;
+}
+
+/** То же для диаграмм последовательностей. */
+function sequenceLayout(source: string) {
+  const layout = layoutMermaid(sequence(source));
+  if (layout.kind !== 'sequence') throw new Error(`ожидалась раскладка последовательностей, а вышла «${layout.kind}»`);
+  return layout;
+}
+
 describe('разбор ссылки на узел', () => {
   it('читает голое имя без подписи', () => {
     expect(parseNodeRef('Start')).toEqual({ id: 'Start' });
@@ -135,7 +153,7 @@ describe('разбор круговой диаграммы', () => {
 
 describe('раскладка блок-схемы', () => {
   it('кладовка сверху вниз: исток выше цели', () => {
-    const layout = layoutMermaid(flow('graph TD\nA --> B --> C'));
+    const layout = flowLayout('graph TD\nA --> B --> C');
     const a = layout.nodes.find((node) => node.id === 'A');
     const b = layout.nodes.find((node) => node.id === 'B');
     const c = layout.nodes.find((node) => node.id === 'C');
@@ -144,21 +162,21 @@ describe('раскладка блок-схемы', () => {
   });
 
   it('кладовка слева направо: исток левее цели', () => {
-    const layout = layoutMermaid(flow('graph LR\nA --> B'));
+    const layout = flowLayout('graph LR\nA --> B');
     const a = layout.nodes.find((node) => node.id === 'A');
     const b = layout.nodes.find((node) => node.id === 'B');
     expect((a?.x ?? 0) < (b?.x ?? 0)).toBe(true);
   });
 
   it('снизу вверх — зеркало сверху вниз', () => {
-    const layout = layoutMermaid(flow('graph BT\nA --> B'));
+    const layout = flowLayout('graph BT\nA --> B');
     const a = layout.nodes.find((node) => node.id === 'A');
     const b = layout.nodes.find((node) => node.id === 'B');
     expect((a?.y ?? 0) > (b?.y ?? 0)).toBe(true);
   });
 
   it('все узлы и связи остаются внутри габаритов', () => {
-    const layout = layoutMermaid(flow('graph TD\nA --> B\nB --> C\nA --> C\nA --> A'));
+    const layout = flowLayout('graph TD\nA --> B\nB --> C\nA --> C\nA --> A');
     for (const node of layout.nodes) {
       expect(node.x).toBeGreaterThanOrEqual(0);
       expect(node.y).toBeGreaterThanOrEqual(0);
@@ -174,7 +192,7 @@ describe('раскладка блок-схемы', () => {
   });
 
   it('подпись связи ложится на её середину', () => {
-    const layout = layoutMermaid(flow('graph TD\nA -->|да| B'));
+    const layout = flowLayout('graph TD\nA -->|да| B');
     const edge = layout.edges[0];
     expect(edge?.label).toBe('да');
     expect(edge?.labelX).toBeTypeOf('number');
@@ -184,7 +202,7 @@ describe('раскладка блок-схемы', () => {
 
 describe('раскладка диаграммы последовательностей', () => {
   it('участники стоят столбцами, сообщения идут по строкам', () => {
-    const layout = layoutMermaid(sequence('sequenceDiagram\nA->>B: раз\nB-->>A: два'));
+    const layout = sequenceLayout('sequenceDiagram\nA->>B: раз\nB-->>A: два');
     expect(layout.kind).toBe('sequence');
     expect(layout.participants).toHaveLength(2);
     expect(layout.messages).toHaveLength(2);
@@ -194,7 +212,7 @@ describe('раскладка диаграммы последовательнос
   });
 
   it('блок loop получает рамку', () => {
-    const layout = layoutMermaid(sequence('sequenceDiagram\nA->>B: раз\nloop пока\nB-->>A: два\nend'));
+    const layout = sequenceLayout('sequenceDiagram\nA->>B: раз\nloop пока\nB-->>A: два\nend');
     expect(layout.frames).toHaveLength(1);
     expect(layout.frames[0]!.height).toBeGreaterThan(0);
   });

@@ -35,7 +35,10 @@ describe('toOpenAiTools в строгом режиме', () => {
       { strict: true },
     );
 
-    const parameters = tool?.function.parameters as Record<string, any>;
+    const parameters = tool?.function.parameters as unknown as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
     expect(tool?.function.strict).toBe(true);
     expect(parameters.properties.email).toEqual({ type: 'string', description: 'почта' });
     expect(parameters.properties.tags).toEqual({ type: 'array', items: { type: 'string' } });

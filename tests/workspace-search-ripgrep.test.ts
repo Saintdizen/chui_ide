@@ -59,10 +59,7 @@ function summary(searches: number): string {
 }
 
 function service(): WorkspaceService {
-  return new WorkspaceService(
-    () => undefined,
-    () => undefined,
-  );
+  return new WorkspaceService(() => undefined, {});
 }
 
 describe('search через ripgrep', () => {

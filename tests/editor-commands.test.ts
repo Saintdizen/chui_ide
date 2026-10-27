@@ -11,20 +11,20 @@ import {
 /** Подставной контекст: считает вызовы, а не делает работу — так видно, ЧТО зовут. */
 function fakeContext(extra: Partial<EditorCommandContext> = {}): EditorCommandContext & { calls: string[] } {
   const calls: string[] = [];
-  const context: EditorCommandContext & { calls: string[] } = {
+  const context = {
     calls,
     undo: () => calls.push('undo'),
     redo: () => calls.push('redo'),
     selectAll: () => calls.push('selectAll'),
-    openFind: (mode) => calls.push(`find:${mode}`),
+    openFind: (mode: Parameters<EditorCommandContext['openFind']>[0]) => calls.push(`find:${mode}`),
     openGoto: () => calls.push('goto'),
     indent: () => calls.push('indent'),
     outdent: () => calls.push('outdent'),
     toggleComment: () => calls.push('toggleComment'),
     toggleBlockComment: () => calls.push('toggleBlockComment'),
-    moveLines: (direction) => calls.push(`moveLines:${direction}`),
+    moveLines: (direction: Parameters<EditorCommandContext['moveLines']>[0]) => calls.push(`moveLines:${direction}`),
     copyLinesDown: () => calls.push('copyLinesDown'),
-    sortLines: (options) =>
+    sortLines: (options: Parameters<EditorCommandContext['sortLines']>[0]) =>
       calls.push(`sortLines:${options?.reverse ? 'reverse' : options?.unique ? 'unique' : 'asc'}`),
     joinLines: () => calls.push('joinLines'),
     deleteLines: () => calls.push('deleteLines'),
@@ -33,9 +33,9 @@ function fakeContext(extra: Partial<EditorCommandContext> = {}): EditorCommandCo
     insertLineAbove: () => calls.push('insertLineAbove'),
     completeStatement: () => calls.push('completeStatement'),
     transpose: () => calls.push('transpose'),
-    convertCase: (style) => calls.push(`convertCase:${style}`),
+    convertCase: (style: Parameters<EditorCommandContext['convertCase']>[0]) => calls.push(`convertCase:${style}`),
     ...extra,
-  };
+  } as unknown as EditorCommandContext & { calls: string[] };
   return context;
 }
 

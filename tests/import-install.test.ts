@@ -10,6 +10,7 @@ import type { ImportRef } from '../src/shared/imports';
 
 const ref = (top: string, line: number): ImportRef => ({
   module: top,
+  kind: 'module',
   top,
   line,
   startColumn: 8,

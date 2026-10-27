@@ -67,7 +67,11 @@ describe('контракт RPC: ChuiMethods ↔ регистрация в main',
   it('контракт не содержит повторов', () => {
     const methods = contractMethods();
     const seen = new Set<string>();
-    const duplicates = methods.filter((method) => (seen.has(method) ? true : (seen.add(method), false)));
+    const duplicates = methods.filter((method) => {
+      if (seen.has(method)) return true;
+      seen.add(method);
+      return false;
+    });
     expect(duplicates, `повторяются: ${duplicates.join(', ')}`).toEqual([]);
   });
 });

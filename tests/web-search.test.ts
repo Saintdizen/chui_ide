@@ -1,174 +1,158 @@
-import { describe, expect, it } from 'vitest';
-import {
-  defaultWebSearchEndpoint,
-  formatWebResults,
-  isAllowedSearchEndpoint,
-  isWebSearchProvider,
-  parseSearchResponse,
-  stripTags,
-} from '../src/shared/web-search';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { isAllowedSearchEndpoint } from '../src/shared/web-search';
 
 /**
- * Разбор ответа и допуск адреса. Ошибка в разборе выглядит как «поиск ничего не
- * нашёл», поэтому обе схемы проверяются на настоящих формах ответов вендоров.
+ * Единственный выход проекта во внешнюю сеть «по просьбе модели». Проверяем то,
+ * что защищает: адрес только из настроек, ограничение размера и времени, разбор
+ * ответа трёх вендоров и срез до запрошенного числа результатов.
  */
-describe('parseSearchResponse', () => {
-  it('SearxNG: результаты в корне, описание в content', () => {
-    const hits = parseSearchResponse('searxng', {
-      query: 'x',
-      results: [
-        { title: 'Первая', url: 'https://a.example/1', content: 'описание первой' },
-        { title: 'Вторая', url: 'https://b.example/2', content: 'описание второй' },
-      ],
-    });
+const netFetch = vi.fn();
 
-    expect(hits).toEqual([
-      { title: 'Первая', url: 'https://a.example/1', snippet: 'описание первой' },
-      { title: 'Вторая', url: 'https://b.example/2', snippet: 'описание второй' },
-    ]);
+vi.mock('../src/main/net/proxy', () => ({
+  netFetch: (...args: unknown[]) => netFetch(...args),
+}));
+
+const {
+  WEB_SEARCH_LIMIT,
+  searchWeb,
+  webSearchHeaders,
+  webSearchNeedsKey,
+  webSearchProviderLabel,
+  webSearchRequestBody,
+  webSearchRequestUrl,
+} = await import('../src/main/ai/web-search');
+
+const searx = { provider: 'searxng' as const, endpoint: '' };
+const brave = { provider: 'brave' as const, endpoint: '', apiKey: 'key-1' };
+const deepseek = { provider: 'deepseek' as const, endpoint: 'https://api.deepseek.com/search', apiKey: 'ds-2' };
+
+/** Ответ netFetch с готовым телом. */
+function reply(body: string, init: { status?: number; ok?: boolean } = {}): Response {
+  const status = init.status ?? 200;
+  return {
+    ok: init.ok ?? (status >= 200 && status < 300),
+    status,
+    text: async () => body,
+  } as Response;
+}
+
+beforeEach(() => {
+  netFetch.mockReset();
+});
+
+describe('адрес, заголовки и тело запроса', () => {
+  it('SearxNG: /search с format=json, адрес по умолчанию', () => {
+    const url = webSearchRequestUrl(searx, 'как дела', 5);
+    expect(url).toMatch(/\/search\?q=%D0%BA%D0%B0%D0%BA%20%D0%B4%D0%B5%D0%BB%D0%B0&format=json$/);
   });
 
-  it('Brave: результаты внутри web, описание в description', () => {
-    const hits = parseSearchResponse('brave', {
-      web: { results: [{ title: 'Док', url: 'https://doc.example', description: 'как это работает' }] },
-    });
-
-    expect(hits).toEqual([{ title: 'Док', url: 'https://doc.example', snippet: 'как это работает' }]);
+  it('Brave: count в строке запроса, лишние слэши в адресе не удваиваются', () => {
+    const url = webSearchRequestUrl({ ...brave, endpoint: 'https://api.search.brave.com/res/v1/web/search/' }, 'q', 3);
+    expect(url).toBe('https://api.search.brave.com/res/v1/web/search?q=q&count=3');
   });
 
-  it('разметку в описании снимаем', () => {
-    const hits = parseSearchResponse('brave', {
-      web: {
-        results: [{ title: '<b>API</b>', url: 'https://d.example', description: 'про <b>embed</b> &amp; токены' }],
-      },
-    });
-
-    expect(hits[0]).toEqual({ title: 'API', url: 'https://d.example', snippet: 'про embed & токены' });
+  it('DeepSeek: запрос уходит телом, адрес без параметров', () => {
+    expect(webSearchRequestUrl(deepseek, 'что нового', 10)).toBe('https://api.deepseek.com/search');
+    const body = webSearchRequestBody(deepseek, 'привет', 200);
+    expect(body?.contentType).toBe('application/json');
+    expect(JSON.parse(body!.body)).toEqual({ query: 'привет', count: 50 });
   });
 
-  it('мусор вместо ответа не роняет разбор', () => {
-    expect(parseSearchResponse('searxng', null)).toEqual([]);
-    expect(parseSearchResponse('searxng', 'строка')).toEqual([]);
-    expect(parseSearchResponse('brave', { web: {} })).toEqual([]);
-    expect(parseSearchResponse('searxng', { results: 'нет' })).toEqual([]);
+  it('DeepSeek: тело ужимает число результатов в разумные рамки', () => {
+    const low = webSearchRequestBody(deepseek, 'q', 0);
+    expect(JSON.parse(low!.body).count).toBe(1);
+    expect(webSearchRequestBody(searx, 'q', 10)).toBeUndefined();
+    expect(webSearchRequestBody(brave, 'q', 10)).toBeUndefined();
   });
 
-  it('результат без url пропускаем, без заголовка — берём url', () => {
-    const hits = parseSearchResponse('searxng', {
-      results: [{ title: 'Пусто', content: 'x' }, { url: 'https://e.example' }],
-    });
+  it('заголовки: ключ вендора каждый раз свой', () => {
+    expect(webSearchHeaders(brave)['x-subscription-token']).toBe('key-1');
+    expect(webSearchHeaders(deepseek).authorization).toBe('Bearer ds-2');
+    expect(webSearchHeaders(searx)).toEqual({ accept: 'application/json' });
+    expect(webSearchHeaders({ ...brave, apiKey: undefined })).toEqual({ accept: 'application/json' });
+  });
 
-    expect(hits).toEqual([{ title: 'https://e.example', url: 'https://e.example', snippet: '' }]);
+  it('ключ нужен всем, кроме своего сервера поиска', () => {
+    expect(webSearchNeedsKey('searxng')).toBe(false);
+    expect(webSearchNeedsKey('brave')).toBe(true);
+    expect(webSearchNeedsKey('deepseek')).toBe(true);
+    expect(webSearchProviderLabel('brave')).toBe('Brave Search');
+    expect(webSearchProviderLabel('deepseek')).toBe('Поиск DeepSeek');
+    expect(webSearchProviderLabel('searxng')).toBe('SearxNG');
   });
 });
 
-describe('isAllowedSearchEndpoint', () => {
-  it('https разрешён всегда', () => {
-    expect(isAllowedSearchEndpoint('https://searx.example.org')).toBe(true);
-    expect(isAllowedSearchEndpoint('https://api.search.brave.com/res/v1/web/search')).toBe(true);
+describe('searchWeb: защита и разбор ответа', () => {
+  it('неразрешённый адрес не открывается вовсе', async () => {
+    await expect(
+      searchWeb('q', { provider: 'searxng', endpoint: 'http://чужой-сервер.example' }),
+    ).rejects.toThrow(/не разрешён/);
+    expect(netFetch).not.toHaveBeenCalled();
   });
 
-  it('открытый http — только для своего', () => {
-    expect(isAllowedSearchEndpoint('http://localhost:8080')).toBe(true);
-    expect(isAllowedSearchEndpoint('http://127.0.0.1:8080')).toBe(true);
-    expect(isAllowedSearchEndpoint('http://192.168.1.5:8080')).toBe(true);
-    expect(isAllowedSearchEndpoint('http://searx:8080')).toBe(true);
-    // Публичный http — это запрос по сети в открытом виде.
-    expect(isAllowedSearchEndpoint('http://searx.example.org')).toBe(false);
-    expect(isAllowedSearchEndpoint('http://8.8.8.8')).toBe(false);
+  it('SearxNG: срезает выдачу до запрошенного числа и чистит теги', async () => {
+    const results = Array.from({ length: 30 }, (_, i) => ({
+      url: `https://site.example/${i}`,
+      title: `<b>Заголовок ${i}</b>`,
+      content: 'описание',
+    }));
+    netFetch.mockResolvedValue(reply(JSON.stringify({ results })));
+
+    const hits = await searchWeb('q', searx, 4);
+    expect(hits).toHaveLength(4);
+    expect(hits[0]).toEqual({ title: 'Заголовок 0', url: 'https://site.example/0', snippet: 'описание' });
+    const [url, init] = netFetch.mock.calls[0] as [string, { method: string; headers: Record<string, string> }];
+    expect(init.method).toBe('GET');
+    expect(init.headers['content-type']).toBeUndefined();
+    expect(url).toContain('q=q');
   });
 
-  it('чужая схема не проходит', () => {
-    expect(isAllowedSearchEndpoint('file:///etc/passwd')).toBe(false);
-    expect(isAllowedSearchEndpoint('ftp://host/')).toBe(false);
-    expect(isAllowedSearchEndpoint('javascript:alert(1)')).toBe(false);
-    expect(isAllowedSearchEndpoint('не адрес')).toBe(false);
-    expect(isAllowedSearchEndpoint('')).toBe(false);
+  it('DeepSeek: POST с телом и content-type', async () => {
+    netFetch.mockResolvedValue(reply(JSON.stringify({ results: [{ url: 'https://a.example', summary: 'сводка' }] })));
+
+    const hits = await searchWeb('вопрос', deepseek, 10);
+    expect(hits).toEqual([{ title: 'https://a.example', url: 'https://a.example', snippet: 'сводка' }]);
+    const [, init] = netFetch.mock.calls[0] as [string, { method: string; body?: string }];
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body!)).toEqual({ query: 'вопрос', count: 10 });
   });
 
-  it('адреса по умолчанию допустимы', () => {
-    expect(isAllowedSearchEndpoint(defaultWebSearchEndpoint('searxng'))).toBe(true);
-    expect(isAllowedSearchEndpoint(defaultWebSearchEndpoint('brave'))).toBe(true);
-  });
-});
-
-describe('поиск DeepSeek', () => {
-  it('результаты в корне, длинное описание важнее короткого', () => {
-    // У DeepSeek два описания: snippet (100–200 знаков, для показа) и summary
-    // (600–800, «для модели»). В контекст агента нужен второй.
-    const hits = parseSearchResponse('deepseek', {
-      results: [{ title: 'Документация', url: 'https://a.example/doc', snippet: 'коротко', summary: 'подробно' }],
-    });
-    expect(hits).toHaveLength(1);
-    expect(hits[0]?.snippet).toBe('подробно');
+  it('Brave: результаты берутся из web.results', async () => {
+    netFetch.mockResolvedValue(
+      reply(JSON.stringify({ web: { results: [{ url: 'https://b.example', title: 'B', description: 'кратко' }] } })),
+    );
+    const hits = await searchWeb('q', brave);
+    expect(hits).toEqual([{ title: 'B', url: 'https://b.example', snippet: 'кратко' }]);
   });
 
-  it('адрес по умолчанию — их собственный поиск', () => {
-    expect(defaultWebSearchEndpoint('deepseek')).toBe('https://api.deepseek.com/v1/tools/search');
-  });
-});
-
-describe('isWebSearchProvider', () => {
-  it('знает только свои виды поиска', () => {
-    expect(isWebSearchProvider('brave')).toBe(true);
-    expect(isWebSearchProvider('searxng')).toBe(true);
-    expect(isWebSearchProvider('deepseek')).toBe(true);
-    expect(isWebSearchProvider('google')).toBe(false);
-    expect(isWebSearchProvider(undefined)).toBe(false);
-  });
-});
-
-describe('stripTags', () => {
-  it('снимает теги, сущности и лишние пробелы', () => {
-    expect(stripTags('<p>a &amp; b</p>\n\n <b>c</b>')).toBe('a & b c');
-    expect(stripTags('без тегов')).toBe('без тегов');
-  });
-});
-
-describe('formatWebResults', () => {
-  it('нумерует результаты и предупреждает, что страницу не читали', () => {
-    const { summary, detail } = formatWebResults('ffmpeg scale', 'Brave', [
-      { title: 'Документация', url: 'https://ffmpeg.org/scale', snippet: 'фильтр scale' },
-      { title: 'Пример', url: 'https://ex.example', snippet: '' },
-    ]);
-
-    expect(summary).toBe('«ffmpeg scale»: результатов 2 (Brave)');
-    expect(detail).toContain('1. Документация\n   https://ffmpeg.org/scale\n   фильтр scale');
-    expect(detail).toContain('2. Пример\n   https://ex.example');
-    // Выдача — не проверенный факт: содержимое по ссылке читает отдельный инструмент.
-    expect(detail).toContain('содержимое по ссылке читает web (action fetch)');
+  it('код 401 говорит про ключ, прочие коды — просто код', async () => {
+    netFetch.mockResolvedValueOnce(reply('', { status: 401 }));
+    await expect(searchWeb('q', brave)).rejects.toThrow(/проверьте ключ/);
+    netFetch.mockResolvedValueOnce(reply('', { status: 503 }));
+    await expect(searchWeb('q', brave)).rejects.toThrow(/кодом 503/);
   });
 
-  it('пустая выдача — это не ошибка, но и не ответ', () => {
-    const { summary, detail } = formatWebResults('нечто', 'SearxNG', []);
-    expect(summary).toContain('ничего не найдено');
-    expect(detail).toContain('другую формулировку');
-  });
-});
-
-describe('isAllowedSearchEndpoint: частные диапазоны и имена', () => {
-  it('частные диапазоны считаются своими', () => {
-    expect(isAllowedSearchEndpoint('http://127.0.0.5:8080')).toBe(true);
-    expect(isAllowedSearchEndpoint('http://10.1.2.3:8080')).toBe(true);
-    expect(isAllowedSearchEndpoint('http://172.16.0.1:8080')).toBe(true);
-    expect(isAllowedSearchEndpoint('http://172.31.255.254')).toBe(true);
+  it('огромный ответ отвергается до разбора', async () => {
+    netFetch.mockResolvedValue(reply('x'.repeat(1_000_001)));
+    await expect(searchWeb('q', searx)).rejects.toThrow(/слишком большой/);
   });
 
-  it('172 вне диапазона 16–31 — уже не свой', () => {
-    expect(isAllowedSearchEndpoint('http://172.15.0.1')).toBe(false);
-    expect(isAllowedSearchEndpoint('http://172.32.0.1')).toBe(false);
+  it('не-JSON объясняет, что проверить', async () => {
+    netFetch.mockResolvedValue(reply('<html>не то</html>'));
+    await expect(searchWeb('q', searx)).rejects.toThrow(/не JSON/);
   });
 
-  it('IPv6-петля в скобках — локальная', () => {
-    expect(isAllowedSearchEndpoint('http://[::1]:8080')).toBe(true);
+  it('пустая выдача — пустой список, а не ошибка', async () => {
+    netFetch.mockResolvedValue(reply(JSON.stringify({})));
+    await expect(searchWeb('q', searx)).resolves.toEqual([]);
+    expect(WEB_SEARCH_LIMIT).toBe(10);
   });
-});
 
-describe('parseSearchResponse: мусор внутри выдачи', () => {
-  it('не-объекты в списке результатов пропускаются', () => {
-    const hits = parseSearchResponse('searxng', {
-      results: [null, 'строка', 42, { url: 'https://ok.example' }],
-    });
-    expect(hits).toEqual([{ title: 'https://ok.example', url: 'https://ok.example', snippet: '' }]);
+  it('ограничение по времени приходит в netFetch вместе с отменой агента', async () => {
+    netFetch.mockResolvedValue(reply('{"results":[]}'));
+    await searchWeb('q', searx);
+    const [, init] = netFetch.mock.calls[0] as [string, { signal?: AbortSignal }];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(isAllowedSearchEndpoint(webSearchRequestUrl(searx, 'q', 10))).toBe(true);
   });
 });
