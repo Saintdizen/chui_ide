@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { WorkspaceService } from '../src/main/workspace/workspace';
+import { untilEdit } from './watch-wait';
 import type { WorkspaceChangedPayload } from '../src/shared/api';
 
 const roots: string[] = [];
@@ -23,14 +24,6 @@ function service(events: Array<{ topic: string; payload: unknown }>): WorkspaceS
   const ws = new WorkspaceService((topic, payload) => events.push({ topic, payload }));
   services.push(ws);
   return ws;
-}
-
-async function until(check: () => boolean, timeoutMs = 3000): Promise<void> {
-  const started = Date.now();
-  while (!check()) {
-    if (Date.now() - started > timeoutMs) throw new Error('no event in time');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
 }
 
 function changesFor(events: Array<{ topic: string; payload: unknown }>, root: string): WorkspaceChangedPayload[] {
@@ -65,8 +58,7 @@ describe('наблюдение за несколькими корнями', () =
     await ws.addRoot(second);
     events.length = 0;
 
-    await fs.writeFile(path.join(first, 'a.ts'), 'y\n', 'utf8');
-    await until(() => changesFor(events, first).length > 0);
+    await untilEdit([path.join(first, 'a.ts')], () => changesFor(events, first).length > 0);
 
     const payload = changesFor(events, first)[0]!;
     expect(payload.path).toBe(path.join(first, 'a.ts'));
@@ -83,12 +75,12 @@ describe('наблюдение за несколькими корнями', () =
     await ws.open(first);
     await ws.addRoot(second);
 
-    await fs.writeFile(path.join(first, 'a.ts'), 'y\n', 'utf8');
-    await fs.writeFile(path.join(second, 'b.ts'), 'y\n', 'utf8');
     // Окно схлопывания одно на всю область: правки в разных корнях дают и одно,
     // и два уведомления в зависимости от гонки. Ждём хотя бы одно, и проверяем
     // главное: у каждого события корень СВОЙ и путь лежит в нём.
-    await until(() => events.some((event) => event.topic === 'workspace:changed'));
+    await untilEdit([path.join(first, 'a.ts'), path.join(second, 'b.ts')], () =>
+      events.some((event) => event.topic === 'workspace:changed'),
+    );
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     const told = [...changesFor(events, first), ...changesFor(events, second)];
@@ -109,9 +101,8 @@ describe('наблюдение за несколькими корнями', () =
     await ws.removeRoot(first);
     events.length = 0;
 
-    await fs.writeFile(path.join(first, 'a.ts'), 'z\n', 'utf8');
-    await fs.writeFile(path.join(second, 'b.ts'), 'y\n', 'utf8');
-    await until(() => changesFor(events, second).length > 0);
+    // Снятый корень должен молчать и на повторных записях — поэтому пишем оба файла.
+    await untilEdit([path.join(second, 'b.ts'), path.join(first, 'a.ts')], () => changesFor(events, second).length > 0);
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     expect(changesFor(events, first)).toHaveLength(0);

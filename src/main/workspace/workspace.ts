@@ -1300,7 +1300,13 @@ export class WorkspaceService {
         if (name && IGNORE_FILES.some((file) => file === name)) void this.reloadIgnore(root);
         this.scheduleChange(name ? path.join(root, name) : root);
       });
+      // Наблюдение поднимается не с первого раза: пока оно лежало (это секунды),
+      // правки прошли мимо него и пропали бы насовсем — ни дерево, ни git-пометки
+      // о них не узнали бы. Поэтому перечитываем корень целиком: лишнее обновление
+      // безопасно, потерянная правка — нет.
+      const restarted = state.watchRetries > 0;
       state.watchRetries = 0;
+      if (restarted) this.scheduleChange(root);
       // Ошибку наблюдения (переполнение буфера inotify, сетевой диск) не роняем
       // в консоль: без наблюдения чужую правку не увидим, но свои изменения
       // продолжаем сообщать сами. Пробуем поднять наблюдение заново — иначе

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { WorkspaceService } from '../src/main/workspace/workspace';
+import { untilEdit } from './watch-wait';
 
 /**
  * Наблюдение за файлами: о своих правках и чужих изменениях сообщаем в UI.
@@ -33,15 +34,12 @@ function service(events: Array<{ topic: string; payload: unknown }>): WorkspaceS
   return ws;
 }
 
-/** Дождаться события: наблюдатель асинхронный, ждать «просто так» нельзя. */
-async function until(check: () => boolean, timeoutMs = 3000): Promise<void> {
-  const started = Date.now();
-  while (!check()) {
-    if (Date.now() - started > timeoutMs) throw new Error('событие не пришло за отведённое время');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
+/**
+ * Дождаться события: наблюдатель асинхронный, ждать «просто так» нельзя.
+ *
+ * Без повторной записи (см. `untilEdit` в `./watch-wait`) здесь не обойтись:
+ * одиночная запись на macOS и на загруженном раннере может потеряться.
+ */
 describe('наблюдение за файлами', () => {
   it('запись мимо сервиса сообщается подписчику', async () => {
     const dir = await makeDir();
@@ -51,8 +49,7 @@ describe('наблюдение за файлами', () => {
     await ws.open(dir);
 
     // Пишем НЕ через сервис — так видит правку внешний инструмент.
-    await fs.writeFile(path.join(dir, 'a.ts'), 'const a = 2;\n', 'utf8');
-    await until(() => events.length > 0);
+    await untilEdit([path.join(dir, 'a.ts')], () => events.length > 0);
 
     expect(events[0]!.topic).toBe('workspace:changed');
   });
@@ -66,7 +63,7 @@ describe('наблюдение за файлами', () => {
 
     // Файл правил есть только сейчас: без перечитывания о нём никто не узнает.
     await fs.writeFile(path.join(dir, '.ai_ignore'), 'секрет/\nчерновики/\nмусор/\n', 'utf8');
-    await until(() => ws.ignoreRuleCount() !== before);
+    await untilEdit([path.join(dir, '.ai_ignore')], () => ws.ignoreRuleCount() !== before);
 
     expect(before).toBe(0);
     expect(ws.ignoreRuleCount()).toBe(3);
