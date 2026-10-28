@@ -28,6 +28,13 @@ const SELF_NAMES: ReadonlySet<string> = new Set(['this', 'self', 'cls']);
 export interface MemberAccess {
   /** Имя объекта перед точкой: `this`, `order`, `Styles`. */
   readonly receiver: string;
+  /**
+   * Выражение перед точкой целиком: `self.browser.driver.` → `['self', 'browser', 'driver']`.
+   *
+   * Нужно многоуровневому доступу: приёмник `driver` — ни `self`, ни имя класса, и без
+   * пути к нему тип не найти. Для простого `this.` путь — `['this']`, то есть `[receiver]`.
+   */
+  readonly path: readonly string[];
   /** Что уже набрано после точки (`#di` в `this.#di`); пусто — набрали только точку. */
   readonly prefix: string;
   /** Сколько знаков заменит вставка: длина `prefix`. */
@@ -64,7 +71,27 @@ export function memberAccessAt(line: string, column: number): MemberAccess | nul
   // `1.` и `2.5` — дробная часть числа, а не доступ к члену.
   if (/^\p{Nd}+$/u.test(receiver)) return null;
 
-  return { receiver, prefix, replaces: prefix.length };
+  return { receiver, path: receiverPath(line, nameStart, nameEnd), prefix, replaces: prefix.length };
+}
+
+/**
+ * Выражение перед точкой целиком, от начала строки до приёмника: `a.b.` → `['a', 'b']`.
+ *
+ * Разбираем только спокойные звенья — имя и точка. Всё остальное (`(`, `)`, `]`, `?`,
+ * кавычка) означает, что цепочка началась с выражения, и путь туда ведёт не к имени
+ * в тексте файла, а в ответ сервера. Тогда в пути только сам приёмник — и `membersOf`
+ * работает как раньше.
+ */
+function receiverPath(line: string, nameStart: number, nameEnd: number): string[] {
+  const path = [line.slice(nameStart, nameEnd)];
+  let at = nameStart;
+  while (at >= 2 && line[at - 1] === '.' && isIdentChar(line[at - 2] ?? '')) {
+    let begin = at - 2;
+    while (begin > 0 && isIdentChar(line[begin - 1] ?? '')) begin -= 1;
+    path.unshift(line.slice(begin, at - 1));
+    at = begin;
+  }
+  return path;
 }
 
 /** Текущий объект ли это (`this` в JS/Java/C#, `self`/`cls` в Python). */
@@ -76,6 +103,8 @@ export function isSelfReceiver(receiver: string): boolean {
 export interface MemberEntry {
   readonly name: string;
   readonly kind: 'field' | 'method';
+  /** Имя типа, если он назван рядом с объявлением: `conn: Connection`. */
+  readonly type?: string;
 }
 
 /**
@@ -90,12 +119,15 @@ export interface MemberEntry {
  */
 export function selfMembers(text: string): MemberEntry[] {
   const found = new Map<string, MemberEntry>();
-  const remember = (name: string, kind: MemberEntry['kind']): void => {
+  const remember = (name: string, kind: MemberEntry['kind'], type?: string): void => {
     if (!name || RESERVED.has(name) || found.has(name)) return;
-    found.set(name, { name, kind });
+    found.set(name, { name, kind, ...(type ? { type } : {}) });
   };
 
   for (const line of text.split('\n')) {
+    // Аннотация поля (`db: Db;` / `conn: Pg`) — единственный след типа для цепочки `a.b.`.
+    const annotated = FIELD_LINE.exec(line);
+    if (annotated?.[2]) remember(annotated[2], 'field', annotated[3]?.trim());
     // Объявления методов: `def run(self)`, `async def run(self)`, `run() {`, `#run() {`.
     const method = METHOD_DECL.exec(line);
     if (method?.[1]) remember(method[1], 'method');
@@ -130,12 +162,16 @@ export function classMembers(text: string, className: string): MemberEntry[] {
     if (!header || header[2] !== className) continue;
     const baseIndent = header[1]?.length ?? 0;
     const found = new Map<string, MemberEntry>();
-    const remember = (name: string, kind: MemberEntry['kind']): void => {
+    const remember = (name: string, kind: MemberEntry['kind'], type?: string): void => {
       if (!name || RESERVED.has(name) || found.has(name)) return;
-      found.set(name, { name, kind });
+      // Тип нужен цепочке `self.browser.driver.`: без него звено не пройти (см. `membersOfPath`).
+      found.set(name, type ? { name, kind, type } : { name, kind });
     };
 
     let bodyIndent: number | null = null;
+    // Однострочный класс: `class Connection { host: string; port: number; }` — все члены
+    // на строке заголовка, и цикл по продолжению их не увидит.
+    for (const inline of inlineMembers(lines[index] ?? '')) remember(inline.name, inline.kind, inline.type);
     for (let at = index + 1; at < lines.length; at += 1) {
       const line = lines[at] ?? '';
       if (!line.trim()) continue;
@@ -157,11 +193,39 @@ export function classMembers(text: string, className: string): MemberEntry[] {
         continue;
       }
       const field = FIELD_LINE.exec(line);
-      if (field?.[2]) remember(field[2], 'field');
+      if (field?.[2]) remember(field[2], 'field', field[3]);
     }
+    // Члены на строке заголовка разобраны до цикла (см. `inlineMembers`).
     return [...found.values()];
   }
   return [];
+}
+
+/** Члены, объявленные на строке заголовка: `class C { a: string; b(): void; }`. */
+function inlineMembers(header: string): MemberEntry[] {
+  // Берём только первую строку тела: многострочный класс разберёт цикл по отступу.
+  const body = /\{([^}]*)/u.exec(header)?.[1];
+  if (!body) return [];
+  const found: MemberEntry[] = [];
+  for (const piece of body.split(/[;,]/u)) {
+    const text = piece.trim();
+    if (!text) continue;
+    const method = METHOD_DECL.exec(text);
+    if (method?.[1]) {
+      found.push({ name: method[1], kind: 'method' });
+      continue;
+    }
+    // Голое имя без `:` и `=` — это модификатор или ключевое слово, а не член.
+    const field =
+      /^([\p{L}\p{Nl}\p{Pc}_$][\p{L}\p{Nl}\p{Nd}\p{Pc}_$]*)\s*\??\s*(?::\s*([\w.$][\w.$<>[\]]*))?\s*(?:\(|:|=)/u.exec(
+        text,
+      );
+    const name = field?.[1];
+    if (!name || RESERVED.has(name)) continue;
+    const kind = field[0].endsWith('(') ? 'method' : 'field';
+    found.push({ name, kind, ...(field[2] ? { type: field[2] } : {}) });
+  }
+  return found;
 }
 
 /**
@@ -189,9 +253,57 @@ export function receiverType(text: string, receiver: string): string | null {
 }
 
 /**
- * Члены приёмника из текста файла. `self`/`this`/`cls` — члены текущего объекта
- * (`selfMembers`). Имя класса — его члены (`classMembers`). Поле или переменная
- * (`browser`, `driver`) — члены ТИПА, который ей присвоен или приписан аннотацией.
+ * Члены последнего звена цепочки: `self.browser.driver.` → члены типа `driver`.
+ *
+ * Без этого многоуровневый доступ работал только на ПЕРВОМ звене: `self.browser.`
+ * находил тип `browser`, а `self.browser.driver.` передавал дальше имя `driver`
+ * как отдельное слово — и оно ни в одном классе файла не находилось. Здесь цепочка
+ * проходится слева направо: тип каждого звена берётся из объявления поля внутри
+ * предыдущего типа (`driver: WebDriver` в `class Browser`).
+ *
+ * `null` — цепочка не разобрана с самого начала (первое имя не `self` и не класс
+ * файла) или на каком-то шаге тип не назван. Отличие от пустого списка важно:
+ * пустой — «тип известен, членов нет», `null` — «ручаться нечем», и вызывающий
+ * оставляет тогда слово из файла или ответ сервера.
+ */
+export function membersOfPath(
+  text: string,
+  path: readonly string[],
+  elsewhere: readonly string[] = [],
+): MemberEntry[] | null {
+  const first = path[0];
+  if (!first) return null;
+
+  // Первое звено: `self`/`this` — свой класс; иначе — класс с таким именем в файле.
+  let entries: MemberEntry[] | null = isSelfReceiver(first)
+    ? selfMembers(text)
+    : classMembersAnywhere(text, first, elsewhere);
+  for (const step of path.slice(1)) {
+    if (!entries) return null;
+    const field = entries.find((entry) => entry.name === step);
+    // Необъявленное звено (динамика, `getattr`, `any`) — дальше не проходим.
+    if (!field?.type) return null;
+    entries = classMembersAnywhere(text, field.type, elsewhere);
+  }
+  return entries;
+}
+
+/** Члены класса по имени: сначала в файле, затем — в привезённых импортом текстах. */
+function classMembersAnywhere(text: string, className: string, elsewhere: readonly string[]): MemberEntry[] | null {
+  const own = classMembers(text, className);
+  if (own.length > 0) return own;
+  for (const other of elsewhere) {
+    const found = classMembers(other, className);
+    if (found.length > 0) return found;
+  }
+  // Класса нет нигде: тип не наш, ручаться нечем.
+  return null;
+}
+
+/**
+ * Члены приёмника: `self`/`this`/`cls` — свой объект (`selfMembers`). Имя класса — его
+ * члены (`classMembers`). Поле или переменная (`browser`, `driver`) — члены ТИПА, который
+ * ей присвоен или приписан аннотацией.
  *
  * `elsewhere` — тексты ДРУГИХ файлов (импортированных классов). В текущем файле
  * объявления чужого класса нет, и по одному `text` его члены не собрать: класс
@@ -268,10 +380,10 @@ const IDENT = String.raw`[\p{L}\p{Nl}\p{Nd}\p{Pc}_$][\p{L}\p{Nl}\p{Nd}\p{Pc}_$]*
 /** Объявление класса: `class Elements:` (Python) или `export class Elements {` (JS/TS). */
 const CLASS_DECL = new RegExp(String.raw`^(\s*)(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(${IDENT})`, 'u');
 /**
- * Объявление на уровне класса: `x = …` (Python), `x: int = …`, `x: number;` (TS).
- * Вторая группа — имя: без `=` поле всё равно поле, `;` его закрывает.
+ * Объявление поля на уровне класса: `x = …` (Python), `x: int = …`, `x: number;` (TS).
+ * Вторая группа — имя, третья — тип из аннотации (без него не пройти цепочку `a.b.`).
  */
-const FIELD_LINE = new RegExp(String.raw`^(\s*)(${IDENT})\s*(?::[^=;]*)?(?:=|;|$)`, 'u');
+const FIELD_LINE = new RegExp(String.raw`^(\s*)(${IDENT})\s*(?::\s*([^=;]*?))?\s*(?:=|;|$)`, 'u');
 /** Имя члена: у закрытого поля впереди `#`. */
 const MEMBER = `#?${IDENT}`;
 

@@ -40,7 +40,7 @@ import { importPathAt, importPathItems, type ImportPathContext } from './import-
 import { expandPostfix, postfixAt, postfixOffers } from './postfix';
 import { callContextAt, namedArgumentItems } from './named-args';
 import { expandSnippet } from './snippet';
-import { importsOf, memberAccessAt, membersOf, type MemberAccess } from './member-access';
+import { importsOf, memberAccessAt, type membersOf, membersOfPath, type MemberAccess } from './member-access';
 import { prefixAt } from './prefix';
 import { WordIndex } from './word-index';
 import type { SuggestWidget } from '../widgets/suggest-widget';
@@ -887,7 +887,10 @@ export class CompletionAssistant {
 
   /** Члены приёмника по уже прочитанным текстам (свой файл + импортированные). */
   private memberEntries(member: MemberAccess): ReturnType<typeof membersOf> {
-    return membersOf(this.buffer.text, member.receiver, [...this.sources.values()]);
+    // Путь длиннее одного звена — `self.browser.driver.`: приёмник `driver` сам по себе
+    // ничего не говорит, и его члены надо искать по типу ПОЛЯ `browser`. Для одиночного
+    // приёмника путь равен `[receiver]`, и вызов тот же.
+    return membersOfPath(this.buffer.text, member.path, [...this.sources.values()]) ?? [];
   }
 
   /**
@@ -959,7 +962,9 @@ export class CompletionAssistant {
   ): Promise<ReturnType<typeof membersOf>> {
     const entries = this.memberEntries(member);
     if (entries.length > 0) return entries;
-    for (const specifier of importsOf(text, member.receiver)) {
+    // Ищим импорт ПЕРВОГО звена пути: `import { browser } from './browser'` отвечает за
+    // `browser.driver.`, а приёмник `driver` в импортах может не встречаться вообще.
+    for (const specifier of importsOf(text, member.path[0] ?? member.receiver)) {
       const next = resolveSpecifier(specifier, target, files, aliases);
       if (next === null || this.sources.has(next)) continue;
       const deeper = await read(next).catch(() => null);

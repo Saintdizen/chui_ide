@@ -4,6 +4,7 @@ import {
   isSelfReceiver,
   memberAccessAt,
   membersOf,
+  membersOfPath,
   selfMembers,
 } from '../src/renderer/editor/complete/member-access';
 
@@ -15,12 +16,12 @@ import {
 describe('memberAccessAt', () => {
   it('точка без набранного имени — членов ещё нет, но место уже member', () => {
     const access = memberAccessAt('this.', 5);
-    expect(access).toEqual({ receiver: 'this', prefix: '', replaces: 0 });
+    expect(access).toEqual({ receiver: 'this', path: ['this'], prefix: '', replaces: 0 });
   });
 
   it('набранное после точки становится началом члена', () => {
     const access = memberAccessAt('this.#dia', 9);
-    expect(access).toEqual({ receiver: 'this', prefix: '#dia', replaces: 4 });
+    expect(access).toEqual({ receiver: 'this', path: ['this'], prefix: '#dia', replaces: 4 });
   });
 
   it('закрытое поле начинается с #', () => {
@@ -162,5 +163,51 @@ describe('importsOf', () => {
 
   it('переименование при импорте: ищем по локальному имени', () => {
     expect(importsOf("import { Elements as El } from './elements';\n", 'El')).toEqual(['./elements']);
+  });
+});
+
+describe('цепочка a.b.', () => {
+  const TS = [
+    'class Pg { host = ""; port = 5432; }',
+    'class Db {',
+    '  conn: Pg;',
+    '  name = "";',
+    '}',
+    'class App {',
+    '  db: Db;',
+    '}',
+  ].join('\n');
+
+  it('приёмник — последнее звено, путь — все звенья', () => {
+    const line = 'self.db.conn.';
+    expect(memberAccessAt(line, line.length)).toEqual({
+      receiver: 'conn',
+      path: ['self', 'db', 'conn'],
+      prefix: '',
+      replaces: 0,
+    });
+  });
+
+  it('одно звено — путь равен [receiver]', () => {
+    expect(memberAccessAt('this.', 5)?.path).toEqual(['this']);
+  });
+
+  it('тип поля из аннотации ведёт к его классу: `db: Db` → члены Db', () => {
+    expect(membersOfPath(TS, ['self', 'db'])?.map((entry) => entry.name)).toEqual(['conn', 'name']);
+  });
+
+  it('два шага подряд: `self.db.conn.` → члены Pg', () => {
+    expect(membersOfPath(TS, ['self', 'db', 'conn'])?.map((entry) => entry.name)).toEqual(['host', 'port']);
+  });
+
+  it('порядок звеньев важен: `self.conn.db` никуда не ведёт', () => {
+    expect(membersOfPath(TS, ['self', 'conn', 'db'])).toBeNull();
+  });
+
+  it('аннотация без `=` тоже поле: тип берётся из `db: Db;`', () => {
+    // Класса Db в этом тексте нет — идти некуда. Появился он — звено разрешается.
+    expect(membersOfPath('class A {\n  db: Db;\n}', ['self', 'db'])).toBeNull();
+    const withDb = 'class A {\n  db: Db;\n}\nclass Db { x = 1; }';
+    expect(membersOfPath(withDb, ['self', 'db'])?.map((entry) => entry.name)).toEqual(['x']);
   });
 });

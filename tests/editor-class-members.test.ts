@@ -64,7 +64,12 @@ describe('membersOf', () => {
 
 describe('вложенный доступ в строке', () => {
   it('self.Elements.ba распознаётся как приёмник Elements', () => {
-    expect(memberAccessAt('self.Elements.ba', 16)).toEqual({ receiver: 'Elements', prefix: 'ba', replaces: 2 });
+    expect(memberAccessAt('self.Elements.ba', 16)).toEqual({
+      receiver: 'Elements',
+      path: ['self', 'Elements'],
+      prefix: 'ba',
+      replaces: 2,
+    });
   });
 });
 
