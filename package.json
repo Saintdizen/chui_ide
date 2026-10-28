@@ -1,6 +1,6 @@
 {
   "name": "chui-ide",
-  "version": "0.3.64",
+  "version": "0.3.65",
   "private": true,
   "license": "MIT",
   "author": {
@@ -92,6 +92,7 @@
     "probe:terminal": "npm run build && electron scripts/terminal-input-probe.cjs",
     "probe:layout": "npm run build && electron scripts/layout-probe.cjs",
     "probe:editor": "electron scripts/own-editor-probe.cjs",
+    "probe:suggestplace": "electron scripts/suggest-place-probe.cjs",
     "probe:lspbundled": "npm run build:main && electron scripts/lsp-bundled-probe.cjs",
     "probe:lspstatus": "npm run build && electron scripts/lsp-status-probe.cjs",
     "probe:lspstart": "npm run build && electron scripts/lsp-start-probe.cjs",

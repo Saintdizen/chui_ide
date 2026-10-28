@@ -66,4 +66,51 @@ describe('placePopup', () => {
     const placement = placePopup({ anchor, size: { width: 340, height: 300 }, viewport, gap: 12, margin: 20 });
     expect(placement.top).toBe(576 - 300 - 12);
   });
+
+  describe('prefer: below — якорь внутри текста', () => {
+    // Каретка в середине окна: места хватает с обеих сторон, и спор решает
+    // предпочтение, а не арифметика.
+    const caret = { top: 300, left: 200, right: 200, bottom: 320 };
+
+    it('список у каретки раскрывается вниз', () => {
+      const placement = placePopup({
+        anchor: caret,
+        size: { width: 320, height: 200 },
+        viewport,
+        gap: 2,
+        align: 'start',
+        prefer: 'below',
+      });
+      expect(placement.top).toBe(322);
+    });
+
+    it('без prefer — по-прежнему вверх', () => {
+      const placement = placePopup({ anchor: caret, size: { width: 320, height: 200 }, viewport, gap: 2 });
+      expect(placement.top).toBe(300 - 200 - 2);
+    });
+
+    it('внизу не влезает — переворачивается вверх, а не упирается в край', () => {
+      // Каретка у нижнего края окна: снизу 200 px уже не влезут.
+      const placement = placePopup({
+        anchor: { top: 520, left: 200, right: 200, bottom: 540 },
+        size: { width: 320, height: 200 },
+        viewport,
+        gap: 2,
+        prefer: 'below',
+      });
+      expect(placement.top).toBe(520 - 200 - 2);
+    });
+
+    it('не влезает нигде — прижимается к нижнему краю окна, но не вылезает', () => {
+      const placement = placePopup({
+        anchor: { top: 300, left: 200, right: 200, bottom: 320 },
+        size: { width: 320, height: 1000 },
+        viewport,
+        gap: 2,
+        prefer: 'below',
+      });
+      expect(placement.top).toBe(8);
+      expect(placement.top + 1000).toBeGreaterThanOrEqual(viewport.height - 8);
+    });
+  });
 });

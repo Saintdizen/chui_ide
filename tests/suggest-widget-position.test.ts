@@ -15,6 +15,8 @@ class FakeNode {
   className = '';
   textContent = '';
   scrollHeight = 0;
+  /** Высота «по отрисовке»: у фейка раскладки нет, поэтому её задаёт тест. */
+  rectHeight = 0;
   scrollTop = 0;
   clientHeight = 0;
   offsetTop = 0;
@@ -46,6 +48,9 @@ class FakeNode {
     return null;
   }
   addEventListener() {}
+  getBoundingClientRect() {
+    return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: this.rectHeight };
+  }
 }
 
 const root = new FakeNode('html');
@@ -64,7 +69,7 @@ beforeEach(() => {
   globals.HTMLElement = FakeNode;
 });
 
-const { SuggestWidget } = await import('../src/renderer/editor/widgets/suggest-widget');
+const { SuggestWidget, docPreview } = await import('../src/renderer/editor/widgets/suggest-widget');
 
 function item(label: string) {
   return { label, kind: 'language' as const, detail: '' };
@@ -89,8 +94,7 @@ describe('попап: дописывание списка', () => {
     widget.append([item('beta'), item('gamma')]);
     expect(widget.labels()).toEqual(['alpha', 'beta', 'gamma']);
     // Каретка не двигалась — левый край тот же. Верх пересчитан от того же якоря:
-    // попап встал над кареткой (места снизу в фейковом окне нет), а не там, где был
-    // нарисован прежний, короткий список.
+    // попап встал под кареткой, а не там, где был нарисован прежний, короткий список.
     expect(popup.style.left).toBe(left);
     const top = Number.parseInt(popup.style.top!, 10);
     expect(top).toBeGreaterThan(0);
@@ -124,45 +128,82 @@ describe('попап: дописывание списка', () => {
 });
 
 describe('попап: высота по факту', () => {
-  it('низкий список меряется по scrollHeight, а не по потолку', () => {
-    const { widget, list } = setup();
-    // Одна строка CSS-высотой 20px: арифметика «строки × ROW_HEIGHT + 8» дала бы 28,
-    // мера — 20. Попап ставим по каретке у нижнего края: короткий список помещается
-    // снизу только если взята настоящая высота.
-    list.scrollHeight = 20;
-    widget.show([item('alpha')], { left: 100, top: 700, bottom: 720 }, 0);
-    // 700 + 2 (gap) + 20 = 722 < 900 − 2 (margin): снизу помещается.
-    expect(list.style.maxHeight).toBe('200px');
-  });
-
-  it('мера берётся после потолка, а не до', () => {
-    const { widget, list } = setup();
-    // Список длиной больше MAX_VISIBLE: scrollHeight у настоящего узла уже с потолком.
-    // Фейк отдаёт значение, которое выставил виджет, — потолок обязан стоять ДО меры.
-    const seen: string[] = [];
-    let height = 0;
-    Object.defineProperty(list, 'scrollHeight', {
-      get: () => {
-        seen.push(list.style.maxHeight ?? '');
-        return height;
-      },
-      set: (value: number) => {
-        height = value;
-      },
-    });
-    height = 160; // как у шести строк по 20px плюс отступы
+  it('длинный список не переворачивает попап над кареткой', () => {
+    const { widget, popup, list } = setup();
+    // Беда, ради которой мера заведена: у списка `scrollHeight` потолком не режется
+    // и у длинного набора равен высоте ВСЕХ строк (в живой ИДЕ — 1000 при видимых 210).
+    // С такой «высотой» попап не влезал ни вниз, ни вверх и прижимался к верхнему
+    // краю окна, хотя каретка была посреди экрана.
+    list.scrollHeight = 1000;
+    popup.rectHeight = 210;
     widget.show(
-      Array.from({ length: 12 }, (_, index) => item(`row${index}`)),
-      { left: 100, top: 200, bottom: 220 },
+      Array.from({ length: 40 }, (_, index) => item(`row${index}`)),
+      { left: 100, top: 600, bottom: 620 },
       0,
     );
-    expect(seen[0]).toBe('200px');
+    // 620 + 2 = 622: растёт вниз от каретки, а не к потолку окна.
+    expect(popup.style.top).toBe('622px');
+    expect(list.style.maxHeight).toBe('200px');
   });
 
   it('без раскладки (мера 0) остаётся расчёт по строкам', () => {
     const { widget, popup } = setup();
-    // scrollHeight = 0 — как в jsdom. Три строки дают 3 × 20 + 8 = 68.
+    // Высота попапа 0 — как в jsdom. Три строки дают 3 × 20 + 8 = 68.
+    // Якорь у каретки — список растёт ВНИЗ от строки, где набирают (220 + 2).
     widget.show([item('a'), item('b'), item('c')], { left: 100, top: 200, bottom: 220 }, 0);
-    expect(popup.style.top).toBe(`${200 - 2 - 68}px`);
+    expect(popup.style.top).toBe(`${220 + 2}px`);
+  });
+});
+
+/**
+ * Строка «```c» — ограждение блока кода из описания сервера, а не подпись языка.
+ * В списке она появлялась ровно на выбранной строке (до `completionItem/resolve`
+ * описания нет) и не говорила ничего: человек уже знает, на каком языке файл.
+ */
+describe('описание в строке списка', () => {
+  it('ограждение блока кода не выдаётся за описание', () => {
+    expect(docPreview('```c\nint XATTR_SIZE_MAX;\n```')).toBe('int XATTR_SIZE_MAX;');
+  });
+
+  it('тильды считаются тем же ограждением', () => {
+    expect(docPreview('~~~python\nprint(1)\n~~~')).toBe('print(1)');
+  });
+
+  it('первая содержательная строка идёт после пустых', () => {
+    expect(docPreview('\n\nМаксимальный размер атрибута')).toBe('Максимальный размер атрибута');
+  });
+
+  it('из одних ограждений описание пустое — строка не рисуется', () => {
+    expect(docPreview('```c\n```')).toBe('');
+    expect(docPreview('')).toBe('');
+  });
+
+  it('patch кладёт в строку первую содержательную строку описания', () => {
+    const { widget, list } = setup();
+    const item = { label: 'XATTR_SIZE_MAX', kind: 'external' as const, detail: 'Auto-import' };
+    widget.show([item], { left: 100, top: 200, bottom: 220 }, 0);
+    const doc = list.children[0]!.children[0]!.children[2]!;
+
+    // До ответа `completionItem/resolve` описания нет — строки под подписью тоже.
+    expect(doc.hidden).toBe(true);
+
+    widget.patch(item, { documentation: '```c\nint XATTR_SIZE_MAX;\n```' });
+    expect(doc.textContent).toBe('int XATTR_SIZE_MAX;');
+    expect(doc.hidden).toBe(false);
+  });
+
+  it('описание из одного ограждения подписи языка не показывает', () => {
+    const { widget, list } = setup();
+    const item = {
+      label: 'XATTR_SIZE_MAX',
+      kind: 'external' as const,
+      detail: 'Auto-import',
+      documentation: '```c\n```',
+    };
+    widget.show([item], { left: 100, top: 200, bottom: 220 }, 0);
+    const doc = list.children[0]!.children[0]!.children[2]!;
+
+    expect(doc.textContent).toBe('');
+    expect(doc.hidden).toBe(true);
   });
 });

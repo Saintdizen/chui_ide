@@ -23,6 +23,8 @@ const MAX_VISIBLE = 10;
 /** Высота строки списка и его ширина: попап ставим до отрисовки, размеры нужны заранее. */
 const ROW_HEIGHT = 20;
 const WIDTH = 280;
+/** Строка-ограждение блока кода в описании: «```c». В списке это подпись языка, не смысл. */
+const FENCE = /^\s{0,3}(```|~~~)/;
 
 export interface SuggestAnchor {
   /** Координаты каретки в системе окна. */
@@ -266,6 +268,8 @@ export class SuggestWidget {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       gap: 2,
       align: 'start',
+      // Якорь — каретка в тексте: список обязан раскрываться вниз от строки.
+      prefer: 'below',
     });
     this.root.style.left = `${placement.left}px`;
     this.root.style.top = `${placement.top}px`;
@@ -274,15 +278,15 @@ export class SuggestWidget {
   /**
    * Высота попапа по факту отрисовки, а не по арифметике из `ROW_HEIGHT`.
    *
-   * Высоту строки задаёт CSS (`min-height` плюс отступы), и правка стиля тянула бы
-   * за собой константу в этом файле — попап переворачивался бы не там. Мера берётся
-   * у списка, которому уже поставлен потолок `max-height` (см. `position`), — иначе у
-   * длинного списка вернулась бы высота всех строк. В jsdom без раскладки мера — 0,
-   * поэтому там остаётся расчёт.
+   * Меру даёт прямоугольник самого попапа: у списка `scrollHeight` потолком
+   * `max-height` НЕ режется и у длинного набора равен высоте всех строк (в живой ИДЕ
+   * вышло 1000 при видимых 210). С такой «высотой» попап не влезал ни вниз, ни вверх
+   * и прижимался к верхнему краю окна — при верной каретке и верном якоре. В jsdom без
+   * раскладки мера — 0, поэтому там остаётся расчёт по числу видимых строк.
    */
   private measuredHeight(): number {
-    const measured = this.list.scrollHeight;
-    if (measured > 0) return measured;
+    const rendered = this.root.getBoundingClientRect().height;
+    if (rendered > 0) return rendered;
     return Math.min(this.items.length, MAX_VISIBLE) * ROW_HEIGHT + 8;
   }
 
@@ -353,6 +357,23 @@ function renderLabel(node: HTMLElement, item: CompletionItem): void {
 }
 
 /**
+ * Одна строка описания для строки списка.
+ *
+ * Первая непустая строка ответа сервера — нередко ограждение блока кода
+ * («```c»). В списке она читается как подпись языка и не говорит ничего:
+ * человек уже знает, на каком языке файл. Отсюда её пропускаем и берём
+ * первую содержательную строку — у clangd это сама сигнатура.
+ */
+export function docPreview(documentation: string): string {
+  for (const part of documentation.split('\n')) {
+    const line = part.trim();
+    if (line.length === 0 || FENCE.test(line)) continue;
+    return line;
+  }
+  return '';
+}
+
+/**
  * Описание символа под подписью: одна строка в списке, полный текст — в подсказке.
  * Появляется только после `completionItem/resolve` — до него описания ещё нет.
  */
@@ -360,11 +381,7 @@ function renderDoc(row: HTMLElement, item: CompletionItem): void {
   const doc = row.querySelector('.own-editor-suggest-doc');
   if (!(doc instanceof HTMLElement)) return;
   const full = item.documentation ?? '';
-  const first =
-    full
-      .split('\n')
-      .find((part) => part.trim().length > 0)
-      ?.trim() ?? '';
+  const first = docPreview(full);
   doc.textContent = first;
   doc.hidden = first.length === 0;
   if (first) doc.title = full;

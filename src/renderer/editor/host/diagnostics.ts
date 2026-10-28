@@ -106,6 +106,20 @@ export class DiagnosticsStore {
     if (this.byPath.delete(path)) this.emitter.fire();
   }
 
+  /**
+   * Забыть ВСЕ пометки — при смене проекта.
+   *
+   * Отдельно от `clear(path)` потому, что свои пометки снимают сами проверки
+   * (`projectCheck`, `typeCheck`), а пометки обхода проекта знает только окно: старый
+   * корень закрылся, а обход нового мог и не начаться (в проекте нет сервера) — ошибки
+   * чужого кода висели бы в панели «Проблемы» вечно.
+   */
+  clearAll(): void {
+    if (this.byPath.size === 0) return;
+    this.byPath.clear();
+    this.emitter.fire();
+  }
+
   /** Пометки файла, сгруппированные в порядке следования по документу — для перехода. */
   ordered(path?: string): DiagnosticItem[] {
     return this.markers(path);

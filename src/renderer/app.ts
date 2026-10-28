@@ -3538,6 +3538,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         await refreshScan();
         preloadEnvironment();
         // Активный корень сменился — старые пометки про чужой код: снять и проверить заново.
+        // clearAllMarkers — пометки обхода проекта (`lsp-project`): их не знает ни одна
+        // проверка окна, и без этого в «Проблемах» висели ошибки прошлого корня.
+        editors.clearAllMarkers();
         projectCheck.reset();
         typeCheck.reset();
         void projectCheck.run();
@@ -3561,6 +3564,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       await refreshScan();
       preloadEnvironment();
       // У нового проекта всё другое, включая пометки: снять старые и проверить заново.
+      // Свои пометки снимают сами проверки, а обход проекта (`lsp-project`) — только
+      // здесь: иначе ошибки старого корня остались бы в «Проблемах» до следующего обхода.
+      editors.clearAllMarkers();
       projectCheck.reset();
       typeCheck.reset();
       void projectCheck.run();

@@ -93,6 +93,20 @@ describe('пометки всего проекта', () => {
 
     expect(h.published).toEqual([]);
   });
+
+  it('смена проекта отсекает уже собранные файлы при отправке', () => {
+    // Файл успели собрать, а пачка ещё ждала таймера — и в этот миг сменили проект.
+    // Проверка при сборе его пропустила (тогда он был своим), проверка при отправке — нет.
+    let root = '/old';
+    const h = harness((file) => file.startsWith(root));
+    h.service.begin();
+    h.deferred.shift()?.();
+    h.emit('/old/src/a.ts', [error(1)]);
+    root = '/new';
+    h.deferred.shift()?.();
+
+    expect(h.published.map((payload) => payload.start)).toEqual([true]);
+  });
 });
 
 describe('isProjectSource', () => {

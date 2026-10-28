@@ -49,6 +49,9 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
     // Открытая папка попадает в историю стартового окна.
     deps.settings.rememberProject(info.root);
     await deps.git.refresh();
+    // Другой проект — другая карта символов и чужие пометки в строке состояния.
+    // Обход заново: он же снимает счёт прошлого проекта (`begin()` в project-diagnostics).
+    deps.index?.refresh();
     return info;
   });
 
@@ -58,16 +61,19 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
     const info = await deps.workspace.addRoot(params.path);
     deps.settings.rememberProject(info.root);
     await deps.git.refresh();
+    deps.index?.refresh();
     return info;
   });
   router.register('workspace.removeRoot', async (params) => {
     const info = await deps.workspace.removeRoot(params.path);
     await deps.git.refresh();
+    deps.index?.refresh();
     return info;
   });
   router.register('workspace.setActiveRoot', async (params) => {
     const info = await deps.workspace.setActiveRoot(params.path);
     await deps.git.refresh();
+    deps.index?.refresh();
     return info;
   });
 

@@ -98,4 +98,35 @@ describe('DiagnosticsStore', () => {
     store.set('/p/b.ts', 'imports', []);
     expect(calls).toBe(2);
   });
+
+  it('clearAll забывает пометки ВСЕХ файлов и источников: смена проекта', () => {
+    const store = new DiagnosticsStore();
+    // Ошибка старого проекта от обхода (`lsp-project`) и от живой проверки.
+    store.set('/старый/a.ts', 'lsp-project', [diagnostic({ line: 4 })]);
+    store.set('/старый/b.py', 'lsp', [diagnostic({ line: 1, severity: 'warning' })]);
+    let calls = 0;
+    store.onDidChange(() => {
+      calls += 1;
+    });
+
+    store.clearAll();
+
+    // Панель «Проблемы» и счётчики в статус-баре читают именно это.
+    expect(store.markers()).toEqual([]);
+    expect(store.paths()).toEqual([]);
+    expect(store.problemCounts()).toEqual({ errors: 0, warnings: 0 });
+    // Один сигнал на всю чистку, а не по одному на файл.
+    expect(calls).toBe(1);
+  });
+
+  it('clearAll на пустом наборе не будит подписчиков', () => {
+    const store = new DiagnosticsStore();
+    let calls = 0;
+    store.onDidChange(() => {
+      calls += 1;
+    });
+    // Смену проекта ловят все окна; лишняя перерисовка в пустом — ни к чему.
+    store.clearAll();
+    expect(calls).toBe(0);
+  });
 });

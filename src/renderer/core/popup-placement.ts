@@ -48,6 +48,15 @@ export function placePopup(options: {
    * так попап остаётся внутри своей панели, а не уезжает за левый край окна.
    */
   align?: 'start' | 'end';
+  /**
+   * С какой стороны от якоря попап встаёт, если места хватает с обеих.
+   * `above` — по умолчанию: попапы поднимаются из нижних панелей (статусбар),
+   * и вверх места больше. `below` — для якоря внутри текста (список подсказок):
+   * список у каретки обязан расти вниз, иначе накрывает только что написанные
+   * строки и кажется уехавшим вверх. Переворот — только когда с этой стороны
+   * не влезает (каретка у нижнего края окна).
+   */
+  prefer?: 'above' | 'below';
 }): Placement {
   const { anchor, size, viewport, gap } = options;
   const margin = options.margin ?? 8;
@@ -59,7 +68,13 @@ export function placePopup(options: {
 
   const above = anchor.top - size.height - gap;
   const below = anchor.bottom + gap;
-  const preferred = above >= margin ? above : below;
+  const preferBelow = options.prefer === 'below';
+  const fitsAbove = above >= margin;
+  const fitsBelow = below + size.height <= viewport.height - margin;
+  // Сначала хочет одну сторону, но уступает ей, если там не влезает — иначе
+  // попап упирался бы в край окна, хотя с другой стороны места полно.
+  const wantAbove = preferBelow ? !fitsBelow && fitsAbove : fitsAbove;
+  const preferred = wantAbove ? above : below;
 
   // Прижатие к границам: снизу — чтобы не уехал за нижний край, сверху — за верхний.
   const top = Math.max(margin, Math.min(preferred, viewport.height - size.height - margin));

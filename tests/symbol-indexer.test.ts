@@ -190,6 +190,31 @@ describe('SymbolIndexer', () => {
     expect(index.status().root).toBe(two);
   });
 
+  it('просьба пересобрать во время обхода не теряется', async () => {
+    const one = project({ 'a.py': 'x = 1\n' });
+    const two = project({ 'b.py': 'y = 2\n' });
+    let root = one;
+    // Обход первого проекта держим за руку: только так ловится миг «проект сменился,
+    // а старый обход ещё идёт» — именно тогда окно и оставалось с чужими пометками.
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const outline = async (target: string): Promise<readonly FileSymbol[] | null> => {
+      await held;
+      return target.endsWith('a.py') || target.endsWith('b.py') ? parserSkeleton : [];
+    };
+    const index = new SymbolIndexer({ root: () => root, outline, store: new SymbolStore(path.join(one, '.idx')) });
+
+    index.refresh();
+    root = two;
+    index.refresh();
+    release();
+
+    await waitFor(() => index.status().root === two && index.status().phase === 'ready');
+    expect(names(index.find('Parser'))).toEqual(['b.py']);
+  });
+
   it('без проекта карта пуста, а не «готова»', async () => {
     const { outline } = fakeOutline({});
     const index = new SymbolIndexer({ root: () => null, outline, store: new SymbolStore(path.join(tmpdir(), 'nope')) });

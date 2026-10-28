@@ -48,8 +48,11 @@ export function createProjectDiagnostics(deps: ProjectDiagnosticsDeps): ProjectD
   const flush = (): void => {
     scheduled = false;
     if (pending.length === 0) return;
-    const files = pending;
+    // Проверяем ещё раз при отправке: пока пачка лежала в ожидании, могли сменить
+    // проект, и файлы старого корня в окно уже не годятся.
+    const files = deps.include ? pending.filter((file) => deps.include?.(file.path) === true) : pending;
     pending = [];
+    if (files.length === 0) return;
     deps.publish({ start: false, files });
   };
 

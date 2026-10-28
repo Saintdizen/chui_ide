@@ -1,7 +1,7 @@
 import type { LspChip } from '../../shared/lsp-status';
 import { lspOriginLabel } from '../../shared/lsp-status';
 import { h, svgIcon } from './dom';
-import { checkProgress } from './check-progress';
+import { statusMeter } from './status-meter';
 import type { CheckProgressInput } from './check-progress';
 import { problemsWidget } from './problems-widget';
 import type { ProjectProblemCounts } from './problems-widget';
@@ -189,9 +189,10 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   );
   const lspLabel = h('span', {});
   lspItem.appendChild(lspLabel);
-  // Прогресс языкового сервера (индексация, поиск ссылок): полоса с процентом, если
-  // сервер его назвал, иначе бегущий штрих. Занятый сервер молчать не должен.
-  const progressItem = h(
+  // Одна полоса на все долгие работы окна: языковый сервер, чтение проекта, проверка
+  // проекта. Раньше их было три, и две обычно стояли на нуле, дожидаясь первой —
+  // рядом это читалось как зависание. Очередь решает чистый модуль: `ui/status-meter.ts`.
+  const meterItem = h(
     'span',
     { class: 'status-item status-meter is-metered' },
     h(
@@ -202,23 +203,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     ),
     h('span', { class: 'status-meter-label' }),
   );
-  const progressFill = progressItem.querySelector<HTMLElement>('.status-meter-fill')!;
-  const progressLabel = progressItem.querySelector<HTMLElement>('.status-meter-label')!;
-  // Карта символов собирается: полоса с числом пройденных файлов. Числа — файлы,
-  // а не проценты: обход идёт файл за файлом, и это единственное, что известно точно.
-  const symbolsItem = h(
-    'span',
-    { class: 'status-item status-meter' },
-    h(
-      'span',
-      { class: 'status-meter-track' },
-      h('span', { class: 'status-meter-fill' }),
-      h('span', { class: 'status-meter-run' }),
-    ),
-    h('span', { class: 'status-meter-label' }),
-  );
-  const symbolsFill = symbolsItem.querySelector<HTMLElement>('.status-meter-fill')!;
-  const symbolsLabel = symbolsItem.querySelector<HTMLElement>('.status-meter-label')!;
+  const meterFill = meterItem.querySelector<HTMLElement>('.status-meter-fill')!;
+  const meterLabel = meterItem.querySelector<HTMLElement>('.status-meter-label')!;
   // Идёт запись макроса: точка и число действий. Молчит, когда записи нет.
   const macroItem = h(
     'span',
@@ -245,21 +231,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h('span', { class: 'status-problems-counts' }),
   );
   const problemsCounts = problemsItem.querySelector<HTMLElement>('.status-problems-counts')!;
-  // Полоса проверки проекта: заливка — завершённые шаги, бегущий штрих — работа идёт.
-  // Цифры только про шаги: проценты внутри шага были бы выдуманными.
-  const checkItem = h(
-    'span',
-    { class: 'status-item status-meter is-metered' },
-    h(
-      'span',
-      { class: 'status-meter-track' },
-      h('span', { class: 'status-meter-fill' }),
-      h('span', { class: 'status-meter-run' }),
-    ),
-    h('span', { class: 'status-meter-label' }),
-  );
-  const checkFill = checkItem.querySelector<HTMLElement>('.status-meter-fill')!;
-  const checkLabel = checkItem.querySelector<HTMLElement>('.status-meter-label')!;
 
   // Статус ассистента (одна кнопка «Информация о сессии»: значок режима, кольцо
   // контекста, искра) приходит из чата и встаёт последним — в правом углу полосы.
@@ -272,10 +243,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       'div',
       { class: 'status-group' },
       vimItem,
-      progressItem,
-      symbolsItem,
+      meterItem,
       macroItem,
-      checkItem,
       problemsItem,
       versionItem,
       positionItem,
@@ -307,27 +276,12 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
         ? `Языковой сервер для «${lsp.language}» не поднялся: ${lsp.failed}`
         : `Языковой сервер: ${lsp.label} (${lsp.origin ? lspOriginLabel(lsp.origin) : 'источник неизвестен'})`;
     }
-    const progress = state.progress;
-    progressItem.hidden = progress === null;
-    progressLabel.textContent =
-      progress === null
-        ? ''
-        : progress.percentage === null
-          ? progress.label
-          : `${progress.label} ${Math.round(progress.percentage)}%`;
-    progressItem.title = progress ? `Языковой сервер: ${progress.label}` : '';
-    // Процент сервер сообщает сам ($/progress); без него — бегущий штрих.
-    progressItem.classList.toggle('is-busy', progress !== null && progress.percentage === null);
-    progressFill.style.width = `${Math.round(progress?.percentage ?? 0)}%`;
-    const symbols = state.symbols;
-    symbolsItem.hidden = symbols === null;
-    symbolsLabel.textContent = symbols?.text ?? '';
-    symbolsItem.title = symbols?.title ?? '';
-    // Дорожка нужна там, где есть что мерить: у одного числа делить нечего.
-    const meter = symbols?.progress ?? null;
-    symbolsItem.classList.toggle('is-metered', meter !== null);
-    symbolsItem.classList.toggle('is-busy', meter !== null);
-    symbolsFill.style.width = meter ? `${Math.round((meter.done / Math.max(1, meter.total)) * 100)}%` : '0';
+    const meter = statusMeter(state);
+    meterItem.hidden = meter.hidden;
+    meterItem.classList.toggle('is-busy', meter.busy);
+    meterLabel.textContent = meter.label;
+    meterFill.style.width = `${Math.round(meter.fill * 100)}%`;
+    meterItem.title = meter.title;
     const macro = state.macro;
     macroItem.hidden = macro === null;
     macroCount.textContent = macro ? `МАКРО ${macro.steps}` : '';
@@ -357,12 +311,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     problemsItem.classList.toggle('has-warnings', problems.tone === 'warnings');
     problemsCounts.textContent = problems.text;
     problemsItem.title = problems.title;
-    const check = checkProgress(state.check);
-    checkItem.hidden = check.hidden;
-    checkItem.classList.toggle('is-busy', check.busy);
-    checkFill.style.width = `${Math.round(check.fill * 100)}%`;
-    checkLabel.textContent = check.label;
-    checkItem.title = check.title;
     gitItem.hidden = state.branch === null;
     gitLabel.textContent = state.branch ? `${state.branch}${state.changes > 0 ? `  ±${state.changes}` : ''}` : '';
     gitItem.title = state.branch

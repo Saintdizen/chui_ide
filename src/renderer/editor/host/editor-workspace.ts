@@ -1099,6 +1099,21 @@ export class EditorWorkspace {
     this.drawMarkers(path);
   }
 
+  /**
+   * Снять ВСЕ пометки — при смене проекта.
+   *
+   * Свои пометки проверки снимают сами (`projectCheck.reset`, `typeCheck.reset`),
+   * а пометки обхода проекта (`lsp-project`) — нет: их знает только окно, и после
+   * смены корня ошибки старого проекта оставались в панели «Проблемы» и в волнистых
+   * подчёркиваниях до следующего обхода, которого могло не быть вовсе.
+   */
+  clearAllMarkers(): void {
+    const paths = this.diagnostics.paths();
+    this.diagnostics.clearAll();
+    // Панели помнят, что рисовали: для каждой — пустой набор, иначе подчёркивания висят.
+    for (const path of paths) this.drawMarkers(path);
+  }
+
   /** Раздать всем панелям объединённые пометки файла — по ним рисуются подчёркивания. */
   private drawMarkers(path: string): void {
     const merged = this.diagnostics.forPath(path);

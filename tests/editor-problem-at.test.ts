@@ -36,4 +36,15 @@ describe('problemsAt', () => {
     const markers = [marker({ line: 2, column: 4, endColumn: 4 })];
     expect(problemsAt(markers, { line: 2, column: 4 })).toHaveLength(1);
   });
+
+  it('многострочная пометка ловится по всей первой строке — как нарисована волна', () => {
+    // Такая пометка рисуется до конца строки (см. buildSquiggles), значит и находиться
+    // должна там же: иначе человек ведёт мышью по красной строке, а карточка молчит.
+    const markers = [marker({ line: 45, column: 9, endLine: 46, endColumn: 4, message: 'две строки' })];
+    expect(problemsAt(markers, { line: 45, column: 9 })).toHaveLength(1);
+    expect(problemsAt(markers, { line: 45, column: 120 })).toHaveLength(1);
+    expect(problemsAt(markers, { line: 45, column: 8 })).toHaveLength(0);
+    // На последующих строках волны нет — и карточки тоже.
+    expect(problemsAt(markers, { line: 46, column: 2 })).toHaveLength(0);
+  });
 });

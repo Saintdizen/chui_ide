@@ -94,6 +94,8 @@ export class SymbolIndexer {
    */
   private progress: { done: number; total: number; stage: SymbolIndexStage } | null = null;
   private running: Promise<void> | null = null;
+  /** Просили пересобрать, пока шёл прогон: смену проекта терять нельзя. */
+  private refreshPending = false;
   /** Файлы, которые правили после сборки: их объявления уже устарели. */
   private readonly touched = new Set<string>();
   private touchTimer: NodeJS.Timeout | null = null;
@@ -131,11 +133,20 @@ export class SymbolIndexer {
    * не начинается — читать проект дважды разом незачем.
    */
   refresh(): void {
-    if (this.running) return;
+    // Просьба во время прогона не теряется: смена проекта приходит именно так —
+    // старый обход ещё идёт, а новый уже нужен. Забыть просьбу значило бы оставить
+    // окно с картой и пометками старого проекта до следующего изменения файлов.
+    if (this.running) {
+      this.refreshPending = true;
+      return;
+    }
     this.running = this.run()
       .catch(() => undefined)
       .finally(() => {
         this.running = null;
+        if (!this.refreshPending) return;
+        this.refreshPending = false;
+        this.refresh();
       });
   }
 

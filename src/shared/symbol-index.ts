@@ -146,11 +146,19 @@ export function symbolIndexChip(status: SymbolIndexStatus): SymbolIndexChip | nu
   // Всего файлов не знает никто до обхода каталога: пока его нет, полосы не будет —
   // показывать долю от выдуманного числа хуже, чем просто сказать «читаю…».
   const progress = status.progress;
-  const work = progress?.stage === 'dependencies' ? 'читаю зависимости' : 'читаю проект';
+  const stage = progress?.stage === 'dependencies' ? 'читаю зависимости' : 'читаю проект';
+  // `total === 0` — разбор начался, а список файлов ещё не готов. Раньше в этот миг
+  // в строке стояло «читаю проект: 0 из 0», что читается как поломка; теперь —
+  // «читаю проект…» и бегущий штрих без чисел.
+  const counted = progress !== null && progress.total > 0;
   return {
-    text: progress ? `${work}: ${progress.done} из ${progress.total}` : `Символы: ${status.files}…`,
+    text: counted
+      ? `${stage}: ${progress.done} из ${progress.total}`
+      : progress
+        ? `${stage}…`
+        : `Символы: ${status.files}…`,
     title: `Карта символов собирается: ${parts.join(', ')}. Поиск по структуре отвечает уже сейчас, но пока неполно.`,
-    progress: progress ? { done: progress.done, total: progress.total } : null,
+    progress: counted ? { done: progress.done, total: progress.total } : null,
   };
 }
 
