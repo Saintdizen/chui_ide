@@ -26,6 +26,29 @@ describe('слова языка', () => {
   });
 });
 
+describe('своё имя против чужого', () => {
+  it('объявленное в файле перекрывает пару знаков длины', () => {
+    // `activeRow` короче `activeBlob` на два знака, но объявлено здесь — надбавка
+    // своё перевешивает разницу в длине. Длина в 6 знаков (`active`) не в счёт:
+    // совпавшее с набранным целиком слово индекс в подсказки не отдаёт.
+    const index = indexOf(['activeBlob activeBlob activeBlob', 'const activeRow = 1;']);
+    const items = buildCompletions(index, 'typescript', 'active');
+    expect(labels(items).indexOf('activeRow')).toBeLessThan(labels(items).indexOf('activeBlob'));
+  });
+
+  it('надбавка не переворачивает выбор: чужое сильно короче остаётся выше', () => {
+    // `activeBlob` (10) против `activeRow` (9): разница в один знак меньше надбавки,
+    // и объявленное своё идёт первым. На десяток знаков — обратный случай: своё
+    // поднимается максимум на пару мест, но первым остаётся то, что ближе к набранному.
+    const near = indexOf(['activeBlob activeBlob', 'const activeRow = 1;']);
+    expect(labels(buildCompletions(near, 'typescript', 'active'))[0]).toBe('activeRow');
+
+    const far = indexOf(['activeBlobby12345 activeBlobby12345', 'const activeRowXyzLong = 1;']);
+    const items = buildCompletions(far, 'typescript', 'active');
+    expect(labels(items).indexOf('activeRowXyzLong')).toBeLessThan(labels(items).indexOf('activeBlobby12345'));
+  });
+});
+
 describe('подсказки по префиксу', () => {
   it('пустой префикс ничего не даёт: попап не вылезает на каждом слове', () => {
     const index = indexOf(['value']);

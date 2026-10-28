@@ -122,6 +122,22 @@ const BUILTIN_TYPE = /^(?:string|number|boolean|bigint|symbol|object|unknown|any
 const TYPE_IN_VALUE_PENALTY = 30;
 
 /**
+ * Надбавка за своё объявление: `const activeRow =` против того же слова из чужой строки.
+ *
+ * Размер — 10: ровно один шаг длины имени, и только при равном начале совпадения он
+ * выходит решающим. Заметно более длинное слово своё не обгоняет: человек ищет то, что
+ * длиннее на пару букв перед глазами, а не на десяток.
+ */
+const LOCAL_BONUS = 10;
+
+/**
+ * Сколько мест объявленное имя теряет перед более короткими чужими. Два — потому что
+ * один шаг забирает уже сама надбавка (`LOCAL_BONUS`), а подъём снимает только
+ * остаток: слово на пару знаков длиннее своё, на десяток — нет.
+ */
+const LOCAL_MAX_DROP = 2;
+
+/**
  * Надбавка за вид подсказки — часть ОЦЕНКИ, а не отдельная очередь источников.
  *
  * `expected` — чего ждёт место под курсором; `null` — место не разобрано, и тогда вид
@@ -142,6 +158,8 @@ interface RankedItem {
   readonly score: number;
   /** Порядок добавления: при равной оценке сохраняет прежний порядок (стабильность). */
   readonly order: number;
+  /** Слово объявлено в этом файле — подъём его узнаёт (см. `hoistDeclared`). */
+  readonly declared: boolean;
 }
 
 /**
@@ -193,6 +211,7 @@ export function buildCompletions(
       item: { label, kind: 'external', detail: 'предложено', positions: match.positions },
       score: match.score + EXTERNAL_BONUS + kindBonus({ label, kind: 'external' }, expected),
       order: order++,
+      declared: false,
     });
   }
 
@@ -213,6 +232,7 @@ export function buildCompletions(
       },
       score: match.score + SNIPPET_BONUS + kindBonus({ label: snippet.prefix, kind: 'snippet' }, expected),
       order: order++,
+      declared: false,
     });
   }
 
@@ -227,6 +247,7 @@ export function buildCompletions(
       item: { label: word, kind: 'language', detail: 'язык', positions: match.positions },
       score: match.score + kindBonus({ label: word, kind: 'language' }, expected),
       order: order++,
+      declared: false,
     });
   }
 
@@ -236,15 +257,58 @@ export function buildCompletions(
     const match = matchScore(word, prefix);
     if (!match) continue;
     emitted.add(word);
+    // Объявленное в самом файле (`const activeRow =`) — "своё" имя: человек придумал его
+    // сам минуту назад и ищет его чаще, чем одноимённое слово из чужих строк.
+    const own = index.isDeclared(word);
+    const declared = own ? LOCAL_BONUS : 0;
     ranked.push({
       item: { label: word, kind: 'word', detail: `в файле: ${index.count(word)}`, positions: match.positions },
-      score: match.score + kindBonus({ label: word, kind: 'word' }, expected),
+      score: match.score + kindBonus({ label: word, kind: 'word' }, expected) + declared,
       order: order++,
+      declared: own,
     });
   }
 
   ranked.sort((left, right) => right.score - left.score || left.order - right.order);
-  return ranked.slice(0, limit).map((entry) => entry.item);
+  return hoistDeclared(ranked)
+    .slice(0, limit)
+    .map((entry) => entry.item);
+}
+
+/**
+ * Поднять объявленное имя так, чтобы оно обошло не более `LOCAL_MAX_DROP` более коротких чужих.
+ *
+ * Зачем не очками: надбавка в очках меряется в длине имени, а длина имени — шкала, по которой
+ * и так уже всё разложено. Надбавка "как два знака" проигрывает трём, "как пять" — начинает
+ * переворачивать весь список. Поэтому порядок по оценке считается как раньше, а здесь сделано
+ * ровно то, что нужно человеку: своё имя не проваливается за несколько чужих, которые чуть
+ * короче. Дальше — как решила оценка.
+ *
+ * Чужое перед ним может оказаться любым, в том числе тоже своим: подъём без условий сразу
+ * для всех объявленных превратил бы список в прежний и не дал ничего. Поэтому каждый шаг
+ * поднимает только то, что ещё отстаёт больше позволенного, и шаги идут сверху вниз.
+ */
+function hoistDeclared(entries: readonly RankedItem[]): RankedItem[] {
+  const list = [...entries];
+  let index = 0;
+  // Идём сверху вниз; после переноса пересматриваем то же место уже с поднятым элементом.
+  while (index < list.length) {
+    const entry = list[index]!;
+    if (!entry.declared) {
+      index += 1;
+      continue;
+    }
+    let ahead = 0;
+    while (ahead < index && ahead < LOCAL_MAX_DROP && list[ahead]!.score > entry.score) ahead += 1;
+    if (ahead === 0) {
+      index += 1;
+      continue;
+    }
+    list.splice(index, 1);
+    list.splice(index - ahead, 0, entry);
+    index += 1;
+  }
+  return list;
 }
 
 /**

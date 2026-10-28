@@ -97,6 +97,31 @@ describe('подбор по префиксу', () => {
   });
 });
 
+describe('свои объявления', () => {
+  it('имя из `const`/`function` считается объявленным, а слово из чужой строки — нет', () => {
+    const index = indexOf(['const activeRow = 1;', 'return activeRow;', 'otherRow()']);
+    expect(index.isDeclared('activeRow')).toBe(true);
+    // `otherRow()` в начале строки — тоже объявление: имя идёт сразу после ключевого
+    // слова, без `=` и `:`. Это широкий, но осознанный захват — см. `declaredIn`.
+    // А вот `return` и произвольное слово — нет.
+    expect(index.isDeclared('otherRow')).toBe(true);
+    expect(index.isDeclared('return')).toBe(false);
+    expect(index.isDeclared('нетакого')).toBe(false);
+  });
+
+  it('объявленное идёт вперёд даже при меньшей частоте', () => {
+    // `otherRow` встречается трижды, `activeRow` — только в объявлении.
+    const index = indexOf(['otherRow otherRow otherRow', 'const activeRow = 1;']);
+    expect(index.candidates('Row', 10)).toEqual(['activeRow', 'otherRow']);
+  });
+
+  it('сброс словаря снимает и признак объявления', () => {
+    const index = indexOf(['const activeRow = 1;']);
+    index.reset();
+    expect(index.isDeclared('activeRow')).toBe(false);
+  });
+});
+
 describe('слова без префикса', () => {
   it('самые частые слова — по убыванию частоты', () => {
     const index = indexOf(['alpha alpha beta gamma']);
@@ -106,5 +131,10 @@ describe('слова без префикса', () => {
   it('исключения учитываются', () => {
     const index = indexOf(['alpha beta']);
     expect(index.allWords(5, new Set(['alpha']))).toEqual(['beta']);
+  });
+
+  it('своё объявление идёт вперёд и без префикса', () => {
+    const index = indexOf(['alpha alpha alpha beta', 'const zeta = 1;']);
+    expect(index.allWords(2)).toEqual(['zeta', 'alpha']);
   });
 });
