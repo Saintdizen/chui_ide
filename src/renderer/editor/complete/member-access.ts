@@ -125,12 +125,16 @@ export function selfMembers(text: string): MemberEntry[] {
   };
 
   for (const line of text.split('\n')) {
-    // Аннотация поля (`db: Db;` / `conn: Pg`) — единственный след типа для цепочки `a.b.`.
-    const annotated = FIELD_LINE.exec(line);
-    if (annotated?.[2]) remember(annotated[2], 'field', annotated[3]?.trim());
     // Объявления методов: `def run(self)`, `async def run(self)`, `run() {`, `#run() {`.
+    // Метод проверяем раньше поля: строка `get(): string {` иначе ляжет полем `get`
+    // с «типом» `(: string» (см. FIELD_LINE ниже).
     const method = METHOD_DECL.exec(line);
-    if (method?.[1]) remember(method[1], 'method');
+    if (method?.[2]) remember(method[2], 'method');
+    // Аннотация поля (`db: Db;` / `conn: Pg`) — единственный след типа для цепочки `a.b.`.
+    else {
+      const annotated = FIELD_LINE.exec(line);
+      if (annotated?.[2]) remember(annotated[2], 'field', annotated[3]?.trim());
+    }
 
     // Поля: `this.count =`, `self.count =`, `#count = 0`, `static count = 0`.
     for (const match of line.matchAll(FIELD_DECL)) if (match[1]) remember(match[1], 'field');
@@ -176,15 +180,26 @@ export function classMembers(text: string, className: string): MemberEntry[] {
       const line = lines[at] ?? '';
       if (!line.trim()) continue;
       const indent = leadingSpaces(line);
-      // Отступ вернулся на уровень класса или выше — объявление кончилось.
-      if (indent <= baseIndent) break;
-      // Первый член задаёт отступ тела: всё глубже — это уже код метода.
-      if (bodyIndent === null) bodyIndent = indent;
-      if (indent > bodyIndent) continue;
+      // Отступ вернулся на уровень класса или выше — объявление кончилось. Но не любой
+      // такой отступ: в JS/TS класс пишут и плоско, члены наравне с заголовком.
+      //
+      //   class Repo {
+      //   private db: Db;
+      //   pool: Map<string, Connection>;
+      //   }
+      //
+      // Такое объявление закрывает только новое объявление того же уровня, а не
+      // первый же член (см. `sameLevelDeclaration`).
+      if (indent <= baseIndent && sameLevelDeclaration(line)) break;
+      // Первый член задаёт отступ тела: всё глубже — это уже код метода. Плоский
+      // класс (члены на отступе заголовка) тела не задаёт — иначе следующий член
+      // с отступом 2 попал бы в «код метода» и потерялся бы.
+      if (bodyIndent === null && indent > baseIndent) bodyIndent = indent;
+      if (bodyIndent !== null && indent > bodyIndent) continue;
 
       const method = METHOD_DECL.exec(line);
-      if (method?.[1]) {
-        remember(method[1], 'method');
+      if (method?.[2]) {
+        remember(method[2], 'method');
         continue;
       }
       const nested = CLASS_DECL.exec(line);
@@ -375,6 +390,11 @@ function leadingSpaces(line: string): number {
   return count;
 }
 
+/** С этой строки начинается новое объявление — значит предыдущее кончилось. */
+function sameLevelDeclaration(line: string): boolean {
+  return SAME_LEVEL_DECL.test(line);
+}
+
 /** Имя словами (буквы и цифры) — для разбора строк файла. */
 const IDENT = String.raw`[\p{L}\p{Nl}\p{Nd}\p{Pc}_$][\p{L}\p{Nl}\p{Nd}\p{Pc}_$]*`;
 /** Объявление класса: `class Elements:` (Python) или `export class Elements {` (JS/TS). */
@@ -383,13 +403,29 @@ const CLASS_DECL = new RegExp(String.raw`^(\s*)(?:export\s+)?(?:default\s+)?(?:a
  * Объявление поля на уровне класса: `x = …` (Python), `x: int = …`, `x: number;` (TS).
  * Вторая группа — имя, третья — тип из аннотации (без него не пройти цепочку `a.b.`).
  */
-const FIELD_LINE = new RegExp(String.raw`^(\s*)(${IDENT})\s*(?::\s*([^=;]*?))?\s*(?:=|;|$)`, 'u');
+const FIELD_LINE = new RegExp(
+  String.raw`^(\s*)(?:(?:public|private|protected|readonly|static|declare|override|abstract)\s+)*(${IDENT})\s*(?::\s*([^=;]*?))?\s*(?:=|;|$)`,
+  'u',
+);
 /** Имя члена: у закрытого поля впереди `#`. */
 const MEMBER = `#?${IDENT}`;
 
-/** Объявление метода: `def run(self)`, `run() {`, `async run() {`, `get size() {`. */
+/**
+ * Начало другого объявления того же уровня, что и класс: `class`, `function`,
+ * `export`, `const`, `def`… По нему видно, что тело класса кончилось, даже когда
+ * его писали плоско и члены сидят на отступе заголовка.
+ */
+const SAME_LEVEL_DECL =
+  /^\s*(?:export\b|import\b|declare\b|class\b|function\b|const\b|let\b|var\b|interface\b|type\b|enum\b|namespace\b|module\b|def\b|async\s+def\b|@)/u;
+
+/**
+ * Объявление метода: `def run(self)`, `run() {`, `async run() {`, `get size() {`.
+ */
 const METHOD_DECL = new RegExp(
-  String.raw`^\s*(?:async\s+)?(?:static\s+|get\s+|set\s+)*(?:def\s+)?(${IDENT})\s*\(`,
+  // `get`/`set` — модификатор только с пробелом: `get size()` — аксессор, а `get()` — метод с именем `get`.
+  // Модификаторы — в любом порядке: `public async`, `async private`. `async` внутри
+  // списка, а не впереди: в TS его пишут после доступа.
+  String.raw`^\s*(?:(?:public|private|protected|static|readonly|override|abstract|async)\s+)*((?:get|set)\s+(?=${IDENT}))?(?:def\s+)?(${IDENT})\s*\(`,
   'u',
 );
 /** Объявление поля: `this.count =`, `#count = 0`, `static count = 0`. */
@@ -427,8 +463,9 @@ const RESERVED: ReadonlySet<string> = new Set([
   'yield',
   'static',
   'async',
-  'get',
-  'set',
+  // У `get` и `set` двойная роль: модификатор аксессора и обычное имя метода.
+  // Модификатором их делает только пробел (`get size()`), а именами они могут
+  // быть — `get(): string`, — поэтому в RESERVED их нет (см. METHOD_DECL).
   'import',
   'from',
   'export',

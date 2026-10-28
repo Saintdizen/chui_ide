@@ -47,6 +47,58 @@ describe('classMembers', () => {
     expect(members.find((member) => member.name === 'enter_lk')?.kind).toBe('method');
     expect(classMembers(page, 'НетакогоКласса')).toEqual([]);
   });
+
+  it('плоский TS-класс: члены на отступе заголовка', () => {
+    // Так пишут почти весь TS/TSX: тело без лишнего сдвига. Раньше цикл обрывался
+    // на первом же члене (отступ не больше отступа заголовка) и класс был пуст.
+    const flat = [
+      'class Repo {',
+      'private db: Db;',
+      '  pool: Map<string, Connection>;',
+      '  find(): void {',
+      '    return this.find();',
+      '  }',
+      '}',
+    ].join('\n');
+    const members = classMembers(flat, 'Repo');
+    expect(members.map((member) => member.name)).toEqual(['db', 'pool', 'find']);
+    expect(members.find((member) => member.name === 'db')?.type).toBe('Db');
+    expect(members.find((member) => member.name === 'find')?.kind).toBe('method');
+  });
+
+  it('модификаторы доступа не мешают имени и типу', () => {
+    const text = [
+      'class A {',
+      '  private readonly conn: Conn;',
+      '  public async load(): Promise<void> {}',
+      '  protected static make(): void {}',
+      '}',
+    ].join('\n');
+    const members = classMembers(text, 'A');
+    expect(members.find((member) => member.name === 'conn')?.type).toBe('Conn');
+    expect(members.find((member) => member.name === 'load')?.kind).toBe('method');
+    expect(members.find((member) => member.name === 'make')?.kind).toBe('method');
+  });
+
+  it('get/set — модификатор с пробелом, но имя метода get() остаётся именем', () => {
+    const text = [
+      'class A {',
+      '  get size(): number { return 1; }',
+      '  set size(v: number) {}',
+      "  get(): string { return ''; }",
+      '}',
+    ].join('\n');
+    const names = classMembers(text, 'A').map((member) => member.name);
+    expect(names).toContain('size');
+    expect(names).toContain('get');
+  });
+
+  it('плоский класс не съедает следующее объявление', () => {
+    // Без новой границы (см. `sameLevelDeclaration`) плоский класс тянул бы всё вниз.
+    const text = ['class Repo {', '  db: Db;', '}', 'export class Other {', '  x: string;', '}'].join('\n');
+    expect(classMembers(text, 'Repo').map((member) => member.name)).toEqual(['db']);
+    expect(classMembers(text, 'Other').map((member) => member.name)).toEqual(['x']);
+  });
 });
 
 describe('membersOf', () => {
