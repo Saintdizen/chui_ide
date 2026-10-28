@@ -131,7 +131,10 @@ function toEntry(raw: unknown): CompletionEntry | null {
   // `textEdit.newText` точнее `insertText`: он задаёт и участок замены, и текст.
   const editText = value.textEdit && typeof value.textEdit.newText === 'string' ? value.textEdit.newText : null;
   const insert = editText ?? (typeof value.insertText === 'string' ? value.insertText : label);
-  const detail = typeof value.detail === 'string' && value.detail ? value.detail : kindLabel(value.kind);
+  // Пустой вид бывает чаще, чем кажется: сервер вправе не прислать `kind`, а новый вид
+  // из будущей версии протокола в таблице отсутствует. Без подписи в списке остаётся
+  // пустое место, и `fitsExpectation` теряет единственный признак «это тип».
+  const detail = typeof value.detail === 'string' && value.detail ? value.detail : kindLabel(value.kind) || 'символ';
   // `insertTextFormat: 2` — вставка как сниппет: разметку раскрывает редактор.
   const snippet = value.insertTextFormat === 2 ? insert : undefined;
   const additionalEdits = toAdditionalEdits(value.additionalTextEdits);

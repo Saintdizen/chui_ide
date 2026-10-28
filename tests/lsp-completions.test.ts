@@ -5,8 +5,8 @@ describe('разбор подсказок LSP', () => {
   it('принимает и список, и обёртку CompletionList', () => {
     const items = [{ label: 'foo' }];
     // Исходный элемент тоже переносится (`source`) — сверяем главные поля.
-    expect(toCompletions(items)[0]).toMatchObject({ label: 'foo', insert: 'foo', detail: '' });
-    expect(toCompletions({ items })[0]).toMatchObject({ label: 'foo', insert: 'foo', detail: '' });
+    expect(toCompletions(items)[0]).toMatchObject({ label: 'foo', insert: 'foo', detail: 'символ' });
+    expect(toCompletions({ items })[0]).toMatchObject({ label: 'foo', insert: 'foo', detail: 'символ' });
     expect(toCompletions({ isIncomplete: true, items })).toHaveLength(1);
   });
 
@@ -28,8 +28,9 @@ describe('разбор подсказок LSP', () => {
     expect(toCompletions([{ label: 'foo', kind: 3 }])[0]!.detail).toBe('функция');
     expect(toCompletions([{ label: 'foo', kind: 6 }])[0]!.detail).toBe('переменная');
     expect(toCompletions([{ label: 'foo', kind: 3, detail: '() -> str' }])[0]!.detail).toBe('() -> str');
-    // Незнакомый номер вида — пояснения нет, но подсказка остаётся.
-    expect(toCompletions([{ label: 'foo', kind: 999 }])[0]!.detail).toBe('');
+    // Незнакомый номер вида — конкретного пояснения нет, но пустой подписи не бывает:
+    // иначе в списке остаётся пустое место, а `fitsExpectation` теряет признак вида.
+    expect(toCompletions([{ label: 'foo', kind: 999 }])[0]!.detail).toBe('символ');
   });
 
   it('additionalTextEdits (авто-импорт) переводятся в 1-based правки', () => {
