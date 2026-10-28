@@ -428,6 +428,18 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Файлы проекта — для подсказок пути внутри импорта: `from './ut'` просит файл,
     // а не слово. Пути приходят относительными — так их и пишут в импорте.
     projectFiles: () => rpc.request('workspace.listFiles').catch(() => []),
+    // Алиасы `paths` из tsconfig: подсказка после точки разворачивает по ним импорт
+    // (`@/core` → `src/core`). Пути приходят от корня проекта (`src/...`), как их и пишут.
+    importAliases: async () => {
+      const { aliases } = await rpc.request('workspace.importAliases').catch(() => ({ aliases: {} }));
+      return Object.entries(aliases).map(([prefix, target]) => ({
+        // На правой стороне шаблон собирается обратно со звёздочкой: `@/` + `*`
+        // и `src/` + `*` — это `paths` как его пишут в tsconfig.
+        pattern: `${prefix}*`,
+        target: `${target}*`,
+        baseDir: '',
+      }));
+    },
     // Ссылки в коде: сервер помечает участки (пути в import, адреса) — их показываем
     // подчёркнутыми, а клик открывает адрес или файл (см. `openDocumentLink`).
     documentLinks: async (path) => {
@@ -482,6 +494,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       }
     },
     relativePath: (path) => workspace.relative(path),
+    // Запись файла на диск: подсказкам надо сбросить прочитанное — иначе новое поле
+    // в соседнем файле не появится после точки до перезапуска окна.
+    onDidWriteFile: (listener) =>
+      documents.onDidChangeDirty((document) => {
+        if (!document.dirty) listener(document.path);
+      }).dispose,
     onNotice: (text) => showToast(text),
     // Переименование: имя спрашиваем диалогом, правки применяет документная модель.
     renameSymbol: (path, position) => {

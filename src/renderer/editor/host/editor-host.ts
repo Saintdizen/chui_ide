@@ -42,7 +42,7 @@ import type { EditSource, TextDocument } from '../../core/document';
 import { Emitter } from '../../core/events';
 import type { SpellCheck } from '../../core/spellcheck';
 import { CompletionAssistant } from '../complete/assistant';
-import type { ProjectCompletion } from '../complete/assistant';
+import type { ImportAlias, ProjectCompletion } from '../complete/assistant';
 import type { CompletionItem } from '../complete/completions';
 import { SignatureAssistant } from '../complete/signature';
 import { TextBuffer } from '../core/text-buffer';
@@ -244,6 +244,19 @@ export interface EditorHostOptions {
    * заглядывания нет вовсе: показать нечего.
    */
   readText?: (path: string) => Promise<string | null>;
+  /**
+   * Файл записан на диск: путь → подписка. Нужен подсказкам, которые держат прочитанный
+   * текст чужого файла (см. `onDidWriteFile` в `complete/assistant.ts`) — иначе добавленное
+   * поле не появилось бы после точки до перезапуска окна. Не задано — кэш живёт до
+   * вытеснения.
+   */
+  onDidWriteFile?: (listener: (path: string) => void) => () => void;
+  /**
+   * Алиасы импорта из `paths` в tsconfig (`@/core` → `src/core`). Нужны подсказке после
+   * точки: без них такой импорт не разворачивается и члены класса не показываются.
+   * Не задано — алиасов нет, работают только относительные пути и Python-модули.
+   */
+  importAliases?: () => Promise<readonly ImportAlias[]>;
   /**
    * Показать выбор обёртки выделения («surround with»). Не задано — сочетание молчит:
    * список вариантов и модалка — дело вызывающего (см. `ui/surround-modal.ts`).
@@ -609,6 +622,14 @@ export class EditorHost {
       projectSymbols: options.projectSymbols,
       // Пути в импорте считаются от открытого файла — по той же причине.
       projectFiles: options.projectFiles,
+      // Члены класса, объявленного в соседнем файле: тело класса читаем тем же
+      // чтением, что и «заглядывание» в определение (открытый — из документа,
+      // прочий — с диска).
+      readSource: options.readText,
+      // Алиасы `paths` из tsconfig: без них импорт `@/core` не разворачивается, и подсказка
+      // после точки молчит про класс из такого файла.
+      importAliases: options.importAliases,
+      onDidWriteFile: options.onDidWriteFile,
       currentPath: () => this.activePath,
       lsp: options.completionFromLanguage
         ? (_prefix, position) => {

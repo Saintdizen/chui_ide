@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   extendItems,
+  isCodeLanguage,
   scopeLabel,
   worthAskingIndex,
   type CompletionScope,
@@ -48,6 +49,27 @@ describe('уровни ширины', () => {
     const labels = (['file', 'project', 'dependencies'] as CompletionScope[]).map(scopeLabel);
     expect(new Set(labels).size).toBe(3);
     expect(labels[0]).toBeNull();
+  });
+});
+
+describe('точка только в коде', () => {
+  it('языки кода — да', () => {
+    for (const language of ['typescript', 'javascript', 'python', 'go', 'rust', 'java', 'csharp']) {
+      expect(isCodeLanguage(language), language).toBe(true);
+    }
+  });
+
+  it('проза и разметка — нет: там точка — знак препинания', () => {
+    for (const language of ['markdown', 'text', 'plaintext', 'html', 'xml', 'yaml', 'css']) {
+      expect(isCodeLanguage(language), language).toBe(false);
+    }
+  });
+
+  it('данные и журналы — тоже нет', () => {
+    expect(isCodeLanguage('json')).toBe(false);
+    expect(isCodeLanguage('jsonc')).toBe(false);
+    expect(isCodeLanguage('csv')).toBe(false);
+    expect(isCodeLanguage('log')).toBe(false);
   });
 });
 

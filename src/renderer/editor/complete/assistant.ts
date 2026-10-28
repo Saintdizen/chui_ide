@@ -28,8 +28,11 @@
 import type { TextBuffer } from '../core/text-buffer';
 import { COMMENT, STRING } from '../highlight/tokens';
 import { snippetsForLanguage, type Snippet } from '../../../shared/snippets';
+import type { ImportAlias } from '../../../shared/imports';
 import type { EditorController, EditorChange } from '../input/editor-controller';
 import type { EditorView } from '../view/editor-view';
+
+export type { ImportAlias };
 import { allCompletions, buildCompletions, DEFAULT_LIMIT, type CompletionItem } from './completions';
 import { expectedAt, filterByExpectation, type Expectation } from './expectation';
 import { EXTERNAL_BONUS, matchScore } from './fuzzy';
@@ -37,7 +40,7 @@ import { importPathAt, importPathItems, type ImportPathContext } from './import-
 import { expandPostfix, postfixAt, postfixOffers } from './postfix';
 import { callContextAt, namedArgumentItems } from './named-args';
 import { expandSnippet } from './snippet';
-import { memberAccessAt, membersOf, type MemberAccess } from './member-access';
+import { importsOf, memberAccessAt, membersOf, type MemberAccess } from './member-access';
 import { prefixAt } from './prefix';
 import { WordIndex } from './word-index';
 import type { SuggestWidget } from '../widgets/suggest-widget';
@@ -70,6 +73,12 @@ const NAMED_ARGS_LOOKBACK = 2000;
 const FILE_LIST_TTL_MS = 5000;
 
 /**
+ * Сколько чужих файлов держать прочитанными. Один файл — единицы килобайт, так что
+ * предел страхует от мегабайт в памяти за длинную сессию, а не от двух-трёх соседей.
+ */
+const SOURCES_LIMIT = 50;
+
+/**
  * Откуда берутся подсказки: чем шире, тем больше список.
  *
  * Так же, как в больших IDE: первое нажатие Ctrl+Space даёт то, что рядом, повторное —
@@ -83,6 +92,162 @@ function widerScope(scope: CompletionScope): CompletionScope {
   if (scope === 'file') return 'project';
   return 'dependencies';
 }
+
+/** Расширения, которые в импорте не пишутся: ищом файл по любому из них. */
+const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py'];
+
+/**
+ * Путь к файлу по спецификатору импорта (обратное к `specifierFor`).
+ *
+ * `./elements` от `src/app/main.ts` → `src/app/elements.ts` (или `/index.ts`, `elements.tsx`, …).
+ * Python-модуль (`pkg.mod`) — путь от корня проекта, `pkg/mod.py`; если не вышло —
+ * ищем по хвосту среди известных файлов (`files`). Этот хвост и спасает: корень пакета
+ * в Python снаружи не виден, а `mod.py` в проекте обычно один.
+ *
+ * Алиас из `paths` (`@/core` → `src/core`, см. `aliasesFromTsconfig`) — путь от корня
+ * проекта, как и Python-модуль, но с проверкой всех вариантов алиаса и без хвоста: алиас
+ * точен, а хвост в чужом проекте ловит одноимённый файл из другой папки.
+ *
+ * `null` — файл не нашли; дальше искать нечего.
+ */
+function resolveSpecifier(
+  specifier: string,
+  fromFile: string,
+  files: readonly string[],
+  aliases: readonly ImportAlias[] = [],
+): string | null {
+  const aliased = resolveAlias(specifier, aliases, files);
+  if (aliased !== null) return aliased;
+  const fromDir = fromFile.includes('/') ? fromFile.slice(0, fromFile.lastIndexOf('/')) : '';
+  if (specifier.startsWith('.')) {
+    const parts = fromDir.length === 0 ? [] : fromDir.split('/');
+    for (const segment of specifier.split('/')) {
+      if (segment === '.' || segment.length === 0) continue;
+      if (segment === '..') parts.pop();
+      else parts.push(segment);
+    }
+    const base = parts.join('/');
+    for (const candidate of [base, `${base}/index`]) {
+      const hit = files.find((file) => candidate.length > 0 && stripCodeExtension(file) === candidate);
+      if (hit) return hit;
+    }
+    for (const extension of SOURCE_EXTENSIONS) {
+      const direct = `${base}${extension}`;
+      if (files.includes(direct)) return direct;
+      const indexed = `${base}/index${extension}`;
+      if (files.includes(indexed)) return indexed;
+    }
+    return null;
+  }
+  // Голый пакет или Python-модуль: ищем по хвосту пути (`pkg.mod` → `mod.py` в конце).
+  const tail = specifier.split('.').pop() ?? specifier;
+  for (const extension of SOURCE_EXTENSIONS) {
+    const hit = files.find((file) => {
+      const cut = file.lastIndexOf('/');
+      const name = cut < 0 ? file : file.slice(cut + 1);
+      const stem = name.endsWith(extension) ? name.slice(0, -extension.length) : null;
+      return stem === tail;
+    });
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Развернуть алиас в путь среди известных файлов проекта.
+ *
+ * Спецификатор разворачивается по всем подходящим шаблонам: `@/ui/button` может
+ * подойти и к `@/*`, и к `@/ui/*`, и выигрывает тот, где звёздочка совпала длиннее
+ * (ровно как в TypeScript). Не нашли файл — `null`: спецификатор может оказаться и
+ * пакетом, и тогда искать его дальше обычным порядком.
+ */
+function resolveAlias(specifier: string, aliases: readonly ImportAlias[], files: readonly string[]): string | null {
+  let best: { path: string; weight: number } | null = null;
+  for (const alias of aliases) {
+    const star = alias.pattern.indexOf('*');
+    let tail: string;
+    if (star < 0) {
+      if (specifier !== alias.pattern) continue;
+      tail = '';
+    } else {
+      const head = alias.pattern.slice(0, star);
+      const after = alias.pattern.slice(star + 1);
+      if (!specifier.startsWith(head) || !specifier.endsWith(after)) continue;
+      if (specifier.length < head.length + after.length) continue;
+      tail = specifier.slice(head.length, specifier.length - after.length);
+    }
+    const expanded = alias.target.includes('*') ? alias.target.replace('*', tail) : alias.target;
+    const base = joinProjectPath(alias.baseDir, expanded);
+    const hit = findProjectFile(base, files);
+    if (hit === null) continue;
+    if (best === null || tail.length > best.weight) best = { path: hit, weight: tail.length };
+  }
+  return best?.path ?? null;
+}
+
+/** Склеить каталог и путь, схлопнув `./`, `../` и лишние слэши. */
+function joinProjectPath(directory: string, path: string): string {
+  const parts = directory.length === 0 ? [] : directory.split('/');
+  for (const segment of path.split('/')) {
+    if (segment === '.' || segment.length === 0) continue;
+    if (segment === '..') parts.pop();
+    else parts.push(segment);
+  }
+  return parts.join('/');
+}
+
+/** Файл проекта по пути без расширения: сам файл, `файл.ts`, `файл/index.ts`. */
+function findProjectFile(base: string, files: readonly string[]): string | null {
+  if (base.length === 0) return null;
+  for (const candidate of [base, `${base}/index`]) {
+    const hit = files.find((file) => stripCodeExtension(file) === candidate);
+    if (hit) return hit;
+  }
+  for (const extension of SOURCE_EXTENSIONS) {
+    for (const candidate of [`${base}${extension}`, `${base}/index${extension}`]) {
+      const hit = files.find((file) => file === candidate);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+/** Путь без расширения кода — как его пишут в импорте (`src/core`, а не `src/core.ts`). */
+function stripCodeExtension(file: string): string {
+  for (const extension of SOURCE_EXTENSIONS) {
+    if (file.endsWith(extension)) return file.slice(0, -extension.length);
+  }
+  return file;
+}
+
+/**
+ * Язык, где точка может быть обращением к члену. В прозе, разметке и таблицах стилей
+ * точка — знак препинания и разделитель, и запасной путь после неё только мешает.
+ */
+export function isCodeLanguage(language: string): boolean {
+  return !NON_CODE_LANGUAGES.has(language);
+}
+
+const NON_CODE_LANGUAGES: ReadonlySet<string> = new Set([
+  'plaintext',
+  'text',
+  'markdown',
+  'md',
+  'restructuredtext',
+  'asciidoc',
+  'css',
+  'scss',
+  'less',
+  'html',
+  'xml',
+  'yaml',
+  'toml',
+  'json',
+  'jsonc',
+  'diff',
+  'csv',
+  'log',
+]);
 
 /** Подпись уровня в списке: по ней видно, откуда взялись новые имена. */
 export function scopeLabel(scope: CompletionScope): string | null {
@@ -174,6 +339,25 @@ export interface CompletionAssistantOptions {
    * Не задано — список показывает только то, что пришло в первом ответе.
    */
   resolve?: (item: unknown) => Promise<{ detail?: string; documentation?: string } | null>;
+  /**
+   * Прочитать текст файла проекта по пути (`src/core.ts`). Нужен для членов класса,
+   * импортированного из соседнего файла: в открытом файле его тела нет.
+   * Не задано — члены чужих классов не подсказываются, остаются свои.
+   */
+  readSource?: (path: string) => Promise<string | null>;
+  /**
+   * Подписаться на запись файла: отдаёт путь и отписку. По этому событию сбрасывается
+   * прочитанный текст — иначе добавленное поле в соседнем файле не появилось бы после
+   * точки до перезапуска окна (см. `sources`).
+   * Не задано — кэш живёт только до вытеснения по `SOURCES_LIMIT`.
+   */
+  onDidWriteFile?: (listener: (path: string) => void) => () => void;
+  /**
+   * Алиасы импорта из `paths` tsconfig (`@/core` → `src/core`). Бывают нужны там, где
+   * спецификатор не относительный и не пакет: без конфига проекта такой импорт не
+   * развернуть. Не задано — алиасов нет, работает относительный путь и Python-модуль.
+   */
+  importAliases?: () => Promise<readonly ImportAlias[]>;
 }
 
 export class CompletionAssistant {
@@ -187,6 +371,21 @@ export class CompletionAssistant {
   /** Файлы проекта для подсказок пути в импорте и путь открытого файла. */
   private readonly projectFiles?: () => Promise<readonly string[]>;
   private readonly currentPath?: () => string | null;
+  /** Чтение исходников проекта — для членов класса, объявленного в другом файле. */
+  private readonly readSource?: (path: string) => Promise<string | null>;
+  /** Алиасы из `paths` tsconfig; кэш на сессию — между нажатиями конфиг не меняется. */
+  private readonly importAliases?: () => Promise<readonly ImportAlias[]>;
+  private aliasList: readonly ImportAlias[] | null = null;
+  /**
+   * Прочитанные тексты чужих файлов: путь → текст. Читаем один раз на сессию —
+   * подсказка едет на каждый знак, а диск не должен участвовать в этом пути.
+   *
+   * Две поправки к «один раз»: запись файла (`onDidWriteFile`) сбрасывает запись —
+   * иначе добавленное поле не появилось бы после точки до перезапуска окна; и объём
+   * ограничен `SOURCES_LIMIT` — в пиковой сессии десятки файлов дали бы мегабайты
+   * в памяти рендерера. Вытесняем самый давний (Map помнит порядок вставки).
+   */
+  private readonly sources = new Map<string, string>();
   /**
    * Прочитанный список файлов проекта. Держим его здесь, а не забираем на каждый знак:
    * обход дерева на каждую букву был бы дороже самих подсказок. Свежесть — по времени:
@@ -202,6 +401,8 @@ export class CompletionAssistant {
   private readonly snippets: () => readonly Snippet[];
   private readonly lsp: CompletionAssistantOptions['lsp'];
   private readonly resolve: CompletionAssistantOptions['resolve'];
+  /** Отписка от события записи файлов проекта (см. `onDidWriteFile`). */
+  private readonly stopWatchingWrites?: () => void;
   /** Подписи, для которых уже спрашивали resolve: не повторяем на каждое движение стрелок. */
   private readonly resolveRequested = new Set<string>();
   private language: string;
@@ -232,7 +433,12 @@ export class CompletionAssistant {
     this.projectSymbols = options.projectSymbols;
     this.projectFiles = options.projectFiles;
     this.currentPath = options.currentPath;
+    this.readSource = options.readSource;
+    this.importAliases = options.importAliases;
     this.resolve = options.resolve;
+    // Записали файл — прочитанный текст устарел. Сбрасываем только эту запись:
+    // остальные файлы проекта от чужой правки не изменились.
+    this.stopWatchingWrites = options.onDidWriteFile?.((path) => this.sources.delete(path));
     widget.onAccept = () => this.accept();
     // Список выделил строку — доводим её до полного вида (описание, подробность).
     widget.onSelect = (item) => void this.resolveItem(item);
@@ -253,6 +459,7 @@ export class CompletionAssistant {
    * ассистент закрытой вкладки и могли дёрнуть сервер или карту вхолостую.
    */
   dispose(): void {
+    this.stopWatchingWrites?.();
     this.clearRetry();
     this.clearIndexTimer();
     this.lspRequestId += 1;
@@ -520,6 +727,22 @@ export class CompletionAssistant {
   }
 
   /**
+   * Алиасы из `paths` tsconfig: читаются один раз и запоминаются.
+   *
+   * Нет источника — считаем, что алиасов нет: `resolveSpecifier` тогда ведёт себя как
+   * раньше и алиас в проекте не найдёт.
+   */
+  private async aliasListFor(): Promise<readonly ImportAlias[]> {
+    if (this.aliasList !== null) return this.aliasList;
+    const source = this.importAliases;
+    if (!source) return [];
+    const aliases = await source().catch(() => null);
+    if (!aliases) return [];
+    this.aliasList = aliases;
+    return aliases;
+  }
+
+  /**
    * Дополнить обычный список объявлениями карты — так индекс питает подсказки сам.
    *
    * Список по набранному началу раньше знал только слова файла и ответ сервера: если
@@ -583,20 +806,24 @@ export class CompletionAssistant {
   /**
    * Подсказки-члены объекта (`this.`, `order.`): имена, которые принадлежат ему.
    *
-   * Два источника, и порядок тут важнее, чем кажется. Свои члены (разбор файла)
-   * показываем СРАЗУ — попап должен появляться на саму точку, без ожидания сети.
-   * Языковой сервер отвечает следом и встаёт впереди: только он знает типы, поэтому
-   * для `order.` он и есть настоящий ответ, а наши имена — подстраховка на случай,
-   * когда сервера нет или язык ему незнаком.
+   * Три источника, и порядок тут важнее, чем кажется. Свои члены (разбор открытого
+   * файла) показываем СРАЗУ — попап должен появляться на саму точку, без ожидания
+   * сети и диска. Класс, импортированный из соседнего файла, читаем асинхронно и
+   * дописываем в уже показанный список, когда текст придёт. Языковой сервер
+   * отвечает следом и встаёт впереди: только он знает типы.
    */
   private showMembers(member: MemberAccess): void {
+    // В прозе и разметке точка — знак препинания, а не обращение к члену: «см. файл.ts.»
+    // иначе открывало бы попап с ключевыми словами. Запасной путь есть только у кода.
+    if (!isCodeLanguage(this.language)) return;
     const caret = this.controller.caret;
     const ranked: { item: CompletionItem; score: number }[] = [];
     const taken = new Set<string>();
 
     // Члены приёмника из текста файла: `self.` — свои, `self.Elements.` — члены
     // НАЗВАННОГО класса (вложенного, фабрики). Работает и без сервера, и сразу.
-    for (const entry of membersOf(this.textAroundCaret(), member.receiver)) {
+    // Текст берём весь, а не окно: класс может быть объявлен далеко от курсора.
+    for (const entry of this.memberEntries(member)) {
       if (entry.name.length === 0 || taken.has(entry.name)) continue;
       // Набранное после точки совпадает с именем члена по тем же правилам, что и
       // слова в обычном списке: `gT` найдёт `getTitle` и после `this.`.
@@ -614,6 +841,10 @@ export class CompletionAssistant {
       });
     }
 
+    // Свой класс не нашёлся — возможно, он в импортированном файле. Читаем его и
+    // дописываем: попап уже висит, ждать диск ему незачем.
+    if (ranked.length === 0) this.membersFromImports(member, caret);
+
     ranked.sort((left, right) => right.score - left.score);
     // Postfix-шаблоны (`order.if` → `if order:`) идут следом за членами, а не вместо
     // них: если у объекта есть член с таким именем, он нужнее шаблона и стоит выше.
@@ -623,6 +854,126 @@ export class CompletionAssistant {
       member.replaces,
     );
     this.askServer(member.prefix, caret);
+  }
+
+  /** Члены приёмника по уже прочитанным текстам (свой файл + импортированные). */
+  private memberEntries(member: MemberAccess): ReturnType<typeof membersOf> {
+    return membersOf(this.buffer.text, member.receiver, [...this.sources.values()]);
+  }
+
+  /**
+   * Дочитать файл, где объявлен приёмник, и показать его члены дополнением.
+   *
+   * Имя спецификатора берём из строк импорта открытого файла (`import { Elements }
+   * from './elements'`). Путь считаем от каталога открытого файла — так же, как
+   * `import-path.ts` при подсказке путей. Прочитанный текст кладём в `sources`:
+   * следующий знак после точки уже не пойдёт на диск.
+   */
+  private membersFromImports(member: MemberAccess, caret: number): void {
+    const read = this.readSource;
+    const from = this.currentPath?.() ?? null;
+    if (!read || !from) return;
+    const specifiers = importsOf(this.buffer.text, member.receiver);
+    if (specifiers.length === 0) return;
+    void Promise.all([
+      this.projectFiles?.().catch(() => [] as readonly string[]) ?? Promise.resolve([] as readonly string[]),
+      this.aliasListFor(),
+    ])
+      .then(([files, aliases]) => {
+        // Кандидатов перебираем по очереди, пока один не даст члены. Раньше брали
+        // первый нечитанный файл и на нём же останавливались: если класс лежал во
+        // втором импорте, подсказка молчала — а вид у этого был как у «членов нет».
+        const targets: string[] = [];
+        for (const specifier of specifiers) {
+          const hit = resolveSpecifier(specifier, from, files, aliases);
+          if (hit !== null && !this.sources.has(hit) && !targets.includes(hit)) targets.push(hit);
+        }
+        if (targets.length === 0) return null;
+        // `reduce` с последовательным промисом: диск трогаем только когда надо.
+        return targets.reduce<Promise<void>>(
+          (queue, target) =>
+            queue.then(async () => {
+              if (!this.widget.isVisible || this.controller.caret !== caret) return;
+              if (this.sources.has(target)) return;
+              const text = await read(target);
+              if (text === null) return;
+              this.rememberSource(target, text);
+              const entries = await this.memberEntriesFollowingReexports(member, target, text, read, files, aliases);
+              if (entries.length === 0) return;
+              this.appendMembers(entries, member.prefix);
+            }),
+          Promise.resolve(),
+        );
+      })
+      .catch(() => {
+        // Файла нет или прочитался с ошибкой — остаются свои члены и слова файла.
+      });
+  }
+
+  /**
+   * Члены с одного уровня реэкспорта.
+   *
+   * Файл, найденный по импорту, часто только пересылает (`export * from './elements'`,
+   * `export { Elements } from './elements'` — в том числе через `index.ts`): тела класса
+   * в нём нет, и поиск по уже прочитанному молчал бы. Идём ровно на один шаг глубже —
+   * глубже не нужно, а стоить могло бы чтение всего дерева.
+   */
+  private async memberEntriesFollowingReexports(
+    member: MemberAccess,
+    target: string,
+    text: string,
+    read: (path: string) => Promise<string | null>,
+    files: readonly string[] = this.fileList ?? [],
+    aliases: readonly ImportAlias[] = this.aliasList ?? [],
+  ): Promise<ReturnType<typeof membersOf>> {
+    const entries = this.memberEntries(member);
+    if (entries.length > 0) return entries;
+    for (const specifier of importsOf(text, member.receiver)) {
+      const next = resolveSpecifier(specifier, target, files, aliases);
+      if (next === null || this.sources.has(next)) continue;
+      const deeper = await read(next).catch(() => null);
+      if (deeper === null) continue;
+      this.rememberSource(next, deeper);
+      const found = this.memberEntries(member);
+      if (found.length > 0) return found;
+    }
+    return entries;
+  }
+
+  /**
+   * Положить прочитанный чужой файл в кэш, вытеснив самый давний сверх `SOURCES_LIMIT`.
+   *
+   * Map помнит порядок вставки, но не порядок обращения: читаем заново только после
+   * сброса при записи файла, так что «самый давний по вставке» и есть самый давний.
+   * Перезапись существующего ключа сначала удаляем — иначе он остался бы на старом месте.
+   */
+  private rememberSource(path: string, text: string): void {
+    this.sources.delete(path);
+    this.sources.set(path, text);
+    while (this.sources.size > SOURCES_LIMIT) {
+      const oldest = this.sources.keys().next();
+      if (oldest.done) break;
+      this.sources.delete(oldest.value);
+    }
+  }
+
+  /** Дописать члены из импортированного файла к уже показанному списку, не повторяя. */
+  private appendMembers(entries: ReturnType<typeof membersOf>, prefix: string): void {
+    const known = new Set(this.widget.labels());
+    const items: CompletionItem[] = [];
+    for (const entry of entries) {
+      if (entry.name.length === 0 || known.has(entry.name)) continue;
+      const match = matchScore(entry.name, prefix);
+      if (!match) continue;
+      known.add(entry.name);
+      items.push({
+        label: entry.name,
+        kind: 'word',
+        detail: entry.kind === 'method' ? 'метод' : 'поле',
+        positions: match.positions,
+      });
+    }
+    if (items.length > 0) this.widget.append(items);
   }
 
   /**
@@ -824,20 +1175,6 @@ export class CompletionAssistant {
   private anchor(offset: number): { left: number; top: number; bottom: number } {
     const point = this.view.clientPoint(offset);
     return { left: point.left, top: point.top, bottom: point.bottom };
-  }
-
-  /**
-   * Текст вокруг курсора — для разбора членов класса. Берём окно, а не файл целиком:
-   * подсказка идёт на каждое нажатие после точки, и собирать ради неё весь текст
-   * большого файла незачем. Класс целиком в окно помещается с большим запасом.
-   */
-  private textAroundCaret(): string {
-    const line = this.buffer.lineAt(this.controller.caret);
-    const from = Math.max(1, line - WORDS_AROUND);
-    const to = Math.min(this.buffer.lineCount, line + WORDS_AROUND);
-    const lines: string[] = [];
-    for (let current = from; current <= to; current += 1) lines.push(this.buffer.lineText(current));
-    return lines.join('\n');
   }
 
   /** Добавить в словарь строки вокруг курсора, которых там ещё нет. */

@@ -192,13 +192,59 @@ export function receiverType(text: string, receiver: string): string | null {
  * Члены приёмника из текста файла. `self`/`this`/`cls` — члены текущего объекта
  * (`selfMembers`). Имя класса — его члены (`classMembers`). Поле или переменная
  * (`browser`, `driver`) — члены ТИПА, который ей присвоен или приписан аннотацией.
+ *
+ * `elsewhere` — тексты ДРУГИХ файлов (импортированных классов). В текущем файле
+ * объявления чужого класса нет, и по одному `text` его члены не собрать: класс
+ * лежит рядом и приезжает импортом. Поэтому, не найдя класса в `text`, смотрим в
+ * `elsewhere` — там его тело и отыщется. Порядок важен: свой файл всегда впереди.
  */
-export function membersOf(text: string, receiver: string): MemberEntry[] {
+export function membersOf(text: string, receiver: string, elsewhere: readonly string[] = []): MemberEntry[] {
   if (isSelfReceiver(receiver)) return selfMembers(text);
-  const named = classMembers(text, receiver);
-  if (named.length > 0) return named;
+  for (const source of [text, ...elsewhere]) {
+    const named = classMembers(source, receiver);
+    if (named.length > 0) return named;
+  }
   const type = receiverType(text, receiver);
-  return type ? classMembers(text, type) : [];
+  if (!type) return [];
+  for (const source of [text, ...elsewhere]) {
+    const typed = classMembers(source, type);
+    if (typed.length > 0) return typed;
+  }
+  return [];
+}
+
+/**
+ * Модули, из которых в файле мог приехать класс: спецификаторы импортов.
+ *
+ * Нужно, чтобы запасной путь (разбор по тексту) дотянулся до класса, объявленного
+ * в СОСЕДНЕМ файле: тело `class Foo` живёт не в открытом файле, а там, откуда его
+ * импортировали. Разбираем обе формы — JS/TS (`from './foo'`, `require('./foo')`)
+ * и Python (`from pkg.foo import`, `import pkg.foo`).
+ *
+ * Отбираем только те импорты, где встречается `className`: иначе на каждый показ
+ * после точки пришлось бы читать все файлы проекта. `[]` — класс ниоткуда не
+ * импортирован (объявлен тут же или подсказки от сервера).
+ */
+export function importsOf(text: string, className: string): string[] {
+  const name = escapeRegExp(className);
+  // JS/TS: `import { Foo } from './foo'`, `import Foo from './foo'`,
+  // `import { Foo as Bar } from './foo'`, `import './foo'` (побочный).
+  const quoted = new RegExp(String.raw`(?:import|export)\b[^;\n]*?\b${name}\b[^;\n]*?\bfrom\s*['"]([^'"]+)['"]`, 'gu');
+  // Python: `from pkg.foo import Foo, Bar`, `from pkg.foo import (Foo)`.
+  const dotted = new RegExp(String.raw`^\s*from\s+([\w.]+)\s+import\s+(?:\(|)[^\n]*\b${name}\b`, 'gmu');
+  // Python: `import pkg.foo` — тело берётся по всему модулю; имя в нём поищем сами.
+  const plainDotted = /^\s*import\s+([\w.]+(?:\s*,\s*[\w.]+)*)\s*$/gmu;
+
+  const found = new Set<string>();
+  for (const match of text.matchAll(quoted)) if (match[1]) found.add(match[1]);
+  for (const match of text.matchAll(dotted)) if (match[1]) found.add(match[1]);
+  for (const match of text.matchAll(plainDotted)) {
+    for (const module of (match[1] ?? '').split(',')) {
+      const trimmed = module.trim();
+      if (trimmed) found.add(trimmed);
+    }
+  }
+  return [...found];
 }
 
 /** Экранирование имени для вставки в регулярное выражение. */
@@ -219,10 +265,13 @@ function leadingSpaces(line: string): number {
 
 /** Имя словами (буквы и цифры) — для разбора строк файла. */
 const IDENT = String.raw`[\p{L}\p{Nl}\p{Nd}\p{Pc}_$][\p{L}\p{Nl}\p{Nd}\p{Pc}_$]*`;
-/** Объявление класса: `class Elements:` (Python) или `class Elements {` (JS/TS). */
-const CLASS_DECL = new RegExp(String.raw`^(\s*)class\s+(${IDENT})`, 'u');
-/** Присваивание на уровне класса: `back_to_old_design = …` или `x: int = …`. */
-const FIELD_LINE = new RegExp(String.raw`^(\s*)(${IDENT})\s*(?::[^=]*)?=`, 'u');
+/** Объявление класса: `class Elements:` (Python) или `export class Elements {` (JS/TS). */
+const CLASS_DECL = new RegExp(String.raw`^(\s*)(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(${IDENT})`, 'u');
+/**
+ * Объявление на уровне класса: `x = …` (Python), `x: int = …`, `x: number;` (TS).
+ * Вторая группа — имя: без `=` поле всё равно поле, `;` его закрывает.
+ */
+const FIELD_LINE = new RegExp(String.raw`^(\s*)(${IDENT})\s*(?::[^=;]*)?(?:=|;|$)`, 'u');
 /** Имя члена: у закрытого поля впереди `#`. */
 const MEMBER = `#?${IDENT}`;
 

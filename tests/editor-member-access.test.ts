@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isSelfReceiver, memberAccessAt, selfMembers } from '../src/renderer/editor/complete/member-access';
+import {
+  importsOf,
+  isSelfReceiver,
+  memberAccessAt,
+  membersOf,
+  selfMembers,
+} from '../src/renderer/editor/complete/member-access';
 
 /**
  * Доступ к члену: подсказка после точки показывает имена объекта, а не слова файла.
@@ -93,5 +99,68 @@ describe('selfMembers', () => {
     const names = members.map((member) => member.name);
     expect(names.filter((name) => name === 'count')).toHaveLength(1);
     expect(names).not.toContain('if');
+  });
+
+  it('TS-поле без инициализатора — тоже член', () => {
+    const members = selfMembers(['export class A {', '  private button: number;', '}'].join('\n'));
+    expect(members.map((member) => member.name)).toContain('button');
+  });
+});
+
+/**
+ * Члены чужого класса: класс объявлен в соседнем файле, поэтому без сервера его
+ * приходится искать по тексту — сначала в импортированных модулях, потом в том,
+ * что эти модули реэкспортируют.
+ */
+describe('membersOf', () => {
+  const elements = [
+    'export class Elements {',
+    '  static byId(id: string): HTMLElement { return null; }',
+    '  static sum(): number { return 0; }',
+    '}',
+  ].join('\n');
+
+  it('находит класс в первом же прочитанном файле', () => {
+    const members = membersOf('Elements.byId()', 'Elements', [elements]);
+    expect(members.map((member) => member.name)).toContain('byId');
+  });
+
+  it('не останавливается на файле, где класса нет', () => {
+    // Так выглядит пачка импортов: «Icons» приехал из иконок, «Elements» — из элементов.
+    // Раньше поиск брал первый кандидат, не находил класс и сдавался.
+    const icons = 'export const Icons = { ok: 1 };';
+    const members = membersOf('Elements.byId()', 'Elements', [icons, elements]);
+    expect(members.map((member) => member.name)).toContain('byId');
+  });
+
+  it('не нашлось нигде — пусто, а не чужие члены', () => {
+    expect(membersOf('Elements.byId()', 'Elements', ['export const Icons = 1;'])).toEqual([]);
+  });
+});
+
+describe('importsOf', () => {
+  it('знает, из какого модуля приехало имя', () => {
+    const text = "import { Icons } from './icons';\nimport { Elements } from './elements';\n";
+    expect(importsOf(text, 'Elements')).toEqual(['./elements']);
+    expect(importsOf(text, 'Icons')).toEqual(['./icons']);
+  });
+
+  it('Python: from pkg.mod import Name', () => {
+    expect(importsOf('from pkg.mod import Widget\n', 'Widget')).toEqual(['pkg.mod']);
+  });
+
+  it('имя ниоткуда не импортировано — пусто', () => {
+    expect(importsOf("import { Icons } from './icons';\n", 'Elements')).toEqual([]);
+  });
+
+  it('реэкспорт из index.ts — тот же модуль-источник', () => {
+    // Файл, найденный по импорту, часто только пересылает; шаг реэкспорта
+    // (assistant.memberEntriesFollowingReexports) ищет по этому результату.
+    const index = "export { Elements } from './elements';\nexport * from './icons';\n";
+    expect(importsOf(index, 'Elements')).toEqual(['./elements']);
+  });
+
+  it('переименование при импорте: ищем по локальному имени', () => {
+    expect(importsOf("import { Elements as El } from './elements';\n", 'El')).toEqual(['./elements']);
   });
 });

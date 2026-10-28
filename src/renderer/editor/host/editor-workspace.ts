@@ -37,7 +37,7 @@ import type { SymbolSource } from './symbol-navigation';
 import type { HoverExternalInfo } from '../widgets/hover-widget';
 import type { PeekAnchor } from '../widgets/peek-widget';
 import type { CompletionItem } from '../complete/completions';
-import type { ProjectCompletion } from '../complete/assistant';
+import type { ImportAlias, ProjectCompletion } from '../complete/assistant';
 import type { CompletionTriggers } from './lsp-features';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { FoldRange } from '../../../shared/fold-ranges';
@@ -189,6 +189,18 @@ export interface EditorWorkspaceOptions {
    */
   readText?: (path: string) => Promise<string | null>;
   /**
+   * Подписка на запись файла: отдаёт путь и отписку. Нужна подсказкам после точки —
+   * по этому событию сбрасывается прочитанный текст соседнего файла (см.
+   * `complete/assistant.ts`). Не задано — кэш живёт до собственного вытеснения.
+   */
+  onDidWriteFile?: (listener: (path: string) => void) => () => void;
+  /**
+   * Алиасы импорта из `paths` tsconfig (`@/core` → `src/core`). Нужны подсказке после
+   * точки и показу путей в импорте: без них такие ссылки не разворачиваются.
+   * Не задано — алиасов нет.
+   */
+  importAliases?: () => Promise<readonly ImportAlias[]>;
+  /**
    * «Обернуть выделение»: показать выбор обёртки. Не задано — команды нет: список
    * вариантов (и то, из чего выбирать по языку) — дело приложения (см. `ui/surround-modal.ts`).
    */
@@ -287,6 +299,10 @@ export class EditorWorkspace {
   private readonly revealLocation: ((path: string, line: number, column: number) => void) | undefined;
   /** Чтение текста файла: нужно «заглядыванию» в определение (см. `peek-controller.ts`). */
   private readonly readText: ((path: string) => Promise<string | null>) | undefined;
+  /** Подписка на запись файла: по ней сбрасывается прочитанное соседом для подсказок. */
+  private readonly onDidWriteFile: EditorWorkspaceOptions['onDidWriteFile'];
+  /** Алиасы `paths` из tsconfig — шов к приложению (`@/core` → `src/core`). */
+  private readonly importAliases: EditorWorkspaceOptions['importAliases'];
   /** Шов выбора обёртки: список вариантов показывает приложение. */
   private readonly surroundWith: (() => void) | undefined;
   /** Шов форматирования участка — сервер и правки на стороне приложения. */
@@ -417,6 +433,8 @@ export class EditorWorkspace {
     this.renameSymbol = options.renameSymbol;
     this.revealLocation = options.revealLocation;
     this.readText = options.readText;
+    this.onDidWriteFile = options.onDidWriteFile;
+    this.importAliases = options.importAliases;
     this.surroundWith = options.surroundWith;
     this.formatRange = options.formatRange;
     this.formatOnPaste = options.formatOnPaste;
@@ -509,6 +527,7 @@ export class EditorWorkspace {
       completionFromLanguage: this.completionFromLanguage,
       projectSymbols: this.projectSymbols,
       projectFiles: this.projectFiles,
+      importAliases: this.importAliases,
       completionTriggers: this.completionTriggers,
       resolveCompletionItem: this.resolveCompletionItem,
       signatureFromLanguage: this.signatureFromLanguage,
@@ -526,6 +545,7 @@ export class EditorWorkspace {
       symbols: this.symbols,
       revealLocation: this.revealLocation,
       readText: this.readText,
+      onDidWriteFile: this.onDidWriteFile,
       surroundWith: this.surroundWith,
       formatRange: this.formatRange,
       formatOnPaste: this.formatOnPaste,

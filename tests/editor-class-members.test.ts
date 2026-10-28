@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { classMembers, memberAccessAt, membersOf, receiverType } from '../src/renderer/editor/complete/member-access';
+import {
+  classMembers,
+  importsOf,
+  memberAccessAt,
+  membersOf,
+  receiverType,
+} from '../src/renderer/editor/complete/member-access';
 
 /**
  * Члены НАЗВАННОГО класса из текста файла — то, чего раньше не было: после
@@ -117,5 +123,72 @@ describe('многоуровневое вложение: члены по тип�
       '        self.Elements = Elements()',
     ].join('\n');
     expect(membersOf(text, 'Elements').map((member) => member.name)).toContain('lk_button');
+  });
+});
+
+/**
+ * Класс, объявленный в СОСЕДНЕМ файле и ввезённый импортом: в тексте открытого
+ * файла его тела нет, и по одному `text` членов не бывает. Раньше члены такого
+ * класса не показывались вовсе — ни сервером (он ещё не ответил), ни запасным
+ * путём (он смотрел только в открытый файл). Теперь второй текст передаётся
+ * в `elsewhere`.
+ */
+describe('члены импортированного класса', () => {
+  const page = [
+    "import { Elements } from './elements';",
+    '',
+    'export class Page {',
+    '  constructor() {',
+    '    this.el = new Elements();',
+    '  }',
+    '}',
+  ].join('\n');
+
+  const elements = [
+    'export class Elements {',
+    '  lkButton: number;',
+    '  backToOldDesign = Element(\'//*[@id="old"]\');',
+    '  click(): void {}',
+    '}',
+  ].join('\n');
+
+  it('membersOf ищет класс и по имени приёмника, и по типу поля', () => {
+    const byName = membersOf(page, 'Elements', [elements]).map((member) => member.name);
+    expect(byName).toContain('lkButton');
+    expect(byName).toContain('click');
+
+    // `this.el.` — приёмник `el`, тип `Elements` тоже объявлен в другом файле.
+    const byType = membersOf(page, 'el', [elements]).map((member) => member.name);
+    expect(byType).toContain('lkButton');
+  });
+
+  it('без второго текста членов нет — виноват не разбор, а отсутствие текста', () => {
+    expect(membersOf(page, 'Elements')).toEqual([]);
+  });
+
+  it('свой класс ближе чужого: тот же класс в открытом файле побеждает', () => {
+    const local = ['class Elements {', '  own = 1;', '}', page].join('\n');
+    const names = membersOf(local, 'Elements', [elements]).map((member) => member.name);
+    expect(names).toContain('own');
+    expect(names).not.toContain('lkButton');
+  });
+});
+
+/**
+ * Спецификаторы импорта по имени: по ним ищется файл с телом класса.
+ * Разбираются оба стиля — JS/TS (`import … from '…'`) и Python (`from pkg.mod import X`).
+ */
+describe('importsOf', () => {
+  it('JS/TS: именованный и прямой импорт', () => {
+    expect(importsOf("import { A, Elements } from './elements';", 'Elements')).toContain('./elements');
+    expect(importsOf("import Elements from './elements';", 'Elements')).toContain('./elements');
+  });
+
+  it('Python: from pkg.mod import X', () => {
+    expect(importsOf('from pages.elements import Elements', 'Elements')).toContain('pages.elements');
+  });
+
+  it('имя из другого импорта не путается с искомым', () => {
+    expect(importsOf("import { Other } from './other';", 'Elements')).toEqual([]);
   });
 });
