@@ -19,6 +19,11 @@ export interface CreateVenvOptions {
   preset?: VenvInstallPreset;
   /** Поставить зависимости из requirements.txt, если он есть. */
   installRequirements?: boolean;
+  /**
+   * Чистое окружение: ни профиля, ни requirements — только питон и pip.
+   * Сильнее остальных полей: `preset` и `installRequirements` при этом игнорируются.
+   */
+  clean?: boolean;
 }
 
 /** Событие прогресса создания окружения: шаг и вывод команд. */

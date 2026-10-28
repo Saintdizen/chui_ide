@@ -13,6 +13,16 @@
 
 ## Правила, добытые ценой (не задачи)
 
+- **Одно окружение на несколько проектов — это конфликт версий, который pip не считает ошибкой.**
+  `pip install -r requirements.txt` разрешает только свою графу: `pytest-cov`, поставленный
+  пресетом, в ней нет — и pip молча понизил `pluggy` до 0.13.1 (в выводе лишь «resolver does
+  not currently take into account all the packages that are installed»), после чего pytest-cov 7
+  падал на загрузке `TypeError: __call__() got an unexpected keyword argument 'wrapper'`.
+  Поэтому `python.createVenv` по умолчанию **чистое** окружение (`clean: true` в
+  `CreateVenvOptions`, `src/main/python/environments.ts` пропускает и пресет, и requirements;
+  галочка в `src/renderer/ui/venv-modal.ts`). Ставить пакеты — решение человека, не побочный
+  эффект создания venv. Не сделано: `pip check` после установки.
+
 - **Порог покрытия — только там, где тесты доехали.** Глобальный процент
   считается по всем тестам, а часть их на Windows снимается: заглушки
   git/rg/lsp — POSIX-скрипты (`stubSupported = process.platform !== 'win32'`

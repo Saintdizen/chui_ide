@@ -65,10 +65,12 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
     placeholder: DEFAULT_VENV_DIR,
   });
 
+  const presetField = h('div', { class: 'venv-field' });
   const presetSelect = createSelect({ title: 'Что поставить в новое окружение' });
   presetSelect.setOptions(VENV_INSTALL_OPTIONS.map((option) => ({ value: option.id, label: option.label })));
   presetSelect.setValue('pytest');
   presetSelect.onChange(() => updatePresetHint());
+  presetField.append(h('label', { class: 'venv-label' }, 'Пакеты'), presetSelect.element);
 
   // Выбор версии питона: у некоторых установленных нет модуля venv, и окружение
   // из них не создаётся — человек должен видеть список, а не получать ошибку.
@@ -106,6 +108,16 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
 
   const requirementsRow = h('label', { class: 'venv-check', hidden: true });
   const requirementsBox = h('input', { type: 'checkbox', checked: true });
+
+  // Чистое окружение по умолчанию: пины проекта (`pytest==6.2.4` и подобные)
+  // иначе приезжают поверх уже поставленного и ломают его версиями.
+  const cleanBox = h('input', { type: 'checkbox', checked: true, onChange: () => updateInstallVisibility() });
+  const cleanRow = h(
+    'label',
+    { class: 'venv-check' },
+    cleanBox,
+    document.createTextNode(' Чистое окружение — только питон и pip'),
+  );
 
   const log = h('pre', { class: 'venv-log', hidden: true });
 
@@ -158,15 +170,16 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
       nameField,
       pathField,
       h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Интерпретатор'), baseSelect.element),
-      h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Пакеты'), presetSelect.element),
+      cleanRow,
+      presetField,
       presetHint,
       requirementsRow,
       log,
     ),
   );
 
-  presetSelect.onChange(() => updatePresetHint());
   updatePresetHint();
+  updateInstallVisibility();
   locationSelect.onChange(() => updateLocation());
   updateLocation();
 
@@ -179,6 +192,14 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
   function updatePresetHint(): void {
     const option = VENV_INSTALL_OPTIONS.find((item) => item.id === presetSelect.value);
     presetHint.textContent = option?.hint ?? '';
+  }
+
+  /** Галочка «чистое окружение» гасит и профиль пакетов, и requirements.txt. */
+  function updateInstallVisibility(): void {
+    const clean = cleanBox.checked;
+    presetField.hidden = clean;
+    presetHint.hidden = clean;
+    requirementsRow.hidden = clean || !hasRequirements;
   }
 
   /**
@@ -238,9 +259,9 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
       .request('workspace.stat', { path: `${root}/requirements.txt` })
       .then(() => true)
       .catch(() => false);
-    requirementsRow.hidden = !hasRequirements;
     clear(requirementsRow);
     requirementsRow.append(requirementsBox, document.createTextNode(' Поставить зависимости из requirements.txt'));
+    updateInstallVisibility();
     renderList();
   }
 
@@ -278,6 +299,9 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
     pathInput.toggleAttribute('disabled', busy);
     baseSelect.setDisabled(busy);
     locationSelect.setDisabled(busy);
+    presetSelect.setDisabled(busy);
+    cleanBox.toggleAttribute('disabled', busy);
+    requirementsBox.toggleAttribute('disabled', busy);
   }
 
   function cancel(): void {
@@ -308,6 +332,7 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
           base: baseSelect.value || undefined,
           preset: presetSelect.value as VenvInstallPreset,
           installRequirements: hasRequirements && requirementsBox.checked,
+          clean: cleanBox.checked,
         },
         (event, payload) => {
           if (event !== VenvEvent.Progress) return;

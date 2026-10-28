@@ -116,7 +116,13 @@ export async function createVenv(
     }
 
     const installed: string[] = [];
-    if (options.installRequirements) {
+    // Чистое окружение — это только питон и pip. Всё остальное ставит человек сам
+    // (`pip install -r requirements.txt` в терминале), иначе пины проекта молча
+    // понизят то, что уже стоит в окружении.
+    if (options.clean) {
+      emit({ type: 'step', message: 'Окружение чистое: пакеты не ставлю' });
+    }
+    if (options.installRequirements && !options.clean) {
       const requirements = path.join(root, 'requirements.txt');
       if (await isFile(requirements)) {
         emit({ type: 'step', message: 'Ставлю зависимости из requirements.txt…' });
@@ -127,7 +133,7 @@ export async function createVenv(
       }
     }
 
-    const packages = installPackages(options.preset ?? 'empty');
+    const packages = options.clean ? [] : installPackages(options.preset ?? 'empty');
     if (packages.length > 0) {
       emit({ type: 'step', message: `Ставлю пакеты: ${packages.join(', ')}…` });
       await runCommand(python, ['-m', 'pip', 'install', ...packages], root, emit, signal);
