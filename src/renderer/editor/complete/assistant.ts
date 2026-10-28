@@ -610,6 +610,7 @@ export class CompletionAssistant {
       external: this.external(),
       snippets: snippetsForLanguage(this.snippets(), this.language),
       exclude: this.contextWords(prefix),
+      expectation: expectedAt(this.buffer.text.slice(0, this.controller.caret)),
     });
     // Внутри вызова к словам добавляются имена параметров: `parse(te|` ждёт `text=`,
     // а не слово из файла. Имена берутся из объявления этой же функции (`named-args.ts`).
@@ -710,6 +711,7 @@ export class CompletionAssistant {
       limit: DEFAULT_LIMIT,
       external: this.external(),
       snippets: snippetsForLanguage(this.snippets(), this.language),
+      expectation: expectedAt(text.slice(0, caret)),
     });
     // Заменяем слово под курсором, если оно есть: тогда подсказка встаёт вместо него.
     const prefix = prefixAt(text, column);

@@ -25,6 +25,7 @@ import type { TextEdit } from '../../../shared/edits';
 import { CODE_GRAMMARS } from '../highlight/languages/code';
 import type { Snippet } from '../../../shared/snippets';
 import { EXTERNAL_BONUS, matchScore } from './fuzzy';
+import type { Expectation } from './expectation';
 import type { WordIndex } from './word-index';
 
 /** Что за подсказка: по виду панель рисует значок, а не полагается на текст. */
@@ -83,6 +84,11 @@ export interface CompletionOptions {
   readonly snippets?: readonly Snippet[];
   /** Слово под курсором исключаем из подсказок — предлагать набранное бессмысленно. */
   readonly exclude?: ReadonlySet<string>;
+  /**
+   * Чего ждёт место под курсором (см. `expectation.ts`). Входит только в ОЦЕНКУ, не в
+   * состав: в позиции значения `string` не должен вставать выше своего `startTime`.
+   */
+  readonly expectation?: Expectation | null;
 }
 
 /** Предел списка по умолчанию: столько строк попапа глаз охватывает без прокрутки. */
@@ -90,6 +96,45 @@ export const DEFAULT_LIMIT = 50;
 
 /** Надбавка сниппетам: их задал человек, и триггер уже даёт точное совпадение. */
 const SNIPPET_BONUS = 60;
+
+/**
+ * Насколько ВИД подсказки сдвигает её в списке — единицы, не сотни очков.
+ *
+ * В `fuzzy.ts` совпадение с начала имени даёт 1000, а длина имени и разрывы отнимают
+ * по 1 и по 25. Вид должен решать только при почти равной форме совпадения:
+ * переворачивать список на глаз человеку незачем.
+ */
+const KIND_BONUS: Record<CompletionKind, number> = {
+  /** Своё из файла: имён своего кода человек ищет чаще всего. */
+  word: 10,
+  /** Ответ сервера языка: у него есть типы, но его элементы и так идут первыми. */
+  external: 0,
+  /** Сниппеты получают свою, бóльшую надбавку выше. */
+  snippet: 0,
+  /** Общие слова языка: нужны, но реже собственных имён. */
+  language: -10,
+};
+
+/** Встроенные типы языка — в позиции значения они почти никогда не нужное имя. */
+const BUILTIN_TYPE = /^(?:string|number|boolean|bigint|symbol|object|unknown|any|never|void)$/;
+
+/** Насколько опустить встроенный тип в позиции значения: перекрывает всё, что даёт вид. */
+const TYPE_IN_VALUE_PENALTY = 30;
+
+/**
+ * Надбавка за вид подсказки — часть ОЦЕНКИ, а не отдельная очередь источников.
+ *
+ * `expected` — чего ждёт место под курсором; `null` — место не разобрано, и тогда вид
+ * только разводит равные имена, ничего не опуская.
+ */
+function kindBonus(item: Pick<CompletionItem, 'label' | 'kind'>, expected: Expectation | null): number {
+  let bonus = KIND_BONUS[item.kind];
+  // `string` как значение — почти всегда промах: тип написали там, где ждали имя.
+  if (expected === 'value' && item.kind === 'language' && BUILTIN_TYPE.test(item.label)) {
+    bonus -= TYPE_IN_VALUE_PENALTY;
+  }
+  return bonus;
+}
 
 /** Подсказка с оценкой — для сортировки списка по релевантности. */
 interface RankedItem {
@@ -131,6 +176,7 @@ export function buildCompletions(
   if (prefix.length === 0) return [];
 
   const excluded = options.exclude ?? new Set<string>();
+  const expected = options.expectation ?? null;
   const emitted = new Set<string>();
   const ranked: RankedItem[] = [];
   let order = 0;
@@ -145,7 +191,7 @@ export function buildCompletions(
     emitted.add(label);
     ranked.push({
       item: { label, kind: 'external', detail: 'предложено', positions: match.positions },
-      score: match.score + EXTERNAL_BONUS,
+      score: match.score + EXTERNAL_BONUS + kindBonus({ label, kind: 'external' }, expected),
       order: order++,
     });
   }
@@ -165,7 +211,7 @@ export function buildCompletions(
         snippet: snippet.body,
         positions: match.positions,
       },
-      score: match.score + SNIPPET_BONUS,
+      score: match.score + SNIPPET_BONUS + kindBonus({ label: snippet.prefix, kind: 'snippet' }, expected),
       order: order++,
     });
   }
@@ -179,7 +225,7 @@ export function buildCompletions(
     emitted.add(word);
     ranked.push({
       item: { label: word, kind: 'language', detail: 'язык', positions: match.positions },
-      score: match.score,
+      score: match.score + kindBonus({ label: word, kind: 'language' }, expected),
       order: order++,
     });
   }
@@ -192,7 +238,7 @@ export function buildCompletions(
     emitted.add(word);
     ranked.push({
       item: { label: word, kind: 'word', detail: `в файле: ${index.count(word)}`, positions: match.positions },
-      score: match.score,
+      score: match.score + kindBonus({ label: word, kind: 'word' }, expected),
       order: order++,
     });
   }
@@ -207,6 +253,10 @@ export function buildCompletions(
  * больше сотни ключевых слов и типов), и если пустить их подряд, до имён из файла
  * список никогда не дойдёт. А имена из файла человеку нужнее: ключевые слова он и так
  * знает.
+ *
+ * Оценки (`expectation`, вид) здесь сознательно нет: «покажи всё» — это состав, а не
+ * ранжирование; сортируй здесь по оценке — и Ctrl+Space начнёт вести себя
+ * по-разному на своём имени и на слове языка.
  */
 export function allCompletions(
   index: WordIndex,

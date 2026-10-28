@@ -32,12 +32,64 @@ describe('подсказки по префиксу', () => {
     expect(buildCompletions(index, 'typescript', '')).toEqual([]);
   });
 
-  it('короткий префикс: языковое слово впереди слов файла', () => {
+  it('короткий префикс с почти равной формой: слово из файла впереди', () => {
     const index = indexOf(['formatRow formatRow']);
     const items = buildCompletions(index, 'typescript', 'f');
-    // Набрано «f» — предложить `for` честнее, чем `formatRow`.
-    expect(items[0]?.label).toBe('for');
-    expect(labels(items)).toContain('formatRow');
+    // `formatRow` не совпадает с начала (`f` — первый знак, дальше буквы сдвинуты),
+    // а `for` совпадает сплошь. Оценки почти равны (991 против 997), и вид решает
+    // исход в пользу своего имени: 991 + 10 против 997 - 10.
+    expect(items[0]?.label).toBe('formatRow');
+    expect(labels(items)).toContain('for');
+  });
+
+  it('при почти равной форме совпадения имя из файла впереди слова языка', () => {
+    // `f0rmat` и `false` совпадают с начала одинаково — тогда решает вид.
+    const index = indexOf(['f0rmat f0rmat f0rmat']);
+    const items = buildCompletions(index, 'typescript', 'f0');
+    expect(items[0]?.label).toBe('f0rmat');
+  });
+
+  it('вид решает только при почти равной длине имени', () => {
+    // Оба совпадают с начала сплошь, поэтому оценка = 1000 - штраф за длину
+    // минус надбавка за вид. `falsel` (6 знаков) против `false` (5): слово языка
+    // длиннее всего на знак, и надбавка за своё имя переворачивает исход.
+    const near = indexOf(['falsel falsel falsel']);
+    const items = buildCompletions(near, 'typescript', 'fals');
+    expect(items[0]?.label).toBe('falsel');
+    expect(labels(items).indexOf('false')).toBeGreaterThan(0);
+
+    // Пять знаков разницы надбавка уже не перекрывает: `false` остаётся выше.
+    const far = indexOf(['falselXyzzy falselXyzzy falselXyzzy']);
+    const wider = buildCompletions(far, 'typescript', 'falsel');
+    expect(labels(wider).indexOf('false')).toBeLessThan(labels(wider).indexOf('falselXyzzy'));
+  });
+
+  it('Ctrl+Space: вид не отбирает — в позиции значения список тот же', () => {
+    // `allCompletions` — это «покажи всё»: список строится чередованием источников и
+    // по оценке НЕ сортируется, поэтому `expectation` (опция общей формы) здесь на
+    // состав и порядок не влияет — иначе Ctrl+Space на слове языка вёл бы себя
+    // иначе, чем на своём имени, а человек видит просто «всё».
+    const index = indexOf(['startTime startTime startTime']);
+    const plain = allCompletions(index, 'typescript', { limit: 20 });
+    const withValue = allCompletions(index, 'typescript', { limit: 20, expectation: 'value' });
+    const withName = allCompletions(index, 'typescript', { limit: 20, expectation: 'type' });
+    expect(labels(withValue)).toEqual(labels(plain));
+    expect(labels(withName)).toEqual(labels(plain));
+    // Порядок — чередование источников, а не оценка: сперва языковая половина.
+    expect(labels(withValue)[0]).toBe('if');
+  });
+
+  it('в позиции значения встроенный тип опускается ниже имени из файла', () => {
+    const index = indexOf(['startTime startTime startTime']);
+    const items = buildCompletions(index, 'typescript', 'st', { expectation: 'value' });
+    const order = (label: string) => items.findIndex((item) => item.label === label);
+    expect(order('startTime')).toBeLessThan(order('string'));
+  });
+
+  it('вне разобранного места встроенный тип ничего не теряет', () => {
+    const index = indexOf(['startTime startTime startTime']);
+    const items = buildCompletions(index, 'typescript', 'st');
+    expect(labels(items)).toContain('string');
   });
 
   it('длинный префикс: слова файла впереди языковых', () => {
