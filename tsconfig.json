@@ -1,4 +1,13 @@
 {
+  // Общие правила типов. Сборка и проверка идут по четырём конфигам, которые
+  // этот extends: main (node), renderer (dom), tests и scripts. Отдельной
+  // проверки по ЭТОМУ файлу нет и быть не может: без `dom` он не знает ни
+  // `document`, ни `HTMLElement` (1300 ош.), а с `dom` — ругается на node-
+  // исходники. В одиночку он открыт только эдитору, который берёт настройки с
+  // ближайшего tsconfig и доверяет типу файла.
+  //
+  // `noUncheckedSideEffectImports: false` — про импорт `.css`: стили тянут
+  // ради побочного эффекта, а Vite подменяет импорт вставкой <style>.
   "compilerOptions": {
     "target": "ES2022",
     "strict": true,
@@ -11,6 +20,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "noUncheckedSideEffectImports": false
   }
 }
