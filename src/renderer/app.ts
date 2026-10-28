@@ -58,6 +58,7 @@ import { parseNodeCoverage } from '../shared/node-coverage';
 import { diagnoseHighlighting, refreshHighlight } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
 import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
+import { attachDoubleShift } from './core/double-shift';
 import { languageFromPath, languageLabel, languageIndent } from './core/languages';
 import { normalizeBrowserUrl, isLocalUrl } from '../shared/browser';
 import { imageFormatLabel, isImagePath } from '../shared/images';
@@ -3619,6 +3620,11 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   changeGutter.refresh();
 
   new KeybindingService(commands, DEFAULT_KEYBINDINGS, () => settings.keybindings.overrides).attach(window);
+
+  // Двойное нажатие Shift — второй способ позвать палитру, как в Zed/JetBrains.
+  // Хоткей меню и Ctrl+Shift+P работают там, где фокус в окне; этот — заодно и после
+  // того, как фокус вернулся из панели браузера (там Shift человек жмёт «просто так»).
+  attachDoubleShift(window, () => void commands.execute('palette.open'));
 
   // Проект мог быть открыт ещё в стартовом окне: main помнит корень, и окно IDE
   // забирает его себе, чтобы не спрашивать папку второй раз. Делаем это после

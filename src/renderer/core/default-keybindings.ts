@@ -18,6 +18,11 @@ export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   // Символ по проекту — привычное сочетание.
   { combo: 'Ctrl+T', command: 'navigate.symbol' },
   { combo: 'Ctrl+,', command: 'settings.open' },
+  // Палитра команд есть и в меню («Вид»), но акселератор меню срабатывает не всегда:
+  // клавишу забирает себе тот, у кого фокус (дочерний webContents встроенного браузера,
+  // открытый диалог). Поэтому сочетание продублировано здесь — из двух путей до команды
+  // доходит один: нажатие, съеденное меню, до renderer не доходит вовсе.
+  { combo: 'Ctrl+Shift+P', command: 'palette.open' },
   { combo: 'Ctrl+Shift+G', command: 'view.showChanges' },
   { combo: 'Ctrl+`', command: 'view.showTerminal' },
   { combo: 'Ctrl+Alt+E', command: 'view.toggleEditor' },

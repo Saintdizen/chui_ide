@@ -834,6 +834,16 @@ export class BrowserPanel {
       announce();
     });
 
+    // Пока фокус в чужой странице, Ctrl+Shift+P теряется: акселератор меню и renderer
+    // видят только СВОЙ документ, а страница поверх — нет. Поэтому палитру зовём сами,
+    // тем же push-каналом, каким её зовёт пункт меню.
+    contents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || !input.control || !input.shift) return;
+      if (input.code !== 'KeyP') return;
+      event.preventDefault();
+      this.deps.notify(PushTopic.MenuCommand, { command: 'palette.open' });
+    });
+
     // Схему гостю тоже ограничиваем: `file:` показал бы локальный файл мимо дерева
     // и прав, а `data:` и `javascript:` — это уже запуск чужого кода.
     contents.on('will-navigate', (event, target) => {
