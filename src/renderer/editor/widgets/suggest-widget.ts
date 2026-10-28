@@ -38,6 +38,8 @@ export class SuggestWidget {
   private selected = 0;
   private visible = false;
   private prefixLength = 0;
+  /** Где показан список: по нему пересчитываем место, когда список дописывается. */
+  private anchor: SuggestAnchor | null = null;
 
   /** Что делать при выборе мышью. Задаёт тот, кто виджет создал. */
   onAccept: (() => void) | null = null;
@@ -94,6 +96,9 @@ export class SuggestWidget {
       this.hide();
       return;
     }
+    // Место запоминаем: список дописывается позже (импорт, ответ сервера), и после
+    // дописывания строк стало больше — попап мог вылезти за край, тогда его перевернём.
+    this.anchor = anchor;
     this.items = [...items];
     // Выделено всегда первое: обычно оно и нужное, а выбор стрелкой — уже уточнение.
     this.selected = 0;
@@ -109,6 +114,7 @@ export class SuggestWidget {
     this.visible = false;
     this.root.hidden = true;
     this.items = [];
+    this.anchor = null;
   }
 
   /** Подписи текущего списка: по ним вызывающий не добавляет то, что уже показано. */
@@ -124,7 +130,10 @@ export class SuggestWidget {
   append(items: readonly CompletionItem[]): void {
     if (items.length === 0) return;
     this.items = [...this.items, ...items];
-    if (this.visible) this.render();
+    if (!this.visible) return;
+    this.render();
+    // Строк стало больше — высота другая, место пересчитываем от той же каретки.
+    if (this.anchor) this.position(this.anchor);
   }
 
   /** Передвинуть выбор. По краям не заворачиваем: конец списка должен быть заметен. */
@@ -246,7 +255,10 @@ export class SuggestWidget {
 
   /** Поставить попап у каретки: снизу, если есть место, иначе сверху. */
   private position(anchor: SuggestAnchor): void {
-    const height = Math.min(this.items.length, MAX_VISIBLE) * ROW_HEIGHT + 8;
+    // Сначала потолок списка, потом мера: иначе у длинного списка `scrollHeight`
+    // вернул бы высоту всех строк и попап уезжал бы с экрана.
+    this.list.style.maxHeight = `${MAX_VISIBLE * ROW_HEIGHT}px`;
+    const height = this.measuredHeight();
     const placement = placePopup({
       // Правый край якоря совпадает с левым — попап растёт вправо от каретки.
       anchor: { top: anchor.top, left: anchor.left, right: anchor.left, bottom: anchor.bottom },
@@ -257,7 +269,21 @@ export class SuggestWidget {
     });
     this.root.style.left = `${placement.left}px`;
     this.root.style.top = `${placement.top}px`;
-    this.list.style.maxHeight = `${MAX_VISIBLE * ROW_HEIGHT}px`;
+  }
+
+  /**
+   * Высота попапа по факту отрисовки, а не по арифметике из `ROW_HEIGHT`.
+   *
+   * Высоту строки задаёт CSS (`min-height` плюс отступы), и правка стиля тянула бы
+   * за собой константу в этом файле — попап переворачивался бы не там. Мера берётся
+   * у списка, которому уже поставлен потолок `max-height` (см. `position`), — иначе у
+   * длинного списка вернулась бы высота всех строк. В jsdom без раскладки мера — 0,
+   * поэтому там остаётся расчёт.
+   */
+  private measuredHeight(): number {
+    const measured = this.list.scrollHeight;
+    if (measured > 0) return measured;
+    return Math.min(this.items.length, MAX_VISIBLE) * ROW_HEIGHT + 8;
   }
 
   private readonly onMouseMove = (event: MouseEvent): void => {

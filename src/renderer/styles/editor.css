@@ -724,14 +724,16 @@
   overflow-y: auto;
 }
 
+/* Строка — сетка из двух колонок: подпись тянется, пояснение упирается в правый край.
+   Раньше здесь был flex с max-height: 20px и flex-wrap — длинная подпись переносилась,
+   обрезалась снизу и наезжала на соседнюю строку. */
 .own-editor-suggest-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
+  column-gap: 12px;
+  min-height: 20px;
   padding: 2px 6px;
-  max-height: 20px;
   line-height: 16px;
   border-radius: var(--radius_xs);
   cursor: pointer;
@@ -742,6 +744,7 @@
 }
 
 .own-editor-suggest-label {
+  min-width: 0;
   overflow: hidden;
   font-family: var(--font_mono);
   text-overflow: ellipsis;
@@ -749,16 +752,12 @@
 }
 
 .own-editor-suggest-detail {
-  flex: none;
+  min-width: 0;
+  overflow: hidden;
   color: var(--text_color_tertiary);
   font-size: var(--font_small_size);
-}
-
-/* Совпавшие с набранным знаки — жирным и акцентом: по ним видно, почему
-   строка в списке, особенно при совпадении по «горбам» (`gT` → `getTitle`). */
-.own-editor-suggest-match {
-  font-weight: 600;
-  color: var(--link_color);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Совпавшие с набранным знаки — жирным и акцентом: по ним видно, почему
@@ -780,7 +779,7 @@
 /* Описание символа под подписью: приходит от `completionItem/resolve`, поэтому
    появляется позже и своей строкой — знаки в списке остаются на своих местах. */
 .own-editor-suggest-doc {
-  flex-basis: 100%;
+  grid-column: 1 / -1;
   overflow: hidden;
   color: var(--text_color_tertiary);
   font-size: var(--font_small_size);
