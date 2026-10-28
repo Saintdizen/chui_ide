@@ -106,7 +106,22 @@ const onDisk: ExistsCheck = (target) =>
  * Пустой объект — алиасов нет (нет `tsconfig.json` или в нём нет `paths`): тогда
  * `@/x` ведёт себя как раньше и не подчёркивается.
  */
-export type AliasMap = Readonly<Record<string, string>>;
+export interface AliasMap {
+  /** Префикс спецификатора → каталог от корня проекта (`'@/'` → `'src/'`). */
+  readonly prefixes: Readonly<Record<string, string>>;
+  /**
+   * Шаблоны, целиком занявшие спецификатор (`'@ui'` → `'src/ui'`): такой алиас
+   * совпадает только сам с собой.
+   *
+   * Без них префикс `@ui` ловил бы и `@uix/foo` — и подчёркивал бы рабочий импорт
+   * чужого алиаса. В tsconfig побеждает самый длинный префикс, поэтому такие шаблоны
+   * важнее коротких: `{'@/*': …, '@ui/*': …}` на `@ui/x` не должен уйти в `src/ui/x`.
+   */
+  readonly exact: readonly string[];
+}
+
+/** Алиасов нет (нет tsconfig или в нём нет `paths`). */
+const NO_ALIASES: AliasMap = { prefixes: {}, exact: [] };
 
 /**
  * Спецификаторы, которые не удалось разрешить: их и подчёркиваем.
@@ -121,7 +136,7 @@ export async function missingLocalImports(
   filePath: string,
   specifiers: readonly string[],
   exists: ExistsCheck = onDisk,
-  aliases: AliasMap = {},
+  aliases: AliasMap = NO_ALIASES,
   root = '',
 ): Promise<string[]> {
   const unique = [...new Set(specifiers)].filter((item) => item);
@@ -157,11 +172,13 @@ export async function missingLocalImports(
 
 /** Каталог алиаса от корня проекта: `@/a/b` + `{'@/*': 'src/*'}` → `<корень>/src/a/b`. */
 function aliasTarget(specifier: string, aliases: AliasMap, root: string): string | null {
-  for (const [prefix, base] of Object.entries(aliases)) {
+  if (aliases.exact.includes(specifier)) return path.join(root, aliases.prefixes[specifier] ?? '');
+  let best: { base: string; length: number } | null = null;
+  for (const [prefix, base] of Object.entries(aliases.prefixes)) {
     if (!specifier.startsWith(prefix)) continue;
-    const rest = specifier.slice(prefix.length);
-    return path.join(root, base, rest);
+    if (best === null || prefix.length > best.length) best = { base, length: prefix.length };
   }
+  if (best) return path.join(root, best.base, specifier.slice(best.length));
   return null;
 }
 
@@ -174,18 +191,26 @@ function aliasTarget(specifier: string, aliases: AliasMap, root: string): string
  * Порядок вариантов сохраняется: в tsconfig первый совпавший шаблон и побеждает.
  */
 export async function projectAliases(root: string | null): Promise<AliasMap> {
-  if (!root) return {};
+  if (!root) return NO_ALIASES;
   const file = path.join(root, 'tsconfig.json');
   const text = await fs.readFile(file, 'utf8').catch(() => null);
-  if (text === null) return {};
-  const map: Record<string, string> = {};
+  if (text === null) return NO_ALIASES;
+  const prefixes: Record<string, string> = {};
+  const exact: string[] = [];
   for (const alias of aliasesFromTsconfig(text)) {
-    // `baseDir` — `baseUrl`: он уже абсолютный либо пуст, тогда считаем от корня.
-    const base = alias.baseDir ? path.relative(root, alias.baseDir) || '.' : '.';
-    const prefix = alias.pattern.replace('*', '');
+    // `baseDir` — `baseUrl`, и он ОТНОСИТЕЛЬНЫЙ (абсолютный оставили бы как есть):
+    // `path.relative` от `src` к `src` вернул бы `''`, и `paths` от baseUrl
+    // разъехались бы с каталогом проекта.
+    const base = alias.baseDir.startsWith('/') ? alias.baseDir : path.join(root, alias.baseDir);
     const target = path.join(base, alias.target.replace('*', ''));
-    if (prefix in map) continue;
-    map[prefix] = target;
+    const prefix = alias.pattern.replace('*', '');
+    if (prefix in prefixes || exact.includes(prefix)) continue;
+    // Шаблон без `*` совпадает только целиком: `@ui` — это `src/ui`, а не `@uix`.
+    if (alias.pattern.includes('*')) prefixes[prefix] = target;
+    else {
+      exact.push(prefix);
+      prefixes[prefix] = target;
+    }
   }
-  return map;
+  return { prefixes, exact };
 }

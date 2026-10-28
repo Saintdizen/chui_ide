@@ -431,12 +431,21 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Алиасы `paths` из tsconfig: подсказка после точки разворачивает по ним импорт
     // (`@/core` → `src/core`). Пути приходят от корня проекта (`src/...`), как их и пишут.
     importAliases: async () => {
-      const { aliases } = await rpc.request('workspace.importAliases').catch(() => ({ aliases: {} }));
-      return Object.entries(aliases).map(([prefix, target]) => ({
+      const { aliases } = await rpc
+        .request('workspace.importAliases')
+        .catch((): { aliases: { prefixes: Record<string, string>; exact: readonly string[] } } => ({
+          aliases: { prefixes: {}, exact: [] },
+        }));
+      const patterns = [
+        ...Object.entries(aliases.prefixes),
+        // Шаблон без `*` совпадает только целиком — звёздочку к нему не приписываем.
+        ...aliases.exact.map((name): [string, string] => [name, aliases.prefixes[name] ?? '']),
+      ];
+      return patterns.map(([prefix, target]) => ({
         // На правой стороне шаблон собирается обратно со звёздочкой: `@/` + `*`
         // и `src/` + `*` — это `paths` как его пишут в tsconfig.
-        pattern: `${prefix}*`,
-        target: `${target}*`,
+        pattern: prefix in aliases.prefixes ? `${prefix}*` : prefix,
+        target: prefix in aliases.prefixes ? `${target}*` : target,
         baseDir: '',
       }));
     },

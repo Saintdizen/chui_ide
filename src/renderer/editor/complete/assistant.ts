@@ -73,6 +73,13 @@ const NAMED_ARGS_LOOKBACK = 2000;
 const FILE_LIST_TTL_MS = 5000;
 
 /**
+ * Через сколько перечитывать алиасы `paths`. Дороже списка файлов (один файл плюс
+ * разбор), но дешевле, чем ждать перезапуска после правки tsconfig: без TTL
+ * добавленный `@/*` не подхватывался вовсе.
+ */
+const ALIAS_LIST_TTL_MS = 5000;
+
+/**
  * Сколько чужих файлов держать прочитанными. Один файл — единицы килобайт, так что
  * предел страхует от мегабайт в памяти за длинную сессию, а не от двух-трёх соседей.
  */
@@ -162,11 +169,12 @@ function resolveSpecifier(
  * пакетом, и тогда искать его дальше обычным порядком.
  */
 function resolveAlias(specifier: string, aliases: readonly ImportAlias[], files: readonly string[]): string | null {
-  let best: { path: string; weight: number } | null = null;
+  let best: { path: string; weight: number; length: number } | null = null;
   for (const alias of aliases) {
     const star = alias.pattern.indexOf('*');
     let tail: string;
     if (star < 0) {
+      // Шаблон без `*` совпадает только целиком: `@ui` — это `@ui`, а не `@uix/foo`.
       if (specifier !== alias.pattern) continue;
       tail = '';
     } else {
@@ -180,7 +188,11 @@ function resolveAlias(specifier: string, aliases: readonly ImportAlias[], files:
     const base = joinProjectPath(alias.baseDir, expanded);
     const hit = findProjectFile(base, files);
     if (hit === null) continue;
-    if (best === null || tail.length > best.weight) best = { path: hit, weight: tail.length };
+    // Длиннее совпавший шаблон важнее: `@ui/` обыгрывает `@/` на `@ui/…`.
+    const length = alias.pattern.length;
+    if (best === null || tail.length > best.weight || (tail.length === best.weight && length > best.length)) {
+      best = { path: hit, weight: tail.length, length };
+    }
   }
   return best?.path ?? null;
 }
@@ -358,6 +370,12 @@ export interface CompletionAssistantOptions {
    * развернуть. Не задано — алиасов нет, работает относительный путь и Python-модуль.
    */
   importAliases?: () => Promise<readonly ImportAlias[]>;
+  /**
+   * Уже известные алиасы: снимок из общего кэша. Задан вместе с `initialAliasesAt`
+   * (`owner.aliases.age()`), иначе помощник прочитал бы те же `paths` заново.
+   */
+  initialAliases?: readonly ImportAlias[];
+  initialAliasesAt?: number;
 }
 
 export class CompletionAssistant {
@@ -373,9 +391,11 @@ export class CompletionAssistant {
   private readonly currentPath?: () => string | null;
   /** Чтение исходников проекта — для членов класса, объявленного в другом файле. */
   private readonly readSource?: (path: string) => Promise<string | null>;
-  /** Алиасы из `paths` tsconfig; кэш на сессию — между нажатиями конфиг не меняется. */
+  /** Алиасы из `paths` tsconfig; кэш до `ALIAS_LIST_TTL_MS` — правка tsconfig должна доезжать. */
   private readonly importAliases?: () => Promise<readonly ImportAlias[]>;
+  /** Стартовые алиасы — из синхронного снимка конфига (см. `initialAliases`). */
   private aliasList: readonly ImportAlias[] | null = null;
+  private aliasListAt = 0;
   /**
    * Прочитанные тексты чужих файлов: путь → текст. Читаем один раз на сессию —
    * подсказка едет на каждый знак, а диск не должен участвовать в этом пути.
@@ -435,6 +455,8 @@ export class CompletionAssistant {
     this.currentPath = options.currentPath;
     this.readSource = options.readSource;
     this.importAliases = options.importAliases;
+    this.aliasList = options.initialAliases ?? null;
+    this.aliasListAt = options.initialAliasesAt ?? 0;
     this.resolve = options.resolve;
     // Записали файл — прочитанный текст устарел. Сбрасываем только эту запись:
     // остальные файлы проекта от чужой правки не изменились.
@@ -727,18 +749,23 @@ export class CompletionAssistant {
   }
 
   /**
-   * Алиасы из `paths` tsconfig: читаются один раз и запоминаются.
+   * Алиасы из `paths` tsconfig: читаются и запоминаются на `ALIAS_LIST_TTL_MS`.
+   *
+   * Не на сессию: дописал `@/*` в tsconfig — подсказка должна это узнать без
+   * перезапуска окна; TTL того же порядка, что у списка файлов.
    *
    * Нет источника — считаем, что алиасов нет: `resolveSpecifier` тогда ведёт себя как
    * раньше и алиас в проекте не найдёт.
    */
   private async aliasListFor(): Promise<readonly ImportAlias[]> {
-    if (this.aliasList !== null) return this.aliasList;
+    if (this.aliasList !== null && Date.now() - this.aliasListAt < ALIAS_LIST_TTL_MS) return this.aliasList;
     const source = this.importAliases;
-    if (!source) return [];
+    if (!source) return this.aliasList ?? [];
     const aliases = await source().catch(() => null);
-    if (!aliases) return [];
+    // Не прочиталось — не затираем прошлое: пустой список навсегда хуже старого.
+    if (!aliases) return this.aliasList ?? [];
     this.aliasList = aliases;
+    this.aliasListAt = Date.now();
     return aliases;
   }
 
@@ -879,7 +906,7 @@ export class CompletionAssistant {
       this.projectFiles?.().catch(() => [] as readonly string[]) ?? Promise.resolve([] as readonly string[]),
       this.aliasListFor(),
     ])
-      .then(([files, aliases]) => {
+      .then(async ([files, aliases]) => {
         // Кандидатов перебираем по очереди, пока один не даст члены. Раньше брали
         // первый нечитанный файл и на нём же останавливались: если класс лежал во
         // втором импорте, подсказка молчала — а вид у этого был как у «членов нет».
@@ -888,9 +915,11 @@ export class CompletionAssistant {
           const hit = resolveSpecifier(specifier, from, files, aliases);
           if (hit !== null && !this.sources.has(hit) && !targets.includes(hit)) targets.push(hit);
         }
-        if (targets.length === 0) return null;
-        // `reduce` с последовательным промисом: диск трогаем только когда надо.
-        return targets.reduce<Promise<void>>(
+        if (targets.length === 0) return;
+        // `reduce` с последовательным промисом: диск трогаем только когда надо. Пока
+        // курсор на месте, а файл не заглянул в тупик, идём к следующему кандидату:
+        // второй импорт может дать члены там, где первый их не дал.
+        await targets.reduce<Promise<void>>(
           (queue, target) =>
             queue.then(async () => {
               if (!this.widget.isVisible || this.controller.caret !== caret) return;

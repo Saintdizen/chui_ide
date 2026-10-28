@@ -314,7 +314,7 @@ export function aliasesFromTsconfig(text: string): ImportAlias[] {
   const { baseUrl, paths } = options as { baseUrl?: unknown; paths?: unknown };
   if (!paths || typeof paths !== 'object') return [];
   // `baseUrl` в tsconfig обычно `./src` или `.`: храним без ведущего `./`, как пути файлов.
-  const baseDir = typeof baseUrl === 'string' ? baseUrl.replace(/^\.\//, '').replace(/\/$/, '') : '';
+  const baseDir = typeof baseUrl === 'string' ? baseUrl.replace(/^(\.?\/)+/, '').replace(/\/$/, '') : '';
   const aliases: ImportAlias[] = [];
   for (const [pattern, targets] of Object.entries(paths as Record<string, unknown>)) {
     if (!Array.isArray(targets)) continue;

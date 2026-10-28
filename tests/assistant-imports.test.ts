@@ -128,6 +128,8 @@ async function open(
     sources?: Record<string, string>;
     files?: readonly string[];
     onDidWriteFile?: (listener: (path: string) => void) => () => void;
+    /** Алиасы `paths` из tsconfig — то, что в IDE приезжает RPC-запросом. */
+    importAliases?: () => Promise<readonly { pattern: string; target: string; baseDir: string }[]>;
   } = {},
 ): Promise<Harness> {
   const host = new FakeNode('div');
@@ -141,7 +143,8 @@ async function open(
   const files = options.files ?? Object.keys(options.sources ?? {});
   const read: Reader = async (path) => {
     reads.push(path);
-    return options.sources?.[path] ?? null;
+    // Ассистент читает так же, как `listFiles` отдаёт список: путями от корня проекта.
+    return options.sources?.[path] ?? options.sources?.[`/project/${path}`] ?? null;
   };
 
   const shown: string[] = [];
@@ -175,6 +178,7 @@ async function open(
     currentPath: () => options.path ?? '/project/src/main.ts',
     projectFiles: async () => files,
     onDidWriteFile: options.onDidWriteFile,
+    importAliases: options.importAliases,
   });
   assistant.setLanguage('typescript');
   // Раскладки нет: точку привязки и тип токена задаём сами.
@@ -280,6 +284,62 @@ describe('члены класса из соседнего файла', () => {
     await harness.type('r');
     expect(harness.reads.length).toBeGreaterThan(1);
     expect(harness.widget.labels()).toContain('refresh');
+  });
+});
+
+describe('алиасы из paths в tsconfig', () => {
+  const core = {
+    '/project/src/core/elements.ts': 'export class Elements {\n  mount(): void {}\n}\n',
+    '/project/src/ui/button.ts': 'export class Button {\n  press(): void {}\n}\n',
+  };
+
+  it('@/x разворачивается в src/x — члены находятся', async () => {
+    const harness = await open("import { Elements } from '@/core/elements';\n\nElements.", {
+      sources: core,
+      // Как `listFiles` в IDE: пути проекта — относительные, без ведущего слэша.
+      files: ['src/core/elements.ts', 'src/ui/button.ts'],
+      importAliases: async () => [{ pattern: '@/*', target: 'src/*', baseDir: '' }],
+    });
+    await harness.type('');
+    expect(harness.widget.labels()).toContain('mount');
+  });
+
+  it('шаблон без * совпадает целиком: @ui не ловит @uix/button', async () => {
+    // Раньше `resolveAlias` сверял только префикс и на `@uix/button` подставлял
+    // `src/ui`, получая чужой файл.
+    const harness = await open("import { Button } from '@uix/button';\n\nButton.", {
+      sources: core,
+      files: ['src/core/elements.ts', 'src/ui/button.ts'],
+      importAliases: async () => [{ pattern: '@ui', target: 'src/ui', baseDir: '' }],
+    });
+    await harness.type('');
+    expect(harness.widget.labels()).not.toContain('press');
+  });
+
+  it('алиасы перечитываются через TTL — правка tsconfig доезжает', async () => {
+    let version = 0;
+    const harness = await open("import { Elements } from '@/core/elements';\n\nElements.", {
+      sources: core,
+      files: ['src/core/elements.ts', 'src/ui/button.ts'],
+      // Первый ответ — пусто (paths ещё нет), потом алиас появился в tsconfig.
+      importAliases: async () => {
+        version += 1;
+        return version === 1 ? [] : [{ pattern: '@/*', target: 'src/*', baseDir: '' }];
+      },
+    });
+    await harness.type('');
+    expect(harness.widget.labels()).not.toContain('mount');
+    // Ждём больше TTL кэша (ALIAS_LIST_TTL_MS) и просим подсказку снова.
+    await new Promise((resolve) => setTimeout(resolve, 5100));
+    await harness.type('m');
+    expect(version).toBeGreaterThan(1);
+    expect(harness.widget.labels()).toContain('mount');
+  });
+
+  it('нет источника алиасов — импорт алиасом не разрешается, но и не падает', async () => {
+    const harness = await open("import { Elements } from '@/core/elements';\n\nElements.", { sources: core });
+    await harness.type('');
+    expect(harness.widget.labels()).not.toContain('mount');
   });
 });
 

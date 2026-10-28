@@ -110,7 +110,7 @@ describe('missingLocalImports', () => {
 });
 
 describe('missingLocalImports и алиасы из tsconfig', () => {
-  const aliases = { '@/': 'src/' };
+  const aliases = { prefixes: { '@/': 'src/' }, exact: [] as string[] };
 
   it('алиас из paths ищется от корня проекта, а не от файла', async () => {
     const missing = await missingLocalImports(
@@ -139,6 +139,21 @@ describe('missingLocalImports и алиасы из tsconfig', () => {
   it('алиас без объявления в paths не судится', async () => {
     // `@/x` без `paths` — забота конфига сборщика: объявить его пропавшим — соврать.
     const missing = await missingLocalImports('typescript', at('p', 'src', 'a.ts'), ['@/x'], existsIn([]));
+    expect(missing).toEqual([]);
+  });
+
+  it('шаблон без звёздочки не ловит чужой алиас с тем же началом', async () => {
+    // `@ui` → `src/ui` объявлен целиком: `@uix/foo` — чужое имя, а не его хвост.
+    const exact = { prefixes: { '@ui': 'src/ui' }, exact: ['@ui'] };
+    const missing = await missingLocalImports(
+      'typescript',
+      at('p', 'src', 'a.ts'),
+      ['@uix/foo'],
+      existsIn([at('p', 'src', 'ui', 'x', 'foo.ts')]),
+      exact,
+      at('p'),
+    );
+    // Алиасом не признан — и подчёркивать нечего: конфига мы про него не знаем.
     expect(missing).toEqual([]);
   });
 });
