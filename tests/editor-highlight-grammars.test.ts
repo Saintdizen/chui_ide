@@ -13,6 +13,7 @@ import {
   TAG,
   TYPE,
   VARIABLE,
+  roleLabel,
   type Token,
 } from '../src/renderer/editor/highlight/tokens';
 
@@ -360,5 +361,22 @@ describe('TOML/INI', () => {
 
   it('точка с запятой — тоже комментарий', () => {
     expect(typeOfWord('; заметка', '; заметка', first('ini', '; заметка'))).toBe(COMMENT);
+  });
+});
+
+describe('roleLabel', () => {
+  it('у известных ролей есть русское название', () => {
+    expect(roleLabel(COMMENT)).toBe('комментарий');
+    expect(roleLabel(TYPE)).toBe('тип');
+    expect(roleLabel(FUNCTION)).toBe('функция');
+  });
+
+  it('пустая роль и null — не роль: названия нет', () => {
+    expect(roleLabel(null)).toBeNull();
+    expect(roleLabel('')).toBeNull();
+  });
+
+  it('чужая роль без перевода даёт null, а не подпись наугад', () => {
+    expect(roleLabel('keyword.operator.чужое')).toBeNull();
   });
 });
