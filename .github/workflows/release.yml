@@ -115,8 +115,26 @@ jobs:
       - name: Установить зависимости
         run: npm ci
 
-      - name: Проверить код (типы, линт, тесты)
+      # Пороги покрытия — только на Linux.
+      #
+      # Глобальный процент считается по всем тестам, а часть их на Windows
+      # снимается: заглушки git/rg/lsp — POSIX-скрипты (`stubSupported` в
+      # `tests/*.ts`). Прогон теряет ~0,5 п.п., и `npm run check` падал с
+      # «Coverage for lines (83.54%) does not meet global threshold (84%)»:
+      # сборка Windows не вставала три тега подряд, хотя код был цел —
+      # до прогона доехало меньше тестов, а не покрытие просело.
+      # Поэтому на не-Linux те же типы, линт и тесты — без порогов.
+      - name: Проверить код (типы, линт, тесты, пороги покрытия)
+        if: runner.os == 'Linux'
         run: npm run check
+
+      - name: Проверить код (типы, линт)
+        if: runner.os != 'Linux'
+        run: npm run check:static
+
+      - name: Тесты
+        if: runner.os != 'Linux'
+        run: npm test
 
       - name: Собрать main и renderer
         run: npm run build
