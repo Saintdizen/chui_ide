@@ -179,9 +179,11 @@ function ruleFor(languageId: string): LanguageRule | null {
     return {
       parse: parseScriptImports,
       message: (item) =>
-        item.kind === 'local'
-          ? `Модуль «${item.module}» не найден`
-          : `Пакет «${item.top}» не установлен в node_modules`,
+        item.kind === 'module'
+          ? `Пакет «${item.top}» не установлен в node_modules`
+          : item.kind === 'alias'
+            ? `Алиас «${item.module}» не ведёт никуда из tsconfig paths`
+            : `Модуль «${item.module}» не найден`,
     };
   }
   return null;

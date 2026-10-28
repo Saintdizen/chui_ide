@@ -108,3 +108,37 @@ describe('missingLocalImports', () => {
     expect(new Set(seen).size).toBe(seen.length);
   });
 });
+
+describe('missingLocalImports и алиасы из tsconfig', () => {
+  const aliases = { '@/': 'src/' };
+
+  it('алиас из paths ищется от корня проекта, а не от файла', async () => {
+    const missing = await missingLocalImports(
+      'typescript',
+      at('p', 'src', 'deep', 'a.ts'),
+      ['@/core/util'],
+      existsIn([at('p', 'src', 'core', 'util.ts')]),
+      aliases,
+      at('p'),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('алиас из paths, которого нет на диске, отмечается', async () => {
+    const missing = await missingLocalImports(
+      'typescript',
+      at('p', 'src', 'a.ts'),
+      ['@/gone'],
+      existsIn([]),
+      aliases,
+      at('p'),
+    );
+    expect(missing).toEqual(['@/gone']);
+  });
+
+  it('алиас без объявления в paths не судится', async () => {
+    // `@/x` без `paths` — забота конфига сборщика: объявить его пропавшим — соврать.
+    const missing = await missingLocalImports('typescript', at('p', 'src', 'a.ts'), ['@/x'], existsIn([]));
+    expect(missing).toEqual([]);
+  });
+});

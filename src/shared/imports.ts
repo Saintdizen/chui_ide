@@ -16,9 +16,11 @@
  * Проверки у них разные, поэтому и вид разный: пакет сверяется с окружением
  * (интерпретатор Python, каталоги `node_modules`), а локальный — с диском: есть ли
  * такой файл рядом с импортирующим. Смешивать их нельзя — `./util` не пакет, и
- * искать его в `node_modules` бессмысленно.
+ * искать его в `node_modules` бессмысленно. Алиас (`@/core`, см. `paths` в tsconfig)
+ * — третий вид: пакетом он не считается, но и без конфига проекта про него не
+ * скажешь, поэтому ищется по диску только если проект объявил его в `paths`.
  */
-export type ImportKind = 'module' | 'local';
+export type ImportKind = 'module' | 'local' | 'alias';
 
 /** Одно место в тексте, где подключают модуль. */
 export interface ImportRef {
@@ -198,7 +200,7 @@ export function topLevelModules(imports: readonly ImportRef[]): string[] {
  * спецификатор. Ответ приходит одним списком, и по ключу видно, какая ссылка мимо.
  */
 export function importKey(item: ImportRef): string {
-  return item.kind === 'local' ? item.module : item.top;
+  return isLocalKind(item.kind) ? item.module : item.top;
 }
 
 /**
@@ -209,7 +211,7 @@ export function checkTargets(imports: readonly ImportRef[]): { modules: string[]
   const modules = new Set<string>();
   const locals = new Set<string>();
   for (const item of imports) {
-    if (item.kind === 'local') locals.add(item.module);
+    if (isLocalKind(item.kind)) locals.add(item.module);
     else modules.add(item.top);
   }
   return { modules: [...modules], locals: [...locals] };
@@ -256,14 +258,72 @@ export function isExternalSpecifier(specifier: string): boolean {
  * `null` — проверять нечего. Абсолютные пути и адреса с протоколом (`node:fs`,
  * `https://…`) за `node_modules` не отвечают; путь-алиас вида `@/components`
  * (привычка Vite и `paths` в tsconfig) разрешается конфигом, которого мы не
- * читаем, — объявить его недостающим пакетом значило бы врать.
+ * читаем, — объявить его недостающим пакетом значило бы врать. Поэтому алиас —
+ * свой вид (`alias`): пакетом он не считается, а ищется по диску, как локальный,
+ * если проект объявил его в `paths` (см. `aliasesFromTsconfig`).
  */
 export function classifySpecifier(specifier: string): ImportKind | null {
   if (!specifier) return null;
   if (specifier === '.' || specifier === '..') return 'local';
   if (specifier.startsWith('./') || specifier.startsWith('../')) return 'local';
-  if (specifier.startsWith('@/')) return null;
+  if (specifier.startsWith('@/')) return 'alias';
   return isExternalSpecifier(specifier) ? 'module' : null;
+}
+
+/**
+ * Стоит ли считать этот вид импорта файлом проекта, а не пакетом.
+ *
+ * Алиас (`@/core`) — `alias`: на диске он может быть, а может значить что-то
+ * другое (алиасы сборщика); разбирает его main, и только по `paths` проекта.
+ */
+export function isLocalKind(kind: ImportKind): boolean {
+  return kind === 'local' || kind === 'alias';
+}
+
+/** Алиас импорта из `paths` в tsconfig: `@/*` → `src/*`. */
+export interface ImportAlias {
+  /** Левая часть как её пишут (`@/*`); `*` означает «здесь хвост». */
+  pattern: string;
+  /** Куда разворачивается (`src/*`), тоже с `*`. */
+  target: string;
+  /** Каталог, от которого считается `target` (у `paths` — `baseUrl`). */
+  baseDir: string;
+}
+
+/**
+ * Алиасы импорта из `tsconfig.json` проекта: `compilerOptions.paths` и `baseUrl`.
+ *
+ * Комментарии в tsconfig разрешены (это JSONC), поэтому срезаем их и висячие запятые
+ * перед разбором: иначе `JSON.parse` падает на первом же комментарии, а файл у людей
+ * почти всегда с комментариями. Нет `paths` — пусто: алиасов нет.
+ */
+export function aliasesFromTsconfig(text: string): ImportAlias[] {
+  const cleaned = text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/,(\s*[}\]])/g, '$1');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== 'object') return [];
+  const options = (parsed as { compilerOptions?: unknown }).compilerOptions;
+  if (!options || typeof options !== 'object') return [];
+  const { baseUrl, paths } = options as { baseUrl?: unknown; paths?: unknown };
+  if (!paths || typeof paths !== 'object') return [];
+  // `baseUrl` в tsconfig обычно `./src` или `.`: храним без ведущего `./`, как пути файлов.
+  const baseDir = typeof baseUrl === 'string' ? baseUrl.replace(/^\.\//, '').replace(/\/$/, '') : '';
+  const aliases: ImportAlias[] = [];
+  for (const [pattern, targets] of Object.entries(paths as Record<string, unknown>)) {
+    if (!Array.isArray(targets)) continue;
+    for (const target of targets) {
+      if (typeof target !== 'string' || target.length === 0) continue;
+      aliases.push({ pattern, target: target.replace(/^\.\//, ''), baseDir });
+    }
+  }
+  return aliases;
 }
 
 /** Виды лексем: слова (ключевые и имена), строки и одиночная пунктуация. */
@@ -371,7 +431,7 @@ export function parseScriptImports(text: string): ImportRef[] {
     const { line, startColumn } = at(token.start);
     refs.push({
       module: token.value,
-      top: kind === 'local' ? token.value : packageNameOf(token.value),
+      top: isLocalKind(kind) ? token.value : packageNameOf(token.value),
       kind,
       line,
       startColumn,

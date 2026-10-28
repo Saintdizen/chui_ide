@@ -1,3 +1,4 @@
+import { projectAliases } from '../../project/local-imports';
 import type { RpcServices } from '../context';
 import type { RpcRouter } from '../router';
 
@@ -19,6 +20,11 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
   router.register('workspace.stat', (params) => deps.workspace.stat(params.path));
   router.register('workspace.search', (params) => deps.workspace.search(params));
   router.register('workspace.listFiles', () => deps.workspace.listFiles());
+  // Алиасы `paths` из tsconfig: подсказка после точки разворачивает по ним импорт
+  // (`@/core` → `src/core`), иначе класс из такого файла не находится.
+  router.register('workspace.importAliases', async () => ({
+    aliases: await projectAliases(deps.workspace.rootPath()),
+  }));
   router.register('workspace.compareFolders', (params) => deps.workspace.compareFolders(params.left, params.right));
   router.register('workspace.replace', (params) => deps.workspace.replace(params));
   router.register('workspace.structuralSearch', (params) => deps.workspace.findByStructure(params));

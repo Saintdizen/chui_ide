@@ -321,6 +321,11 @@ export interface ChuiMethods {
   'workspace.search': { params: SearchOptions; result: SearchResult };
   /** Относительные (POSIX) пути всех файлов проекта — для быстрого открывателя. */
   'workspace.listFiles': { params: void; result: string[] };
+  /**
+   * Алиасы импорта из `paths` tsconfig: префикс (`@/`) → путь от корня проекта (`src/`).
+   * Нет tsconfig или `paths` — пустой объект.
+   */
+  'workspace.importAliases': { params: void; result: { aliases: Record<string, string> } };
   /** Сравнить две папки рабочей области: какие файлы различаются. */
   'workspace.compareFolders': { params: { left: string; right: string }; result: FolderCompareResult };
   /** Сессия проекта: восстановление при открытии и сохранение изменений. */

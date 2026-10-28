@@ -136,6 +136,8 @@ const NOT_MOCKED: Record<string, string[]> = {
     'workspace.addRoot',
     'workspace.removeRoot',
     'workspace.setActiveRoot',
+    // Алиасы берутся из `tsconfig.json` проекта: без диска разбирать нечего.
+    'workspace.importAliases',
   ],
   'точные данные от языкового сервера — в браузере сервера нет': ['lsp.formatRange', 'lsp.semanticTokens'],
   'ключи и права ассистента — хранятся в настройках': [

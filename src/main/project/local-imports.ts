@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { aliasesFromTsconfig, classifySpecifier } from '../../shared/imports';
 
 /**
  * Относительные импорты: есть ли на диске то, на что ссылаются.
@@ -13,10 +14,13 @@ import path from 'node:path';
  *
  * Чего здесь нет намеренно:
  *
- *   • путь-алиасы (`@/components`, `paths` в tsconfig) — они разрешаются конфигом
- *     сборщика, которого мы не читаем, и объявлять их недостающими нельзя;
+ *   • пути, не похожие ни на относительные, ни на алиас (голый пакет), — это
+ *     забота проверки пакетов, а не этой;
  *   • `from . import name` у Python — имя может быть определено в `__init__.py`,
  *     и файла с таким именем просто нет (разбор такие ссылки не отдаёт).
+ *
+ * Алиасы (`@/components` из `paths` в tsconfig) — наоборот, здесь: конфиг читает
+ * main (`aliasesFromTsconfig`), и без `paths` алиас считается чужим (см. `AliasMap`).
  */
 
 /** Проверка «этот путь есть»: по умолчанию — диск, в тестах — своя функция. */
@@ -97,17 +101,28 @@ const onDisk: ExistsCheck = (target) =>
     .catch(() => false);
 
 /**
+ * Алиасы проекта: префикс из `paths` tsconfig → каталог от корня проекта.
+ *
+ * Пустой объект — алиасов нет (нет `tsconfig.json` или в нём нет `paths`): тогда
+ * `@/x` ведёт себя как раньше и не подчёркивается.
+ */
+export type AliasMap = Readonly<Record<string, string>>;
+
+/**
  * Спецификаторы, которые не удалось разрешить: их и подчёркиваем.
  *
  * Пустой ответ — не «всё хорошо», а «судить нечем»: так устроены ссылки, для
- * которых путей не придумано (см. шапку файла). Лучше промолчать, чем подчеркнуть
- * рабочий импорт.
+ * которых путей не придумано (см. шапку файла). Лучше промолчать, чем расписать
+ * рабочий импорт. По той же причине алиас, которого нет в `paths`, не попадает в
+ * ответ: сказать про него `@/x` нечего — где искать, знает только конфиг.
  */
 export async function missingLocalImports(
   language: string,
   filePath: string,
   specifiers: readonly string[],
   exists: ExistsCheck = onDisk,
+  aliases: AliasMap = {},
+  root = '',
 ): Promise<string[]> {
   const unique = [...new Set(specifiers)].filter((item) => item);
   if (unique.length === 0) return [];
@@ -116,7 +131,15 @@ export async function missingLocalImports(
   const missing: string[] = [];
 
   for (const specifier of unique) {
-    const candidates = candidatesFor(filePath, specifier);
+    const aliasBase = language === 'python' ? null : aliasTarget(specifier, aliases, root);
+    // Алиас, которого нет в `paths`, — не наша забота: где искать `@/x`, знает
+    // только конфиг, и объявлять его пропавшим значило бы врать.
+    if (aliasBase === null && classifySpecifier(specifier) === 'alias') continue;
+    const candidates =
+      aliasBase === null
+        ? candidatesFor(filePath, specifier)
+        : // Алиас развёрнут в каталог от корня: ищем в нём сам файл, расширения и `index`.
+          scriptImportCandidates(path.join(aliasBase, 'x'), '.');
     if (candidates.length === 0) continue;
 
     let found = false;
@@ -130,4 +153,39 @@ export async function missingLocalImports(
   }
 
   return missing;
+}
+
+/** Каталог алиаса от корня проекта: `@/a/b` + `{'@/*': 'src/*'}` → `<корень>/src/a/b`. */
+function aliasTarget(specifier: string, aliases: AliasMap, root: string): string | null {
+  for (const [prefix, base] of Object.entries(aliases)) {
+    if (!specifier.startsWith(prefix)) continue;
+    const rest = specifier.slice(prefix.length);
+    return path.join(root, base, rest);
+  }
+  return null;
+}
+
+/**
+ * Алиасы проекта из `tsconfig.json` (см. `aliasesFromTsconfig`).
+ *
+ * Шаблоны `paths` бывают двух сортов, и оба нужны: `@/*` → `src/*` (разворот с хвостом)
+ * и `@ui` → `src/ui` (целиком). Первый — тот, что пишут почти везде, поэтому `*`
+ * становится префиксом ключа (`@/` → `src/`), а не поводом отбросить шаблон.
+ * Порядок вариантов сохраняется: в tsconfig первый совпавший шаблон и побеждает.
+ */
+export async function projectAliases(root: string | null): Promise<AliasMap> {
+  if (!root) return {};
+  const file = path.join(root, 'tsconfig.json');
+  const text = await fs.readFile(file, 'utf8').catch(() => null);
+  if (text === null) return {};
+  const map: Record<string, string> = {};
+  for (const alias of aliasesFromTsconfig(text)) {
+    // `baseDir` — `baseUrl`: он уже абсолютный либо пуст, тогда считаем от корня.
+    const base = alias.baseDir ? path.relative(root, alias.baseDir) || '.' : '.';
+    const prefix = alias.pattern.replace('*', '');
+    const target = path.join(base, alias.target.replace('*', ''));
+    if (prefix in map) continue;
+    map[prefix] = target;
+  }
+  return map;
 }

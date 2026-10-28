@@ -178,7 +178,7 @@ async function open(
   });
   assistant.setLanguage('typescript');
   // Раскладки нет: точку привязки и тип токена задаём сами.
-  view.clientPoint = () => ({ left: 10, top: 20, bottom: 40 });
+  view.clientPoint = () => ({ left: 10, top: 20, bottom: 40, height: 20 });
   view.tokenTypeAt = () => 'plain';
 
   return {
@@ -254,16 +254,19 @@ describe('члены класса из соседнего файла', () => {
   });
 
   it('запись файла сбрасывает кэш — новое поле видно без перезапуска', async () => {
-    let fire: ((path: string) => void) | null = null;
+    type Fire = (path: string) => void;
+    // В объекте, а не в переменной: TS не учитывает присваивание из замыкания
+    // и сужает `let fire` до `null` там, где его зовут.
+    const writes: { fire: Fire | null } = { fire: null };
     const sources: Record<string, string> = {
       '/project/src/elements.ts': 'export class Elements {\n  mount(): void {}\n}\n',
     };
     const harness = await open("import { Elements } from './elements';\n\nElements.", {
       sources,
-      onDidWriteFile: (listener) => {
-        fire = listener;
+      onDidWriteFile: (listener: Fire) => {
+        writes.fire = listener;
         return () => {
-          fire = null;
+          writes.fire = null;
         };
       },
     });
@@ -272,7 +275,7 @@ describe('члены класса из соседнего файла', () => {
 
     // Файл дописали снаружи: поле `refresh` появилось.
     sources['/project/src/elements.ts'] = 'export class Elements {\n  mount(): void {}\n  refresh(): void {}\n}\n';
-    fire?.('/project/src/elements.ts');
+    writes.fire?.('/project/src/elements.ts');
 
     await harness.type('r');
     expect(harness.reads.length).toBeGreaterThan(1);

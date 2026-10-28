@@ -128,8 +128,10 @@ describe('classifySpecifier', () => {
     expect(classifySpecifier('@scope/pkg')).toBe('module');
     expect(classifySpecifier('./a')).toBe('local');
     expect(classifySpecifier('../b')).toBe('local');
-    // Алиас из конфига сборщика: разрешается не нами — объявлять его пропавшим нельзя.
-    expect(classifySpecifier('@/components/Button')).toBeNull();
+    // Алиас из конфига сборщика: пакетом не считается, но и свой модуль из
+    // tsconfig/`paths` — не всегда: без `paths` файла на диске может не быть.
+    expect(classifySpecifier('@/components/Button')).toBe('alias');
+    expect(classifySpecifier('~utils/x')).toBe('module');
     expect(classifySpecifier('node:fs')).toBeNull();
     expect(classifySpecifier('/abs')).toBeNull();
     expect(classifySpecifier('#internal')).toBeNull();

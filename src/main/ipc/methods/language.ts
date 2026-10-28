@@ -9,7 +9,7 @@ import { runLineProfile } from '../../python/line-profile';
 import { checkEnvironments } from '../../python/health';
 import { missingModules } from '../../python/packages';
 import { missingPackages } from '../../node/packages';
-import { missingLocalImports } from '../../project/local-imports';
+import { missingLocalImports, projectAliases } from '../../project/local-imports';
 import {
   checkEnvironment as checkNodeEnvironment,
   nodeInfo,
@@ -74,8 +74,16 @@ export function registerLanguageMethods(router: RpcRouter, deps: RpcServices): v
       params.language === 'python'
         ? await missingModules(root, deps.resolvePython(root), params.modules)
         : await missingPackages(root, params.modules);
-    // Свои модули проекта ищем рядом с файлом, который их импортирует.
-    const local = await missingLocalImports(params.language, params.path, params.locals);
+    // Свои модули проекта ищем рядом с файлом, который их импортирует; алиасы
+    // (`@/x`) — по `paths` из tsconfig, и только если проект их объявил.
+    const local = await missingLocalImports(
+      params.language,
+      params.path,
+      params.locals,
+      undefined,
+      await projectAliases(root),
+      root ?? '',
+    );
     return { missing: [...missing, ...local] };
   });
 
