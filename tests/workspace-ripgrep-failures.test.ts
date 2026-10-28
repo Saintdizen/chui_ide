@@ -89,7 +89,7 @@ async function expectFileToContain(
   expect(`${mark}\n--- журнал заглушки ---\n${await context()}`).toContain(text);
 }
 
-describe('сбои rg', () => {
+describe.skipIf(!stubSupported)('сбои rg', () => {
   it('нет команды — null, а не ошибка и не пустой результат', async () => {
     // PATH без rg: только пустой каталог, чтобы ничего не нашлось случайно.
     const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-empty-'));
@@ -103,19 +103,19 @@ describe('сбои rg', () => {
     }
   });
 
-  it.skipIf(!stubSupported)('сбой поиска (код 2) — отказ с причиной из stderr', async () => {
+  it('сбой поиска (код 2) — отказ с причиной из stderr', async () => {
     await withFakeRg(script(`process.stderr.write('битый шаблон\\n');\nprocess.exit(2);`));
     await expect(runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir())).rejects.toThrow(
       'rg завершился с кодом 2: битый шаблон',
     );
   });
 
-  it.skipIf(!stubSupported)('совпадений нет (код 1) — это результат, а не отказ', async () => {
+  it('совпадений нет (код 1) — это результат, а не отказ', async () => {
     await withFakeRg(script(`process.stdout.write('итог\\n');\nprocess.exit(1);`));
     expect(await runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir())).toBe('итог\n');
   });
 
-  it.skipIf(!stubSupported)('прерванный поиск убивает процесс', async () => {
+  it('прерванный поиск убивает процесс', async () => {
     // Скрипт живёт, пока его не убьют: проверяем, что сигнал доходит.
     const marker = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-kill-'));
     roots.push(marker);
@@ -169,6 +169,9 @@ describe('сбои rg', () => {
     // Что доказать надо — что процесс был убит: он мог жить 5 секунд. Отметку ждём
     // отдельно, её пишет уже сам умирающий процесс; журнал заглушки идёт в текст
     // провала, чтобы причина была видна без повторного запуска.
-    await expectFileToContain(died, 'да', isWindows, () => fs.readFile(log, 'utf8').catch(() => ''));
+    // Потолок — срок жизни заглушки (5 с): `process.exit(143)` внутри обработчика не
+    // гарантирует, что запись уже дошла до диска, а меньше по умолчанию (2 с)
+    // оставляло падение на горячем раннере, ничего при этом не проверяя.
+    await expectFileToContain(died, 'да', isWindows, () => fs.readFile(log, 'utf8').catch(() => ''), 5000);
   });
 });
