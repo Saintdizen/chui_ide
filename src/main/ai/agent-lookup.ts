@@ -265,6 +265,40 @@ export function asPlainLookupCall(command: string, cwdDir: string): LookupCall |
     };
   }
 
+  if (program === 'awk' || program === 'gawk') {
+    // Только выборка строк по номеру: `awk 'NR>=10 && NR<=20' f`. Печать полей,
+    // суммы и `$1` — не наше: такого ответа у `read` нет, пусть шелл.
+    const flags = rest.filter((word) => word.startsWith('-'));
+    const plain = rest.filter((word) => !word.startsWith('-'));
+    if (flags.length > 0 || plain.length !== 2) return null;
+    const [script, file] = plain as [string, string];
+    const range = /^NR(?:>=(\d+)&&NR<=(\d+)|<=(\d+)|==(\d+)|>=(\d+))$/.exec(script.replace(/\s+/g, ''));
+    if (!range) return null;
+    // Четыре формы, и у каждой свой смысл: диапазон, «с начала до B», «только N»,
+    // «от A до конца файла».
+    const from = range[1] ?? (range[3] ? '1' : (range[4] ?? range[5]));
+    const to = range[2] ?? range[3] ?? range[4];
+    if (from === undefined || Number(from) < 1) return null;
+    if (to !== undefined && Number(to) < Number(from)) return null;
+    return {
+      tool: 'read',
+      args: {
+        path: scope(file),
+        startLine: Number(from),
+        ...(to === undefined ? {} : { endLine: Number(to) }),
+      },
+      label: `awk '${script.trim()}'`,
+    };
+  }
+
+  if (program === 'nl') {
+    // `nl` — тот же `cat`, только с номерами строк, а их `read` ставит сам.
+    const flags = rest.filter((word) => word.startsWith('-'));
+    const plain = rest.filter((word) => !word.startsWith('-'));
+    if (flags.some((flag) => !/^-b[atn]$/.test(flag)) || plain.length !== 1) return null;
+    return { tool: 'read', args: { path: scope(plain[0]!) }, label: 'nl' };
+  }
+
   if (program === 'ls') {
     const plain: string[] = [];
     for (const word of rest) {
@@ -387,14 +421,59 @@ export function commandWords(command: string): string[] | null {
   return words;
 }
 
+/**
+ * Ведущий `cd <папка> &&` (или `;`) — смена области, а не чтение.
+ *
+ * Замер: `cd` — второй по частоте повод уйти в шелл после `cat`. Сам по себе он
+ * ничего не печатает: интересно то, что за ним. Снимаем префикс и отдаём остаток
+ * разбору с новой папкой. Всё, что не похоже на папку (`cd -`, `cd $DIR`, `cd ~/x`),
+ * возвращает `null`: подстановку должен сделать шелл, а не мы.
+ */
+export function takeCdPrefix(command: string, cwdDir: string): { command: string; cwd: string } | null {
+  let rest = command.trim();
+  let cwd = cwdDir;
+  let moved = false;
+  for (;;) {
+    const head = /^cd[ \t]+(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))[ \t]*(?:&&|;)[ \t]*(\S[\s\S]*)$/.exec(rest);
+    if (!head) break;
+    const target = head[1] ?? head[2] ?? head[3] ?? '';
+    if (!target || target.startsWith('-') || /[$`~]/.test(target)) return null;
+    cwd = path.isAbsolute(target) ? target : path.resolve(cwd, target);
+    rest = head[4]!.trim();
+    moved = true;
+  }
+  return moved ? { command: rest, cwd } : null;
+}
+
+/** `cat f | head -20` — это `read` с потолком, а не шелл: потолок есть у `read`. */
+function headOfRead(call: LookupCall | BrokenCommand | null, limit: number | null): LookupCall | BrokenCommand | null {
+  if (!call || limit === null || 'broken' in call || call.tool !== 'read') return call;
+  const args = call.args as { path?: unknown; endLine?: unknown };
+  if (typeof args.path !== 'string' || args.endLine !== undefined) return call;
+  return { ...call, args: { ...args, endLine: limit }, label: `${call.label} | head -${limit}` };
+}
+
 export function asLookupCall(command: string, cwdDir: string): LookupCall | BrokenCommand | null {
   // Сломанная команда — это ответ, а не повод уйти в шелл: шелл на ней
   // отработает с кодом 0 и пустым выводом, и агент прочтёт «(пустой вывод)»
   // как «файла нет» или «пустой файл». Проверяем ДО разбора: образец в кавычках
   // — норма, а вот кавычка без пары — ошибка, где бы она ни стояла.
   if (unclosedQuote(command)) return { broken: `кавычка без пары: ${JSON.stringify(command)}` };
+  // `cd папка && чтение` — самый частый повод уйти в шелл (655 вызовов `cd` в
+  // замере). Область меняется, а чтение остаётся чтением: снимаем префикс и
+  // разбираем остаток уже с новой папкой. Остаток не читалка — ответ `null`, и
+  // в шелл уйдёт ИСХОДНАЯ команда целиком: поведение не меняется ни на бит.
+  const moved = takeCdPrefix(command, cwdDir);
+  if (moved) return asLookupCall(moved.command, moved.cwd);
   const tail = takeHeadTail(command);
-  if (tail.command !== command) return finishLookup(asPlainLookupCall(tail.command, cwdDir), tail.limit);
+  if (tail.command !== command) {
+    const call = asPlainLookupCall(tail.command, cwdDir);
+    // `head` хвостом — не всегда отсечка поиска: `cat f | head -20` — тот же
+    // `read`, только с концом диапазона. Тогда потолок уходит в аргументы, а не
+    // в `limit` (его понимает только `search`) — и вызов остаётся читалкой.
+    const cut = headOfRead(call, tail.limit);
+    return cut !== call ? cut : finishLookup(call, tail.limit);
+  }
   // `команда | grep …`: читалка, чей вывод отфильтрован одной строкой. Это не
   // скрипт, а тот же `search`, только запрос — из самого `grep`, а папка — из
   // читалки. Остальные трубы (`| wc -l`, `| sort`) по-прежнему идут в шелл:

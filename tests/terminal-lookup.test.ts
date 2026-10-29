@@ -74,6 +74,53 @@ describe('команда-читалка выполняется структур�
     expect(outcome.summary).toContain('cat → read');
   });
 
+  it('cd папка && cat файл — тот же read, и область — из cd', async () => {
+    // 655 вызовов `cd` в замере уходили в шелл целиком: менялась область, а не
+    // суть. Теперь префикс снимается, и в шелл не уходит ничего.
+    const box = sandbox();
+    const outcome = await run(box, 'cd src && cat app.ts');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(true);
+    expect(String(outcome.detail)).toContain('const row1 = 1;');
+  });
+
+  it('cd вне проекта — всё равно шелл: подстановку делает он', async () => {
+    const box = sandbox();
+    const outcome = await run(box, 'cd ~/чужое && cat app.ts');
+
+    expect(box.calls).toHaveLength(1);
+    expect(outcome.ok).toBe(true);
+  });
+
+  it('awk по номерам строк — это read диапазоном', async () => {
+    const box = sandbox();
+    const range = await run(box, "awk 'NR>=3 && NR<=4' src/app.ts");
+    const single = await run(box, "awk 'NR==7' src/app.ts");
+
+    expect(box.calls).toEqual([]);
+    expect(String(range.detail)).toContain('3 | const row3 = 3;');
+    expect(String(range.detail)).not.toContain('5 | const row5 = 5;');
+    expect(String(single.detail)).toContain('7 | const row7 = 7;');
+  });
+
+  it('awk, печатающий поля, — по-прежнему шелл', async () => {
+    // У `read` нет ответа «второе поле от каждой строки» — не притворяемся.
+    const box = sandbox();
+    await run(box, "awk -F: '{print $2}' /etc/passwd");
+    expect(box.calls).toHaveLength(1);
+  });
+
+  it('cat файл | head -N — read с потолком, а не шелл', async () => {
+    // Потолок понимает только `search`; для `read` он становится концом диапазона,
+    // иначе `cat f | head -20` тихо терялся и шёл в шелл.
+    const box = sandbox();
+    const outcome = await run(box, 'cat src/app.ts | head -2');
+
+    expect(box.calls).toEqual([]);
+    expect(String(outcome.detail)).not.toContain('3 | const row3 = 3;');
+  });
+
   it('sed -n «A,Bp» — это read диапазоном', async () => {
     const box = sandbox();
     const outcome = await run(box, "sed -n '3,5p' src/app.ts");

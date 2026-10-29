@@ -119,7 +119,8 @@
     "dist:linux": "npm run build && electron-builder --linux AppImage deb --publish never",
     "dist:win": "npm run build && electron-builder --win nsis --publish never",
     "dist:mac": "npm run build && electron-builder --mac dmg --publish never",
-    "smoke:proxy": "npm run build:main && node scripts/proxy-smoke.cjs"
+    "smoke:proxy": "npm run build:main && node scripts/proxy-smoke.cjs",
+    "usage": "tsx scripts/agent-usage.ts"
   },
   "engines": {
     "node": ">=20"

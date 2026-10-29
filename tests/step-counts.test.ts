@@ -106,9 +106,46 @@ describe('счётчик шагов', () => {
       { id: 'b', name: 'edit', args: '{}', ok: false, summary: 'Не хватает аргумента', detail: 'Передай oldText' },
       { id: 'c', name: 'terminal', args: '{}', ok: false, summary: 'код выхода 1' },
       { id: 'd', name: 'read', args: '{}', ok: false, summary: 'Файл не найден: a.ts' },
+      // Якорь — до `not-found`: отказ правки тоже говорит «не найден», но чинится
+      // он другим якорем, а не перечитыванием пути.
+      {
+        id: 'e',
+        name: 'edit',
+        args: '{}',
+        ok: false,
+        summary: 'ошибка правки',
+        detail: 'текст «return 1» в файле не найден.',
+      },
+      { id: 'f', name: 'edit', args: '{}', ok: false, summary: 'Правки не применены', detail: 'правка не применена' },
+      {
+        id: 'g',
+        name: 'ask',
+        args: '{}',
+        ok: false,
+        summary: 'Ответа нет',
+        detail: 'Человек не ответил: вопрос отклонили',
+      },
+      { id: 'h', name: 'edit', args: '{}', ok: false, summary: 'Не задан аргумент «contents»' },
+      // Наши собственные формы отказов — со строчной буквы. До 29.10 они оседали
+      // в «other», и причина 76% отказов `edit` была неведома.
+      { id: 'i', name: 'edit', args: '{}', ok: false, summary: 'edits[0].edits[0].newText: нужна строка' },
+      { id: 'j', name: 'edit', args: '{}', ok: false, summary: 'edits[0]: не задан path.' },
+      { id: 'k', name: 'edit', args: '{}', ok: false, summary: 'edits[0].edits: нужен непустой массив правок.' },
     ];
     const record = buildCountsRecord(log);
-    expect(record.steps[0]!.calls.map((item) => item.reason)).toEqual(['action', 'arg', 'command', 'not-found']);
+    expect(record.steps[0]!.calls.map((item) => item.reason)).toEqual([
+      'action',
+      'arg',
+      'command',
+      'not-found',
+      'anchor',
+      'anchor',
+      'rejected',
+      'arg',
+      'arg',
+      'arg',
+      'arg',
+    ]);
     expect(callFailureReason({ ok: true, summary: 'ok' })).toBe('other');
   });
 

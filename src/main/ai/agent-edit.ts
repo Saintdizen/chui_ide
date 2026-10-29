@@ -152,8 +152,15 @@ export function hasInnerEdits(item: unknown): boolean {
  * хотя в действительности было ясно, что менять и чем.
  */
 export function flatHunk(item: Record<string, unknown>): Record<string, unknown> | null {
-  if (typeof item.oldText !== 'string' && typeof item.newText !== 'string') return null;
-  const hunk: Record<string, unknown> = { newText: typeof item.newText === 'string' ? item.newText : '' };
+  // `contents` — та же запись целиком, только названная как у `create`. Без этой
+  // строки `{path, contents}` проходил мимо `flatHunk`, доезжал до разбора замен
+  // и падал на «edits[0].edits[0].newText: нужна строка» — хотя данные все на
+  // месте (проверено 29.10).
+  const whole = typeof item.contents === 'string' ? item.contents : undefined;
+  if (typeof item.oldText !== 'string' && typeof item.newText !== 'string' && whole === undefined) return null;
+  const hunk: Record<string, unknown> = {
+    newText: typeof item.newText === 'string' ? item.newText : (whole ?? ''),
+  };
   if (typeof item.oldText === 'string') hunk.oldText = item.oldText;
   for (const key of ['startLine', 'startColumn', 'endLine', 'endColumn'] as const) {
     if (typeof item[key] === 'number') hunk[key] = item[key];
