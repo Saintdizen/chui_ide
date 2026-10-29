@@ -9,7 +9,6 @@
 
 import { confirmFile, coveredRequest, uncoverFiles } from '../../shared/read-coverage';
 import { isMcpToolName } from '../../shared/mcp';
-import { parseSubagentTasks } from '../../shared/subagents';
 import { parseToolArguments } from '../../shared/tools';
 import { CHARS_PER_TOKEN, CHARS_PER_TOKEN_WIDE, estimateTextTokens, isCondenseMarker } from '../../shared/context-fit';
 import { fitOutput } from '../../shared/output-budget';
@@ -404,8 +403,6 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await webAction(ctx, args);
       case 'file':
         return await fileAction(ctx, args);
-      case 'task':
-        return await task(ctx, args);
       case 'mcp':
         return await mcpAction(ctx, args);
       // Семейства ниже — одним инструментом с `action`: семь схем браузера стоили
@@ -434,36 +431,6 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
       summary: error instanceof Error ? error.message : String(error),
     };
   }
-}
-
-/* ── подзадача (sub-agent) ────────────────────────────────────────────── */
-
-/* ── вопрос человеку ────────────────────────────────────────── */
-
-/** Больше пяти вариантов — это уже список, а не выбор: кнопки теряют смысл. */
-
-/**
- * `ask` — остановить прогон и спросить человека. Агент сам вопрос не придумывает и
- * ничего не решает за него: без ответа он честно останавливается. Ответ уходит модели
- * результатом вызова, и прогон продолжается тем же ходом (в отличие от подтверждений,
- * где от ответа зависит лишь одно действие). Моста нет — инструмент не предлагается.
- */
-async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.subagent) return { ok: false, summary: 'Подзадачи недоступны' };
-
-  const request = parseSubagentTasks(args);
-  if (request.error) return { ok: false, summary: 'Не заданы подзадачи', detail: request.error };
-
-  // Одна подзадача идёт прежним путём: лишний слой пула не нужен, а ответ
-  // остаётся ровно тем же, что и раньше, — отчётом одного агента.
-  if (request.tasks.length === 1) {
-    const only = request.tasks[0]!;
-    return ctx.subagent.run({
-      description: only.description,
-      prompt: only.prompt,
-    });
-  }
-  return ctx.subagent.runMany(request.tasks);
 }
 
 /* ── браузер ────────────────────────────────────────────────────────────── */

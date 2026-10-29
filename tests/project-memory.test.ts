@@ -168,12 +168,16 @@ describe('инструменты remember/forget', () => {
     expect(memory.remember).toHaveBeenCalledWith('личное', 'global');
   });
 
-  it('переполнение — понятный отказ с подсказкой', async () => {
+  it('вытеснение на потолке видно в ответе', async () => {
+    // Отказ `full` стоил агенту трёх шагов (`notes` → `forget` → `remember`) и он же
+    // отвечал за переполнение. Теперь хранилище убирает самую давнюю заметку само.
     const memory: MemoryTools = {
       remember: vi.fn(
         async (_text: string, _scope?: MemoryScope): Promise<RememberResult> => ({
-          ok: false,
-          reason: 'full',
+          ok: true,
+          notes: [],
+          added: true,
+          dropped: 'самая давняя',
         }),
       ),
       forget: vi.fn(),
@@ -181,9 +185,8 @@ describe('инструменты remember/forget', () => {
     };
     const outcome = await runTool(context(memory), 'mind', '{"action":"remember","text":"x"}');
 
-    expect(outcome.ok).toBe(false);
-    expect(outcome.summary).toContain('заполнена');
-    expect(outcome.detail).toContain('mind');
+    expect(outcome.ok).toBe(true);
+    expect(outcome.detail).toContain('самая давняя');
   });
 
   it('notes показывает всю память, а не только ту часть, что в промпте', async () => {
@@ -237,10 +240,14 @@ describe('инструменты remember/forget', () => {
     expect(memory.forget).not.toHaveBeenCalled();
   });
 
-  it('потолок заметок соблюдается хранилищем', async () => {
+  it('потолок заметок держится вытеснением', async () => {
     const memory = new ProjectMemory(await tempDir());
     for (let index = 0; index < MAX_NOTES; index += 1) await memory.remember('/proj', `заметка ${index}`);
 
-    expect(await memory.remember('/proj', 'лишняя')).toEqual({ ok: false, reason: 'full' });
+    const result = await memory.remember('/proj', 'лишняя');
+    if (!result.ok) throw new Error('ожидалось успешное добавление');
+    expect(result.dropped).toBe('заметка 0');
+    expect(result.notes).toHaveLength(MAX_NOTES);
+    expect(result.notes[MAX_NOTES - 1]).toEqual({ text: 'лишняя' });
   });
 });

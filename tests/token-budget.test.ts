@@ -144,8 +144,6 @@ describe('бюджет схем', () => {
     // захода в том, что слияние с полем `action` почти ничего не даёт — тела схем
     // остаются оба, а общий у них только каркас.
     const candidates: ReadonlyArray<readonly [string, readonly string[]]> = [
-      ['агенты', ['agents']],
-      ['подзадачи', ['task']],
       ['поиск', ['search']],
       ['чтение файла', ['read']],
       ['список файлов', ['list', 'project_map']],
@@ -234,8 +232,7 @@ describe('бюджет схем', () => {
    * Строка ростера — единственное, что модель узнаёт о скрытых инструментах
    * (схема не едет: `WIDENED_TOOLS` пуст намеренно, докачка ломает кеш префикса).
    * Поэтому она обязана называть поля, без которых вызов не собрать:
-   * `terminal(Open|…, command, cwd?)` до 26.10 молчала про `background`/`timeout`,
-   * а `task` показывался как `task()` — при том что у него поле с промптом.
+   * а `terminal(Open|…, command, cwd?)` до 26.10 молчала про `background`/`timeout`.
    */
   it('ростер называет поля, без которых скрытый инструмент не позвать', () => {
     const line = rosterLine(rosterNames('auto'));
@@ -246,10 +243,6 @@ describe('бюджет схем', () => {
     };
     for (const field of ['command', 'cwd?', 'background?', 'timeout?']) {
       expect(shown('terminal')).toContain(field);
-    }
-    // У `task` нет обязательных полей — но пустые скобки не рассказывают ничего.
-    for (const field of ['description?', 'prompt?', 'tasks?']) {
-      expect(shown('task')).toContain(field);
     }
   });
 });

@@ -22,8 +22,8 @@ function readScope(args: Record<string, unknown>): MemoryScope {
  * Записать заметку в память. Память переживает беседу и её сжатие — сюда уходит
  * то, о чём договорились насовсем: предпочтения, решения, «как запускать». Личные
  * предпочтения (язык ответов и прочее), годные в любом проекте, идут в глобальную
- * область (`scope: "global"`). Не дублируем точные повторы и честно отказываем,
- * когда заметок стало слишком много: терять новую из-за переполнения молча нельзя.
+ * область (`scope: "global"`). Точные повторы не плодим, а на переполнении убираем
+ * самую давнюю заметку — и говорим об этом в ответе, чтобы потеря не была тихой.
  */
 export async function remember(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.memory) return { ok: false, summary: 'Память недоступна' };
@@ -33,15 +33,6 @@ export async function remember(ctx: ToolContext, args: Record<string, unknown>):
   const result = await ctx.memory.remember(text, scope);
 
   if (!result.ok) {
-    if (result.reason === 'full') {
-      return {
-        ok: false,
-        summary: 'Память заполнена',
-        detail:
-          'Заметок стало слишком много. Посмотри их все (`mind` action: "notes"), убери устаревшие через `mind` ' +
-          '(action: "forget"), а затем запиши нужную снова — иначе новая заметка потеряется среди старых.',
-      };
-    }
     return {
       ok: false,
       summary: 'Пустая заметка',
@@ -50,10 +41,11 @@ export async function remember(ctx: ToolContext, args: Record<string, unknown>):
   }
 
   const where = scope === 'global' ? 'в глобальной памяти' : 'в памяти проекта';
+  const dropped = result.dropped ? ` Освободил место — убрал самую давнюю: «${result.dropped}».` : '';
   return {
     ok: true,
     summary: result.added ? 'заметка записана' : 'такая заметка уже есть',
-    detail: `Заметок ${where} теперь: ${result.notes.length}.`,
+    detail: `Заметок ${where} теперь: ${result.notes.length}.${dropped}`,
   };
 }
 
@@ -81,8 +73,7 @@ export async function forget(ctx: ToolContext, args: Record<string, unknown>): P
 
 /**
  * Вся память области: в промпт едет только хвост (`MEMORY_PROMPT_CHARS`), и при
- * переполнении агент видит 12 заметок из 40. Без этого действия `forget` бьёт
- * наугад, а отказ `remember` («память заполнена») не показывает, что уже занято.
+ * переполнении агент видит часть заметок. Без этого действия `forget` бьёт наугад,
  */
 export async function memoryNotes(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.memory) return { ok: false, summary: 'Память недоступна' };

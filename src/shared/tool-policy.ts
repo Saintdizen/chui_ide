@@ -4,8 +4,8 @@
  *
  * Раньше одни и те же сведения были размазаны по пяти спискам в трёх файлах:
  * повтор вызова не исполнялся по `READ_ONLY_TOOLS` (service), режим плана
- * отбирал `PLAN_MODE_TOOLS` (service), подзадача ходила по `SUBAGENT_TOOLS`
- * (tools), а «доступен без условий» решался дефолтом `canRun`. Новый инструмент надо было вспомнить в
+ * отбирал `PLAN_MODE_TOOLS` (service), а «доступен без условий» решался дефолтом
+ * `canRun`. Новый инструмент надо было вспомнить в
  * каждом — и забыть хотя бы в одном было тихо: тесты этого не видели.
  *
  * Теперь сведения об одном инструменте лежат одной строкой, а наборы собираются
@@ -24,8 +24,6 @@ export interface ToolPolicy {
   readonly readOnly?: boolean;
   /** Предлагается и исполняется в режиме «План»: ничего не меняет или меняет только сам план. */
   readonly plan?: boolean;
-  /** Доступен подзадаче (`task`) — и тем самым предел глубины: ни `task` здесь нет. */
-  readonly subagent?: boolean;
   /**
    * Доступен всегда: ни настроек, ни моста окна не требует. Всё остальное
    * решает `canRun` — и по умолчанию отказывает, чтобы новый инструмент не
@@ -46,8 +44,8 @@ export interface ToolPolicy {
    * в языковой сервер, а это меняет код. Отдельным именем такое действие стоило
    * бы схемы в каждом запросе и лишнего слова в ростере, а разница все равно в
    * действии. `isReadOnlyCall` возвращает false для них раньше проверки
-   * `readOnly`, а `isWriteCall` держит отказ в режиме плана и у подзадачи
-   * (`canRun` в service) — второго имени ради этого не надо.
+   * `readOnly`, а `isWriteCall` держит отказ в режиме плана — второго имени
+   * ради этого не надо.
    */
   readonly writeActions?: readonly string[];
 }
@@ -56,31 +54,31 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   /* ── чтение проекта ─────────────────────────────────────────────────── */
   // Одно имя на папку и на маску: без `glob` — что в каталоге, с ним — найденные
   // файлы. Оба действия только читают, поэтому право на них одно.
-  list: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
+  list: { readOnly: true, plan: true, alwaysAvailable: true },
   // Одно имя на один файл и на пачку (`path` | `paths`).
-  read: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
-  search: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
+  read: { readOnly: true, plan: true, alwaysAvailable: true },
+  search: { readOnly: true, plan: true, alwaysAvailable: true },
   // Прошлые беседы и следы прогонов: журнал только читают, проекта не касаются.
-  history: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
-  project_map: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
+  history: { readOnly: true, plan: true, alwaysAvailable: true },
+  project_map: { readOnly: true, plan: true, alwaysAvailable: true },
   read_image: { readOnly: true, plan: true, alwaysAvailable: true },
 
   /* Символы и языковой сервер: без него эти инструменты не предлагаются. */
   // Одно имя на все запросы к серверу: ссылки, объявление и скелет файла читают
   // одно и то же состояние, и прав у них одни. Переименование живёт здесь же —
   // действие `rename`: оно ПИШЕТ код, и его держит `writeActions`, а не имя.
-  lsp: { readOnly: true, plan: true, subagent: true, writeActions: ['rename'] },
+  lsp: { readOnly: true, plan: true, writeActions: ['rename'] },
 
-  /* Проверки: мир не меняют, поэтому они и в плане, и у подзадачи. */
+  /* Проверки: мир не меняют, поэтому они и в плане. */
   run_tests: {},
 
   /*
    * Сеть: `search` в повторах не кэшируется (выдача меняется и стоит денег),
-   * а `fetch` только читает — отсюда `readOnlyActions`. Подзадаче нужен целиком.
+   * а `fetch` только читает — отсюда `readOnlyActions`.
    */
-  web: { plan: true, subagent: true, readOnlyActions: ['fetch'] },
+  web: { plan: true, readOnlyActions: ['fetch'] },
 
-  checks: { readOnly: true, plan: true, subagent: true },
+  checks: { readOnly: true, plan: true },
   mcp: { plan: true },
 
   /* ── правки файлов ──────────────────────────────────────────────────── */
@@ -109,7 +107,6 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   // План и вопрос в плане законны, а `remember`/`forget` ПИШУТ память — их
   // держит `writeActions`, а не имя.
   mind: { plan: true, alwaysAvailable: true, writeActions: ['remember', 'forget'] },
-  task: { readOnly: true, plan: true, alwaysAvailable: true },
 
   /* ── агенты в фоне: план они не меняют, они читают проект ───────────── */
   // Одно имя на все пять действий: `spawn` и три разговора с живым агентом
@@ -204,17 +201,6 @@ export function isWriteCall(name: string, rawArguments: string): boolean {
  * и не исполняется — даже если модель вызовет такой инструмент по имени.
  */
 export const PLAN_MODE_TOOLS = namesWhere('plan');
-
-/**
- * Инструменты подзадачи (`task`) — и тем самым предел глубины работы агентов.
- *
- * Только чтение: правки и команды остаются за основным агентом, который
- * показывает ревью и спрашивает человека. Здесь же лежит ответ на «а может ли
- * агент запустить агента»: ни `task` в наборе нет, поэтому
- * глубина всегда 1. Иначе один вопрос человека
- * превращался бы в дерево прогонов модели, за которое никто не считал.
- */
-export const SUBAGENT_TOOLS = namesWhere('subagent');
 
 /**
  * Доступны всегда: ни настроек, ни моста подтверждений им не нужно. Всё

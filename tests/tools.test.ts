@@ -37,7 +37,6 @@ describe('набор инструментов агента', () => {
       'edit',
       'file',
       'mind',
-      'task',
       'browser',
 
       'mind',

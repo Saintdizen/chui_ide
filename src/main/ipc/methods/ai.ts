@@ -72,15 +72,6 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
   // Деньги на счету — для окна «Информация о сессии». Отдельно от `ai.test`:
   // список моделей для этой цифры не нужен, а спрашивают её часто.
   router.register('ai.balance', (_params, ctx) => deps.ai.accountBalance(ctx.signal));
-  /*
-   * Живые агенты подзадач. Панель чата спрашивает список при появлении, а дальше
-   * получает push-событие `PushTopic.Agents` — опрашивать сервис по таймеру незачем.
-   * Правит агентами и человек: остановить одного и сказать ему по делу — это
-   * решения человека, а не модели, поэтому отдельные вызовы, а не инструменты.
-   */
-  router.register('ai.agents', () => deps.ai.agentList());
-  router.register('ai.agentInterrupt', (params) => ({ ok: deps.ai.agentInterrupt(params.id) }));
-  router.register('ai.agentMessage', (params) => deps.ai.agentMessage(params.id, params.text));
 
   router.register('ai.chat', (request: ChatRequest, ctx) => {
     requireAiEnabled();

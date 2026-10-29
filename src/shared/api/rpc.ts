@@ -24,7 +24,6 @@ import type { ProjectPackage } from '../monorepo';
 import type { ProjectCommand } from '../commands';
 import type { ChatTitleParts } from '../chat-title';
 import type { PermissionPreset } from '../permissions';
-import type { AgentSnapshot } from '../agents';
 import type { ForgeComment, ForgeInfo, ForgeIssue, ForgeNotification, ForgePipeline } from '../git-platform';
 import type { GitReflogEntry } from '../git-reflog';
 import type { GitStashEntry } from '../git-stash';
@@ -897,15 +896,6 @@ export interface ChuiMethods {
   'ai.balance': { params: void; result: AccountBalance | null };
 
   'ai.chat': { params: ChatRequest; result: ChatStreamDone };
-  /**
-   * Живые агенты (подзадачи): кто работает и что делает. Панель спрашивает список
-   * при появлении, дальше живёт push-событием `PushTopic.Agents`.
-   */
-  'ai.agents': { params: Record<string, never>; result: AgentSnapshot[] };
-  /** Остановить одного агента: остальные и сам ход продолжаются. */
-  'ai.agentInterrupt': { params: { id: string }; result: { ok: boolean } };
-  /** Сказать агенту по делу: сообщение доедет перед его следующим шагом. */
-  'ai.agentMessage': { params: { id: string; text: string }; result: { ok: boolean; reason?: string } };
   /**
    * Подсказка для inline-автодополнения: продолжить код в месте курсора.
    * Отдельно от `ai.chat` — это короткий запрос без истории и инструментов.

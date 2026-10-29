@@ -8,7 +8,6 @@ import {
   isReadOnlyCall,
   isCacheableReadCall,
   isWriteCall,
-  SUBAGENT_TOOLS,
   TOOL_POLICIES,
 } from '../src/shared/tool-policy';
 
@@ -44,7 +43,7 @@ describe('таблица признаков', () => {
   it('у каждого признака есть хотя бы один носитель', () => {
     // Пустой набор — признак, который перестали ставить: тогда «повтор не
     // исполняется» или «в плане можно» молча не работает ни для кого.
-    for (const set of [READ_ONLY_TOOLS, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, ALWAYS_AVAILABLE]) {
+    for (const set of [READ_ONLY_TOOLS, PLAN_MODE_TOOLS, ALWAYS_AVAILABLE]) {
       expect(set.size).toBeGreaterThan(0);
     }
   });
@@ -52,27 +51,9 @@ describe('таблица признаков', () => {
 
 describe('производные наборы', () => {
   it('знают только инструменты из AGENT_TOOLS', () => {
-    for (const set of [READ_ONLY_TOOLS, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, ALWAYS_AVAILABLE]) {
+    for (const set of [READ_ONLY_TOOLS, PLAN_MODE_TOOLS, ALWAYS_AVAILABLE]) {
       for (const name of set) expect(names).toContain(name as AgentToolName);
     }
-  });
-
-  it('подзадача ходит только чтением', () => {
-    // Правки и команды остаются за основным агентом: он показывает ревью и
-    // спрашивает человека. Исключение одно — web: выдача поиска меняется и
-    // стоит денег, поэтому в повторах не кэшируется, но читать её можно.
-    for (const name of SUBAGENT_TOOLS) {
-      if (name === 'web') continue;
-      expect(READ_ONLY_TOOLS.has(name)).toBe(true);
-    }
-  });
-
-  it('подзадача не зовёт подзадачу', () => {
-    expect(SUBAGENT_TOOLS.has('task')).toBe(false);
-  });
-
-  it('в плане всё, что доступно подзадаче', () => {
-    for (const name of SUBAGENT_TOOLS) expect(PLAN_MODE_TOOLS.has(name)).toBe(true);
   });
 
   it('в плане нет ничего, что меняет мир', () => {

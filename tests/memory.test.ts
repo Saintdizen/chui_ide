@@ -82,9 +82,14 @@ describe('addNote', () => {
     expect(addNote([], '   ')).toEqual({ ok: false, reason: 'empty' });
   });
 
-  it('при переполнении честный отказ, а не потеря новой', () => {
+  it('при переполнении вытесняет самую давнюю, а не теряет новую', () => {
     const full = Array.from({ length: MAX_NOTES }, (_value, index) => ({ text: `n${index}` }));
-    expect(addNote(full, 'ещё одна')).toEqual({ ok: false, reason: 'full' });
+    const result = addNote(full, 'ещё одна');
+    if (!result.ok) throw new Error('ожидалось успешное добавление');
+    expect(result.dropped).toBe('n0');
+    expect(result.notes).toHaveLength(MAX_NOTES);
+    expect(result.notes[0]).toEqual({ text: 'n1' });
+    expect(result.notes[MAX_NOTES - 1]).toEqual({ text: 'ещё одна' });
   });
 
   it('слишком длинную заметку обрезает', () => {

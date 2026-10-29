@@ -26,7 +26,11 @@ export interface MemoryNote {
 /** Область памяти: заметки проекта или общие для всех проектов. */
 export type MemoryScope = 'workspace' | 'global';
 
-/** Сколько заметок держим: память — выжимка, а не дневник. За полем — отказ, не молчание. */
+/**
+ * Сколько заметок держим: память — выжимка, а не дневник. Потолок не отказ, а
+ * вытеснение: отказ стоил агенту трёх шагов (`notes` → `forget` → `remember`),
+ * а решает он же сам — пусть теряет самую давнюю, а не новую.
+ */
 export const MAX_NOTES = 40;
 /** Потолок одной заметки: длинная заметка — это уже не заметка, а простыня в промпте. */
 export const MAX_NOTE_CHARS = 320;
@@ -70,15 +74,19 @@ export function serializeMemory(notes: readonly MemoryNote[], title: string): st
   return `${lines.join('\n')}\n`;
 }
 
-/** Итог добавления: либо новая память, либо причина отказа (её видит агент). */
+/**
+ * Итог добавления: либо новая память, либо причина отказа (её видит агент).
+ * `dropped` — текст заметки, которую пришлось вытеснить: агент должен знать,
+ * что именно пропало, иначе потеря тихо меняет его же договорённости.
+ */
 export type RememberResult =
-  | { ok: true; notes: MemoryNote[]; added: boolean }
-  | { ok: false; reason: 'empty' | 'full' | 'duplicate' };
+  | { ok: true; notes: MemoryNote[]; added: boolean; dropped?: string }
+  | { ok: false; reason: 'empty' };
 
 /**
  * Добавить заметку. Точный повтор не плодим: одна и та же мысль, записанная
- * дважды, только засоряет промпт. Потолок достигнут — честный отказ: агент
- * должен сначала убрать лишнее, а не потерять новое молча.
+ * дважды, только засоряет промпт. Достигли потолка — вытесняем самую давнюю:
+ * файл растёт сверху вниз, старые заметки наверху, новое важнее.
  */
 export function addNote(notes: readonly MemoryNote[], text: string): RememberResult {
   const clean = text.trim().slice(0, MAX_NOTE_CHARS);
@@ -86,7 +94,11 @@ export function addNote(notes: readonly MemoryNote[], text: string): RememberRes
 
   const existing = notes.find((note) => note.text === clean);
   if (existing) return { ok: true, notes: [...notes], added: false };
-  if (notes.length >= MAX_NOTES) return { ok: false, reason: 'full' };
+
+  if (notes.length >= MAX_NOTES) {
+    const [oldest, ...kept] = notes;
+    return { ok: true, notes: [...kept, { text: clean }], added: true, dropped: oldest?.text };
+  }
 
   return { ok: true, notes: [...notes, { text: clean }], added: true };
 }

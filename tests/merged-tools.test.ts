@@ -83,12 +83,21 @@ describe('слитые инструменты: разбор', () => {
     expect(neither.ok).toBe(false);
     expect(neither.summary).toContain('oldText');
 
-    const partial = await runTool(
+    // `startLine` без столбцов — это адрес ЦЕЛЫМИ строками (номера даёт `read`),
+    // а не половина адреса: такой вызов проходит до применения правок.
+    const lineRange = await runTool(
       ctx,
       'edit',
       JSON.stringify({ edits: [{ path: '/p/a.ts', edits: [{ startLine: 1, newText: 'x' }] }] }),
     );
-    expect(partial.summary).toContain('не все');
+    expect(lineRange.summary).not.toContain('startLine');
+    // А один столбец без строки — не адрес вовсе: отказ называет, чего не хватает.
+    const columnOnly = await runTool(
+      ctx,
+      'edit',
+      JSON.stringify({ edits: [{ path: '/p/a.ts', edits: [{ startColumn: 2, newText: 'x' }] }] }),
+    );
+    expect(columnOnly.summary).toContain('startLine');
 
     const mixed = await runTool(
       ctx,

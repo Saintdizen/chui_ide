@@ -96,15 +96,6 @@ describe('missingArguments', () => {
     expect(missingArguments(toolSpec('terminalOutput')!.inputSchema, {})).toEqual([]);
     expect(missingArguments(toolSpec('terminalList')!.inputSchema, {})).toEqual([]);
   });
-
-  it('подзадача без prompt названа путём внутри tasks', () => {
-    // Форма элемента `task.tasks` — в полях схемы, иначе `{ name, prompt }`
-    // теряется молча; `description` нарочно не обязателен (разбор подставит сам).
-    const spec = toolSpec('task')!;
-    expect(missingArguments(spec.inputSchema, { tasks: [{ description: 'без промпта' }] })).toEqual([
-      'tasks[0].prompt',
-    ]);
-  });
 });
 
 /**

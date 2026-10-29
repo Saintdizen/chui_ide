@@ -18,7 +18,7 @@
  */
 
 import type { ChatRunTrace } from './api';
-import type { ChatRunLog, RunCallLog, RunStepLog, RunSubagentLog, RunSystemLog } from './run-log';
+import type { ChatRunLog, RunCallLog, RunStepLog, RunSystemLog } from './run-log';
 import type { PermissionPreset } from './permissions';
 
 /** Потолок одного текстового поля в записи: подробности нужны, мегабайты — нет. */
@@ -119,7 +119,6 @@ export interface RunTelemetryRecord {
   system: RunSystemLog;
   /** Шаги с вызовами — вычищенные и урезанные. */
   steps: RunStepLog[];
-  subagents?: RunSubagentLog[];
   /** Схемы аргументов инструментов, которыми пользовался прогон. */
   schemas?: Record<string, string>;
   /** Запись пришлось укоротить, чтобы влезть в потолок. */
@@ -200,9 +199,6 @@ export function buildRunRecord(run: ChatRunLog, input: RunTelemetryInput = {}): 
     trace: run.trace,
     system: cleanSystem(run.system),
     steps: run.steps.map((step) => cleanStep(step, MAX_TELEMETRY_FIELD)),
-    ...(run.subagents
-      ? { subagents: run.subagents.map((item) => ({ ...item, description: redactSecrets(item.description) })) }
-      : {}),
     ...(run.schemas
       ? {
           schemas: Object.fromEntries(

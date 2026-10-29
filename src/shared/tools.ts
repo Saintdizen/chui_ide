@@ -43,7 +43,6 @@ export type AgentToolName =
   | 'web'
   | 'file'
   | 'mind'
-  | 'task'
   | 'browser'
   | 'show';
 
@@ -127,9 +126,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'read',
     side: 'main',
     description:
-      'Read a file — whole, a line range (`startLine`/`endLine`) or several (`paths`, 2-5, output capped). ' +
+      'Read a file — whole, a line range (`startLine`/`endLine`) or several at once (`paths`, 2-5: one step instead of one call each). ' +
       'Prefer a range around the spot. ' +
-      'Output lines are numbered from 1: those numbers go to edit.',
+      'Output numbers are addresses for `startLine`/`endLine`, not file text: do not copy them into edit anchors.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -336,8 +335,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     // «Replacement; empty deletes.», «Whole file: replaces it.») стоили 46 токенов
     // в каждом запросе (замер 27.10).
     description:
-      'Change files: edits[] — [{path, oldText, newText}] or [{path, contents}] for a whole new file; ' +
-      'move, delete — file.',
+      'Change files: edits[] — [{path, oldText, newText}], [{path, startLine, endLine, newText}] to replace whole lines (numbers from read), ' +
+      'or [{path, contents}] for a whole new file; move, delete — file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -350,6 +349,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
               path: { type: 'string' },
               oldText: { type: 'string' },
               newText: { type: 'string' },
+              // `startLine`/`endLine` схема не объявляет — как и четыре позиции
+              // раньше: разбор их понимает, а объявление стоило бы 40 токенов в
+              // каждом запросе. Форму называет описание инструмента, и это дешевле.
               contents: { type: 'string' },
             },
             // `path` здесь НЕ обязателен: проверка схемы срабатывает раньше разбора
@@ -526,38 +528,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         plan: { type: 'string', description: 'exit_plan: in brief; empty — the checklist.' },
       },
       required: ['action'],
-    },
-  },
-  {
-    name: 'task',
-    side: 'main',
-    description:
-      'A subtask in its own context: it explores the project and returns a short report; ' +
-      'your conversation does not grow from its reads. Parallel: use tasks.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        description: { type: 'string', description: 'Short subtask name, shown on the card.' },
-        prompt: {
-          type: 'string',
-          description: 'What to investigate; the more concrete, the better.',
-        },
-        tasks: {
-          type: 'array',
-          description: 'Up to 4 independent subtasks. Not with prompt.',
-          // Форма элемента — в полях, а не в тексте описания: подзадача,
-          // присланная как `{ name, prompt }`, теряется молча. Обязателен только
-          // `prompt`: `description` подставляет сам разбор (parseSubagentTasks).
-          items: {
-            type: 'object',
-            properties: {
-              description: { type: 'string' },
-              prompt: { type: 'string' },
-            },
-            required: ['prompt'],
-          },
-        },
-      },
     },
   },
   {

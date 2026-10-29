@@ -24,7 +24,6 @@ import {
 import type { FileEdit } from '../../shared/edits';
 import type { PatchFile } from '../../shared/patch';
 import { ageStaleResults, ageToolResults } from './age-results';
-import { clipWithRemainder } from './spill';
 import { readCalibration, saveCalibration } from './token-calibration';
 import { compressToolOutput } from '../../shared/output-compress';
 import {
@@ -45,13 +44,7 @@ import {
   type AgentToolSpec,
   type ExposedToolSpec,
 } from '../../shared/tools';
-import {
-  PLAN_MODE_TOOLS,
-  SUBAGENT_TOOLS,
-  isReadOnlyCall,
-  isCacheableReadCall,
-  isWriteCall,
-} from '../../shared/tool-policy';
+import { PLAN_MODE_TOOLS, isReadOnlyCall, isCacheableReadCall, isWriteCall } from '../../shared/tool-policy';
 import { canonicalCall } from '../../shared/tool-aliases';
 import { canRunTool, canUseWebSearch } from './available-tools';
 import {
@@ -93,9 +86,6 @@ import {
 } from '../../shared/permissions';
 import { MAX_GOAL_CONTINUES, goalContinuePrompt, goalPrompt, parseGoalUpdate, sanitizeGoal } from '../../shared/goal';
 import { isPlanExitCall, parsePlanExitArgs, planExitResult, type PlanExitDecision } from '../../shared/plan-exit';
-import { formatSubagentReport, runWithLimit, subagentBatchSize, type SubagentFailure } from '../../shared/subagents';
-import { formatAgentNotes, stopReasonLabel, type AgentSnapshot, type AgentStopReason } from '../../shared/agents';
-import { createAgentRegistry, type AgentHandle, type AgentRegistry } from './agents';
 import {
   MAX_RUN_CALLS_PER_STEP,
   MAX_RUN_STEPS,
@@ -103,7 +93,6 @@ import {
   type ChatRunLog,
   type RunCallLog,
   type RunStepLog,
-  type RunSubagentLog,
 } from '../../shared/run-log';
 import type { ReviewVerdict } from '../../shared/approval-review';
 import { addUsage } from '../../shared/usage';
@@ -128,7 +117,7 @@ import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
 import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
 import { runTool } from './agent-tools';
-import { STEP_OUTPUT_CHARS, stepOutputChars } from './output-budget';
+import { stepOutputChars } from './output-budget';
 import { failureText } from './tool-rules';
 import type {
   BrowserTools,
@@ -155,7 +144,6 @@ import {
   toolPresetSpec,
   isRosterTool,
   WIDENED_TOOLS,
-  type ToolPresetId,
 } from '../../shared/tool-presets';
 
 /**
@@ -192,9 +180,6 @@ const MIDRUN_KEEP_TURNS = 4;
 // Лимиты шагов «модель → инструмент → модель» живут в настройках
 // (`ai.maxSteps` и `ai.maxAutopilotSteps`): значения по умолчанию — там же.
 
-/** Шагов подзадаче меньше, чем основному агенту: её дело — собрать факты, а не работать. */
-const SUBAGENT_MAX_STEPS = 16;
-
 /**
  * Сколько последних сообщений не сворачиваем: свежий шаг нужен целиком.
  *
@@ -212,14 +197,6 @@ const STALE_KEEP_RECENT = 12;
 const STALE_KEEP_RECENT_HEAVY = 6;
 const STALE_MIN_CHARS_HEAVY = 900;
 const STALE_BATCH_HEAVY = 1;
-
-/**
- * Потолок отчёта подзадачи: это выжимка для основного агента, а не второй
- * контекст. Восемь тысяч символов (≈2 300 токенов) платились за каждый вызов
- * `task`, хотя отчёт читается один раз и по делу отвечает первая треть. Не
- * влезло — остаётся в файле, адрес прилагается.
- */
-const SUBAGENT_REPORT_CHARS = 4000;
 
 /** Дописывается, когда включён полный доступ: подтверждения не нужны. */
 const AUTO_APPROVE_PROMPT = [
@@ -247,18 +224,6 @@ const PLAN_PROMPT = [
 const ASK_PROMPT = [
   'Инструменты в этом режиме выключены: они тебе недоступны.',
   'Отвечай обычным текстом и не вызывай инструменты — их вызов не выполнится.',
-].join('\n');
-
-/**
- * Системная инструкция подзадачи (`task`). Подзадача не видит беседу и не
- * продолжает её: её единственный результат — отчёт, по которому основной агент
- * действует, не перечитывая всё сам.
- */
-const SUBAGENT_PROMPT = [
-  'Ты — подзадача (sub-agent) внутри IDE. У тебя свой контекст: основной агент не видит твоих шагов и получит только твой итоговый отчёт.',
-  'Исследуй проект доступными инструментами чтения и верни КРАТКИЙ, но конкретный отчёт: файлы и номера строк, имена символов, нужные фрагменты, вывод команд — то, по чему можно действовать, не читая всё заново.',
-  'Пиши по делу: что нашёл, где именно (путь:строка) и что это значит. Не пересказывай задание и не извиняйся.',
-  'Инструменты только для чтения: менять проект ты не можешь.',
 ].join('\n');
 
 /**
@@ -322,13 +287,6 @@ export class AiService {
    * шаг и даже ход — его можно дочитать следующим запросом.
    */
   private readonly jobs: JobRegistry = createJobRegistry();
-
-  /**
-   * Живые агенты подзадач: один реестр на окно. Так их видят и панель, и
-   * инструменты (`agents` с действиями `list`, `wait`, `send`, `interrupt`),
-   * а не только тот прогон, что их запустил: фоновый агент переживает ход.
-   */
-  private readonly agents: AgentRegistry = createAgentRegistry();
 
   /**
    * Каталог для полных копий длинного вывода (`ai/spill.ts`). Не задан —
@@ -461,36 +419,6 @@ export class AiService {
    */
   attachTelemetry(telemetry: TelemetryStore): void {
     this.telemetry = telemetry;
-  }
-
-  /* ── живые агенты ────────────────────────────────────────────────────────
-   *
-   * Реестр живёт в сервисе, а не в прогоне: фоновый агент продолжает работать,
-   * когда ход уже закончился, и иначе его никто бы не увидел. Отсюда две
-   * потребности: окно (панель) спрашивает список и правит агентами, а main шлёт
-   * изменение push-событием, чтобы панель не опрашивала сервис по таймеру.
-   */
-
-  /** Кто есть из агентов: идущие и недавние. */
-  agentList(): AgentSnapshot[] {
-    return this.agents.list();
-  }
-
-  /** Сообщение агенту от человека (панель): доедет перед его следующим шагом. */
-  agentMessage(id: string, text: string): { ok: boolean; reason?: string } {
-    const trimmed = text.trim();
-    if (!trimmed) return { ok: false, reason: 'Пустое сообщение' };
-    return this.agents.send(id, trimmed, 'human');
-  }
-
-  /** Остановить одного агента, не снимая остальных и не обрывая ход. */
-  agentInterrupt(id: string): boolean {
-    return this.agents.interrupt(id, 'human');
-  }
-
-  /** Изменение списка агентов: панель подписывается один раз на окно. */
-  onAgentsChanged(listener: (agents: readonly AgentSnapshot[]) => void): () => void {
-    return this.agents.onChange(listener);
   }
 
   /**
@@ -1001,17 +929,6 @@ export class AiService {
      */
     const runStartedAt = Date.now();
     const runStepLogs: RunStepLog[] = [];
-    const runSubagents: RunSubagentLog[] = [];
-    /**
-     * Ход ещё считается открытым. Фоновый агент может закончить работу уже после
-     * ответа человека — тогда его расход и шаги прибавлять некуда (итог прогона
-     * уже посчитан и отдан). Числа агента при этом не теряются: они в реестре
-     * (`steps`, `toolCalls`) и в панели.
-     */
-    let runOpen = true;
-    // Новый ход начинается с чистого списка: агенты прошлого хода уже не работают,
-    // и держать их в панели незачем. Идущие фоновые остаются — они правда идут.
-    this.agents.clearFinished();
     /**
      * Схемы инструментов, которые ушли модели, по имени. Пишем при первом вызове
      * инструмента: схема за прогон не меняется, а копия в каждом вызове раздула
@@ -1063,7 +980,6 @@ export class AiService {
         toolsTokens,
         ...(requestGoal ? { goal: requestGoal } : {}),
       },
-      ...(runSubagents.length > 0 ? { subagents: runSubagents } : {}),
       ...(Object.keys(runSchemas).length > 0 ? { schemas: runSchemas } : {}),
       finished,
       trace: trace(),
@@ -1075,9 +991,6 @@ export class AiService {
      * видит в ленте. Ошибку записи никто не ждёт: журнал — диагностика.
      */
     const finishRun = (finished: ChatRunLog['finished']): ChatRunLog => {
-      // Итог прогона считается здесь и один раз: после этого фоновому агенту
-      // прибавляться уже некуда (см. `runOpen`).
-      runOpen = false;
       const log = runLog(finished);
       const project = this.workspace.rootPath();
       void this.telemetry
@@ -1100,138 +1013,6 @@ export class AiService {
     // останавливается. Правка/команда сбрасывает кэш: состояние могло измениться.
     const executed = new Map<string, ToolOutcome>();
     let stallSteps = 0;
-
-    // Подзадача (`task`): отдельный агент со своим контекстом. Его расход и шаги
-    // прибавляем к прогону — иначе наблюдаемость показала бы только шаги основного
-    // агента, а токены подзадачи выпали бы из итога беседы.
-    /** Одна подзадача: общий путь для одиночного вызова и для пула. */
-    /**
-     * Завести агента в реестре. Запись появляется ДО первого шага: иначе панель и
-     * `interrupt` не видели бы агента как раз тогда, когда его и хочется
-     * снять. Сигнал агента — потомок сигнала прогона: остановка хода снимает всех,
-     * остановка одного ход не трогает.
-     */
-    const openAgent = (description: string): { id: string } | { error: string } => {
-      const spawned = this.agents.spawn({ description, parent: signal });
-      return 'error' in spawned ? { error: spawned.error } : { id: spawned.id };
-    };
-
-    /**
-     * Провести агента и записать итог в реестр на любом выходе.
-     *
-     * Реестр — единственное место, где агента видно снаружи, поэтому `settle`
-     * зовётся и при ошибке: иначе в панели навсегда осталось бы «идёт».
-     */
-    const runAgent = async (id: string, description: string, prompt: string) => {
-      const handle = this.agents.handle(id);
-      if (handle === null) throw new Error(`Агент ${id} потерялся в реестре`);
-
-      let sub: Awaited<ReturnType<AiService['runSubAgent']>>;
-      try {
-        sub = await this.runSubAgent({
-          description,
-          prompt,
-          agent: handle,
-          providerId: request.providerId,
-          provider,
-          model: request.model,
-          temperature,
-          maxTokens,
-          reasoningEffort,
-          ...(thinking === undefined ? {} : { thinking }),
-          ...(connection?.userId ? { userId: connection.userId } : {}),
-          // Агент идёт своим сигналом: человек может снять одного.
-          signal: handle.signal,
-          host,
-          context,
-          windowTokens,
-          // Набор тот же, что у основного агента: сужение не расширяется подзадачей.
-          toolPreset,
-        });
-      } catch (error) {
-        this.agents.settle(id, 'failed', describeFailure(error));
-        throw error;
-      }
-
-      if (runOpen) {
-        // Счётчики общие на прогон: обновляются в одном потоке после `await`, гонки нет.
-        runUsage = addUsage(runUsage, sub.usage);
-        runSteps += sub.steps;
-        runToolCalls += sub.toolCalls;
-        // Подзадача идёт своим контекстом: её шаги в общий список не подмешать,
-        // поэтому в трассе она — отдельная строка с числом шагов и вызовов.
-        runSubagents.push({
-          description,
-          steps: sub.steps,
-          toolCalls: sub.toolCalls,
-        });
-      }
-
-      const stoppedBy = handle.stopReason;
-      this.agents.settle(
-        id,
-        stoppedBy !== null ? 'stopped' : sub.outcome.ok ? 'done' : 'failed',
-        stoppedBy !== null ? stopReasonLabel(stoppedBy) : sub.outcome.summary,
-        sub.outcome.detail ?? sub.outcome.summary,
-      );
-      return sub;
-    };
-
-    /**
-     * Одна подзадача с ожиданием — общий путь для одиночного `task` и для пула.
-     * Предел живым агентам не даёт ей даже начать: это ответ словами, а не «молча
-     * не запустилось».
-     */
-    const runOne = async ({ description, prompt }: { description: string; prompt: string }) => {
-      const opened = openAgent(description);
-      if ('error' in opened) {
-        return {
-          outcome: {
-            ok: false,
-            summary: 'агент не запущен',
-            detail: opened.error,
-          } as ToolOutcome,
-          steps: 0,
-          toolCalls: 0,
-          usage: {},
-        };
-      }
-      return runAgent(opened.id, description, prompt);
-    };
-    /**
-     * Пул подзадач: запускаем не больше `MAX_PARALLEL` сразу.
-     *
-     * Подзадачи независимы по определению (зависимые надо звать отдельными
-     * вызовами), поэтому общий `signal` и общий провайдер — всё, что им нужно.
-     * Одна упавшая подзадача не отменяет остальные: отчёт собирается по каждой
-     * отдельно, а провал называется словами — иначе треть работы пропадёт молча.
-     */
-    toolContext.subagent = {
-      run: async ({ description, prompt }) => (await runOne({ description, prompt })).outcome,
-      runMany: async (tasks) => {
-        // Пул живёт в `shared/subagents.ts`: там же проверено, что он держит
-        // предел и что одна упавшая задача не отменяет остальные.
-        const pool = await runWithLimit(tasks, subagentBatchSize(tasks.length), (task) => runOne(task), { signal });
-
-        const results = pool.done.map((item) => ({
-          description: tasks[item.index]!.description,
-          text: item.value.outcome.detail ?? item.value.outcome.summary,
-        }));
-        const failures: SubagentFailure[] = pool.failed.map((item) => ({
-          description: tasks[item.index]!.description,
-          reason: describeFailure(item.error),
-        }));
-
-        return {
-          ok: results.length > 0,
-          summary:
-            failures.length === 0
-              ? `подзадач: ${results.length} — отчёты ниже`
-              : `подзадач: ${results.length}, не удалось: ${failures.length}`,
-          detail: formatSubagentReport(results, failures),
-        };
-      },
-    };
 
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
     // Карта поднимается из беседы (`ChatConversation.reads`), а не заводится пустой:
@@ -1264,6 +1045,14 @@ export class AiService {
      * а `read` дешевле и помнит уже прочитанное.
      */
     let shellReads = 0;
+    /**
+     * Чтения `read` по одному файлу за шаг — подряд. Замер (`counts.jsonl`):
+     * 1 227 чтений и всего 6 из них пачкой (`paths`), а шагов с 2+ вызовами — 15%.
+     * После третьего одиночного чтения говорим один раз на прогон: пачка — тот же
+     * вывод за один шаг, а шаг — это вся история заново.
+     */
+    let singleReads = 0;
+    let pathsHinted = false;
 
     for (let step = 0; step < steps; step += 1) {
       if (signal.aborted) break;
@@ -1821,6 +1610,19 @@ export class AiService {
         if (call.name === 'read') shellReads = 0;
         else if (call.name === 'terminal' && callFlags(call.name, call.arguments).includes('shell-read'))
           shellReads += 1;
+        // Очередь одиночных чтений вместо пачки: считаем подряд и один раз на прогон
+        // говорим, что было дешевле. Пачку (`paths`) уже увидели — молчим.
+        if (call.name === 'read' || call.name === 'read_file') {
+          if (callFlags(call.name, call.arguments).includes('paths')) {
+            singleReads = 0;
+            pathsHinted = true;
+          } else singleReads += 1;
+        }
+        const pathsNote =
+          !pathsHinted && singleReads === 3
+            ? '\n(несколько файлов — read с paths одним вызовом: это шаг, а не три)'
+            : '';
+        if (pathsNote) pathsHinted = true;
         // Один раз на серию, а не в каждом ответе: повторённая строка сама станет шумом.
         const shellReadNote =
           call.name === 'terminal' && shellReads === 2
@@ -1835,7 +1637,7 @@ export class AiService {
           name: call.name,
           // Единая точка сжатия для всех инструментов: в контекст модели уходит
           // текст без оформления, а человек в карточке (событие выше) видит полный.
-          content: (compressOutput ? compressToolOutput(result) : result) + widenedNote + shellReadNote,
+          content: (compressOutput ? compressToolOutput(result) : result) + widenedNote + shellReadNote + pathsNote,
         };
         countOutput(toolMessage.content ?? '');
         messages.push(toolMessage);
@@ -2049,239 +1851,6 @@ export class AiService {
         wire = tighter;
       }
     }
-  }
-
-  /**
-   * Подзадача: тот же агентный цикл, но в своём контексте. Основной агент её
-   * шагов не видит — до него доезжает только отчёт, поэтому длинное чтение не
-   * раздувает беседу. Инструменты только для чтения (`SUBAGENT_TOOLS`): правки и
-   * команды остаются за основным агентом, который показывает ревью и спрашивает
-   * пользователя. Расход и число шагов возвращаем наверх — основной прогон
-   * прибавляет их к своим, иначе токены подзадачи выпали бы из итога беседы.
-   */
-  private async runSubAgent(params: {
-    description: string;
-    prompt: string;
-    /**
-     * Запись в реестре живых агентов: через неё прогон читает почту (сообщения по
-     * ходу дела) и узнаёт, что агента сняли. Не задана — агент нигде не числится
-     * (так зовут проверки).
-     */
-    agent?: AgentHandle;
-    providerId: string;
-    provider: AiProvider;
-    model: string;
-    temperature: number | undefined;
-    maxTokens: number;
-    reasoningEffort: ReasoningEffort | undefined;
-    thinking?: boolean;
-    userId?: string;
-    signal: AbortSignal;
-    host: ChatHostBridge | undefined;
-    context: string | null;
-    windowTokens: number;
-    /** Набор инструментов прогона: подзадача может лишь сузить его (см. tool-presets). */
-    toolPreset: ToolPresetId;
-  }): Promise<{
-    outcome: ToolOutcome;
-    steps: number;
-    toolCalls: number;
-    usage: ChatUsage;
-  }> {
-    const settings = this.settings.get();
-    const compressOutput = settings.ai.compressOutput !== false;
-
-    // Свой контекст: инструкция подзадачи и карта проекта (с памятью), но без
-    // истории беседы. Задание — одно сообщение.
-    const messages: ChatMessage[] = [{ role: 'system', content: SUBAGENT_PROMPT }];
-    if (params.context) messages.push({ role: 'system', content: params.context });
-    messages.push({
-      role: 'user',
-      content: `Подзадача «${params.description}»:\n\n${params.prompt}`,
-    });
-
-    const available = AGENT_TOOLS.filter(
-      (tool) =>
-        SUBAGENT_TOOLS.has(tool.name) &&
-        toolPresetAllows(params.toolPreset, tool.name) &&
-        this.canRun(tool, params.host),
-    );
-    const tools = available.length > 0 ? toOpenAiTools(available) : undefined;
-    const toolsTokens = tools ? estimateTextTokens(JSON.stringify(tools)) : 0;
-
-    // Контекст исполнения подзадачи: те же сервисы, что у основного агента, но
-    // без правок, подтверждений и памяти — подзадача ничего не меняет.
-    const subContext: ToolContext = {
-      workspace: this.workspace,
-      signal: params.signal,
-      autoApprove: false,
-      allowAll: false,
-      confirmDangerous: true,
-    };
-    if (this.symbols) subContext.symbols = this.symbols;
-    if (this.linter) subContext.linter = this.linter;
-    const host = params.host;
-    if (host) subContext.diagnostics = (path) => host.getDiagnostics(path);
-    const webSearch = settings.ai.webSearch;
-    if (settings.ai.webFetch?.enabled) {
-      subContext.webFetch = {
-        fetch: (url, options) =>
-          fetchPage(url, {
-            signal: options?.signal,
-            maxChars: options?.maxChars,
-          }),
-      };
-    }
-    if (canUseWebSearch({ webSearch, webSearchKey: this.webSearchKey(webSearch) })) {
-      subContext.webSearch = {
-        search: (query, limit, callSignal) =>
-          searchWeb(
-            query,
-            {
-              provider: webSearch.provider,
-              endpoint: webSearch.endpoint,
-              apiKey: this.webSearchKey(webSearch),
-            },
-            limit,
-            callSignal,
-          ).then((hits) => ({
-            hits,
-            providerLabel: webSearchProviderLabel(webSearch.provider),
-          })),
-      };
-    }
-
-    let steps = 0;
-    let toolCalls = 0;
-    let usage: ChatUsage = {};
-    let report = '';
-    // Тот же предохранитель от зацикливания, что у основного цикла: повторы
-    // чтения не исполняем, а шаг целиком из повторов — повод остановиться.
-    const executed = new Map<string, ToolOutcome>();
-    let stall = 0;
-
-    try {
-      for (let step = 0; step < SUBAGENT_MAX_STEPS; step += 1) {
-        if (params.signal.aborted) break;
-
-        // Почта агента читается перед шагом: это единственное место, где прогон
-        // модели «ждёт» и куда можно положить поправку по курсу, не обрывая работу.
-        const notes = params.agent?.drain() ?? [];
-        if (notes.length > 0) messages.push({ role: 'user', content: formatAgentNotes(notes) });
-        params.agent?.note({ activity: 'думает', steps, toolCalls });
-
-        const done = await this.streamStep(params.provider, {
-          model: params.model,
-          messages,
-          tools,
-          temperature: params.temperature,
-          maxTokens: params.maxTokens,
-          reasoningEffort: params.reasoningEffort,
-          ...(params.thinking === undefined ? {} : { thinking: params.thinking }),
-          ...(params.userId ? { userId: params.userId } : {}),
-          signal: params.signal,
-          windowTokens: params.windowTokens,
-          toolsTokens,
-          calibrationKey: `${params.providerId}::${params.model}`,
-          onDelta: () => {},
-          onReasoning: () => {},
-        });
-        steps += 1;
-        if (done.usage) usage = addUsage(usage, done.usage);
-        report = done.text;
-
-        const calls = done.toolCalls ?? [];
-        if (calls.length === 0) break;
-        toolCalls += calls.length;
-        messages.push({
-          role: 'assistant',
-          content: done.text,
-          toolCalls: calls,
-          // В подзадаче тот же протокол: размышления шага возвращаются с вызовами.
-          ...(done.reasoning ? { reasoning: done.reasoning } : {}),
-        });
-
-        let didNewWork = false;
-        // Тот же бюджет шага, что у основного агента: отчёт подзадачи — выжимка,
-        // и мегабайт прочитанного в её контексте всё равно не переживёт сжатие.
-        subContext.stepBudget = { left: STEP_OUTPUT_CHARS };
-        for (const raw of calls) {
-          // Старое имя — к нынешнему, как и у основного агента.
-          const mapped = canonicalCall(raw.name, raw.arguments);
-          const call = mapped.renamed ? { ...raw, name: mapped.name, arguments: mapped.arguments } : raw;
-          const key = `${call.name}:${call.arguments}`;
-          let content: string;
-          if (isCacheableReadCall(call.name, call.arguments) && executed.has(key)) {
-            // Результат уже есть выше — не повторяем дорогое чтение.
-            content = `Повтор вызова «${call.name}» пропущен: такой вызов уже был, его результат выше.`;
-          } else {
-            // Что агент делает прямо сейчас: по этому панель показывает не только
-            // «идёт», но и на каком месте он стоит.
-            params.agent?.note({ activity: call.name, steps, toolCalls });
-            const outcome = await runTool(subContext, call.name, call.arguments);
-            if (isCacheableReadCall(call.name, call.arguments)) executed.set(key, outcome);
-            didNewWork = true;
-            const result = outcome.ok ? (outcome.detail ?? outcome.summary) : failureText(outcome);
-            content = compressOutput ? compressToolOutput(result) : result;
-          }
-          messages.push({
-            role: 'tool',
-            toolCallId: call.id,
-            name: call.name,
-            content,
-          });
-        }
-
-        stall = didNewWork ? 0 : stall + 1;
-        if (stall >= 2) break;
-      }
-    } catch (error) {
-      // Снятый агент — не сбой: обрыв потока в этом случае ожидаем, и называть его
-      // «сбоем» значило бы предложить модели перезапустить то, что она сама сняла.
-      const stopped = params.agent?.stopReason ?? null;
-      if (stopped !== null) return stoppedSubagent(params.description, stopped, steps, toolCalls, usage);
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        outcome: {
-          ok: false,
-          summary: `подзадача «${params.description}» не удалась`,
-          detail: `Сбой подзадачи: ${message}. Сделай сам или переформулируй задание.`,
-        },
-        steps,
-        toolCalls,
-        usage,
-      };
-    }
-
-    const stopped = params.agent?.stopReason ?? null;
-    if (stopped !== null) return stoppedSubagent(params.description, stopped, steps, toolCalls, usage);
-
-    const text = report.trim();
-    if (!text) {
-      return {
-        outcome: {
-          ok: false,
-          summary: `подзадача «${params.description}»: пустой отчёт`,
-          detail: 'Подзадача не вернула текст. Сделай сам или переформулируй задание.',
-        },
-        steps,
-        toolCalls,
-        usage,
-      };
-    }
-
-    // Отчёт длиннее потолка: в контекст едет голова, остаток — в файл с адресом.
-    const clipped = clipWithRemainder(this.spillDir, 'otchet-podzadachi', text, SUBAGENT_REPORT_CHARS);
-    return {
-      outcome: {
-        ok: true,
-        summary: `подзадача «${params.description}»: готово`,
-        detail: clipped,
-      },
-      steps,
-      toolCalls,
-      usage,
-    };
   }
 
   /**
@@ -2528,47 +2097,6 @@ function isLocalEndpoint(baseUrl: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** Ошибку подключения объясняем словами: пользователь не должен читать стек. */
-/**
- * Причина провала подзадачи словами. Обычно это `Error` с сообщением, но прийти
- * может что угодно: `[object Object]` в отчёте модели бесполезен.
- */
-/**
- * Отчёт о снятом агенте. Он не «сбой» и не «готово»: работу остановили, и модели
- * об этом надо сказать прямо — иначе она решит, что агент не справился, и пошлёт
- * его снова.
- */
-function stoppedSubagent(
-  description: string,
-  reason: AgentStopReason,
-  steps: number,
-  toolCalls: number,
-  usage: ChatUsage,
-): {
-  outcome: ToolOutcome;
-  steps: number;
-  toolCalls: number;
-  usage: ChatUsage;
-} {
-  return {
-    outcome: {
-      ok: false,
-      summary: `подзадача «${description}» ${stopReasonLabel(reason)}`,
-      detail:
-        `Агента остановили (${stopReasonLabel(reason)}): шагов ${steps}, вызовов ${toolCalls}. ` +
-        'Не запускай эту работу заново без новой просьбы человека — сначала спроси, нужно ли.',
-    },
-    steps,
-    toolCalls,
-    usage,
-  };
-}
-
-function describeFailure(error: unknown): string {
-  const text = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
-  return text.trim() || 'подзадача завершилась с ошибкой без описания';
 }
 
 function describeConnectionError(error: unknown): string {

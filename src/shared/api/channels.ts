@@ -41,6 +41,4 @@ export const PushTopic = {
   BrowserNav: 'browser:nav',
   /** Проверка модели разрешила команду без человека: в ленте строка «разрешено проверкой». */
   ApprovalReview: 'approval:review',
-  /** Список живых агентов изменился: панель подзадач обновляется. */
-  Agents: 'agents:changed',
 } as const;

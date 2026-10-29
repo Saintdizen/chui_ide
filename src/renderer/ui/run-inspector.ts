@@ -280,14 +280,6 @@ export function createRunInspector(): RunInspectorView {
       h('div', { class: 'run-total-text' }, describeRun(log)),
       h('div', { class: 'run-total-finish' }, FINISH_LABEL[log.finished]),
       ...(runTruncated(log) ? [h('div', { class: 'run-total-note' }, 'трасса обрезана по потолкам')] : []),
-      ...(log.subagents ?? []).map((sub) =>
-        h(
-          'div',
-          { class: 'run-subagent' },
-          `подзадача «${sub.description}»: ${plural(sub.steps, 'шаг', 'шага', 'шагов')}, ` +
-            `${plural(sub.toolCalls, 'вызов', 'вызова', 'вызовов')}`,
-        ),
-      ),
     );
     if (title) summary.append(h('div', { class: 'run-total-note' }, title));
 

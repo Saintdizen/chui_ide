@@ -97,20 +97,12 @@ export interface RunSystemLog {
   goal?: string;
 }
 
-/** Подзадача (`task`): у неё свой контекст, поэтому в трассу она входит числом. */
-export interface RunSubagentLog {
-  description: string;
-  steps: number;
-  toolCalls: number;
-}
-
 export interface ChatRunLog {
   startedAt: number;
   /** Сколько длился прогон целиком. */
   ms: number;
   steps: RunStepLog[];
   system: RunSystemLog;
-  subagents?: RunSubagentLog[];
   /**
    * Схемы аргументов инструментов по имени — те самые, что ушли модели. Одной
    * копией на инструмент, а не на вызов: схема за прогон не меняется, а копия
@@ -191,8 +183,8 @@ export function runCost(log: ChatRunLog): RunCost {
 
 /** Итог прогона одной строкой: «5 м 24 с · 6 шагов · 14 вызовов · 41 тыс. токенов». */
 export function describeRun(log: ChatRunLog): string {
-  // Шаги берём из следа, а не из списка трассы: подзадача идёт своим контекстом и
-  // в список не попадает, но её шаги прогон всё равно сделал — и они стоили денег.
+  // Шаги берём из следа, а не из списка трассы: скрытые вызовы (например,
+  // проверка типов после правки) в список не попадают, но шаги они делают — и стоят денег.
   const steps = log.trace.steps > 0 ? log.trace.steps : log.steps.length;
   const parts = [formatDuration(log.ms), plural(steps, 'шаг', 'шага', 'шагов')];
   const calls = log.trace.toolCalls;

@@ -28,7 +28,6 @@ import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memor
 import type { PatchFile } from '../../shared/patch';
 import type { ReadRange } from '../../shared/read-coverage';
 import type { SessionSearchReport } from '../../shared/session-search';
-import type { SubagentTask } from '../../shared/subagents';
 import type { FetchedPage } from '../../shared/web-fetch';
 import type { WebSearchHit } from '../../shared/web-search';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -242,20 +241,6 @@ export interface MemoryTools {
 }
 
 /**
- * Подзадача (`task`): отдельный агент со своим контекстом. Цикл подзадачи живёт
- * в `service.ts` — там есть провайдер и модель, которых здесь нет. Сюда приходит
- * готовый вызов: инструмент остаётся проверяемым без сети и Electron.
- */
-export interface SubagentRunner {
-  run(params: { description: string; prompt: string }): Promise<ToolOutcome>;
-  /**
-   * Несколько подзадач разом. Одновременность ограничивает сервис (см.
-   * `MAX_PARALLEL`): каждая подзадача — свой прогон модели, то есть деньги.
-   */
-  runMany(tasks: readonly SubagentTask[]): Promise<ToolOutcome>;
-}
-
-/**
  * Картинка, которую агент посмотрел (`read_image`). Готовит её main: путь
  * проверен рабочим каталогом, крупные файлы уменьшены, тип — тот, который
  * провайдер принимает. Инструмент остаётся проверяемым без Electron.
@@ -378,8 +363,6 @@ export interface ToolContext {
   webFetch?: WebFetchRunner;
   /** Внешние инструменты (MCP): есть только при настроенных серверах. */
   mcp?: McpRunner;
-  /** Подзадачи (инструмент `task`): запускает service — у него есть провайдер. */
-  subagent?: SubagentRunner;
   /** Браузер: подключён только при включённой настройке. */
   browser?: BrowserTools;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */

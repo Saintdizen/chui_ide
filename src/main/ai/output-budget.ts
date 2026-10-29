@@ -85,7 +85,6 @@ export const TOOL_OUTPUT_CHARS: Record<string, number> = {
   browser: 4_000,
   mcp: 8_000,
   mind: 4_000,
-  task: 8_000,
   show: 2_000,
 };
 

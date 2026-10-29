@@ -40,9 +40,8 @@ describe('промпт агентного режима', () => {
     // В «Минимуме» только ядро и ведение работы: поиск есть, правок нет.
     expect(minimal).toContain('search');
     expect(minimal).not.toContain('read_image');
-    // `mind` и `task` в «Ведении работы» — они остаются.
+    // `mind` в «Ведении работы» — он остаётся.
     expect(minimal).toContain('mind');
-    expect(minimal).toContain('task');
   });
 
   it('«Авто» получает все советы: скрытое в нём подключается по имени', () => {
