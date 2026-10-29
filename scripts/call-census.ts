@@ -46,6 +46,7 @@ const enumOf = (name: string, field: string): string[] => {
 
 const refusalReasons = new Map<string, number>();
 const perCode = new Map<string, number>();
+const unknown = new Map<string, number>();
 const perName = new Map<string, number>();
 const perAction = new Map<string, number>();
 const badAction = new Map<string, number>();
@@ -103,6 +104,9 @@ for (const messages of sample.messages) {
         // значит гадать (замер 29.10: 116 из 152 в «other»).
         const code = callFailureReason({ ok: false, summary: text });
         perCode.set(`${name}.${code}`, (perCode.get(`${name}.${code}`) ?? 0) + 1);
+        // «other» — не ответ, а дыра: так выглядит текст отказа, под который
+        // не подобрана форма. Собираем их отдельно, иначе чинить нечего.
+        if (code === 'other') unknown.set(reason, (unknown.get(reason) ?? 0) + 1);
       }
     }
 
@@ -152,6 +156,13 @@ if (refusalReasons.size > 0) {
   console.log('\nчастые отказы (первая строка результата):');
   const top = [...refusalReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
   for (const [reason, count] of top) console.log(`  ${String(count).padStart(3)}  ${reason}`);
+}
+
+if (unknown.size > 0) {
+  console.log('\nother — дыры классификатора (тексты, под которые нет формы в step-counts):');
+  for (const [reason, count] of [...unknown.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) {
+    console.log(`  ${String(count).padStart(3)}  ${reason}`);
+  }
 }
 
 if (perCode.size > 0) {
