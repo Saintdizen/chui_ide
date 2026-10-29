@@ -103,6 +103,31 @@ export class EditService {
     return document.version !== before;
   }
 
+  /**
+   * Текст для сверки якоря — тот же, что увидит правка.
+   *
+   * Якорь приходит из чтения ГЛАВНОГО процесса, то есть с диска (или из него же
+   * `read` агента), а лежать он будет на буфере. Пока `refreshStale` звался только
+   * внутри самой правки, сверка шла по старому буферу и промахивалась ровно в том
+   * случае, ради которого тот метод и написан: файл переписал git/терминал, буфер
+   * чист, но не перечитан. Замер 30.10 по `kbuntu_cleaner`: `git stash` в терминале
+   * вернул файл на диск, якоря сошли с buffer — три вызова `edit` подряд с ошибкой
+   * «в файле не найден» и подсказкой из буфера, а `read`/`grep` показывали диск.
+   * Отсюда правило: сверка и правка смотрят один текст и в один момент.
+   * Грязный буфер не трогаем — там несохранённая работа человека (см. `refreshStale`).
+   */
+  async textForAnchor(path: string): Promise<string | null> {
+    try {
+      const document = await this.ensureDocument(path);
+      // Подтягивание меняет текст, но не "грязность": если на диске оказалось
+      // ровно то же, что в буфере, документ станет чистым — и это правда.
+      await this.refreshStale(document);
+      return document.value;
+    } catch {
+      return null; // файла нет или путь вне проекта — скажем это в карточке
+    }
+  }
+
   async applyFileEdits(fileEdits: readonly FileEdit[], source: EditSource = 'programmatic'): Promise<ApplyResult> {
     const reports: ApplyReport[] = [];
     const failed: ApplyFailure[] = [];

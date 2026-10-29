@@ -150,6 +150,25 @@ describe('resolvePatches: отказы', () => {
     expect(resolvePatches(FILE, []).ok).toBe(false);
   });
 
+  it('грязный буфер назван: повтор того же якоря не поможет', () => {
+    // Модель читает диск (`read`), а правка ложится в буфер редактора, если
+    // в нём есть несохранённые правки человека. В этом случае якорь не сойдётся
+    // никогда, сколько ни повторяй, — говорить это надо прямо в отказе.
+    const result = resolvePatches(FILE, [{ oldText: 'нет такого', newText: 'x' }], { unsavedBuffer: true });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain('несохранённые');
+    // Номер строки подсказки остаётся: он полезен и в этом случае.
+    expect(result.message).toMatch(/строка \d+|Похожего места/);
+  });
+
+  it('без флага про буфер молчим — лишней строки в отказе нет', () => {
+    const result = resolvePatches(FILE, [{ oldText: 'нет такого', newText: 'x' }]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).not.toContain('несохранённые');
+  });
+
   it('ничего не применяется, если хотя бы один якорь не сошёлся', () => {
     // Отказ до применения: правки возвращаются только целиком.
     const result = resolvePatches(FILE, [

@@ -1698,15 +1698,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     for (const cancel of [...pendingApprovals]) cancel();
   }
 
+  /**
+   * Текст, против которого сводится якорь агента.
+   *
+   * Не прямо из `documents`: открытый буфер мог отстать от диска (файл переписал
+   * `git stash` в терминале), и якорь сошёлся бы с текстом, которого никто не
+   * увидит. Сверка и правка обязаны смотреть одно и то же — поэтому спрашиваем
+   * у того, кто будет применять (`textForAnchor` делает `refreshStale`).
+   */
   async function currentText(target: string): Promise<string | null> {
-    const open = deps.documents.get(target);
-    if (open) return open.value;
-    try {
-      const file = await deps.rpc.request('workspace.readFile', { path: target });
-      return file.text;
-    } catch {
-      return null; // файла нет или путь вне проекта — покажем это в карточке
-    }
+    return deps.edits.textForAnchor(target);
   }
 
   // Решения (ревью правок, подтверждение команды) живут в `chat-approvals.ts`:
@@ -1863,7 +1864,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         failed.push({ path: file.path, message: 'не удалось прочитать файл — проверь путь' });
         continue;
       }
-      const resolved = resolvePatches(text, file.patches);
+      // Грязный буфер — единственный случай, где повтор того же якоря бессмысленен:
+      // модель читает диск, а правка ложится в буфер с правками человека.
+      const unsavedBuffer = deps.documents.get(file.path)?.dirty === true;
+      const resolved = resolvePatches(text, file.patches, { unsavedBuffer });
       if (!resolved.ok) {
         failed.push({ path: file.path, message: resolved.message });
         continue;

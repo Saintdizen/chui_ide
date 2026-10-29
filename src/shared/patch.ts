@@ -197,7 +197,22 @@ function lineOffsets(text: string): number[] {
  * потому что дальше их ждёт `applyTextEdits` — тот же путь, что у правки по позициям,
  * и, значит, то же ревью, undo и «документ изменён».
  */
-export function resolvePatches(text: string, patches: readonly PatchHunk[]): PatchResolution {
+export interface PatchContext {
+  /**
+   * В буфере редактора есть несохранённые правки — значит якорь сверяется не с диском.
+   *
+   * Без этой оговорки «в файле не найден» звучит как «ты скопировал неправильно»,
+   * хотя модель читала `read` (он смотрит на диск), а правка ложится в буфер с
+   * правками человека — и модель повторяет тот же якорь.
+   */
+  unsavedBuffer?: boolean;
+}
+
+export function resolvePatches(
+  text: string,
+  patches: readonly PatchHunk[],
+  context: PatchContext = {},
+): PatchResolution {
   if (patches.length === 0) return { ok: false, message: 'Не передано ни одной правки' };
   if (patches.length > MAX_PATCHES) {
     return { ok: false, message: `Слишком много правок за один вызов: ${patches.length} (максимум ${MAX_PATCHES})` };
@@ -240,6 +255,9 @@ export function resolvePatches(text: string, patches: readonly PatchHunk[]): Pat
         ok: false,
         message:
           `${where}текст «${cut(patch.oldText)}» в файле не найден.${hint}` +
+          (context.unsavedBuffer
+            ? ' В буфере редактора есть несохранённые правки: `read` показывает диск, а якорь ищется в буфере. Сверяй по буферу или скажи человеку сохранить.'
+            : '') +
           ' Если место уже заменено другой правкой этого вызова — учти, что каждая правка ищется в исходном тексте.',
       };
     }

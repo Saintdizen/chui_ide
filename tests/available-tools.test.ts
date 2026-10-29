@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canRunTool, canUseWebSearch, narrowToolSpec, type ToolAvailability } from '../src/main/ai/available-tools';
-import { AGENT_TOOLS, WEB_ACTION_TEXT } from '../src/shared/tools';
+import { AGENT_TOOLS, toOpenAiTools, WEB_ACTION_TEXT } from '../src/shared/tools';
 
 /**
  * Условия «предлагать ли инструмент» проверяются напрямую: до переезда в
@@ -86,6 +86,27 @@ describe('что предлагать модели', () => {
 
     it('не живо ничего — схему не оголяем', () => {
       expect(narrowToolSpec(web!, empty)).toBe(web);
+    });
+
+    it('не живо ничего — инструмента и нет: пустого `enum` не бывает', () => {
+      // `narrowToolSpec` оставляет схему целой, когда живо ноль действий. Это
+      // безопасно только пока `canRunTool` таково же не предлагает: проверяем
+      // пару целиком, иначе настройки однажды дадут `enum: []` — схему, которая
+      // запрещает всё и молчит о причине.
+      const neither = {
+        ...empty,
+        webSearch: { enabled: false, provider: 'none' } as unknown as ToolAvailability['webSearch'],
+      };
+      expect(canRunTool(web!, neither)).toBe(false);
+      expect(canRunTool(web!, { ...neither, webFetchEnabled: true })).toBe(true);
+    });
+
+    it('до модели доезжает сужённая схема, а не полная', () => {
+      const env = { ...empty, webFetchEnabled: true };
+      const [shown] = toOpenAiTools([narrowToolSpec(web!, env)]);
+      const action = (shown?.function.parameters as { properties: Record<string, { enum?: string[] }> }).properties
+        .action;
+      expect(action?.enum).toEqual(['fetch']);
     });
   });
 
