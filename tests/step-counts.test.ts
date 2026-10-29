@@ -135,6 +135,13 @@ describe('счётчик шагов', () => {
       // а отказы инструментов пишутся «недоступна/недоступны».
       { id: 'l', name: 'mind', args: '{"action":"notes"}', ok: false, summary: 'Память недоступна' },
       { id: 'm', name: 'terminal', args: '{}', ok: false, summary: 'Задания недоступны' },
+      // Мужской род: «Веб-поиск недоступен». Его не ловила НИ ОДНА форма, пока
+      // регулярка держала само слово, а не корень, — оба отказа `web` из двух
+      // уходили в «other» (call-census, 30.10).
+      { id: 'o', name: 'web', args: '{}', ok: false, summary: 'Ошибка: Веб-поиск недоступен: Поиск ответил кодом 404' },
+      // Код неизвестен, но команда провалилась — это тоже `command`, а не «other».
+      { id: 'p', name: 'terminal', args: '{}', ok: false, summary: 'Ошибка: код выхода —' },
+      { id: 'q', name: 'terminal', args: '{}', ok: false, summary: 'Ошибка: код выхода 1' },
       {
         id: 'n',
         name: 'checks',
@@ -158,6 +165,9 @@ describe('счётчик шагов', () => {
       'arg',
       'unavailable',
       'unavailable',
+      'unavailable',
+      'command',
+      'command',
       'unavailable',
     ]);
     expect(callFailureReason({ ok: true, summary: 'ok' })).toBe('other');

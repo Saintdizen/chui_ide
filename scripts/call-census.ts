@@ -28,6 +28,7 @@ import { censusHeader, isFailure, loadCensus, retryNames } from './census-data';
 import { estimateTextTokens } from '../src/shared/context-fit';
 import { AGENT_TOOLS, toOpenAiTools } from '../src/shared/tools';
 import { ROSTER_TOOLS, WIDENED_TOOLS } from '../src/shared/tool-presets';
+import { callFailureReason } from '../src/shared/step-counts';
 
 const sample = loadCensus();
 console.log(censusHeader(sample));
@@ -44,6 +45,7 @@ const enumOf = (name: string, field: string): string[] => {
 };
 
 const refusalReasons = new Map<string, number>();
+const perCode = new Map<string, number>();
 const perName = new Map<string, number>();
 const perAction = new Map<string, number>();
 const badAction = new Map<string, number>();
@@ -95,6 +97,12 @@ for (const messages of sample.messages) {
         const text = typeof result.content === 'string' ? result.content : '';
         const reason = `${name}: ${(text.split('\n')[0] ?? '').slice(0, 110)}`;
         refusalReasons.set(reason, (refusalReasons.get(reason) ?? 0) + 1);
+        // Код причины — то, что говорит, ЧЕМ чинить отказ: `arg` — схемой,
+        // `anchor` — якорем, `unavailable` — проводом. Текст отказа называет
+        // симптом, код — лечение, и разбирать 30 % отказов `edit` без него
+        // значит гадать (замер 29.10: 116 из 152 в «other»).
+        const code = callFailureReason({ ok: false, summary: text });
+        perCode.set(`${name}.${code}`, (perCode.get(`${name}.${code}`) ?? 0) + 1);
       }
     }
 
@@ -144,6 +152,18 @@ if (refusalReasons.size > 0) {
   console.log('\nчастые отказы (первая строка результата):');
   const top = [...refusalReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
   for (const [reason, count] of top) console.log(`  ${String(count).padStart(3)}  ${reason}`);
+}
+
+if (perCode.size > 0) {
+  console.log('\nотказы по кодам (код называет лечение, текст — симптом):');
+  for (const [key, count] of [...perCode.entries()].sort((a, b) => b[1] - a[1])) {
+    const at = key.indexOf('.');
+    const name = key.slice(0, at);
+    const used = perName.get(name) ?? 0;
+    console.log(
+      `  ${key.padEnd(22)} ${String(count).padStart(4)}  ${share(count, used).padStart(5)} от вызовов ${name}`,
+    );
+  }
 }
 
 const planned = ['file', 'history', 'mcp', 'show'];

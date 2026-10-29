@@ -120,7 +120,8 @@
     "dist:win": "npm run build && electron-builder --win nsis --publish never",
     "dist:mac": "npm run build && electron-builder --mac dmg --publish never",
     "smoke:proxy": "npm run build:main && node scripts/proxy-smoke.cjs",
-    "usage": "tsx scripts/agent-usage.ts"
+    "usage": "tsx scripts/agent-usage.ts",
+    "census": "tsx scripts/call-census.ts"
   },
   "engines": {
     "node": ">=20"
