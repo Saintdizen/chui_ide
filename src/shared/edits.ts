@@ -43,6 +43,18 @@ export interface ApplyResult {
   failed: ApplyFailure[];
 }
 
+/**
+ * Столбец «до конца строки» — для правки целыми строками (`{startLine, endLine,
+ * newText}`): столбцы тогда не считаются вовсе.
+ *
+ * Это не адрес в файле, а заведомая перекрутка: и `toOffset`, и буфер редактора
+ * зажимают столбец концом строки, поэтому такое значение всегда даёт «конец
+ * строки `endLine`» и никогда не вылезает на следующую. Номер строки берётся
+ * дословно из вывода `read` — счётчиков, которые модель считает на глаз, здесь
+ * не остаётся и вовсе.
+ */
+export const END_OF_LINE = Number.MAX_SAFE_INTEGER;
+
 /** Смещения начал строк (0-based, в code units). */
 export function lineStarts(text: string): number[] {
   const starts = [0];

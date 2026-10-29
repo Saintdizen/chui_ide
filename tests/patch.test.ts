@@ -201,6 +201,43 @@ describe('невидимые символы в якоре', () => {
   });
 });
 
+describe('якорь скопирован из вывода `read` с номерами строк', () => {
+  const run = (text: string, oldText: string) => resolvePatches(text, [{ oldText, newText: 'X' }]);
+  const FILE2 = ['function a() {', '  return 1;', '}', ''].join('\n');
+
+  it('одиночная строка с номером — находится', () => {
+    // `read` отдаёт «2 |   return 1;», и модель регулярно копирует якорь вместе
+    // с номером. В файле номеров нет — без снисходительности был отказ.
+    const r = run(FILE2, '2 |   return 1;');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.edits[0]!.startLine).toBe(2);
+      // `oldText` — настоящий кусок файла, без номера и разделителя.
+      expect(r.edits[0]!.oldText).toBe('  return 1;');
+    }
+  });
+
+  it('номера с отступом слева — находятся', () => {
+    expect(run(FILE2, '   2 |   return 1;').ok).toBe(true);
+  });
+
+  it('несколько строк с номерами — находятся', () => {
+    const r = run(FILE2, '1 | function a() {\n2 |   return 1;');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.edits[0]!.oldText).toBe('function a() {\n  return 1;');
+  });
+
+  it('настоящая таблица `|` в коде — не путается с номерами', () => {
+    // Одиночная строка без номера: снимать нечего, якорь ищется дословно.
+    const text = 'const row = | a | b |;\n';
+    expect(run(text, '| a | b |').ok).toBe(true);
+  });
+
+  it('неоднозначность после снятия номеров — по-прежнему отказ', () => {
+    expect(run('  a();\n  a();\n', '1 |   a();').ok).toBe(false);
+  });
+});
+
 describe('countOccurrences', () => {
   it('считает вхождения без перекрытий', () => {
     expect(countOccurrences('aaaa', 'aa')).toBe(2);

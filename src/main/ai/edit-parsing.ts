@@ -1,5 +1,7 @@
 import path from 'node:path';
 import type { FileEdit, TextEdit } from '../../shared/edits';
+// END_OF_LINE — значение, а не тип: правка целыми строками кончается концом строки.
+import { END_OF_LINE } from '../../shared/edits';
 import type { PatchFile, PatchHunk } from '../../shared/patch';
 import type { ToolOutcome } from './tool-context';
 
@@ -21,7 +23,8 @@ export const MAX_EDITS_PER_FILE = 500;
 /** Форма аргумента правки: её называем в ошибках — вызов чинится за один шаг. */
 export const EDITS_SHAPE =
   'нужен [{ path: "/абсолютный/путь/файл", oldText, newText }] — файл и замена в одном элементе; ' +
-  'вместо старого текста можно четыре позиции: startLine, startColumn, endLine, endColumn';
+  'вместо старого текста можно адрес строками: startLine, endLine (номера — из вывода `read`, ' +
+  'столбцы не нужны) или все четыре позиции: startLine, startColumn, endLine, endColumn';
 
 /** Найденные правки: по якорю и по позициям — дальше это два разных моста. */
 export interface ParsedEdits {
@@ -180,14 +183,25 @@ function parseEditItem(value: unknown, fileIndex: number, editIndex: number): Ed
   const oldText = raw.oldText;
   if (oldText !== undefined && typeof oldText !== 'string') throw new Error(`${where}.oldText: нужна строка`);
 
-  const keys = ['startLine', 'startColumn', 'endLine', 'endColumn'] as const;
-  const given = keys.filter((key) => raw[key] !== undefined);
-  if (given.length === keys.length) {
+  // Адрес строк даёт сам `read` (номера в его выводе), а столбцы дала бы только
+  // модель — на глаз. Поэтому `startLine` + `endLine` без столбцов — это правка
+  // ЦЕЛЫМИ строками: столбцы не спрашиваем вовсе.
+  if (raw.startColumn !== undefined || raw.endColumn !== undefined) {
+    if (raw.startLine === undefined) {
+      throw new Error(`${where}: endColumn/startColumn без startLine смысла не имеют. ${EDITS_SHAPE}`);
+    }
+  }
+  if (raw.startLine !== undefined) {
+    const startLine = editPosition(raw, 'startLine', where);
+    const endLine = raw.endLine === undefined ? startLine : editPosition(raw, 'endLine', where);
+    if (endLine < startLine) {
+      throw new Error(`${where}: endLine (${endLine}) раньше startLine (${startLine}) — диапазон задан наоборот`);
+    }
     const edit: TextEdit = {
-      startLine: editPosition(raw, 'startLine', where),
-      startColumn: editPosition(raw, 'startColumn', where),
-      endLine: editPosition(raw, 'endLine', where),
-      endColumn: editPosition(raw, 'endColumn', where),
+      startLine,
+      startColumn: raw.startColumn === undefined ? 1 : editPosition(raw, 'startColumn', where),
+      endLine,
+      endColumn: raw.endColumn === undefined ? END_OF_LINE : editPosition(raw, 'endColumn', where),
       newText,
     };
     // Якорь рядом с позициями — сверка, а не адрес: промах по номеру строки
@@ -195,16 +209,13 @@ function parseEditItem(value: unknown, fileIndex: number, editIndex: number): Ed
     if (typeof oldText === 'string') edit.oldText = oldText;
     return { position: edit };
   }
-  if (given.length > 0) {
-    throw new Error(`${where}: позиции заданы не все — нужны startLine, startColumn, endLine, endColumn`);
-  }
   if (typeof oldText !== 'string' || oldText.length === 0) {
     // Запись файла целиком приходит без якоря: в переписи это два отказа из
     // двадцати четырёх (`edits[].edits[]` с одним `newText` и без `path`).
     // Без адреса правку не сделать, но модель обычно метила в `create` — говорим.
     const whole = typeof newText === 'string' && newText.includes('\n');
     const hint = whole ? ' Похоже на запись файла целиком: у `create` есть `contents`.' : '';
-    throw new Error(`${where}: нужен oldText (якорь) или все четыре позиции.${hint} ${EDITS_SHAPE}`);
+    throw new Error(`${where}: нужен oldText (якорь) или адрес строками startLine/endLine.${hint} ${EDITS_SHAPE}`);
   }
   return { anchor: { oldText, newText } };
 }

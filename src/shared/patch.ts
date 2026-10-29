@@ -153,6 +153,32 @@ function occurrencesLoose(text: string, anchor: string): Occurrence[] {
   return hits;
 }
 
+/**
+ * Номер строки из вывода `read` перед самой строкой: `412 | const x = 1;`.
+ *
+ * `read` нумерует строки (по ним адресуются `startLine`/`endLine`), и модель
+ * регулярно копирует якорь ВМЕСТЕ с номером. В файле таких номеров нет — якорь
+ * не находился, и правка отказывалась на ровном месте (30% отказов `edit` по
+ * телеметрии).
+ */
+const READ_LINE_NUMBER = /^\s*\d+\s*\|\s?/;
+
+/**
+ * Снять номера строк, если якорь — копия вывода `read` с номерами.
+ *
+ * Требуем номера у большинства непустых строк: одиночная строка вида
+ * `2 | x` может быть и настоящей таблицей в коде, и тогда снимать нечего.
+ * `null` — якорь не нумерованный, трогать его нельзя.
+ */
+export function stripReadNumbers(anchor: string): string | null {
+  const lines = anchor.split('\n');
+  const filled = lines.filter((line) => line.trim().length > 0);
+  const numbered = filled.filter((line) => READ_LINE_NUMBER.test(line));
+  if (numbered.length === 0) return null;
+  if (numbered.length * 4 < filled.length * 3) return null;
+  return lines.map((line) => line.replace(READ_LINE_NUMBER, '')).join('\n');
+}
+
 /** Смещение начала каждой строки в тексте (разбиение по `\n`). */
 function lineOffsets(text: string): number[] {
   const offsets = [0];
@@ -193,15 +219,19 @@ export function resolvePatches(text: string, patches: readonly PatchHunk[]): Pat
     // и общий отступ. Их агент не видит в выводе `read`, а файл на диске живёт
     // с ними (CRLF после Windows, табы, вложенность). Раньше такой якорь просто
     // «не находился», и правка отказывалась на ровном месте.
+    // ...а перед этим — снять номера строк, если якорь скопирован из вывода
+    // `read` вместе с ними: в файле номеров нет.
+    const wanted = stripReadNumbers(patch.oldText) ?? patch.oldText;
     const exact = occurrences(text, patch.oldText);
-    const loose = exact.length > 0 ? [] : occurrencesLoose(text, patch.oldText);
-    const hits = exact.length > 0 ? exact : loose;
+    const bare = exact.length > 0 || wanted === patch.oldText ? [] : occurrences(text, wanted);
+    const loose = exact.length > 0 || bare.length > 0 ? [] : occurrencesLoose(text, wanted);
+    const hits = exact.length > 0 ? exact : bare.length > 0 ? bare : loose;
     const found = hits.length;
     if (found === 0) {
       // Ближайшее место вместо «перечитай файл»: полное чтение стоит до 60 000
       // символов контекста, а подсказка с номером строки и соседними строками
       // отвечает на тот же вопрос за пару строк.
-      const near = nearestPlace(text, patch.oldText);
+      const near = nearestPlace(text, wanted);
       const hint = near
         ? `\nПохожее место — строка ${near.line}:\n${near.snippet}\n` +
           'Возьми якорь отсюда дословно: важен каждый пробел и перевод строки.'

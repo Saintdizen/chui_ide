@@ -131,6 +131,17 @@ describe('счётчик шагов', () => {
       { id: 'i', name: 'edit', args: '{}', ok: false, summary: 'edits[0].edits[0].newText: нужна строка' },
       { id: 'j', name: 'edit', args: '{}', ok: false, summary: 'edits[0]: не задан path.' },
       { id: 'k', name: 'edit', args: '{}', ok: false, summary: 'edits[0].edits: нужен непустой массив правок.' },
+      // Формы без подлежащего мужского рода: «недоступен» ловил только их,
+      // а отказы инструментов пишутся «недоступна/недоступны».
+      { id: 'l', name: 'mind', args: '{"action":"notes"}', ok: false, summary: 'Память недоступна' },
+      { id: 'm', name: 'terminal', args: '{}', ok: false, summary: 'Задания недоступны' },
+      {
+        id: 'n',
+        name: 'checks',
+        args: '{}',
+        ok: false,
+        summary: 'Диагностика недоступна: окно редактора не подключено',
+      },
     ];
     const record = buildCountsRecord(log);
     expect(record.steps[0]!.calls.map((item) => item.reason)).toEqual([
@@ -145,6 +156,9 @@ describe('счётчик шагов', () => {
       'arg',
       'arg',
       'arg',
+      'unavailable',
+      'unavailable',
+      'unavailable',
     ]);
     expect(callFailureReason({ ok: true, summary: 'ok' })).toBe('other');
   });
