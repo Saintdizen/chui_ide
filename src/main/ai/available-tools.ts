@@ -1,6 +1,6 @@
 import type { AiWebSearchSettings } from '../../shared/api';
 import type { ChatHostBridge } from './service';
-import type { AgentToolSpec } from '../../shared/tools';
+import { WEB_ACTION_FIELDS, WEB_ACTION_TEXT, type AgentToolSpec } from '../../shared/tools';
 import { ALWAYS_AVAILABLE } from '../../shared/tool-policy';
 import type { Linter, SymbolSearch, TerminalAgent, TestRunner } from './tool-context';
 import { webSearchNeedsKey } from './web-search';
@@ -43,6 +43,49 @@ export interface ToolAvailability {
 export function canUseWebSearch(env: Pick<ToolAvailability, 'webSearch' | 'webSearchKey'>): boolean {
   if (!env.webSearch.enabled) return false;
   return !webSearchNeedsKey(env.webSearch.provider) || Boolean(env.webSearchKey);
+}
+
+/**
+ * Схема, у которой оставлено только то, что сейчас работает.
+ *
+ * `canRunTool` решает, предлагать ли инструмент ВОВСЕ, но у `web` два действия
+ * с разной судьбой: `fetch` ходит сам, а `search` включается настройкой и без
+ * ключа отвечает ошибкой. Замер 30.10: оба отказа `web` из двух — «Веб-поиск
+ * недоступен», то есть модель платила шагом за действие, которого нет. Здесь
+ * таких шагов не будет: действие, которого нет, исчезает из `enum`. Цена правки
+ * — ноль токенов (значение в списке короче, чем его же описание), и она не
+ * трогает ростер: тот же инструмент на том же месте, только честнее.
+ */
+export function narrowToolSpec(tool: AgentToolSpec, env: ToolAvailability): AgentToolSpec {
+  if (tool.name !== 'web') return tool;
+  const live: (keyof typeof WEB_ACTION_TEXT)[] = [];
+  if (env.webFetchEnabled) live.push('fetch');
+  if (canUseWebSearch(env)) live.push('search');
+  // Ни одного живого действия — инструмент не предложили бы (`canRunTool`),
+  // и трогать схему нечего: пустой `enum` хуже полного, он ничего не разрешает.
+  if (live.length === 0 || live.length === 2) return tool;
+  const only = live[0];
+  if (!only) return tool;
+  const all = tool.inputSchema.properties;
+  const action = all.action;
+  if (!action) return tool;
+  // Поля чужого действия тоже убираем: без `url` модель не будет искать адрес
+  // там, где её просят искать запрос (и наоборот).
+  const properties: NonNullable<typeof all> = {};
+  for (const field of WEB_ACTION_FIELDS[only]) {
+    const keep = all[field];
+    if (keep) properties[field] = keep;
+  }
+  return {
+    ...tool,
+    inputSchema: {
+      ...tool.inputSchema,
+      properties: {
+        ...properties,
+        action: { ...action, description: WEB_ACTION_TEXT[only], enum: [only] },
+      },
+    },
+  };
 }
 
 export function canRunTool(tool: AgentToolSpec, env: ToolAvailability): boolean {

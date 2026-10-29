@@ -14,6 +14,31 @@
 export type AgentToolSide = 'main' | 'renderer';
 
 /**
+ * Текст каждого действия `web` — и для полной схемы, и для суженной.
+ *
+ * Отдельной константой, а не строкой внутри описания: `narrowToolSpec`
+ * выбрасывает выключенное действие из `enum`, и оставшееся должно звучать
+ * теми же словами. Две копии текста разошлись бы молча.
+ */
+export const WEB_ACTION_TEXT: Record<'search' | 'fetch', string> = {
+  search:
+    'search: links, titles, short snippets — the list only, links are not opened, so verify facts instead of stating them.',
+  fetch:
+    'fetch: a page by url — title, plain text, links on it; no JS and no clicks (that is browser), so a page behind a login or a script stays empty.',
+};
+
+/**
+ * Поля каждого действия `web`: в суженной схеме чужие поля не нужны.
+ *
+ * `action` есть у обоих, поэтому в обоих списках. Остальное — своей паре:
+ * `query`/`limit` у поиска, `url`/`maxChars` у загрузки страницы.
+ */
+export const WEB_ACTION_FIELDS: Record<'search' | 'fetch', readonly string[]> = {
+  search: ['action', 'query', 'limit'],
+  fetch: ['action', 'url', 'maxChars'],
+};
+
+/**
  * Как инструменты считают строки: везде с единицы.
  *
  * Одна формулировка на все схемы (и на все варианты написания, что присылает
@@ -374,10 +399,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           enum: ['search', 'fetch'],
-          description:
-            'search: links, titles, short snippets — the list only, links are not opened, so ' +
-            'verify facts instead of stating them; fetch: a page by url — title, plain text, links on it; ' +
-            'no JS and no clicks (that is browser), so a page behind a login or a script stays empty.',
+          description: `${WEB_ACTION_TEXT.search} ${WEB_ACTION_TEXT.fetch}`,
         },
         query: { type: 'string', description: 'search: query.' },
         limit: { type: 'number', description: 'search: how many.' },

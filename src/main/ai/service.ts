@@ -46,7 +46,7 @@ import {
 } from '../../shared/tools';
 import { PLAN_MODE_TOOLS, isReadOnlyCall, isCacheableReadCall, isWriteCall } from '../../shared/tool-policy';
 import { canonicalCall } from '../../shared/tool-aliases';
-import { canRunTool, canUseWebSearch } from './available-tools';
+import { canRunTool, canUseWebSearch, narrowToolSpec, type ToolAvailability } from './available-tools';
 import {
   condenseAppliedCalls,
   condenseSupersededPlans,
@@ -710,6 +710,10 @@ export class AiService {
       );
 
     // Предлагаем модели только то, что реально может исполнить эта сборка.
+    // `narrowToolSpec` — второй шаг того же правила: инструмент жив, но не все его
+    // действия (у `web` выключенный поиск), и мёртвое действие уходит из `enum`,
+    // чтобы модель не платила шагом за вызов, который не может пройти.
+    const toolEnv = this.toolEnv(host);
     const available = useTools
       ? AGENT_TOOLS.filter(
           (tool) =>
@@ -720,7 +724,7 @@ export class AiService {
             (planMode || !isRosterTool(toolPreset, tool.name)) &&
             (planMode || !WIDENED_TOOLS.includes(tool.name)) &&
             (planMode ? PLAN_MODE_TOOLS.has(tool.name) : true),
-        )
+        ).map((tool) => narrowToolSpec(tool, toolEnv))
       : [];
 
     // Внешние инструменты (MCP) добавляем к нашим. В режиме плана их нет: что
@@ -898,7 +902,7 @@ export class AiService {
           // тут один, а строка подсказки стоила бы на каждом шаге.
           (!WIDENED_TOOLS.includes(tool.name) || onDemandTools.has(tool.name)) &&
           (toolPresetAllows(toolPreset, tool.name) || onDemandTools.has(tool.name)),
-      );
+      ).map((tool) => narrowToolSpec(tool, toolEnv));
       const next = [...widened, ...external, ...resourceTools];
       tools = next.length > 0 ? toOpenAiTools(next) : undefined;
       toolsTokens = tools ? estimateTextTokens(JSON.stringify(tools)) : 0;
@@ -1924,8 +1928,20 @@ export class AiService {
   }
 
   private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined): boolean {
+    return canRunTool(tool, this.toolEnv(host));
+  }
+
+  /**
+   * Окружение доступности одним значением.
+   *
+   * Отдельным методом, а не двумя копиями полей: `canRunTool` решает, ехать ли
+   * схеме, `narrowToolSpec` — что в ней оставить. Два разных набора полей
+   * разошлись бы молча: инструмент остался бы в списке, а действие из него
+   * выпало бы не то.
+   */
+  private toolEnv(host: ChatHostBridge | undefined): ToolAvailability {
     const ai = this.settings.get().ai;
-    return canRunTool(tool, {
+    return {
       host,
       terminals: this.terminals,
       tests: this.tests,
@@ -1936,7 +1952,7 @@ export class AiService {
       webSearch: ai.webSearch,
       webFetchEnabled: ai.webFetch?.enabled === true,
       webSearchKey: this.webSearchKey(ai.webSearch),
-    });
+    };
   }
 
   /**

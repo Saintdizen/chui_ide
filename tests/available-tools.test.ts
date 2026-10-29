@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { canRunTool, canUseWebSearch, type ToolAvailability } from '../src/main/ai/available-tools';
-import { AGENT_TOOLS } from '../src/shared/tools';
+import { canRunTool, canUseWebSearch, narrowToolSpec, type ToolAvailability } from '../src/main/ai/available-tools';
+import { AGENT_TOOLS, WEB_ACTION_TEXT } from '../src/shared/tools';
 
 /**
  * Условия «предлагать ли инструмент» проверяются напрямую: до переезда в
@@ -56,6 +56,37 @@ describe('что предлагать модели', () => {
 
   it('незнакомый инструмент не предлагается: отказ по умолчанию', () => {
     expect(canRunTool(spec('совсем-новый'), empty)).toBe(false);
+  });
+
+  describe('enum сужается до живых действий', () => {
+    const web = AGENT_TOOLS.find((tool) => tool.name === 'web');
+
+    it('только fetch без поиска — уходят и действие, и чужие поля', () => {
+      const schema = narrowToolSpec(web!, { ...empty, webFetchEnabled: true }).inputSchema;
+      expect(schema.properties.action?.enum).toEqual(['fetch']);
+      // Текст суженного действия — ровно тот же, что в полной схеме: одна
+      // константа на два места, иначе подсказка разойдётся с реальностью.
+      expect(schema.properties.action?.description).toBe(WEB_ACTION_TEXT.fetch);
+      expect(Object.keys(schema.properties).sort()).toEqual(['action', 'maxChars', 'url']);
+    });
+
+    it('только поиск без fetch — остаётся search и его поля', () => {
+      const brave = { enabled: true, provider: 'brave' } as ToolAvailability['webSearch'];
+      const schema = narrowToolSpec(web!, { ...empty, webSearch: brave, webSearchKey: 'k' }).inputSchema;
+      expect(schema.properties.action?.enum).toEqual(['search']);
+      expect(schema.properties.action?.description).toBe(WEB_ACTION_TEXT.search);
+      expect(Object.keys(schema.properties).sort()).toEqual(['action', 'limit', 'query']);
+    });
+
+    it('живо всё — схема не тронута, включая порядок и описание', () => {
+      const brave = { enabled: true, provider: 'brave' } as ToolAvailability['webSearch'];
+      const env = { ...empty, webFetchEnabled: true, webSearch: brave, webSearchKey: 'k' };
+      expect(narrowToolSpec(web!, env)).toBe(web);
+    });
+
+    it('не живо ничего — схему не оголяем', () => {
+      expect(narrowToolSpec(web!, empty)).toBe(web);
+    });
   });
 
   /**
