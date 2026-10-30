@@ -47,6 +47,7 @@ import { segmentIndexForColumn, wrapSegments, type WrapSegment } from './wrap-mo
 import { BracketDepth, RAINBOW_SIZE } from './bracket-rainbow';
 import { todoMarks } from '../../../shared/todo-comments';
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
+import type { DocumentColor } from '../../../shared/lsp-document-color';
 import { enclosingFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
 import { whitespaceMarks, type WhitespaceMode } from './whitespace';
 import { Minimap } from './minimap';
@@ -91,6 +92,19 @@ interface InlayItem {
   readonly text: string;
   readonly width: number;
   readonly className: string;
+}
+
+/** Плашка цвета: рисуется вставкой, но внутри — не текст, а квадрат цвета. */
+interface ColorItem {
+  /** Столбец с нуля: плашка встаёт ПЕРЕД записью цвета. */
+  readonly column: number;
+  /** Цвет для `background`, уже с прозрачностью: `rgb(255 0 0 / 0.5)`. */
+  readonly css: string;
+  /** Подсказка при наведении: исходное значение и цвет словами. */
+  readonly title: string;
+  /** Цвет прозрачный: плашка рисуется на шахматном фоне. */
+  readonly translucent: boolean;
+  readonly width: number;
 }
 
 /** Строка, уже разложенная по x (кэш раскладки на видимых строк). */
@@ -212,6 +226,12 @@ export class EditorView {
   private minimapVisible = false;
   /** Подсказки-вставки по строкам (inlay hints): место, текст, ширина и класс. */
   private inlayByLine = new Map<number, readonly InlayItem[]>();
+  /**
+   * Плашки цветов из `textDocument/documentColor`: круг перед записью цвета.
+   * Отдельно от подсказок — другой жизни: подсказки гаснут от правки текста,
+   * а цвет держится до перезапроса сервера.
+   */
+  private colorByLine = new Map<number, readonly ColorItem[]>();
   /**
    * Значения переменных во время отладки: `x = 42` после имени. Показываются как вставки,
    * но живут отдельно от подсказок языка: те приходят с сервера, эти — от отладчика, и
@@ -888,6 +908,8 @@ export class EditorView {
     // Подсказки-вставки принадлежали прошлому файлу: их поставит хозяин для нового.
     this.inlayByLine.clear();
     this.inlineValueByLine.clear();
+    // Плашки цветов тоже принадлежали прошлому файлу.
+    this.colorByLine.clear();
     this.stopScrollAnimation();
     this.viewport.scrollTo({ top: 0, left: 0 });
     // Украшения принадлежали прошлому файлу (полоски git, точки останова): их
@@ -1239,6 +1261,13 @@ export class EditorView {
       if (list) list.push(item);
       else hintsAt.set(item.column, [item]);
     }
+    // Плашки цветов тоже встают на границы — в ту же карту мест, но своим узлом.
+    const colorsAt = new Map<number, ColorItem[]>();
+    for (const color of this.colorByLine.get(line) ?? []) {
+      const list = colorsAt.get(color.column);
+      if (list) list.push(color);
+      else colorsAt.set(color.column, [color]);
+    }
 
     // Куски строки по токенам: пропуски между ними — обычный текст (роль не нашлась).
     // Берём только тот отрезок, что рисует этот ряд, — токены за его краем в DOM не нужны.
@@ -1264,6 +1293,7 @@ export class EditorView {
       let at = token.start;
       while (at < token.end) {
         this.appendHints(fragment, hintsAt, at);
+        this.appendColorSwatches(fragment, colorsAt, at);
         const mark = marks.get(at);
         if (mark) {
           const end = Math.min(mark.end, token.end);
@@ -1276,7 +1306,7 @@ export class EditorView {
         }
         // Тянем кусок без выделенных знаков и вставок до следующего такого или конца токена.
         let next = at + 1;
-        while (next < token.end && !marks.has(next) && !hintsAt.has(next)) next += 1;
+        while (next < token.end && !marks.has(next) && !hintsAt.has(next) && !colorsAt.has(next)) next += 1;
         const piece = text.slice(at, next);
         if (token.role) {
           const span = document.createElement('span');
@@ -1296,6 +1326,7 @@ export class EditorView {
     if (last) {
       // Вставка в самом конце строки: цикл по ней не проходит — добавляем после.
       this.appendHints(fragment, hintsAt, text.length);
+      this.appendColorSwatches(fragment, colorsAt, text.length);
 
       // Код-линза и подпись blame — оба ПОСЛЕ текста, но в этом порядке: линза ближе
       // к коду (клик по действию), а длинная подпись blame — в самом хвосте строки.
@@ -1321,6 +1352,23 @@ export class EditorView {
       const span = document.createElement('span');
       span.className = item.className;
       span.textContent = item.text;
+      fragment.append(span);
+    }
+  }
+
+  /** Плашки цветов на этой же границе: квадрат цвета перед записью и подсказка-значение. */
+  private appendColorSwatches(fragment: DocumentFragment, colorsAt: Map<number, ColorItem[]>, at: number): void {
+    const items = colorsAt.get(at);
+    if (!items) return;
+    for (const item of items) {
+      const span = document.createElement('span');
+      span.className = `${ROOT_CLASS}-color-swatch`;
+      span.style.width = `${item.width}px`;
+      span.style.height = `${item.width}px`;
+      span.style.background = item.css;
+      span.title = item.title;
+      // Цвет с прозрачностью — на шахматном фоне, иначе полупрозрачное не отличить от плотного.
+      if (item.translucent) span.classList.add('is-translucent');
       fragment.append(span);
     }
   }
@@ -1431,6 +1479,38 @@ export class EditorView {
   }
 
   /**
+   * Плашки цветов из `textDocument/documentColor`: кружок перед записью цвета.
+   *
+   * Место — начало записи (`#ff0000`, `rgb(...)`). Цвет можно изменить правкой текста,
+   * поэтому плашка — только ПОКАЗ, не кнопка: кликать некуда, и текст она не трогает.
+   *
+   * Переиспользует механизм вставок (они двигают текст вправо), но лежит в своей карте:
+   * подсказки языка гаснут от правки, а цвет живёт до следующего ответа сервера.
+   */
+  setDocumentColors(colors: readonly DocumentColor[]): void {
+    const byLine = new Map<number, ColorItem[]>();
+    for (const color of colors) {
+      const item: ColorItem = {
+        // Один символ под плашку плюс узкий зазор: дальше идёт сам текст цвета.
+        column: Math.max(0, color.column - 1),
+        css: color.hex,
+        title: color.alpha < 1 ? `${color.hex} (прозрачность ${color.alpha})` : color.hex,
+        translucent: color.alpha < 1,
+        width: this.textWidth(' '),
+      };
+      const list = byLine.get(color.line);
+      if (list) list.push(item);
+      else byLine.set(color.line, [item]);
+    }
+    this.colorByLine = byLine;
+    // Плашки меняют ширину строк — пересчитываем раскладку, как у подсказок.
+    this.widest = 0;
+    this.layoutCache = null;
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
+    this.render();
+  }
+
+  /**
    * Значения переменных во время отладки: `x = 42` после имени. Место — столбец с нуля
    * (значение встаёт ПОСЛЕ имени, поэтому столбец — конец участка). Класс свой: значения
    * отладчика отличаются от подсказок языка и цветом, и происхождением.
@@ -1459,7 +1539,12 @@ export class EditorView {
 
   /** Вставки строки в виде «граница и ширина» — для раскладки (`layoutLine`). */
   private insertsFor(line: number): { column: number; width: number }[] {
-    return [...(this.inlayByLine.get(line) ?? []), ...(this.inlineValueByLine.get(line) ?? [])].map((item) => ({
+    return [
+      ...(this.inlayByLine.get(line) ?? []),
+      ...(this.inlineValueByLine.get(line) ?? []),
+      // Плашка цвета тоже занимает место: без неё каретка и подсветка съедут на неё.
+      ...(this.colorByLine.get(line) ?? []),
+    ].map((item) => ({
       column: item.column,
       width: item.width,
     }));

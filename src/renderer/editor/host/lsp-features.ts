@@ -23,6 +23,8 @@
 
 import type { LspDiagnostic } from '../../../shared/api';
 import type { FileEdit, TextEdit } from '../../../shared/edits';
+import type { DocumentColor } from '../../../shared/lsp-document-color';
+import { toDocumentColors } from '../../../shared/lsp-document-color';
 import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations';
 import { toCompletions, toResolvedCompletion, type ResolvedCompletion } from '../../../shared/lsp-completions';
 import { toCodeActions, toLspDiagnostics, type CodeActionItem } from '../../../shared/lsp-code-actions';
@@ -301,6 +303,19 @@ export class LspFeatures {
       },
     });
     return toInlayHints(result);
+  }
+
+  /**
+   * Цвета, объявленные в документе: `#rrggbb` в CSS, `Color(1,0,0)` в Kotlin. Сервер
+   * нужен потому, что найти цвет регуляркой — не его работа: rgb(), hsl(), именованные,
+   * сокращённая запись и переменные темы одного шаблона не имеют.
+   * Пустой ответ — сервер не умеет или цветов нет; это не ошибка.
+   */
+  async documentColors(path: string): Promise<DocumentColor[]> {
+    const result = await this.request(path, 'textDocument/documentColor', {
+      textDocument: { uri: pathToUri(path) },
+    });
+    return toDocumentColors(result);
   }
 
   async executeCommand(path: string, command: string, args: readonly unknown[]): Promise<unknown> {

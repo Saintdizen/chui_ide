@@ -592,6 +592,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Подсказки-вставки: тип переменной, имя параметра — прямо в коде. Серверу нужен
     // диапазон, а своего текста у него нет: конец документа считаем по тексту файла.
     inlayHints: (path, text) => lsp.inlayHints(path, endOfText(text)),
+    // Плашки цветов: сервер CSS/SCSS/LESS знает, что `#3b82f6` и `rgb(...)` — цвет.
+    documentColors: (path) => lsp.documentColors(path),
     // Правый клик по тексту: состав пунктов — `core/editor-menu.ts` (чистая функция,
     // покрыта тестом), а показывает приложение: попапы и реестр команд у него.
     contextMenu: (info, event) => {

@@ -700,6 +700,53 @@
   opacity: 0.6;
 }
 
+/* Плашка цвета из `textDocument/documentColor`: квадрат перед записью цвета.
+   Показ, не кнопка — кликов не ловит. */
+.own-editor-color-swatch {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 2px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_2xs);
+  /* Альфа в самом цвете: полупрозрачная плашка светлеет на фоне, а не врёт плотным цветом. */
+  pointer-events: none;
+}
+
+/* Плашка цвета перед значением (`#3b82f6`, `rgb(...)`): кружок в цвет самого значения.
+   Ширину и высоту ставит вид — по метрикам шрифта, чтобы кружок был в клетку строки.
+   Вставка в текст: она сдвигает всё после себя, поэтому входит в раскладку строки. */
+.own-editor-color-swatch {
+  display: inline-block;
+  vertical-align: text-bottom;
+  margin-right: 2px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_2xs);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+/* Прозрачный цвет: под самим цветом — шахматка, иначе его не отличить от плотного.
+   Шахматка — ::before под цветом: inline-`background` из вида затёр бы её на самом кружке. */
+.own-editor-color-swatch.is-translucent {
+  position: relative;
+}
+
+.own-editor-color-swatch.is-translucent::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* z-index: -1 держит шахматку позади цвета, но внутри самого кружка. */
+  z-index: -1;
+  border-radius: inherit;
+  background-image:
+    linear-gradient(45deg, #808080 25%, transparent 25%, transparent 75%, #808080 75%),
+    linear-gradient(45deg, #808080 25%, transparent 25%, transparent 75%, #808080 75%);
+  background-size: 6px 6px;
+  background-position:
+    0 0,
+    3px 3px;
+}
+
 /* Панель перехода к строке: сверху по центру, одна строка полей. */
 .own-editor-goto {
   position: absolute;

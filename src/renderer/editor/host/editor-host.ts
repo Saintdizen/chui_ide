@@ -29,6 +29,7 @@ import type { GitLineChange } from '../../../shared/git-line-changes';
 import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-lens';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
+import type { DocumentColor } from '../../../shared/lsp-document-color';
 import type { DocumentLinkEntry } from '../../../shared/lsp-document-links';
 import type { LinkedRange } from '../../../shared/lsp-linked-editing';
 import { type SelectionSpan, type SelectionStep, stepSelection } from '../../../shared/lsp-selection-range';
@@ -244,6 +245,11 @@ export interface EditorHostOptions {
    * Не задано — крошек нет: показывать нечего.
    */
   fileSymbols?: (path: string) => Promise<FileSymbol[] | null>;
+  /**
+   * Цвета, объявленные в файле (`textDocument/documentColor`) — для плашек перед
+   * значениями цвета. Не задано — плашек нет.
+   */
+  documentColors?: (path: string) => Promise<readonly DocumentColor[]>;
   /** Перейти к месту: открыть файл и поставить курсор. Дело приложения, не панели. */
   revealLocation?: (path: string, line: number, column: number) => void;
   /**
@@ -480,6 +486,8 @@ export class EditorHost {
   private readonly readOnlyBadge: HTMLElement;
   /** Хлебные крошки над текстом: путь к символу под курсором. `null` — источника нет. */
   private readonly breadcrumbs: BreadcrumbsWidget | null;
+  /** Источник цветов для плашек в тексте. */
+  private readonly documentColorSource: ((path: string) => Promise<readonly DocumentColor[]>) | undefined;
   /** Куда стоял курсор в каждом файле — восстанавливается при возврате к файлу. */
   private readonly cursors = new Map<string, CursorPosition>();
   private readonly cursorEmitter = new Emitter<CursorState>();
@@ -626,6 +634,7 @@ export class EditorHost {
         })
       : null;
     if (this.breadcrumbs) container.append(this.breadcrumbs.element);
+    this.documentColorSource = options.documentColors;
     this.indentSize = options.tabSize ?? 4;
     this.controller = new EditorController(buffer, { tabSize: options.tabSize });
     // Документ (истина о содержимом) узнаёт о правке ПЕРВЫМ — раньше попапов.
@@ -2270,6 +2279,20 @@ export class EditorHost {
     const hints = await source(path, text).catch(() => []);
     if (id !== this.inlayRequestId || this.path !== path) return;
     this.view.setInlayHints(hints);
+    void this.refreshDocumentColors(path);
+  }
+
+  /**
+   * Плашки цветов: где в файле объявлен цвет. Запрос идёт вместе с подсказками-вставками —
+   * это тот же повод (файл открыт или текст правлен) и тот же риск ответа не к месту,
+   * поэтому сверяемся с текущим путём.
+   */
+  private async refreshDocumentColors(path: string): Promise<void> {
+    const source = this.documentColorSource;
+    if (!source) return;
+    const colors = await source(path).catch(() => []);
+    if (this.path !== path) return;
+    this.view.setDocumentColors(colors);
   }
 
   /** Пересчитать подсказки-вставки с паузой: на каждое нажатие дёргать сервер незачем. */
