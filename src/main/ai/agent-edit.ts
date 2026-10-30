@@ -157,10 +157,12 @@ export function flatHunk(item: Record<string, unknown>): Record<string, unknown>
   // и падал на «edits[0].edits[0].newText: нужна строка» — хотя данные все на
   // месте (проверено 29.10).
   const whole = typeof item.contents === 'string' ? item.contents : undefined;
+  // Без старого текста, без `newText` и без `contents` — не правка, а мусор: отказать
+  // форме честнее, чем применять пустоту.
   if (typeof item.oldText !== 'string' && typeof item.newText !== 'string' && whole === undefined) return null;
-  const hunk: Record<string, unknown> = {
-    newText: typeof item.newText === 'string' ? item.newText : (whole ?? ''),
-  };
+  const hunk: Record<string, unknown> = {};
+  if (typeof item.newText === 'string') hunk.newText = item.newText;
+  if (whole !== undefined) hunk.contents = whole;
   if (typeof item.oldText === 'string') hunk.oldText = item.oldText;
   for (const key of ['startLine', 'startColumn', 'endLine', 'endColumn'] as const) {
     if (typeof item[key] === 'number') hunk[key] = item[key];
@@ -211,8 +213,12 @@ export function wholeWrite(item: Record<string, unknown>): WholeWrite | null {
   for (const edit of item.edits) {
     if (!isRecord(edit)) return null;
     const positional = ['startLine', 'startColumn', 'endLine', 'endColumn'].some((key) => edit[key] !== undefined);
-    if (positional || typeof edit.oldText === 'string' || typeof edit.newText !== 'string') return null;
-    parts.push(edit.newText);
+    // Текст замены — `newText`, но `flatHunk` кладёт запись целиком в `contents`
+    // (замена без якоря и без позиций — это и есть файл). Без второго ключа
+    // вызов отваливался «не задан path» там, где файл назван и текст есть (30.10).
+    const text = typeof edit.newText === 'string' ? edit.newText : edit.contents;
+    if (positional || typeof edit.oldText === 'string' || typeof text !== 'string') return null;
+    parts.push(text);
   }
   return parts.length === 0 ? null : { path: item.path, contents: parts.join('\n') };
 }

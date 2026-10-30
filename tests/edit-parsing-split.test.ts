@@ -54,6 +54,19 @@ describe('разбор правок отдельно от инструменто
   it('элемент без path называет форму — вызов чинится за один шаг', () => {
     expect(() => parseEdits([{ oldText: 'a', newText: 'b' }])).toThrow(/edits\[0\]/);
   });
+  it('плоская запись целиком без `edits`: `{path, contents}` на верхнем уровне', () => {
+    // Форма из живой беседы 30.10: `edit` прислал `path` и `contents` рядом, без
+    // обёртки. Разбор ждал `edits[]` и падал на «edits[0].edits[0].newText:
+    // нужна строка» — хотя файл назван и текст есть. Сторож на весь путь.
+    const [item] = normalizeWrite({ path: '/proj/new.ts', contents: 'export const a = 1;\n' }) as Record<
+      string,
+      unknown
+    >[];
+    expect(wholeWrite(item as Record<string, unknown>)).toEqual({
+      path: '/proj/new.ts',
+      contents: 'export const a = 1;\n',
+    });
+  });
 
   it('запись файла целиком элементом массива: `{path, contents}` — это файл, а не замена', () => {
     // Формой `[{path, contents}]` инструмент `edit` ходил в отказ
