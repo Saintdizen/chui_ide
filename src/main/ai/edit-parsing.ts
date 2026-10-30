@@ -168,7 +168,9 @@ function parseEditFile(
       ? ' Похоже на запись файла целиком: в элементе нужен `path` рядом с `contents`.'
       : swap
         ? ' В элементе лежат сами замены (oldText/newText), а не файл — добавь `path` рядом.'
-        : '';
+        : Array.isArray(raw.contents) && raw.contents.length > 0
+          ? ' Записи файлов лежат в `contents` вместе с адресами — нужен [{path, contents}]'
+          : '';
     // Формы вложенности три (файл → `edits[]` → `edits[]`), и на записи без пути
     // не видно, какая из них ожидалась. Называем вслух.
     throw new Error(
@@ -223,7 +225,31 @@ function parseEditItem(value: unknown, fileIndex: number, editIndex: number): Ed
 
   const raw = value as Record<string, unknown>;
   const newText = raw.newText;
-  if (typeof newText !== 'string') throw new Error(`${where}.newText: нужна строка`);
+  if (typeof newText !== 'string') {
+    // Если вместо замены пришла запись файла целиком (`contents` — имя из
+    // `create`), ей место в `[{path, contents}]`, а не в одном элементе: так
+    // `normalizeWrite` её не видит. По переписи 28.10 так пришли четыре из шести
+    // `edits[0].edits[0].newText`.
+    if (Array.isArray(raw.contents)) {
+      const first = raw.contents[0];
+      const withPath =
+        typeof first === 'object' && first !== null && typeof (first as Record<string, unknown>).path === 'string';
+      if (withPath) {
+        throw new Error(
+          `${where}.newText: нужна строка. Вместо замены — запись файла целиком, ` +
+            `и адрес лежит не там: нужен [{path, contents}]`,
+        );
+      }
+    }
+    // Другая половина тех же шести: замена под чужим именем (`contents`, `content`,
+    // `text` — имена из `create`/`write`). Данные на месте, поле названо иначе.
+    // Не угадываем — называем имя вслух, чтобы второй вызов прошёл.
+    const alias = (['contents', 'content', 'text'] as const).find((key) => typeof raw[key] === 'string');
+    const hint = alias
+      ? ` Похоже, запись целиком лежит в \`${alias}\`: у правки это поле зовётся \`newText\`.`
+      : '';
+    throw new Error(`${where}.newText: нужна строка.${hint}`);
+  }
 
   const oldText = raw.oldText;
   if (oldText !== undefined && typeof oldText !== 'string') throw new Error(`${where}.oldText: нужна строка`);

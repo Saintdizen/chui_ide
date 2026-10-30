@@ -99,6 +99,55 @@ describe('разбор правок отдельно от инструменто
     expect(message).toContain('Прошлый файл в вызове: «/proj/a.ts»');
   });
 
+  it('отказ «newText: нужна строка» называет чужое имя поля', () => {
+    // Все шесть отказов 28.10 `edits[0].edits[0].newText: нужна строка` — это
+    // запись целиком под именем из `create`: данные на месте, названы иначе.
+    // Отказ называет имя вслух, чтобы второй вызов прошёл (а не подставляет).
+    let message = '';
+    try {
+      parseEdits([{ path: '/proj/a.ts', edits: [{ contents: 'строка\nвторая' }] }]);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('edits[0].edits[0].newText: нужна строка');
+    expect(message).toContain('лежит в `contents`');
+    // Второй вызов без `create` — у нас нет инструмента с таким именем: пишем имя, по которому ищут.
+    expect(message).toContain('у правки это поле зовётся `newText`');
+  });
+
+  it('замены в соседнем `edits` разбираются, а не отказывают', () => {
+    // `{path, edits: [...]}` проходил раскладку: сторож ниже это утверждает.
+    const parsed = parseEdits([{ path: '/proj/a.ts', edits: [{ oldText: 'a', newText: 'b' }] }]);
+    expect(parsed.anchors[0]!.path).toBe('/proj/a.ts');
+  });
+
+  it('запись целиком в чужом поле и без адреса: отказ называет и элемент, и адрес', () => {
+    // Четыре из шести отказов 28.10 `edits[0].edits[0].newText: нужна строка` —
+    // это файлы целиком, элементы без `path`. Сказать, как пришёл элемент, —
+    // всё, что можно без угадывания.
+    let message = '';
+    try {
+      parseEdits([{ edits: [{ path: '/proj/a.ts', contents: 'тело' }] }]);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('edits[0]: не задан path');
+    expect(message).toContain('{edits: [1x{path, contents}]}');
+  });
+  it('файлы целиком в `contents` массива: отказ называет адрес, где им место', () => {
+    // Четыре из шести отказов 28.10 `edits[0].edits[0].newText: нужна строка` —
+    // запись целиком лежит в `contents`, а адреса — в самом `contents` массивом.
+    // Подставлять адрес не угадываем — называем вслух.
+    let message = '';
+    try {
+      parseEdits([{ contents: [{ path: '/proj/a.ts', contents: 'тело' }] }]);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('Записи файлов лежат в `contents` вместе с адресами');
+    expect(message).toContain('{contents: [1x{path, contents}]}');
+  });
+
   it('combineOutcomes: единственный ответ отдаётся как есть', () => {
     const only = { ok: true, summary: 'одно' };
     expect(combineOutcomes([only])).toBe(only);
