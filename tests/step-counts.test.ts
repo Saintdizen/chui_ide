@@ -221,6 +221,26 @@ describe('счётчик шагов', () => {
     expect(callFailureReason({ ok: true, summary: 'ok' })).toBe('other');
   });
 
+  it('код `arg` сохраняет текст: в нём и жива догадка модели о длине файла', () => {
+    // Замер 30.10: «файл описывают как 386 строк, читают с 590-й» — верный
+    // признак, и его держит только текст. С номером строки в начале его же
+    // не узнать: у всех таких отказов начало одинаковое.
+    const log = run();
+    log.steps[0]!.calls = [
+      {
+        id: 'a',
+        name: 'read',
+        args: '{"startLine":590}',
+        ok: false,
+        summary: 'src/a/agent-read.ts: начало диапазона 590 за концом файла (в файле строк: 386)',
+      },
+    ];
+    const call = buildCountsRecord(log).steps[0]!.calls[0]!;
+    expect(call.reason).toBe('arg');
+    expect(call.unknown).toContain('за концом файла');
+    expect(call.unknown).not.toContain('/');
+  });
+
   it('нечитаемый отказ остаётся с формой: без путей, якорей и команд модели', () => {
     // Смысл: `other` — не тупик. Код молчит, но форма говорит, что чинить.
     expect(
