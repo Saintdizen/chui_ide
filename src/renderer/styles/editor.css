@@ -655,6 +655,51 @@
   max-width: 280px;
 }
 
+/* Хлебные крошки: полоса над текстом — где курсор в структуре файла. */
+.own-editor-breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  gap: 2px;
+  padding: 2px 8px;
+  background: var(--editor_background, var(--panel_background));
+  border-bottom: 1px solid var(--border_color);
+  font-size: var(--font_small_size);
+  color: var(--text_color_secondary);
+  white-space: nowrap;
+}
+
+.own-editor-breadcrumbs[hidden] {
+  display: none;
+}
+
+.own-editor-breadcrumbs-item {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius_xs);
+}
+
+.own-editor-breadcrumbs-item:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.own-editor-breadcrumbs-item[aria-current="location"] {
+  color: var(--text_color);
+  cursor: default;
+}
+
+.own-editor-breadcrumbs-sep {
+  flex: 0 0 auto;
+  opacity: 0.6;
+}
+
 /* Панель перехода к строке: сверху по центру, одна строка полей. */
 .own-editor-goto {
   position: absolute;

@@ -24,6 +24,7 @@
 import type { CursorPosition, LspDiagnostic } from '../../../shared/api';
 import type { TextEdit } from '../../../shared/edits';
 import type { FoldRange } from '../../../shared/fold-ranges';
+import type { FileSymbol } from '../../../shared/lsp-symbols';
 import type { GitLineChange } from '../../../shared/git-line-changes';
 import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-lens';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
@@ -64,6 +65,7 @@ import { normalizeWhitespaceMode, type WhitespaceMode } from '../view/whitespace
 import { caret, isEmpty, type Selection } from '../view/selection';
 import { FileDecorations, type LensDecoration, type LinkDecoration } from '../view/decorations';
 import { FindWidget } from '../widgets/find-widget';
+import { BreadcrumbsWidget } from '../widgets/breadcrumbs-widget';
 import { GotoLineWidget } from '../widgets/goto-widget';
 import { HoverWidget, type HoverExternalInfo, type HoverProblem } from '../widgets/hover-widget';
 import { problemsAt } from '../hover/problem-at';
@@ -236,6 +238,12 @@ export interface EditorHostOptions {
    * определению и ссылок у панели не будет вовсе: показывать нечего и открывать некуда.
    */
   symbols?: SymbolSource;
+  /**
+   * Символы файла целиком (структура) — из них строятся хлебные крошки над текстом
+   * (см. `widgets/breadcrumbs-widget.ts`). `null` — спросить не удалось.
+   * Не задано — крошек нет: показывать нечего.
+   */
+  fileSymbols?: (path: string) => Promise<FileSymbol[] | null>;
   /** Перейти к месту: открыть файл и поставить курсор. Дело приложения, не панели. */
   revealLocation?: (path: string, line: number, column: number) => void;
   /**
@@ -470,6 +478,8 @@ export class EditorHost {
   private readOnly = false;
   /** Значок «только чтение» над панелью: виден, когда файл большой. */
   private readonly readOnlyBadge: HTMLElement;
+  /** Хлебные крошки над текстом: путь к символу под курсором. `null` — источника нет. */
+  private readonly breadcrumbs: BreadcrumbsWidget | null;
   /** Куда стоял курсор в каждом файле — восстанавливается при возврате к файлу. */
   private readonly cursors = new Map<string, CursorPosition>();
   private readonly cursorEmitter = new Emitter<CursorState>();
@@ -604,6 +614,18 @@ export class EditorHost {
     this.readOnlyBadge.title = 'Файл слишком большой для правки — открыт только для чтения';
     this.readOnlyBadge.hidden = true;
     container.append(this.readOnlyBadge);
+    // Хлебные крошки — полосой над текстом: где курсор в структуре файла.
+    this.breadcrumbs = options.fileSymbols
+      ? new BreadcrumbsWidget({
+          fileSymbols: options.fileSymbols,
+          reveal: (path, line) => options.revealLocation?.(path, line, 1),
+          current: () => {
+            const state = this.cursorState;
+            return state.path ? { path: state.path, line: state.line } : null;
+          },
+        })
+      : null;
+    if (this.breadcrumbs) container.append(this.breadcrumbs.element);
     this.indentSize = options.tabSize ?? 4;
     this.controller = new EditorController(buffer, { tabSize: options.tabSize });
     // Документ (истина о содержимом) узнаёт о правке ПЕРВЫМ — раньше попапов.
@@ -2311,6 +2333,7 @@ export class EditorHost {
 
   private emitCursor(): void {
     this.cursorEmitter.fire(this.cursorState);
+    this.breadcrumbs?.refresh();
   }
 }
 

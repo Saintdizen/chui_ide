@@ -236,6 +236,28 @@ function outlineLine(symbol: FileSymbol, depth: number, hidden = 0): string {
   return `${'  '.repeat(depth)}${where}: ${symbol.kind} ${symbol.name}${rest}`;
 }
 
+/**
+ * Путь к символу от внешнего к внутреннему — крошки над редактором. Ищется самый
+ * ГЛУБОКИЙ символ, накрывающий строку: в классе `A` метод `b` — две крошки, а не одна.
+ *
+ * Границы включающие: курсор на строке закрывающей скобки остаётся внутри символа —
+ * так ведёт себя любой редактор, и иначе крошки мигали бы на границе. Символ без
+ * конца (сервер не сообщил) занимает только свою строку: растягивать его на весь
+ * оставшийся файл значило бы врать про вложенность.
+ */
+export function symbolPathAt(symbols: readonly FileSymbol[], line: number): FileSymbol[] {
+  const path: FileSymbol[] = [];
+  let level = symbols;
+  for (;;) {
+    const hit = level.find(
+      (symbol) => symbol.line <= line && line <= (symbol.endLine > symbol.line ? symbol.endLine : symbol.line),
+    );
+    if (!hit) return path;
+    path.push(hit);
+    level = hit.children;
+  }
+}
+
 /** Предел строк вывода: скелет огромного файла не должен вытеснить беседу. */
 const MAX_OUTLINE_LINES = 200;
 

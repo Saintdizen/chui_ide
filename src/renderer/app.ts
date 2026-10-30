@@ -482,6 +482,14 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       definition: (path, position) => lsp.definition(path, position),
       references: (path, position) => lsp.references(path, position),
     },
+    // Хлебные крошки над текстом: символы файла (уже готовые из LSP) и место курсора.
+    fileSymbols: async (path) => {
+      try {
+        return await lsp.documentSymbols(path);
+      } catch {
+        return null;
+      }
+    },
     // Переход к месту: открыть файл (это умеет приложение) и встать на строку.
     revealLocation: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
     // Выбор обёртки показывает приложение: у редактора нет ни модалок, ни списка
