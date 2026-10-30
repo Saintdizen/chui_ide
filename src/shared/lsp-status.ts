@@ -50,7 +50,23 @@ export function lspOriginLabel(origin: LspServerOrigin): string {
   return 'PATH';
 }
 
-/** Чем показать сервер языка в статусбаре: подпись, источник и причина отказа. */
+/**
+ * Причина завершения сервера словами: код выхода, сигнал или текст ошибки запуска.
+ * Нужна, чтобы в статусе стояло «завершился (код 1)», а не голая строка без объяснения.
+ * Пустое/неизвестное — общий ответ «сервер завершился»: молчать и тут нельзя, событие было.
+ */
+export function exitReason(code: number | null, signal: string | null): string {
+  if (code === 0) return 'сервер завершился';
+  if (typeof code === 'number') return `сервер завершился (код ${code})`;
+  const detail = (signal ?? '').trim();
+  if (!detail) return 'сервер завершился';
+  // Сигнал приходит как имя (`SIGSEGV`), ошибка запуска — как текст: подписываем по виду.
+  return /^[A-Z0-9]{2,}$/.test(detail) ? `сервер убит сигналом ${detail}` : `сервер не запустился: ${detail}`;
+}
+
+/**
+ * Подпись чипа в статусбаре для одного языка.
+ */
 export interface LspChip {
   language: string;
   label: string;

@@ -3323,6 +3323,11 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       case PushTopic.LspProgress:
         lspProgress.apply(message.payload as LspProgress);
         break;
+      case PushTopic.LspServers:
+        // Сервер поднялся, исчез или упал посреди работы. Раньше такое не двигало
+        // чип: он был снят при смене языка и замирал — «всё хорошо» при мёртвом сервере.
+        applyLspStatus(message.payload as LspStatus);
+        break;
       case PushTopic.LspProjectDiagnostics:
         // Пометки закрытых файлов, снятые обходом проекта: источник отдельный от живого
         // сервера, иначе закрытие файла обнуляло бы счёт (см. `core/project-diagnostics.ts`).

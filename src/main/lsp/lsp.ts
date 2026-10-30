@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PushTopic, type LspDiagnostic, type LspServerConfig, type LspSettings } from '../../shared/api';
 import { downgradeSeverity } from '../../shared/lsp-severity';
 import type { LspServerOrigin, LspStatus } from '../../shared/lsp-status';
+import { exitReason } from '../../shared/lsp-status';
 import type { FileEdit } from '../../shared/edits';
 import { toWorkspaceFileEdits } from '../../shared/lsp-workspace-edit';
 import { languageInfoForPath } from '../../shared/languages';
@@ -911,12 +912,20 @@ export class LspService {
     );
 
     // Сервер упал или завершился — забываем про него, при следующем файле поднимем снова.
-    const forget = (): void => {
+    // Причину не теряем: иначе упавший посреди работы сервер исчезал из `status()` молча,
+    // и человек видел «чип пропал и подсказок нет» без единого слова почему.
+    const forget = (code: number | null, signal: string | null): void => {
       connection.dispose();
-      if (this.runtimes.get(config.language)?.connection === connection) this.runtimes.delete(config.language);
+      const current = this.runtimes.get(config.language);
+      if (current?.connection !== connection) return;
+      this.runtimes.delete(config.language);
+      this.failed.set(config.language, exitReason(code, signal));
+      this.publish(PushTopic.LspServers, this.status());
     };
     child.on('exit', forget);
-    child.on('error', forget);
+    child.on('error', (error) => {
+      forget(null, String(error?.message ?? error));
+    });
 
     const runtime: ServerRuntime = {
       config,
