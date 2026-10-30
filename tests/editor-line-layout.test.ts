@@ -106,4 +106,58 @@ describe('xForColumn и columnForX', () => {
     // x=15 равноудалён от 10 и 20.
     expect(columnForX(offsets, 15)).toBe(1);
   });
+
+  it('пустая строка: одна граница, попадание — столбец 0', () => {
+    // Пустая строка — вырожденный случай: искать «ближайшую» границу не из чего.
+    const empty = layoutLine('', metrics);
+    expect(empty).toEqual([0]);
+    expect(xForColumn(empty, 0)).toBe(0);
+    expect(xForColumn(empty, 5)).toBe(0);
+    expect(columnForX(empty, 0)).toBe(0);
+    expect(columnForX(empty, 100)).toBe(0);
+  });
+
+  it('без вставок раскладка та же, что с пустым списком', () => {
+    expect(layoutLine('abc', metrics, [])).toEqual(layoutLine('abc', metrics));
+  });
+
+  it('вставка в начале строки сдвигает первый же знак', () => {
+    const offsets = layoutLine('ab', metrics, [{ column: 0, width: 25 }]);
+    expect(offsets).toEqual([0, 35, 45]);
+    expect(xForColumn(offsets, 1)).toBe(35);
+  });
+
+  it('две вставки на одной границе не складываются: на границе одна, вторая — после знака', () => {
+    // Граница 1 — только ПЕРЕД знаком, вставки из неё не суммируются.
+    const offsets = layoutLine('ab', metrics, [
+      { column: 1, width: 20 },
+      { column: 1, width: 15 },
+    ]);
+    expect(offsets).toEqual([0, 10, 55]);
+  });
+
+  it('широкий знак после вставки: вставка считается один раз, столбец — на две клетки', () => {
+    const offsets = layoutLine('中a', metrics, [{ column: 0, width: 10 }]);
+    expect(offsets).toEqual([0, 30, 40]);
+  });
+
+  it('комбинирующий знак не сдвигает следующую границу, но и не теряет её', () => {
+    // Каретка внутри «е́» (между буквой и знаком) — та же позиция, что и до знака.
+    const offsets = layoutLine('e\u0301x', metrics);
+    expect(offsets).toEqual([0, 10, 10, 20]);
+    expect(columnForX(offsets, 10)).toBe(2);
+  });
+
+  it('вставка на границе за концом строки не растягивает её', () => {
+    // Сервер вправе прислать подсказку за последним знаком (column = 5 у строки из двух).
+    // Ставить её некуда — но и уронить раскладку она не должна: строка остаётся прежней.
+    const offsets = layoutLine('ab', metrics, [{ column: 5, width: 30 }]);
+    expect(offsets).toEqual([0, 10, 20]);
+  });
+
+  it('отрицательный столбец вставки не ломает раскладку', () => {
+    // Вставка «до начала» по смыслу равна вставке в начале: табулятор выходит из неё.
+    const offsets = layoutLine('ab', metrics, [{ column: -1, width: 25 }]);
+    expect(offsets).toEqual([0, 10, 20]);
+  });
 });

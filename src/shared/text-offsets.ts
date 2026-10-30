@@ -24,7 +24,8 @@ export function offsetsAt(
     // Конец строки: где начинается следующая. Столбец за её концом прижимаем сюда
     // же — ответ сервера может быть о старой версии текста, и подсветка, перелезшая
     // через перевод строки, была бы хуже, чем чуть короткая.
-    const lineEnd = starts[place.line] === undefined ? text.length : starts[place.line] - 1;
+    const nextStart = starts[place.line];
+    const lineEnd = nextStart === undefined ? text.length : nextStart - 1;
     const start = Math.min(lineEnd, lineStart + Math.max(0, place.column - 1));
     const end = Math.min(lineEnd, lineStart + Math.max(0, place.endColumn - 1));
     if (end > start) out.push({ start, end });
