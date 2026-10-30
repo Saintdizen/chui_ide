@@ -3,6 +3,7 @@ import {
   buildCountsRecord,
   callFailureReason,
   callFlags,
+  refusalShape,
   formatCountsLine,
   parseCounts,
 } from '../src/shared/step-counts';
@@ -94,9 +95,41 @@ describe('счётчик шагов', () => {
 
   it('переживает обрыв записи в журнале', () => {
     const line = formatCountsLine(buildCountsRecord(run()));
-    const records = parseCounts(`${line}\n{"version":1,"steps":[\n`);
+    const records = parseCounts(`${line}\n{"version":2,"steps":[\n`);
     expect(records).toHaveLength(1);
     expect(parseCounts('')).toEqual([]);
+  });
+
+  it('старые записи v1 в отчёт не едут: там код «other» без формы', () => {
+    // Иначе в разделе «other по тексту» вечно висел бы «(форма не записана)»:
+    // живые 415 записей v1 ушли в v2, и старые прогоны не должны с ними мешаться.
+    const line = formatCountsLine(buildCountsRecord(run()));
+    const old = line.replace(/"version":2/u, '"version":1');
+    expect(parseCounts(old)).toEqual([]);
+    expect(parseCounts(line)).toHaveLength(1);
+  });
+
+  it('считает отказом вызов с ok: true, но failed: true', () => {
+    // Разделение 30.10: `failed` — работа сделана, итог отрицательный (упавший тест,
+    // код выхода). Раньше такие вызовы уходили в отчёт как успешные, и число отказов
+    // на бумаге падало ровно на столько, на сколько выросло реальное.
+    const log = run();
+    log.steps[0]!.calls = [
+      {
+        id: 'a',
+        name: 'run_tests',
+        args: '{}',
+        ok: true,
+        failed: true,
+        summary: 'Провалено 2 из 10',
+        detail: 'код выхода 1',
+      },
+      { id: 'b', name: 'read', args: '{}', ok: true, summary: 'x' },
+    ];
+    const calls = buildCountsRecord(log).steps[0]!.calls;
+    expect(calls[0]).toMatchObject({ ok: false, reason: 'command' });
+    expect(calls[1]).toMatchObject({ ok: true });
+    expect(calls[1]!.reason).toBeUndefined();
   });
 
   it('кодирует причину отказа без текста ошибки', () => {
@@ -106,6 +139,15 @@ describe('счётчик шагов', () => {
       { id: 'b', name: 'edit', args: '{}', ok: false, summary: 'Не хватает аргумента', detail: 'Передай oldText' },
       { id: 'c', name: 'terminal', args: '{}', ok: false, summary: 'код выхода 1' },
       { id: 'd', name: 'read', args: '{}', ok: false, summary: 'Файл не найден: a.ts' },
+      // Замер сжатия: аргумент подменился пометкой и до инструмента не дошёл.
+      // 24 отказа `edit` из 266 сидели в «other» именно этим текстом (30.10).
+      {
+        id: 'd2',
+        name: 'edit',
+        args: '{}',
+        ok: false,
+        summary: 'Аргумент edits пришёл пометкой сжатия вместо текста — в файл он не попал',
+      },
       // Якорь — до `not-found`: отказ правки тоже говорит «не найден», но чинится
       // он другим якорем, а не перечитыванием пути.
       {
@@ -156,6 +198,7 @@ describe('счётчик шагов', () => {
       'arg',
       'command',
       'not-found',
+      'arg',
       'anchor',
       'anchor',
       'rejected',
@@ -171,6 +214,45 @@ describe('счётчик шагов', () => {
       'unavailable',
     ]);
     expect(callFailureReason({ ok: true, summary: 'ok' })).toBe('other');
+  });
+
+  it('нечитаемый отказ остаётся с формой: без путей, якорей и команд модели', () => {
+    // Смысл: `other` — не тупик. Код молчит, но форма говорит, что чинить.
+    expect(
+      refusalShape({ ok: false, summary: 'Ошибка: Не хватает аргумента: path — открыть src/a/very-long-name.ts' }),
+    ).toBe('Ошибка: Не хватает аргумента: path — открыть …');
+    // Якорь и путь модели в отчёт не идут: там текст, а не наши пометки.
+    const anchored = refusalShape({
+      ok: false,
+      summary: '',
+      detail: 'якорь «oldText» не найден в /home/u/proj/x.ts, строка 12',
+    });
+    expect(anchored).not.toContain('/home/u/proj');
+    expect(anchored).not.toContain('oldText');
+    // Отказ без текста — тоже сигнал, а не пустота.
+    expect(refusalShape({ ok: false, summary: '' })).toBe('(отказ без текста)');
+    // Форма есть у каждого отказа, кроме `other`, и едет в запись вместе с кодом.
+    const second = buildCountsRecord(
+      run({
+        steps: [
+          {
+            index: 1,
+            ms: 1_000,
+            calls: [
+              { id: 'x', name: 'terminal', args: '{"command":"npm test"}', ok: false, summary: 'код выхода 1' },
+              { id: 'y', name: 'web', args: '{}', ok: false, summary: 'Неизвестный поставщик «acme»' },
+            ],
+          },
+        ],
+      }),
+    );
+    // Код `command` называет причину — формы рядом нет, текста в отчёте тоже.
+    expect(second.steps[0]!.calls[0]!.reason).toBe('command');
+    expect(second.steps[0]!.calls[0]!.unknown).toBeUndefined();
+    // Код молчит — отказ всё равно назван формой, по ней и стоит новая форма.
+    expect(second.steps[0]!.calls[1]!.reason).toBeUndefined();
+    // Аргумент модели (имя поставщика в кавычках) в отчёт не едет — только форма.
+    expect(second.steps[0]!.calls[1]!.unknown).toBe('Неизвестный поставщик …');
   });
 
   // Дыры, найденные `npm run census` в живых беседах: оба текста оседали в «other».

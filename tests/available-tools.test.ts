@@ -104,7 +104,7 @@ describe('что предлагать модели', () => {
     it('до модели доезжает сужённая схема, а не полная', () => {
       const env = { ...empty, webFetchEnabled: true };
       const [shown] = toOpenAiTools([narrowToolSpec(web!, env)]);
-      const action = (shown?.function.parameters as { properties: Record<string, { enum?: string[] }> }).properties
+      const action = (shown!.function.parameters as { properties: Record<string, { enum?: string[] }> }).properties
         .action;
       expect(action?.enum).toEqual(['fetch']);
     });

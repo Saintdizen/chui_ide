@@ -50,11 +50,15 @@ describe('run_tests', () => {
     expect(outcome.summary).toContain('недоступен');
   });
 
-  it('ненулевой код — упавшие тесты: ответ ok=false с кодом в сводке', async () => {
+  it('ненулевой код — упавшие тесты: это результат, а не сбой инструмента', async () => {
+    // Раньше здесь ожидался `ok: false`, и это врало: тесты гонялись, ответ есть.
+    // Мимо `ok: false` шла вся телеметрия отказов (45 отказов на `command`),
+    // и упавший тест начинали чинить как поломку инструмента.
     const tests: TestRunner = { command: async () => ({ command: 'exit 3', label: 'pytest' }) };
     const outcome = await runTool(context(tests), 'run_tests', '{}');
 
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.failed).toBe(true);
     expect(outcome.summary).toContain('код выхода 3');
   });
 

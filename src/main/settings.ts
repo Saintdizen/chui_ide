@@ -90,6 +90,8 @@ interface StoredSettings {
     compactAtTokens: number;
     /** «Сжимать чаще»: каждые N ходов; 0 — по промаху кеша и по окну. */
     compactEveryTurns: number;
+    /** Переносить ли беседу в сводку при смене модели (по умолчанию да). */
+    compactOnModelSwitch: boolean;
     /** Модель для сжатия беседы; не задана — активная. */
     compactModel?: string;
     /** Модель для коротких подзадач; не задана — активная. */
@@ -181,6 +183,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Предел автосжатия выключен: пороги — промах кеша и подход к окну.
     compactAtTokens: COMPACT_AT_TOKENS,
     compactEveryTurns: COMPACT_EVERY_TURNS,
+    // Смена модели переносит беседу в сводку: окно и цена у новой модели другие,
+    // а платим мы объёмом старой. Флаг выключен — если человек хочет сравнить модели.
+    compactOnModelSwitch: true,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     // По умолчанию параметр не отправляем: не всякая модель его знает.
     reasoningEffort: 'off',
@@ -433,6 +438,7 @@ export class SettingsStore {
         contextWindow: ai.contextWindow,
         compactAtTokens: ai.compactAtTokens,
         compactEveryTurns: ai.compactEveryTurns,
+        compactOnModelSwitch: ai.compactOnModelSwitch !== false,
         compactModel: ai.compactModel,
         quickModel: ai.quickModel,
         systemPrompt: ai.systemPrompt,
@@ -692,7 +698,13 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
   // Мастер-тумблер: выключает ассистент целиком, поэтому идёт первым.
   if (patch.enabled !== undefined) target.enabled = patch.enabled === true;
   if (patch.activeProviderId !== undefined) target.activeProviderId = patch.activeProviderId;
-  if (patch.activeModel !== undefined) target.activeModel = patch.activeModel;
+  // Пустая строка — «сбросить на модель по умолчанию», а не «модель с пустым именем».
+  // Пустое имя в активной модели — это тихо невидимая подпись в композере.
+  if (patch.activeModel !== undefined) {
+    const value = patch.activeModel.trim();
+    if (value) target.activeModel = value;
+    else delete target.activeModel;
+  }
   if (patch.temperature !== undefined) target.temperature = patch.temperature;
   if (patch.maxTokens !== undefined) target.maxTokens = patch.maxTokens;
   // Ноль и отрицательное — бюджета нет; иначе запас округляем до цента.
@@ -711,6 +723,9 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     const value = Math.round(patch.compactAtTokens);
     if (Number.isFinite(value) && value >= 0) target.compactAtTokens = value;
   }
+  // Смена модели меняет окно и цену, а старая история уже не к ней: по умолчанию
+  // такую беседу переносим в сводку одним вызовом, иначе платим за «чужой» объём.
+  if (patch.compactOnModelSwitch !== undefined) target.compactOnModelSwitch = patch.compactOnModelSwitch === true;
   // «Сжимать чаще»: 0 — не сжимать по расписанию.
   if (patch.compactEveryTurns !== undefined) {
     const value = Math.round(patch.compactEveryTurns);
@@ -919,6 +934,10 @@ function loadSettings(filePath: string): StoredSettings {
   const storedEvery = Math.round(Number(storedAi.compactEveryTurns));
   ai.compactEveryTurns =
     Number.isFinite(storedEvery) && storedEvery >= 0 ? storedEvery : DEFAULT_SETTINGS.ai.compactEveryTurns;
+
+  // Сжатие при смене модели: в старых настройках поля нет — это не отказ от него,
+  // а наше новое поведение. `false` пишем только когда человек сам выключил.
+  ai.compactOnModelSwitch = storedAi.compactOnModelSwitch !== false;
 
   // Модель сжатия: строка без пробелов или ничего (тогда сжимаем активной моделью).
   ai.compactModel =

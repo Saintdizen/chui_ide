@@ -24,6 +24,11 @@ interface Call {
   flags?: string[];
   /** Код причины отказа — пишет агент (`callFailureReason`), текста в нём нет. */
   reason?: string;
+  /**
+   * Форма отказа без путей и кавычек — пишет агент (`refusalShape`) вместе с кодом
+   * `other`: код молчит, а форма говорит, что чинить.
+   */
+  unknown?: string;
 }
 
 interface Run {
@@ -52,6 +57,14 @@ const perName = new Map<string, { calls: number; fail: number; chars: number }>(
 const perFlag = new Map<string, { calls: number; chars: number }>();
 /** Отказы по коду: код называет лечение (arg → схема, anchor → якорь), текст — симптом. */
 const perCode = new Map<string, number>();
+/** Формы нечитаемых отказов (`reason: 'other'`): код молчит — читаем текст. */
+const perUnknown = new Map<string, number>();
+/**
+ * `reason: 'other'` — это старая схема записи (до v2): кода нет, формы нет.
+ * В отчёте такие отказы считаются отдельно: это долг старых записей, а не
+ * поломка классификатора в живом прогоне.
+ */
+let perLegacy = 0;
 /** По неделям: там видно, сдвинулась ли правка, — средние по всему корпусу этого не покажут. */
 const perWeek = new Map<
   string,
@@ -104,7 +117,17 @@ for (const run of runs) {
         perCode.set(code, (perCode.get(code) ?? 0) + 1);
         // «blind» — доля отказов, которые классификатор не узнал. Падает — значит
         // новые формы покрыты; не падает — значит добавили в «other» ещё один текст.
-        if ((call.reason ?? 'other') === 'other') bucket.blind += 1;
+        if ((call.reason ?? 'other') === 'other') {
+          bucket.blind += 1;
+          // Записи до v2 хранят `other` как код — понимаем их старое соглашение и
+          // считаем их отдельно, а не свалим в «форму не записали».
+          if (call.reason === 'other') {
+            perLegacy += 1;
+            continue;
+          }
+          const shape = call.unknown ?? '(форма не записана)';
+          perUnknown.set(shape, (perUnknown.get(shape) ?? 0) + 1);
+        }
       }
       for (const flag of call.flags ?? []) {
         const at = perFlag.get(flag) ?? { calls: 0, chars: 0 };
@@ -146,6 +169,18 @@ if (perCode.size > 0) {
     );
   }
   console.log('  «other» — дыра классификатора: появился новый текст отказа — добавить форму в step-counts.');
+  if (perLegacy > 0) {
+    console.log(
+      `  ${String(perLegacy).padStart(4)}  из них — записи до v2: код «other» есть, а формы нет (старые прогоны, не сегодняшние)`,
+    );
+  }
+}
+
+if (perUnknown.size > 0) {
+  console.log('\nother по тексту (форма отказа без путей и кавычек; читать, потом чинить шапку списка):');
+  for (const [shape, count] of [...perUnknown.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15)) {
+    console.log(`  ${String(count).padStart(4)}  ${shape}`);
+  }
 }
 
 if (perWeek.size > 1) {

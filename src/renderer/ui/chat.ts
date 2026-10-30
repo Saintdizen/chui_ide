@@ -1320,6 +1320,26 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return settings.ai.activeModel || provider?.defaultModel || provider?.models[0] || '';
   }
 
+  /**
+   * Модель или провайдер сменились — история писалась для другой модели: у новой
+   * другое окно, другая цена и другой счёт кеша. По умолчанию переносим беседу в
+   * сводку тем же `compactSession`, что и при переполнении. Выключатель —
+   * `ai.compactOnModelSwitch`: `false` пишется только осознанно.
+   *
+   * Сжимаем только активную беседу с историей и только пока модель поддерживает
+   * сжатие. Смена модели во время ответа (`applySettings` приходит и с `settings:changed`)
+   * не должна обрывать ход: пустая история — самый частый случай при настройке.
+   */
+  async function compactAfterModelSwitch(previous: { providerId: string; model: string }): Promise<void> {
+    if (settings.ai.compactOnModelSwitch === false) return;
+    if (previous.model === currentModel() && previous.providerId === currentProvider()?.id) return;
+    const session = active();
+    if (session.history.length < 2) return;
+    if (!modelCapabilities(currentModel()).compactCapable) return;
+    const compacted = await compactSession(session);
+    if (compacted) showToast('Беседа сжата под новую модель');
+  }
+
   function syncProviderFields(): void {
     syncModelLabel();
   }
@@ -2020,6 +2040,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     attachImage: (image: PickedImage) => attachments.attachImage(image),
     attachContext: (item: ChatAttachment) => attachments.attachContext(item),
     applySettings(next: Settings) {
+      // До подмены: после неё `currentModel()` уже новая, и сравнить не с чем.
+      const previous = { providerId: currentProvider()?.id ?? '', model: currentModel() };
       settings = next;
       syncProviderFields();
       syncEffort();
@@ -2028,6 +2050,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       // сразу, а не после следующего ответа модели.
       syncSessionInfo();
       syncAiAvailability();
+      // Смена модели — не только подпись: история писалась под другое окно.
+      void compactAfterModelSwitch(previous);
     },
   };
 }

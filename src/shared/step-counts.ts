@@ -21,7 +21,9 @@ import { callOverlaps, repeatedCallIndexes, type CallOverlapKind } from './call-
  */
 
 /** Версия формата: разбор не должен молча читать чужую раскладку полей. */
-export const STEP_COUNTS_VERSION = 1;
+// 2 — у отказа с кодом `other` на месте кода стоит форма (`unknown`). В записях v1
+// там стоял сам код `other`, а формы не было: отчёт старых прогонов не держим.
+export const STEP_COUNTS_VERSION = 2;
 
 /**
  * Пометки о форме вызова. Считаются по аргументам, но текст аргументов в запись
@@ -50,6 +52,12 @@ export interface RunCountCall {
   flags?: CallFlag[];
   /** Код причины отказа — только наша пометка, без текста аргументов. */
   reason?: CallFailureReason;
+  /**
+   * Первая строка отказа для кода `other`: чистая форма, без путей и кавычек.
+   * Правило замера: причину, которую нельзя прочитать, нельзя и лечить, —
+   * поэтому нечитаемые отказы едут в отчёт текстом, а не молчанием (61 % отказов).
+   */
+  unknown?: string;
 }
 
 export interface RunCountStep {
@@ -175,13 +183,21 @@ function countStep(step: RunStepLog): RunCountStep {
 function countCall(call: RunCallLog, repeated: boolean): RunCountCall {
   const chars = (call.detail?.length ?? 0) + (call.summary?.length ?? 0);
   const flags = [...callFlags(call.name, call.args), ...(repeated ? (['repeat'] as const) : [])];
+  // `failed` — тоже отказ: тест упал или команда вернула ненулевой код. Без него
+  // отчёт по шагам считал такие вызовы успешными и отказы «тихо очищались».
+  const reason = call.ok === false ? callFailureReason(call) : call.failed ? 'command' : undefined;
+  const unknown = reason === 'other' ? refusalShape(call) : '';
+  // Сам код `other` в записи не держим: рядом уже стоит форма отказа, и это
+  // тот же факт. С кодом отчёт считал бы такой отказ дважды.
+  const shown = reason === 'other' ? '' : (reason ?? '');
   return {
     name: call.name,
-    ok: call.ok !== false,
+    ok: call.ok !== false && !call.failed,
     chars,
     ...(call.ms !== undefined ? { ms: call.ms } : {}),
     ...(call.note ? { note: call.note } : {}),
-    ...(call.ok === false ? { reason: callFailureReason(call) } : {}),
+    ...(shown ? { reason: shown } : {}),
+    ...(unknown ? { unknown } : {}),
     ...(flags.length > 0 ? { flags } : {}),
   };
 }
@@ -190,6 +206,10 @@ function countCall(call: RunCallLog, repeated: boolean): RunCountCall {
 export function callFailureReason(call: Pick<RunCallLog, 'ok' | 'summary' | 'detail'>): CallFailureReason {
   if (call.ok !== false) return 'other';
   const text = `${call.summary ?? ''}\n${call.detail ?? ''}`;
+  // Помётка сжатия вместо аргумента — наш же отказ формы замера (30.10): аргумент
+  // подменился текстом сжатия и до инструмента не дошёл. 24 отказа `edit` из 266
+  // всех провалов сидели в «other» именно этим текстом.
+  if (/пометкой сжатия/u.test(text)) return 'arg';
   // Формы наших же отказов пишутся строчными («нужна строка», «не задан path»,
   // «ожидался объект») и не попадали ни под «Нужен » (там «нужен», а не «нужна»),
   // ни под «не задан аргумент» — 116 отказов `edit` из 152 осели в «other»,
@@ -230,6 +250,32 @@ export function callFailureReason(call: Pick<RunCallLog, 'ok' | 'summary' | 'det
     return 'permission';
   }
   return 'other';
+}
+
+/**
+ * Форма отказа для кода `other` — то, чего классификатор не узнал.
+ *
+ * Берём первую строку: там подлежащее, а хвост отказа часто несёт аргументы
+ * модели (путь, якорь, команду) — в отчёт они попадать не должны. Вычищаем
+ * содержимое кавычек и похожего на путь: остаётся «Не задан аргумент <…>».
+ * Длина ограничена, чтобы строка отчёта читалась. Пустая форма («отказ без
+ * текста») — тоже сигнал, и он честно помечается, а не пропадает.
+ */
+export function refusalShape(call: Pick<RunCallLog, 'ok' | 'summary' | 'detail'>): string {
+  const first = `${call.summary ?? ''}\n${call.detail ?? ''}`.split('\n').find((line) => line.trim()) ?? '';
+  const shape = first
+    // Парные кавычки — только парой: одиночная замена съедала текст между
+    // разными кавычками. Одиночная кавычка без пары остаётся: она часть формы.
+    .replace(/«[^«»]*»/gu, '…')
+    .replace(/"[^"]*"/gu, '…')
+    .replace(/'[^']*'/gu, '…')
+    .replace(/`[^`]*`/gu, '…')
+    // Путь узнаём по косой или по расширению: `src/a.ts`, `a.ts`, `/abs/x`.
+    .replace(/(?:[~.]?\/[^\s«»"'`]+|\b[\w.-]+\/[\w./-]+|\b[\w-]+\.[A-Za-z]{1,5}\b)/gu, '…')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (!shape) return '(отказ без текста)';
+  return shape.length > 60 ? `${shape.slice(0, 59)}…` : shape;
 }
 
 /** Команды, которыми читают файлы через шелл вместо `read`/`search`. */

@@ -84,6 +84,9 @@ describe('повторы и поиск без ложных промахов', ()
     expect(retryNames(messages, 2)).toEqual(['terminal']);
     expect(isFailure({ content: 'Ничего не найдено' })).toBe(false);
     expect(isFailure({ ok: true, content: 'код выхода 1 — пример из документации' })).toBe(false);
+    // `failed` — работа сделана, итог отрицательный (упавший тест). Без этой ветки
+    // такие вызовы считались успешными и статистика отказов таяла на глазах.
+    expect(isFailure({ ok: true, failed: true, content: 'Провалено 2 из 10' })).toBe(true);
   });
 
   it('считает старые и новые строки совпадений, но не контекст', () => {

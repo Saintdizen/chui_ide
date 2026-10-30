@@ -975,7 +975,11 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         if (current.apiKey !== '') {
           settings = await deps.rpc.request('ai.setApiKey', { providerId: preset.id, apiKey: current.apiKey });
         }
-        await patch({ ai: { activeProviderId: preset.id } }, true);
+        // Активную модель ставим той же правкой: окно переключает подключение и его
+        // модель одним действием. Без этого `activeModel` оставался от прошлого
+        // провайдера — композер подписывался старой моделью, а запрос уходил с ней
+        // к новому адресу (модель «не отображается после смены»).
+        await patch({ ai: { activeProviderId: preset.id, activeModel: current.model } }, true);
         close();
         showToast(existing ? `«${provider.label}» обновлён` : `Добавлен провайдер «${provider.label}»`);
       } catch (error) {

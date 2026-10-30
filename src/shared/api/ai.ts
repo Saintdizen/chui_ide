@@ -354,6 +354,11 @@ export interface ChatToolResultPayload {
   id: string;
   name: string;
   ok: boolean;
+  /**
+   * Инструмент отработал, но итог отрицательный: упавший тест, ненулевой код
+   * выхода. Отличается от `ok: false` — тот значит «инструмент не смог».
+   */
+  failed?: boolean;
   summary: string;
   detail?: string;
   /** Сколько инструмент работал, мс: видно, что шаг ушёл на сборку, а не на чтение. */

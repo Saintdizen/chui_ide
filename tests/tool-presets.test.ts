@@ -190,18 +190,11 @@ describe('наборы инструментов агента', () => {
     expect(hidden.length).toBeGreaterThan(0);
     const note = toolPresetNote('auto');
     for (const name of hidden) {
-      // Ростера мало: без формы вызова первый вызов уйдёт наугад, а схема
-      // теперь не приедет вовсе (`WIDENED_TOOLS` пуст, п.45) — форма в строке
-      // единственное, что увидит модель. Сверяем начало формы.
-      // Свёрнутые в семью (`terminal(Open|Output|…, command, cwd?)`) ищем по
-      // тексту самой записи: хвост `Output` в ней есть, отдельной `terminalOutput(`
-      // нет. Регулярка жадная: `\w+` иначе отдаёт хвосту лишь последнюю букву.
-      const family = /^(\w+)(Open|Output|Write|Stop|List)$/.exec(name);
-      const record = family ? new RegExp(`(?:^|[ ,:])${family[1]}\\(([^)]*)\\)`).exec(note) : null;
-      const inFamily =
-        family !== null && record !== null && record[1]!.split(/[|,]/).includes(name.slice(family[1]!.length));
-      const shown = note.includes(`${name}(`) ? `${name}(` : inFamily ? `${family![1]}(` : null;
-      expect(shown, `в ростере нет формы ${name}`).not.toBeNull();
+      // С 30.10 ростер — только имена: форму вызова и развилки объясняет
+      // системный промпт (он кешируется и один на прогон), а строка ростера
+      // платила за то же самое в каждом шаге. Здесь сторожится главное — имя
+      // найдено; чем звать, проверяет `token-budget.test.ts`.
+      expect(note, `в ростере нет ${name}`).toContain(name);
       expect(toolPresetAllows('auto', name), `${name} не должен входить в схемы`).toBe(false);
       // Полный набор не задет: исключение — про цену, а не про возможность.
       expect(toolPresetAllows('full', name)).toBe(true);
@@ -212,22 +205,19 @@ describe('наборы инструментов агента', () => {
     }
   });
 
-  it('семья терминала едет одной записью, но говорит про обязательные id и data', () => {
+  it('семья терминала названа в ростере, а поля вызова — в промпте', () => {
     // Шесть имён подряд стоили 84 токена на каждом шаге и несли одно знание:
-    // «у терминала есть сессия, вывод, ввод, стоп, список». Свёрнуто в
-    // `terminal(Open|Output|…, command, cwd?, id, data)`.
+    // «у терминала есть сессия, вывод, ввод, стоп, список». С 30.10 строка
+    // ростера — только имена: перечень действий и полей стоил ещё 113 токенов
+    // в каждом шаге и дословно повторял системный промпт.
     const note = toolPresetNote('auto');
-    expect(note).toContain('terminal(Open|Output|Write|Stop|List');
-    // `terminalWrite` без `id` и `data` откажет на первом же вызове, а схемы в
-    // наборе нет — эти поля обязаны быть в строке. `cwd?` — как был, с `?`.
-    expect(note).toContain('cwd?');
-    expect(note).toContain('id');
-    expect(note).toContain('data');
-    // Сворачиваем только то, что правда в ростере целиком: обрезанная семья
-    // обещала бы имена, которых в наборе нет (`terminalList` при выключенном
-    // терминале).
+    for (const name of ['terminal', 'terminalOutput', 'terminalWrite']) {
+      expect(note, `${name} нет в ростере`).toContain(name);
+    }
+    // Где потеряны поля — держит `token-budget.test.ts`: там сторож берёт
+    // и ростер, и промпт вместе, потому что порознь они уже расходились.
     const onlyOutput = rosterLine(['terminalOutput']);
-    expect(onlyOutput).toContain('terminalOutput(');
+    expect(onlyOutput).toContain('terminalOutput');
     expect(onlyOutput).not.toContain('terminal(');
   });
 

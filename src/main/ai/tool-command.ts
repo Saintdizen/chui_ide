@@ -76,7 +76,8 @@ export async function runTests(ctx: ToolContext, args: Record<string, unknown> =
   const passed = result.code === 0 && !result.timedOut;
 
   return {
-    ok: passed,
+    ok: true,
+    ...(passed ? {} : { failed: true }),
     summary: `тесты (${resolved.label}): код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
     detail: `${commandLine(ctx, resolved.command)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
   };

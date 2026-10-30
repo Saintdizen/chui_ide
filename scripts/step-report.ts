@@ -54,6 +54,7 @@ console.log(
 );
 
 // Отказы: цена шага. «ok: false» — вызов ответил ошибкой или аргумент не сошёлся.
+// Сюда же идут `failed` (упавший тест, код выхода) — в записи они уже сведены в `ok: false`.
 const failed = calls.filter((call) => !call.ok);
 console.log('');
 console.log(`Отказы: ${failed.length} из ${calls.length} (${Math.round((failed.length / calls.length) * 100)}%)`);

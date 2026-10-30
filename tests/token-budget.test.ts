@@ -11,7 +11,6 @@ import {
   rosterNames,
   WIDENED_TOOLS,
   presetToolNames,
-  rosterLine,
   toolPresetNote,
   type ToolPresetId,
 } from '../src/shared/tool-presets';
@@ -234,15 +233,17 @@ describe('бюджет схем', () => {
    * Поэтому она обязана называть поля, без которых вызов не собрать:
    * а `terminal(Open|…, command, cwd?)` до 26.10 молчала про `background`/`timeout`.
    */
-  it('ростер называет поля, без которых скрытый инструмент не позвать', () => {
-    const line = rosterLine(rosterNames('auto'));
-    const shown = (name: string) => {
-      const start = line.indexOf(`${name}(`);
-      expect(start).toBeGreaterThanOrEqual(0);
-      return line.slice(start, line.indexOf(')', start) + 1);
-    };
-    for (const field of ['command', 'cwd?', 'background?', 'timeout?']) {
-      expect(shown('terminal')).toContain(field);
+  it('ростер называет имена — форму объясняет промпт', () => {
+    const note = toolPresetNote('auto');
+    // С 30.10 строка ростера — только имена: перечень действий и полей стоил
+    // 113 ток на шаг и дублировал системный промпт. Сторож теперь держит
+    // разделение: имена — в ростере, развилки — в промпте.
+    for (const name of ['terminal', 'mind', 'run_tests', 'project_map']) {
+      expect(note, `${name} нет в ростере`).toContain(name);
+    }
+    const prompt = agentPrompt('auto', { confirm: true });
+    for (const word of ['background: true', 'mind notes', 'run_tests']) {
+      expect(prompt, `промпт не называет ${word}`).toContain(word);
     }
   });
 });

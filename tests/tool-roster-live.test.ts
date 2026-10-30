@@ -17,7 +17,9 @@ describe('скрытое по имени: привычка не должна д�
   it('в запросе нет схемы project_map, но имя — в ростере', () => {
     const wire = toOpenAiTools(offered()).map((tool) => tool.function.name);
     expect(wire).not.toContain('project_map');
-    expect(toolPresetNote('auto')).toContain('project_map()');
+    // Имя — без скобок: строка ростера теперь без полей вызова (они все в
+    // системном промпте), а тест сторожит главное — имя в ростере есть.
+    expect(toolPresetNote('auto')).toContain('project_map');
   });
 
   it('подсказка обещает только то, что механизм делает', () => {

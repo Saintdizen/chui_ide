@@ -15,6 +15,8 @@ export interface CensusMessage {
   role?: string;
   content?: unknown;
   ok?: boolean;
+  /** Работа сделана, итог отрицательный: тоже отказ, но не сбой инструмента. */
+  failed?: boolean;
   usage?: ChatUsage;
   toolCallId?: string;
   toolCalls?: CensusCall[];
@@ -133,7 +135,7 @@ export function textOf(content: unknown): string {
 
 /** Отказы не смешиваем с успешной пустой выдачей. */
 export function isFailure(message: CensusMessage): boolean {
-  if (typeof message.ok === 'boolean') return !message.ok;
+  if (typeof message.ok === 'boolean') return !message.ok || message.failed === true;
   return (
     /^(?:Ошибка(?:\s|:|$)|Не хватает аргумента|Неизвестное значение аргумента)/u.test(textOf(message.content).trim()) ||
     /не входит\. Скажи человеку|код выхода [1-9]/u.test(textOf(message.content))

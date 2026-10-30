@@ -369,6 +369,9 @@ export function toolPresetAllows(preset: ToolPresetId, name: string): boolean {
  * выполнять — нет. Такие поля печатаем с `?`, чтобы было видно: необязательны.
  */
 const ROSTER_EXTRA: Record<string, readonly string[]> = {
+  // `mind` здесь нет намеренно: набор его действий назван в системном промпте
+  // (`agentPrompt`), а повтор стоил 27 токенов на каждом шаге — при том, что
+  // строка ростера уезжает в КАЖДЫЙ запрос, включая автосжатие и заголовки.
   terminal: ['command', 'cwd', 'background', 'timeout'],
   mcp: ['server', 'uri'],
   list: ['path', 'glob', 'limit'],
@@ -377,7 +380,6 @@ const ROSTER_EXTRA: Record<string, readonly string[]> = {
   // Без`query` поиск по беседам отказывает, а без`uid` не назвать прогон: оба
   // поля необязательные, но без них строка ростера не объясняет, чем звать.
   history: ['query', 'uid'],
-  mind: ['text', 'question', 'steps'],
 };
 
 /**
@@ -450,9 +452,31 @@ function rosterItems(names: readonly string[]): string[] {
   return items;
 }
 
+/**
+ * Полная строка ростера: имена с формой вызова. Осталась для отчётов и тестов;
+ * в запрос к модели едет `shortRosterLine`.
+ */
 export function rosterLine(names: readonly string[]): string {
   if (names.length === 0) return '';
   return ` Скрыто по цене, зовётся по имени: ${rosterItems(names).join(', ')}.`;
+}
+
+/**
+ * Короткая строка ростера — без полей вызова: только имена.
+ *
+ * Нужна там, где схема всё равно не растёт, а повторы бесплатны только в наших
+ * отчётах: полная форма инструмента уже едет в разговоре (харнес, экран «кто
+ * делает прогон», хвост рукава). Но не только: агент зовёт по имени, а чем звать
+ * "terminal" — объясняет системный промпт. Для "terminal" полей не хватает
+ * ни в одной настоящей работе, для "mind" — ни в одной тоже (что видно из
+ * `agentPrompt`: там имя действия названо прямо).
+ *
+ * Цена: 181 токен → 47 на каждом шаге. Хвост формы при этом не теряется:
+ * отказ вызова называет недостающее поле по перечню (→ «Не хватает аргумента»).
+ */
+export function shortRosterLine(names: readonly string[]): string {
+  if (names.length === 0) return '';
+  return ` Скрыто по цене, зовётся по имени: ${names.join(', ')}.`;
 }
 
 /** Имена для строки ростера: всё, что скрыто от блока `tools`, без докачки схем. */
@@ -472,7 +496,7 @@ function rosterLineNames(preset: ToolPresetId): readonly string[] {
 export function toolPresetNote(preset: ToolPresetId): string {
   const spec = toolPresetSpec(preset);
   if (spec.groups === null) {
-    const roster = rosterLine(rosterNames(preset));
+    const roster = shortRosterLine(rosterNames(preset));
     if (roster === '') return '';
     return `Набор инструментов: «${spec.label}» — всё, что может эта сборка. Чего не видно в списке — зови по имени, он выполнится.${roster}`;
   }
@@ -487,12 +511,12 @@ export function toolPresetNote(preset: ToolPresetId): string {
     // и перечень полей в строке ростера стоил бы токенов на каждом шаге — больше,
     // чем одна докачка схемы. Модели достаточно знать, что спрятанное зовётся
     // по имени и форма видна из схемы.
-    const roster = rosterLine(rosterLineNames(preset));
+    const roster = shortRosterLine(rosterLineNames(preset));
     return (
       `Набор инструментов: «${spec.label}» (${labels}). Чего нет в списке — зови по имени: ` +
       `выполнится без спроса; поля формы — из отказа «не задан аргумент».${roster}`
     );
   }
-  const roster = rosterLine(rosterNames(preset));
+  const roster = shortRosterLine(rosterNames(preset));
   return `Набор сужен: «${spec.label}» (${labels}). Нужного нет ни в списке, ни в ростере — скажи об этом человеку, а не ищи обход.${roster}`;
 }

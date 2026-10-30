@@ -276,7 +276,6 @@ const TOOL_STATE_LABEL: Record<ToolState, string> = {
   ok: 'готово',
   fail: 'ошибка',
 };
-
 /** Какой значок отвечает состоянию: галочка в круге, крест в круге, круг «идёт». */
 const TOOL_STATE_ICON: Record<ToolState, IconName> = {
   running: 'spinner',
@@ -306,7 +305,17 @@ function toolStateElement(): HTMLElement {
   return element;
 }
 
-function setToolState(element: HTMLElement, ok: boolean): void {
+function setToolState(element: HTMLElement, ok: boolean, failed = false): void {
+  // `failed` — итог неудачный, но инструмент сработал: упавший тест это результат,
+  // а не поломка. Значок галочки с подписью «завершено с ненулевым кодом»
+  // не врёт и не красит карточку в красное.
+  if (ok && failed) {
+    element.className = 'tool-state is-ok is-failed';
+    element.replaceChildren(svgIcon('checkCircle', 14));
+    element.title = 'завершено: результат отрицательный';
+    element.setAttribute('aria-label', element.title);
+    return;
+  }
   paintToolState(element, 'tool-state', ok ? 'ok' : 'fail');
 }
 
@@ -341,7 +350,10 @@ function createToolGroup(
 ): ToolGroupView {
   let count = 0;
   let pending = 0;
+  /** Сколько вызовов сломалось: это ошибка и по значку, и по счёту. */
   let failed = 0;
+  /** Сколько вызовов отработало с отрицательным итогом: упавшие тесты, ненулевой код. */
+  let negative = 0;
   /** Сколько файлов тронули вызовы группы: видно в сводке, когда группа свёрнута. */
   let changedFiles = 0;
   /**
@@ -499,6 +511,9 @@ function createToolGroup(
     // Сколько из вызовов упало — числом: значок говорит «есть ошибка», а счётчик —
     // сколько их. Терять это нельзя: по одному кресту не понять размах.
     if (failed > 0) briefParts.push(`ошибок: ${failed}`);
+    // Отрицательный итог — не ошибка инструмента, поэтому и слово другое: иначе
+    // упавший тест читался бы как поломка вызова.
+    if (negative > 0) briefParts.push(`с отрицательным итогом: ${negative}`);
     if (changedFiles > 0) briefParts.push(`${changedFiles} ${fileWord(changedFiles)}`);
     setBrief(briefParts.length > 0 ? `· ${briefParts.join(' · ')}` : '');
 
@@ -507,6 +522,15 @@ function createToolGroup(
       return;
     }
 
+    // Ставка на худшее: поломка важнее отрицательного итога, а значок в шапке
+    // один. «Отрицательный» без ошибок — жёлтая галочка, как у карточки.
+    if (failed === 0 && negative > 0) {
+      state.className = 'tool-group-state is-ok is-failed';
+      state.replaceChildren(svgIcon('checkCircle', 14));
+      state.title = 'завершено: у части вызовов результат отрицательный';
+      state.setAttribute('aria-label', state.title);
+      return;
+    }
     paintToolState(state, 'tool-group-state', failed > 0 ? 'fail' : 'ok');
   };
 
@@ -623,7 +647,7 @@ function createToolGroup(
       card,
       finish: (result) => {
         outcome = result;
-        setToolState(cardState, result.ok);
+        setToolState(cardState, result.ok, result.failed);
         // Файлы-результаты показываем сразу и вне раскрытия: это то, ради чего
         // вызов и делался. Место — между шапкой и панелью, чтобы кнопки были видны.
         if (result.ok && result.presented?.length) {
@@ -637,6 +661,7 @@ function createToolGroup(
         time.title = spent ? `Выполнялось ${spent}` : '';
         pending -= 1;
         if (!result.ok) failed += 1;
+        else if (result.failed) negative += 1;
         // Ряд файлов появляется только у удачного вызова: под ошибкой список
         // тронутого обещал бы изменения, которых нет.
         // Тронутые файлы отдельным рядом не показываем: список — в сводке шапки

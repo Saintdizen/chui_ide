@@ -49,7 +49,10 @@ describe('фоновый вывод тестов', () => {
     job.append('✓ first 1ms\n✓ second 2ms\nFAIL third\nexpected true\nTests 2 passed | 1 failed\n');
     job.finish(true);
     const out = await job.read();
-    expect(out.ok).toBe(false);
+    // С 30.10 джоба отработала (`ok`), а итог у неё отрицательный (`failed`):
+    // иначе упавший прогон красил карточку в «сбой инструмента».
+    expect(out.ok).toBe(true);
+    expect(out.failed).toBe(true);
     expect(out.detail).not.toContain('✓ first');
     expect(out.detail).toContain('прошло тестов: 2');
     expect(out.detail).toContain('FAIL third\nexpected true');

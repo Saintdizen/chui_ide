@@ -1148,6 +1148,14 @@
   color: var(--text_color_error);
 }
 
+/* Группа без поломок, но с отрицательным итогом у части вызовов: жёлтая
+   галочка, как у строки. Правило после `.is-ok` — при равной специфичности
+   побеждает позднее. Цвет — роль серьёзности: жёлтый пометки должен читаться
+   как одно с волнистой линией в редакторе. */
+.tool-group-state.is-ok.is-failed {
+  color: var(--severity_warning, var(--text_color_secondary));
+}
+
 /* Тело ленты: слева идёт линия, строки сдвинуты под неё. */
 .tool-group-body {
   position: relative;
@@ -1261,6 +1269,12 @@
 
 .tool-state.is-fail {
   color: var(--text_color_error);
+}
+
+/* Инструмент отработал, но результат отрицательный: упавший тест — это данные,
+   а не поломка. Значок тот же «готово», цвет предупреждающий, не красный. */
+.tool-state.is-ok.is-failed {
+  color: var(--severity_warning, var(--text_color_secondary));
 }
 
 .tool-state .icon,

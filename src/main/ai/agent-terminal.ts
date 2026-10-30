@@ -360,7 +360,8 @@ export async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<st
   if (result.truncated) notes.push('вывод обрезан');
 
   return {
-    ok: result.code === 0 && !result.timedOut,
+    ok: true,
+    ...(result.code === 0 && !result.timedOut ? {} : { failed: true }),
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
     detail: `${commandLine(ctx, command, cwd.relative)}\n${output.length ? output : '(пустой вывод)'}${install && !full ? `\n… (скрыто строк установки: ${install.hidden})` : ''}${spillNote(full)}`,
     ...(didWork(result, command) ? { applied: true } : {}),
@@ -512,7 +513,8 @@ export function terminalOutput(ctx: ToolContext, args: Record<string, unknown>):
   if (snapshot.file) notes.push(`полностью — в файле ${snapshot.file}`);
 
   return {
-    ok: snapshot.status !== 'failed',
+    ok: true,
+    ...(snapshot.status === 'failed' ? { failed: true } : {}),
     summary: `${snapshot.id}: ${jobState(snapshot)}${output ? ` · нового вывода: ${output.split('\n').length} строк` : ''}`,
     detail: [
       ...notes,
