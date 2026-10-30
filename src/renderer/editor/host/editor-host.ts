@@ -30,6 +30,7 @@ import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-le
 import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
 import type { DocumentColor } from '../../../shared/lsp-document-color';
+import type { DocumentHighlightSpan } from '../../../shared/lsp-document-highlight';
 import type { DocumentLinkEntry } from '../../../shared/lsp-document-links';
 import type { LinkedRange } from '../../../shared/lsp-linked-editing';
 import { type SelectionSpan, type SelectionStep, stepSelection } from '../../../shared/lsp-selection-range';
@@ -92,6 +93,8 @@ const LENS_REFRESH_DELAY_MS = 400;
 
 /** Пауза перед перезапросом связанных участков: связь ищем по движению курсора. */
 const LINKED_REFRESH_DELAY_MS = 150;
+/** Пауза перед запросом вхождений: каретка ходит по столбцу, а ответ нужен тогда, когда встала. */
+const HIGHLIGHT_REFRESH_DELAY_MS = 150;
 
 /** Пауза перед перезапросом семантической подсветки: сервер разбирает файл целиком. */
 const SEMANTIC_REFRESH_DELAY_MS = 300;
@@ -245,6 +248,14 @@ export interface EditorHostOptions {
    * Не задано — крошек нет: показывать нечего.
    */
   fileSymbols?: (path: string) => Promise<FileSymbol[] | null>;
+  /**
+   * Вхождения символа у сервера: точные места по области видимости, с пометкой
+   * чтение/запись. Не задано или `null` в ответе — своим поиском по тексту.
+   */
+  documentHighlights?: (
+    path: string,
+    position: { line: number; column: number },
+  ) => Promise<readonly DocumentHighlightSpan[] | null>;
   /**
    * Цвета, объявленные в файле (`textDocument/documentColor`) — для плашек перед
    * значениями цвета. Не задано — плашек нет.
@@ -486,6 +497,12 @@ export class EditorHost {
   private readonly readOnlyBadge: HTMLElement;
   /** Хлебные крошки над текстом: путь к символу под курсором. `null` — источника нет. */
   private readonly breadcrumbs: BreadcrumbsWidget | null;
+  /** Вхождения символа у сервера — вместо своего поиска по тексту. */
+  private readonly highlightSource:
+    | ((path: string, position: { line: number; column: number }) => Promise<readonly DocumentHighlightSpan[] | null>)
+    | undefined;
+  private highlightTimer: number | null = null;
+  private highlightRequestId = 0;
   /** Источник цветов для плашек в тексте. */
   private readonly documentColorSource: ((path: string) => Promise<readonly DocumentColor[]>) | undefined;
   /** Куда стоял курсор в каждом файле — восстанавливается при возврате к файлу. */
@@ -635,6 +652,7 @@ export class EditorHost {
       : null;
     if (this.breadcrumbs) container.append(this.breadcrumbs.element);
     this.documentColorSource = options.documentColors;
+    this.highlightSource = options.documentHighlights;
     this.indentSize = options.tabSize ?? 4;
     this.controller = new EditorController(buffer, { tabSize: options.tabSize });
     // Документ (истина о содержимом) узнаёт о правке ПЕРВЫМ — раньше попапов.
@@ -2357,6 +2375,34 @@ export class EditorHost {
   private emitCursor(): void {
     this.cursorEmitter.fire(this.cursorState);
     this.breadcrumbs?.refresh();
+    this.scheduleHighlights();
+  }
+
+  /**
+   * Вхождения символа у сервера: точные места по области видимости, а не совпадения текста.
+   * Спрашиваем с паузой — движение каретки не повод дёргать сервер на каждый столбец.
+   */
+  private scheduleHighlights(): void {
+    if (!this.highlightSource) return;
+    if (this.highlightTimer !== null) window.clearTimeout(this.highlightTimer);
+    this.highlightTimer = window.setTimeout(() => {
+      this.highlightTimer = null;
+      void this.refreshHighlights();
+    }, HIGHLIGHT_REFRESH_DELAY_MS);
+  }
+
+  private async refreshHighlights(): Promise<void> {
+    const source = this.highlightSource;
+    const path = this.path;
+    if (!source || !path) return;
+    const position = this.cursorPosition();
+    const id = (this.highlightRequestId += 1);
+    const ranges = await source(path, position).catch(() => null);
+    // Пока ждали, курсор успел уйти в другое место — этот ответ уже не про него.
+    if (id !== this.highlightRequestId || this.path !== path) return;
+    // Пустой ответ — не значит «вхождений нет»: сервер не умеет или молчит.
+    // Тогда отдаём `null`, и вид откатывается на свой текстовый поиск.
+    this.view.setHighlightedOccurrences(ranges && ranges.length > 0 ? ranges : null);
   }
 }
 

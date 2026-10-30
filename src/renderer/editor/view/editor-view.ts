@@ -38,6 +38,7 @@ import { measureFont, monospaceMetrics, type GlyphMetrics } from './glyph-metric
 import { scrollFinished, scrollStep } from './smooth-scroll';
 import { columnForX, layoutLine, xForColumn } from './line-layout';
 import { FileDecorations, squigglyRect, type LensDecoration, type LinkDecoration } from './decorations';
+import { offsetsAt } from '../../../shared/text-offsets';
 import { findBracketPair, findOccurrences, type BracketPair } from './context-highlight';
 import { caret, isEmpty, rangesRects, selectionEnd, selectionStart, type Selection } from './selection';
 import { clamp, contentHeight, lineAtY, maxScrollLeft, maxScrollTop, revealLine, visibleLines } from './viewport';
@@ -182,6 +183,8 @@ export class EditorView {
   private searchCurrent = -1;
   /** Вхождения слова под курсором: пересчитываются только когда меняется само слово. */
   private occurrences: readonly { start: number; end: number }[] = [];
+  /** Серверные вхождения для текущей каретки; `null` — рисуем свои по тексту. */
+  private serverOccurrences: readonly { start: number; end: number }[] | null = null;
   /** Связанные участки (linkedEditing): имена парных тегов, подсвечены все сразу. */
   private linked: readonly { start: number; end: number }[] = [];
   /**
@@ -472,9 +475,21 @@ export class EditorView {
    * скобок. Зовётся при каждом переезде курсора.
    */
   private updateContextHighlights(): void {
-    this.occurrences = findOccurrences(this.buffer, this.primarySelection);
+    // Серверные вхождения (по области видимости) важнее текстовых: они на текущей
+    // каретке и сняты хостом уже для неё. Каретка переехала — их больше нет.
+    this.occurrences = this.serverOccurrences ?? findOccurrences(this.buffer, this.primarySelection);
     this.brackets = findBracketPair(this.buffer, this.primarySelection.active);
     this.renderHighlight();
+  }
+
+  /**
+   * Вхождения от языкового сервера: точные места по области видимости, а не строки,
+   * совпавшие текстом. `null` — сервер не ответил (ещё не спросили или язык без
+   * сервера): тогда работает свой поиск по тексту.
+   */
+  setHighlightedOccurrences(ranges: readonly { line: number; column: number; endColumn: number }[] | null): void {
+    this.serverOccurrences = ranges ? offsetsAt(this.buffer.text, ranges) : null;
+    this.updateContextHighlights();
   }
 
   /** Слой подсветки контекста: прямоугольники вхождений и подсветка скобок. */
@@ -572,6 +587,7 @@ export class EditorView {
     this.ghostLayer.replaceChildren();
     // Вхождения слова и пара скобок были о прошлом файле — начинаем с чистого листа.
     this.occurrences = [];
+    this.serverOccurrences = null;
     this.brackets = null;
     this.highlightLayer.replaceChildren();
   }

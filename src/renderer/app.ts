@@ -594,6 +594,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     inlayHints: (path, text) => lsp.inlayHints(path, endOfText(text)),
     // Плашки цветов: сервер CSS/SCSS/LESS знает, что `#3b82f6` и `rgb(...)` — цвет.
     documentColors: (path) => lsp.documentColors(path),
+    // Вхождения символа: сервер знает области видимости, свой поиск по тексту — нет.
+    documentHighlights: (path, position) => lsp.documentHighlights(path, position),
     // Правый клик по тексту: состав пунктов — `core/editor-menu.ts` (чистая функция,
     // покрыта тестом), а показывает приложение: попапы и реестр команд у него.
     contextMenu: (info, event) => {

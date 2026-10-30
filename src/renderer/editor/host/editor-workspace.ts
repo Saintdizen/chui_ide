@@ -24,6 +24,7 @@ import type { TextEdit } from '../../../shared/edits';
 import type { GitLineChange } from '../../../shared/git-line-changes';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import type { DocumentColor } from '../../../shared/lsp-document-color';
+import type { DocumentHighlightSpan } from '../../../shared/lsp-document-highlight';
 import type { RunnableTest } from '../../../shared/python-tests';
 import type { TestOutcome } from '../../../shared/test-model';
 import type { BreakpointInput } from '../../core/debug';
@@ -199,6 +200,11 @@ export interface EditorWorkspaceOptions {
    * Цвета, объявленные в документе (плашки перед значением). Не задано — плашек нет.
    */
   documentColors?: (path: string) => Promise<DocumentColor[]>;
+  /** Вхождения символа у сервера — точнее, чем поиск одинакового текста. */
+  documentHighlights?: (
+    path: string,
+    position: { line: number; column: number },
+  ) => Promise<readonly DocumentHighlightSpan[] | null>;
   /**
    * Подписка на запись файла: отдаёт путь и отписку. Нужна подсказкам после точки —
    * по этому событию сбрасывается прочитанный текст соседнего файла (см.
@@ -308,6 +314,7 @@ export class EditorWorkspace {
   private readonly fileSymbols: EditorWorkspaceOptions['fileSymbols'];
   /** Источник цветов документа для плашек перед цветовыми значениями. */
   private readonly documentColors: EditorWorkspaceOptions['documentColors'];
+  private readonly documentHighlights: EditorWorkspaceOptions['documentHighlights'];
   /** Переименование символа: шов к приложению (диалог имени и применение правок). */
   private readonly renameSymbol: ((path: string, position: { line: number; column: number }) => void) | undefined;
   /** Перейти к месту — открыть файл и поставить курсор. */
@@ -447,6 +454,7 @@ export class EditorWorkspace {
     this.symbols = options.symbols;
     this.fileSymbols = options.fileSymbols;
     this.documentColors = options.documentColors;
+    this.documentHighlights = options.documentHighlights;
     this.renameSymbol = options.renameSymbol;
     this.revealLocation = options.revealLocation;
     this.readText = options.readText;
@@ -562,6 +570,7 @@ export class EditorWorkspace {
       symbols: this.symbols,
       fileSymbols: this.fileSymbols,
       documentColors: this.documentColors,
+      documentHighlights: this.documentHighlights,
       revealLocation: this.revealLocation,
       readText: this.readText,
       onDidWriteFile: this.onDidWriteFile,

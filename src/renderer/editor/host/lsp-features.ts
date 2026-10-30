@@ -24,6 +24,8 @@
 import type { LspDiagnostic } from '../../../shared/api';
 import type { FileEdit, TextEdit } from '../../../shared/edits';
 import type { DocumentColor } from '../../../shared/lsp-document-color';
+import type { DocumentHighlightSpan } from '../../../shared/lsp-document-highlight';
+import { toDocumentHighlights } from '../../../shared/lsp-document-highlight';
 import { toDocumentColors } from '../../../shared/lsp-document-color';
 import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations';
 import { toCompletions, toResolvedCompletion, type ResolvedCompletion } from '../../../shared/lsp-completions';
@@ -316,6 +318,19 @@ export class LspFeatures {
       textDocument: { uri: pathToUri(path) },
     });
     return toDocumentColors(result);
+  }
+
+  /**
+   * Все вхождения символа под позицией, с пометкой чтение/запись. Отличается от
+   * нашей своей подсветки тем, что сервер знает области видимости: одноимённые поля
+   * разных классов он не путает. Пустой ответ — сервер не умеет; это не ошибка.
+   */
+  async documentHighlights(path: string, position: LspPosition): Promise<DocumentHighlightSpan[]> {
+    const result = await this.request(path, 'textDocument/documentHighlight', {
+      textDocument: { uri: pathToUri(path) },
+      position: { line: position.line - 1, character: position.column - 1 },
+    });
+    return toDocumentHighlights(result);
   }
 
   async executeCommand(path: string, command: string, args: readonly unknown[]): Promise<unknown> {
