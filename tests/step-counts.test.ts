@@ -127,7 +127,11 @@ describe('счётчик шагов', () => {
       { id: 'b', name: 'read', args: '{}', ok: true, summary: 'x' },
     ];
     const calls = buildCountsRecord(log).steps[0]!.calls;
-    expect(calls[0]).toMatchObject({ ok: false, reason: 'command' });
+    // Код-заглушку `command` в записи не держим: вид назван, причины нет.
+    // Отказ всё равно виден — по `ok` и по форме.
+    expect(calls[0]).toMatchObject({ ok: false });
+    expect(calls[0]!.reason).toBeUndefined();
+    expect(calls[0]!.unknown).toBeTruthy();
     expect(calls[1]).toMatchObject({ ok: true });
     expect(calls[1]!.reason).toBeUndefined();
   });
@@ -196,7 +200,7 @@ describe('счётчик шагов', () => {
     expect(record.steps[0]!.calls.map((item) => item.reason)).toEqual([
       'action',
       'arg',
-      'command',
+      undefined,
       'not-found',
       'arg',
       'anchor',
@@ -209,8 +213,9 @@ describe('счётчик шагов', () => {
       'unavailable',
       'unavailable',
       'unavailable',
-      'command',
-      'command',
+      // Команда провалилась без внятного текста: причина = форма, кода нет.
+      undefined,
+      undefined,
       'unavailable',
     ]);
     expect(callFailureReason({ ok: true, summary: 'ok' })).toBe('other');
@@ -231,7 +236,9 @@ describe('счётчик шагов', () => {
     expect(anchored).not.toContain('oldText');
     // Отказ без текста — тоже сигнал, а не пустота.
     expect(refusalShape({ ok: false, summary: '' })).toBe('(отказ без текста)');
-    // Форма есть у каждого отказа, кроме `other`, и едет в запись вместе с кодом.
+    // Форма есть у каждого отказа: и там, где код молчит (`other`), и там, где
+    // код — заглушка `command` (упавший тест тоже отказ, но ЧЕМ он упал, код не
+    // говорит). Оба едут в запись формой вместо кода.
     const second = buildCountsRecord(
       run({
         steps: [
@@ -246,13 +253,43 @@ describe('счётчик шагов', () => {
         ],
       }),
     );
-    // Код `command` называет причину — формы рядом нет, текста в отчёте тоже.
-    expect(second.steps[0]!.calls[0]!.reason).toBe('command');
-    expect(second.steps[0]!.calls[0]!.unknown).toBeUndefined();
+    // Код `command` — заглушка: причина не в нём, а в тексте, и текст едет формой.
+    expect(second.steps[0]!.calls[0]!.reason).toBeUndefined();
+    expect(second.steps[0]!.calls[0]!.unknown).toBe('код выхода 1');
     // Код молчит — отказ всё равно назван формой, по ней и стоит новая форма.
     expect(second.steps[0]!.calls[1]!.reason).toBeUndefined();
     // Аргумент модели (имя поставщика в кавычках) в отчёт не едет — только форма.
     expect(second.steps[0]!.calls[1]!.unknown).toBe('Неизвестный поставщик …');
+  });
+
+  it('проваленный вызов без кода причины тоже пишет форму', () => {
+    // Замер 30.10: 201 отказ из 326 лежали с кодом-заглушкой и без формы — то
+    // есть в записи не было ни причины, ни текста, и чинить было нечего.
+    const record = buildCountsRecord(
+      run({
+        steps: [
+          {
+            index: 1,
+            ms: 500,
+            calls: [
+              {
+                id: 'z',
+                name: 'run_tests',
+                args: '{}',
+                ok: true,
+                failed: true,
+                summary: '1 тест упал: ждали 2, получили 3',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const call = record.steps[0]!.calls[0]!;
+    expect(call.ok).toBe(false);
+    // Код-заглушку не держим — она не причина, а его место занимает форма.
+    expect(call.reason).toBeUndefined();
+    expect(call.unknown).toBe('1 тест упал: ждали 2, получили 3');
   });
 
   // Дыры, найденные `npm run census` в живых беседах: оба текста оседали в «other».

@@ -113,18 +113,20 @@ for (const run of runs) {
       bucket.calls += 1;
       if (call.ok === false) {
         bucket.fail += 1;
-        const code = `${call.name}.${call.reason ?? 'other'}`;
-        perCode.set(code, (perCode.get(code) ?? 0) + 1);
-        // «blind» — доля отказов, которые классификатор не узнал. Падает — значит
-        // новые формы покрыты; не падает — значит добавили в «other» ещё один текст.
-        if ((call.reason ?? 'other') === 'other') {
-          bucket.blind += 1;
-          // Записи до v2 хранят `other` как код — понимаем их старое соглашение и
-          // считаем их отдельно, а не свалим в «форму не записали».
-          if (call.reason === 'other') {
+        const code = call.reason ?? 'anonymous';
+        perCode.set(`${call.name}.${code}`, (perCode.get(`${call.name}.${code}`) ?? 0) + 1);
+        // «blind» — доля отказов, у которых нет ни осмысленного кода, ни формы.
+        // Падает — значит новые формы покрыты; не падает — значит добавили
+        // в «other» ещё один текст. Код-заглушка `command` (`failed` без причины)
+        // тоже слеп: упавший тест сам не говорит, чем его чинить, — текст говорит.
+        if (code === 'other' || code === 'command' || code === 'anonymous') {
+          // Записи до v2 держат `other` как код и формы не пишут: их соглашение
+          // понимаем, но в «слепые» не берём — тот текст записать было нечем.
+          if (call.reason === 'other' && !call.unknown) {
             perLegacy += 1;
             continue;
           }
+          bucket.blind += 1;
           const shape = call.unknown ?? '(форма не записана)';
           perUnknown.set(shape, (perUnknown.get(shape) ?? 0) + 1);
         }
@@ -168,7 +170,7 @@ if (perCode.size > 0) {
       `  ${code.padEnd(24)} ${String(count).padStart(4)}  ${share(count, named).padStart(5)} от вызовов ${name}`,
     );
   }
-  console.log('  «other» — дыра классификатора: появился новый текст отказа — добавить форму в step-counts.');
+  console.log('  «anonymous» — отказа без кода причины быть не должно: значит запись старая или код потерян.');
   if (perLegacy > 0) {
     console.log(
       `  ${String(perLegacy).padStart(4)}  из них — записи до v2: код «other» есть, а формы нет (старые прогоны, не сегодняшние)`,
@@ -177,7 +179,7 @@ if (perCode.size > 0) {
 }
 
 if (perUnknown.size > 0) {
-  console.log('\nother по тексту (форма отказа без путей и кавычек; читать, потом чинить шапку списка):');
+  console.log('\nотказы без внятного кода по тексту (форма без путей и кавычек; читать, потом чинить шапку списка):');
   for (const [shape, count] of [...perUnknown.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15)) {
     console.log(`  ${String(count).padStart(4)}  ${shape}`);
   }
@@ -185,7 +187,7 @@ if (perUnknown.size > 0) {
 
 if (perWeek.size > 1) {
   console.log('\nпо неделям (сдвиг правки виден только здесь: среднее по корпусу его прячет):');
-  console.log('  неделя     прогонов  шагов/прогон  отказов   из них other  read.paths  shell-read  cd');
+  console.log('  неделя     прогонов  шагов/прогон  отказов  слепых (other/command)  read.paths  shell-read  cd');
   for (const [week, bucket] of [...perWeek.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     // Флаги, а не имена: `paths`, `shell-read`, `cd` ставит агент (см. `CallFlag`).
     const per = (flag: string) => (bucket.flags.get(flag) ?? 0) / Math.max(bucket.runs, 1);
