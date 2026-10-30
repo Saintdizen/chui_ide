@@ -73,8 +73,15 @@ export function parseEdits(value: unknown): ParsedEdits {
   }
 
   const parsed: ParsedEdits = { anchors: [], positions: [] };
+  // Файл, названный в предыдущем элементе: в этой сессии пять отказов из шести
+  // пришли от правок пачкой — первый элемент с `path`, остальные без (30.10).
+  // Путь не подставляем (чужая правка не должна уехать в соседний файл), но
+  // отказ обязан сказать, где он лежит: по записи видно, что модель имела в виду.
+  let lastPath: string | undefined;
   list.forEach((item, index) => {
-    const file = parseEditFile(item, index);
+    const file = parseEditFile(item, index, lastPath);
+    const named = typeof item === 'object' && item !== null && !Array.isArray(item) ? item.path : null;
+    if (typeof named === 'string') lastPath = named;
     if (file.anchor) parsed.anchors.push(file.anchor);
     if (file.position) parsed.positions.push(file.position);
   });
@@ -103,11 +110,42 @@ function flatHunks(raw: Record<string, unknown>): unknown {
 }
 
 /**
+ * Форма пришедшего элемента — одной строкой: имена ключей и типы значений.
+ * Содержимое не печатаем (правка бывает длиной в файл), но «был `edits`, и в нём
+ * — `oldText`/`newText`» по этой строке видно сразу.
+ */
+function shapeOf(raw: Record<string, unknown>): string {
+  const keyOf = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.length}x${elementShape(value[0])}]`;
+    if (value === null) return 'null';
+    return typeof value;
+  };
+  return `{${Object.keys(raw).map((key) => `${key}: ${keyOf(raw[key])}`).join(', ')}}`;
+}
+
+function elementShape(value: unknown): string {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return typeof value;
+  return `{${Object.keys(value).join(', ')}}`;
+}
+
+/**
+ * Подсказка к отказу «не задан path»: где лежал предыдущий названный файл, он не
+ * подставляется сам — угаданный путь хуже честного отказа.
+ */
+function lastPathHint(lastPath?: string): string {
+  return lastPath ? ` Прошлый файл в вызове: «${lastPath}» — добавь путь к этому элементу.` : '';
+}
+
+/**
  * Один файл. Якоря и позиции в одном файле — это два разных пути правки (якоря
  * разрешает renderer, позиции применяет документная модель), поэтому файл
  * отдаётся одному из них целиком: смесь чинится разделением вызова.
  */
-function parseEditFile(value: unknown, index: number): { anchor?: PatchFile; position?: FileEdit } {
+function parseEditFile(
+  value: unknown,
+  index: number,
+  lastPath?: string,
+): { anchor?: PatchFile; position?: FileEdit } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error(`edits[${index}]: ожидался объект — ${EDITS_SHAPE}`);
   }
@@ -120,6 +158,7 @@ function parseEditFile(value: unknown, index: number): { anchor?: PatchFile; pos
   if (typeof filePath !== 'string' || filePath.trim().length === 0) {
     const inner = Array.isArray(raw.edits) ? raw.edits : [];
     const swap = typeof raw.oldText === 'string' || typeof raw.newText === 'string';
+    const lastHint = lastPathHint(lastPath);
     const whole = inner.some((item) => {
       if (typeof item !== 'object' || item === null) return false;
       const hunk = item as Record<string, unknown>;
@@ -130,7 +169,13 @@ function parseEditFile(value: unknown, index: number): { anchor?: PatchFile; pos
       : swap
         ? ' В элементе лежат сами замены (oldText/newText), а не файл — добавь `path` рядом.'
         : '';
-    throw new Error(`edits[${index}]: не задан path.${hint} ${EDITS_SHAPE}`);
+    // Формы вложенности три (файл → `edits[]` → `edits[]`), и на записи без пути
+    // не видно, какая из них ожидалась. Называем вслух.
+    throw new Error(
+      `edits[${index}]: не задан path.${hint} Форма вызова: ${EDITS_SHAPE}` +
+        ` Элемент пришёл такой: ${shapeOf(raw)}.` +
+        lastHint,
+    );
   }
   if (!path.isAbsolute(filePath)) {
     throw new Error(`edits[${index}].path: нужен абсолютный путь, получено «${filePath}»`);

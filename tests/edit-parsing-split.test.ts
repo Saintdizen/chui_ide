@@ -81,6 +81,24 @@ describe('разбор правок отдельно от инструменто
     });
   });
 
+  it('отказ «не задан path» называет форму элемента и прошлый файл', () => {
+    // Пять отказов из шести пришли правкой пачкой: первый элемент с `path`,
+    // остальные без. По записи видно ключи, но не видно, куда путь класть —
+    // теперь отказ это говорит: имена ключей элемента и путь предыдущего файла.
+    let message = '';
+    try {
+      parseEdits([
+        { path: '/proj/a.ts', oldText: 'a', newText: 'b' },
+        { edits: [{ oldText: 'a', newText: 'b' }] },
+      ]);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('edits[1]: не задан path');
+    expect(message).toContain('Элемент пришёл такой: {edits: [1x{oldText, newText}]}');
+    expect(message).toContain('Прошлый файл в вызове: «/proj/a.ts»');
+  });
+
   it('combineOutcomes: единственный ответ отдаётся как есть', () => {
     const only = { ok: true, summary: 'одно' };
     expect(combineOutcomes([only])).toBe(only);
