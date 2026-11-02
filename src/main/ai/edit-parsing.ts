@@ -120,7 +120,9 @@ function shapeOf(raw: Record<string, unknown>): string {
     if (value === null) return 'null';
     return typeof value;
   };
-  return `{${Object.keys(raw).map((key) => `${key}: ${keyOf(raw[key])}`).join(', ')}}`;
+  return `{${Object.keys(raw)
+    .map((key) => `${key}: ${keyOf(raw[key])}`)
+    .join(', ')}}`;
 }
 
 function elementShape(value: unknown): string {
@@ -141,11 +143,7 @@ function lastPathHint(lastPath?: string): string {
  * разрешает renderer, позиции применяет документная модель), поэтому файл
  * отдаётся одному из них целиком: смесь чинится разделением вызова.
  */
-function parseEditFile(
-  value: unknown,
-  index: number,
-  lastPath?: string,
-): { anchor?: PatchFile; position?: FileEdit } {
+function parseEditFile(value: unknown, index: number, lastPath?: string): { anchor?: PatchFile; position?: FileEdit } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error(`edits[${index}]: ожидался объект — ${EDITS_SHAPE}`);
   }
@@ -245,9 +243,7 @@ function parseEditItem(value: unknown, fileIndex: number, editIndex: number): Ed
     // `text` — имена из `create`/`write`). Данные на месте, поле названо иначе.
     // Не угадываем — называем имя вслух, чтобы второй вызов прошёл.
     const alias = (['contents', 'content', 'text'] as const).find((key) => typeof raw[key] === 'string');
-    const hint = alias
-      ? ` Похоже, запись целиком лежит в \`${alias}\`: у правки это поле зовётся \`newText\`.`
-      : '';
+    const hint = alias ? ` Похоже, запись целиком лежит в \`${alias}\`: у правки это поле зовётся \`newText\`.` : '';
     throw new Error(`${where}.newText: нужна строка.${hint}`);
   }
 
