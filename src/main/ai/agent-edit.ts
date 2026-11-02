@@ -91,7 +91,8 @@ export const EDITOR_MISSING: ToolOutcome = {
  * нет пути ни в элементе, ни сверху — отказ (там действительно нечего исполнять).
  */
 export function normalizeWrite(args: Record<string, unknown>): unknown {
-  const top = typeof args.path === 'string' && args.path.trim().length > 0 ? args.path : undefined;
+  // Верхний адрес — тоже через `firstPath`: `path: ["a.ts"]` адресует тот же файл.
+  const top = firstPath(args.path);
   // Массив правок может называться и `patches`/`hunks` (`apply_patch` кладёт их
   // под `patches`, а потом — файлы в `patches[]`): тогда у файла без `path`
   // верхний путь тоже работает.
@@ -121,8 +122,9 @@ export function normalizeWrite(args: Record<string, unknown>): unknown {
       const hunk = flatHunk(item);
       const editsFor = item.edits ?? item.patches ?? item.hunks;
       const file: Record<string, unknown> = { ...(item as Record<string, unknown>) };
-      if (!Array.isArray(item.edits) && (hasInnerEdits(item) || hunk)) file.edits = Array.isArray(editsFor) ? editsFor : [hunk];
-      const named = typeof file.path !== 'string' && top ? { ...file, path: top } : file;
+      if (!Array.isArray(item.edits) && (hasInnerEdits(item) || hunk))
+        file.edits = Array.isArray(editsFor) ? editsFor : [hunk];
+      const named = !firstPath(file.path) && top ? { ...file, path: top } : file;
       // Внутренний список зовётся `edits`, какое бы имя ни выбрала модель.
       const inner = named.edits ?? named.patches ?? named.hunks;
       return Array.isArray(inner) && inner !== named.edits ? { ...named, edits: inner } : named;
@@ -135,9 +137,12 @@ export function normalizeWrite(args: Record<string, unknown>): unknown {
   const groups = new Map<string, unknown[]>();
   for (const item of list) {
     // Замена без своего пути: адрес берём с верхнего уровня.
-    const itemPath = isRecord(item) && typeof item.path === 'string' ? item.path : top;
+    const itemPath = isRecord(item) ? (firstPath(item.path) ?? top) : top;
     // Путь не найти — не угадываем: пусть отказ назовёт форму (это данные, а не шум).
-    if (!itemPath) return list;
+    // Поля проставляем и здесь: без них отказ говорит «patches[0]: не задан path»,
+    // а по чему — не говорит вовсе (замер 02.11: из 11 таких отказов 3 пришли как
+    // «применено файлов: 0, с ошибками: 1» — сводка заместила настоящую причину).
+    if (!itemPath) return describePathless(list, args, 'patches');
     const bucket = groups.get(itemPath) ?? [];
     // Замена во плоской форме (`{path, oldText, newText}` среди замен) — тоже по адресу:
     // иначе до разбора дошёл бы `path` как чужое поле замены, и вызов бы отвалился.
@@ -180,8 +185,81 @@ export function flatHunk(item: Record<string, unknown>): Record<string, unknown>
   return hunk;
 }
 
+/**
+ * Отказ на список замен без единого пути — с картой полей, которая довела до него.
+ *
+ * Зачем. Такой вызов разбор принять не может (адреса нет нигде), но и молчать о
+ * том, где его искали, нельзя: голое «patches[0]: не задан path» не говорит, куда
+ * модель положила `path` — а он может лежать рядом, в `file`, `filePath`, `target`
+ * или выше — в `edits[0].path`. Замер 02.11: каждый такой отказ стоил шага на
+ * переписывание, а треть дошла до отчёта обезличенной сводкой.
+ *
+ * Перечёркнутые имена — те, что в вызове были, но не годятся как путь; порядок —
+ * как в исходной записи, чтобы перепись считала формы по одному шаблону.
+ */
+export function describePathless(
+  list: unknown[],
+  args: Record<string, unknown>,
+  field: string,
+): Record<string, unknown>[] {
+  const first = isRecord(list[0]) ? list[0] : undefined;
+  const seen = Object.keys(first ?? {}).filter((key) => first?.[key] !== undefined);
+  const topKeys = Object.keys(args).filter((key) => args[key] !== undefined);
+  // Имена, похожие на путь, но не путь: значение пустое или не строка. Их важно
+  // назвать отдельно — иначе причина выглядит как «полей нет».
+  const rejected = [...new Set([...seen, ...topKeys])]
+    .filter((key) => PATH_LIKE.test(key))
+    .map((key) => `${key}=${emptyish(first?.[key] ?? args[key])}`);
+  return list.map((item, index) => {
+    const record = isRecord(item) ? item : {};
+    return {
+      ...record,
+      [field]: index
+        ? item
+        : {
+            ...(isRecord(item) ? item : {}),
+            // Поля разбора: по ним отказ называет не только место, но и что там было.
+            path: undefined,
+            seenFields: seen.join(','),
+            topFields: topKeys.join(','),
+            rejectedPathFields: rejected.join(','),
+            hint:
+              'path не задан ни у замены, ни на верхнем уровне; ' +
+              'положите его в каждый элемент или один раз сверху: {path, edits:[...]} или {edits:[{path, ...}]}',
+          },
+    };
+  });
+}
+
+/** Имя поля, которое модель зовёт вместо `path`. */
+const PATH_LIKE = /^(?:.*path|file|filename|filePath|target|name|url)$/i;
+
+/** Значение поля — пустое или не строка: именно поэтому оно не стало путём. */
+function emptyish(value: unknown): string {
+  if (value === undefined) return 'нет';
+  if (typeof value === 'string') return value.trim() ? `строка (${value.length} симв.)` : 'пустая строка';
+  if (value === null) return 'null';
+  // Список с единственной строкой — тоже путь; длиннее — уже не один адрес.
+  if (Array.isArray(value)) return `список из ${value.length}: ${value.map(emptyish).join(', ')}`;
+  return typeof value;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Путь, присланный одним значением или списком (`path: ["a.ts"]`).
+ *
+ * Зачем. Списочная запись — та же адресация, просто массивом. Разбор принимал
+ * её за отсутствие пути и отказывал, хотя исполнять было что. Список длиннее
+ * одного не склеиваем: у замены один адрес, и выбрать из двух — догадка.
+ */
+function firstPath(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim().length > 0 ? value : undefined;
+  if (!Array.isArray(value) || value.length !== 1) return undefined;
+  const only = value[0];
+  return typeof only === 'string' && only.trim().length > 0 ? only : undefined;
 }
 
 /** Запись файла целиком, найденная среди правок: якоря нет, есть только текст. */

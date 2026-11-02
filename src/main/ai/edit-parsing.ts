@@ -170,13 +170,14 @@ function parseEditFile(value: unknown, index: number, lastPath?: string): { anch
       patchList && patchList.length > 0
         ? ` Замены лежат в \`${Array.isArray(raw.patches) ? 'patches' : 'hunks'}\`, а без \`path\` — либо файл в этом списке (\`[{patches: [{path, patches: [{oldText, newText}]}]}]\`), либо путь в каждом элементе (\`[{path, oldText, newText}]\`).`
         : '';
-    const hint = (whole
-      ? ' Похоже на запись файла целиком: в элементе нужен `path` рядом с `contents`.'
-      : swap
-        ? ' В элементе лежат сами замены (oldText/newText), а не файл — добавь `path` рядом.'
-        : Array.isArray(raw.contents) && raw.contents.length > 0
-          ? ' Записи файлов лежат в `contents` вместе с адресами — нужен [{path, contents}]'
-          : '') + inPatches;
+    const hint =
+      (whole
+        ? ' Похоже на запись файла целиком: в элементе нужен `path` рядом с `contents`.'
+        : swap
+          ? ' В элементе лежат сами замены (oldText/newText), а не файл — добавь `path` рядом.'
+          : Array.isArray(raw.contents) && raw.contents.length > 0
+            ? ' Записи файлов лежат в `contents` вместе с адресами — нужен [{path, contents}]'
+            : '') + inPatches;
     // Формы вложенности три (файл → `edits[]` → `edits[]`), и на записи без пути
     // не видно, какая из них ожидалась. Называем вслух.
     throw new Error(

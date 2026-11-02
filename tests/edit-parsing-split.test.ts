@@ -87,10 +87,7 @@ describe('разбор правок отдельно от инструменто
     // теперь отказ это говорит: имена ключей элемента и путь предыдущего файла.
     let message = '';
     try {
-      parseEdits([
-        { path: '/proj/a.ts', oldText: 'a', newText: 'b' },
-        { edits: [{ oldText: 'a', newText: 'b' }] },
-      ]);
+      parseEdits([{ path: '/proj/a.ts', oldText: 'a', newText: 'b' }, { edits: [{ oldText: 'a', newText: 'b' }] }]);
     } catch (error) {
       message = (error as Error).message;
     }
@@ -146,8 +143,39 @@ describe('разбор правок отдельно от инструменто
     expect(parsed.positions[0]!.edits[0]!.newText).toBe('первая');
   });
 
+  it('путь списком из одной строки — тот же адрес, а не отсутствие пути', () => {
+    // Замер 02.11: такие вызовы приходили как `ensure.failed`, а в отчёте
+    // оставалась сводка «применено файлов: 0, с ошибками: 1» — причина не доезжала.
+    const [file] = normalizeWrite({
+      path: ['/proj/a.ts'],
+      edits: [{ oldText: 'a', newText: 'b' }],
+    }) as { path: string; edits: unknown[] }[];
+    expect(file!.path).toBe('/proj/a.ts');
+    expect(file!.edits).toHaveLength(1);
+  });
+
+  it('путь списком в замене плоской формы: адрес берётся из него, а не отказ', () => {
+    const [file] = normalizeWrite({
+      edits: [{ path: ['/proj/a.ts'], oldText: 'a', newText: 'b' }],
+    }) as { path: string; edits: unknown[] }[];
+    expect(file!.path).toBe('/proj/a.ts');
+  });
+
+  it('путь списком из двух файлов не угадывается: у замены один адрес', () => {
+    const [file] = normalizeWrite({
+      path: ['/proj/a.ts', '/proj/b.ts'],
+      edits: [{ oldText: 'a', newText: 'b' }],
+    }) as { path?: string; edits?: unknown[] }[];
+    // Адреса нет нигде: элемент без пути остаётся как есть и разбор откажет —
+    // но откажет по делу (в записи два адреса, а выбор — догадка).
+    expect(file).toMatchObject({ oldText: 'a', newText: 'b' });
+    expect(file?.path).toBeUndefined();
+  });
+
   it('обёртка apply_patch: файлы под верхним `patches` и правки под `patches`', () => {
-    const parsed = parseEdits(normalizeWrite({ patches: [{ path: '/p/a.ts', patches: [{ oldText: 'x', newText: 'y' }] }] }) as unknown[]);
+    const parsed = parseEdits(
+      normalizeWrite({ patches: [{ path: '/p/a.ts', patches: [{ oldText: 'x', newText: 'y' }] }] }) as unknown[],
+    );
     expect(parsed.anchors[0]!.path).toBe('/p/a.ts');
     expect(parsed.anchors[0]!.patches[0]).toMatchObject({ oldText: 'x', newText: 'y' });
   });

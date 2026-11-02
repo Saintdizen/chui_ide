@@ -317,10 +317,7 @@ export function refusalShape(call: Pick<RunCallLog, 'ok' | 'summary' | 'detail'>
   const words = shape.split(' ');
   // Служебное слово не оставляем последним: «ожидался» без «объект» — это уже
   // другая форма. Замер 02.11: `patches[]: не задан path. В элементе лежат`.
-  while (
-    words.length > 1 &&
-    (words.join(' ').length > 60 || STOP_WORDS.has(words[words.length - 1]!.toLowerCase()))
-  ) {
+  while (words.length > 1 && (words.join(' ').length > 60 || STOP_WORDS.has(words[words.length - 1]!.toLowerCase()))) {
     words.pop();
   }
   const short = words.join(' ');
@@ -348,8 +345,6 @@ const STOP_WORDS = new Set([
   'то',
   'или',
 ]);
-
-
 
 /** Команды, которыми читают файлы через шелл вместо `read`/`search`. */
 const SHELL_READ = /\b(cat|head|tail|sed|grep|rg|awk|less|more|find|ls|tree|wc|nl)\b/;

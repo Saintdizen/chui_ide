@@ -367,7 +367,6 @@ export function conflictLines(text: string): string[] {
     .slice(0, 20);
 }
 
-
 export async function runCommand(
   command: string,
   args: string[],

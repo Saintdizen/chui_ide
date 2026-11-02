@@ -106,13 +106,20 @@ for (const messages of sample.messages) {
         // Сверить не текст ли сам по себе, а форма с префиксом — второе мнение
         // о том же отказе: если код ответил `arg`, а форма не узнаётся — значит
         // делит строку с другим отказом (два отказа в одном вызове).
-        const textCode = callFailureReason({ ok: false, summary: `Ошибка: ${refusalShape({ ok: false, summary: text })}` });
+        const textCode = callFailureReason({
+          ok: false,
+          summary: `Ошибка: ${refusalShape({ ok: false, summary: text })}`,
+        });
         perCode.set(`${name}.${code}`, (perCode.get(`${name}.${code}`) ?? 0) + 1);
         // «other» — не ответ, а дыра: так выглядит текст отказа, под который
         // не подобрана форма. Собираем их отдельно, иначе чинить нечего.
         // Тем же беден `exit` (ответ команды) и `arg` (общее «не задан
         // аргумент»): вид называется, причина — только в форме.
-        if (code === 'other' || code === 'exit' || code === 'arg') unknown.set(`${reason}  [${code}${textCode === code ? '' : ` → ${textCode}`}]`, (unknown.get(`${reason}  [${code}${textCode === code ? '' : ` → ${textCode}`}]`) ?? 0) + 1);
+        if (code === 'other' || code === 'exit' || code === 'arg')
+          unknown.set(
+            `${reason}  [${code}${textCode === code ? '' : ` → ${textCode}`}]`,
+            (unknown.get(`${reason}  [${code}${textCode === code ? '' : ` → ${textCode}`}]`) ?? 0) + 1,
+          );
       }
     }
 

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { lookupVenv } from '../src/main/python/environments';
+import { findEnvironments, lookupVenv } from '../src/main/python/environments';
 
 /**
  * Окружение по папке, которую указал человек.
@@ -72,6 +72,29 @@ describe('окружение по выбранной папке', () => {
     const found = await lookupVenv(venv, project, home, process.platform);
     expect(found.environment?.primary).toBe(true);
     expect(found.environment?.label).toBe('.venv');
+  });
+
+  it('вложенное окружение в подпапке проекта видно, а в node_modules — нет', async () => {
+    const home = await sandbox();
+    const project = path.join(home, 'demo');
+    const nested = await makeVenv(path.join(project, 'backend'), '.venv');
+    // Чужой код и служебные каталоги — не место поиска окружения.
+    await makeVenv(path.join(project, 'node_modules', 'pkg'), '.venv');
+    await makeVenv(path.join(project, '.git'), '.venv');
+
+    const found = await findEnvironments(project, process.platform);
+    expect(found.map((item) => item.path)).toEqual([nested]);
+    expect(found[0]?.label).toBe('backend/.venv');
+    expect(found[0]?.primary).toBe(false);
+  });
+
+  it('вложенное окружение — не окружение проекта: основного нет', async () => {
+    const home = await sandbox();
+    const project = path.join(home, 'demo');
+    await makeVenv(path.join(project, 'backend'), '.venv');
+
+    const found = await findEnvironments(project, process.platform);
+    expect(found.filter((item) => item.primary)).toEqual([]);
   });
 
   it('указали общую папку с одним окружением — берём его', async () => {

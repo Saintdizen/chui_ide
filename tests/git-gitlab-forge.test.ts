@@ -56,24 +56,26 @@ async function withGlabScript(body: string): Promise<{ restore: () => void; call
   // расширения не исполняет вовсе — на этой платформе тесты и снимались.
   const envKey = 'glab_stub_calls';
   const bodyFile = path.join(dir, 'glab-body.sh');
-  await fs.writeFile(bodyFile, `echo "$@" >> "$${envKey}"
+  await fs.writeFile(
+    bodyFile,
+    `echo "$@" >> "$${envKey}"
 ${body}
-`, 'utf8');
+`,
+    'utf8',
+  );
   process.env[envKey] = calls;
   const mjs = path.join(dir, 'glab-stub.mjs');
   await fs.writeFile(
     mjs,
     "import { spawnSync } from 'node:child_process';\n" +
-      'spawnSync("sh", [' + JSON.stringify(bodyFile) + ', ...process.argv.slice(2)], { stdio: "inherit" });\n',
+      'spawnSync("sh", [' +
+      JSON.stringify(bodyFile) +
+      ', ...process.argv.slice(2)], { stdio: "inherit" });\n',
     'utf8',
   );
   await fs.writeFile(path.join(dir, 'glab'), `#!/bin/sh\n${await fs.readFile(bodyFile, 'utf8')}`, 'utf8');
   await fs.chmod(path.join(dir, 'glab'), 0o755);
-  await fs.writeFile(
-    path.join(dir, 'glab.cmd'),
-    `@echo off\r\n"${process.execPath}" "${mjs}" %*\r\n`,
-    'utf8',
-  );
+  await fs.writeFile(path.join(dir, 'glab.cmd'), `@echo off\r\n"${process.execPath}" "${mjs}" %*\r\n`, 'utf8');
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   return {
