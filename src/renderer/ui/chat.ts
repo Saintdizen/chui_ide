@@ -143,6 +143,8 @@ export interface ChatDeps {
    * необязательно: без него пункт молчит и говорит, почему.
    */
   codebase?: (query: string) => Promise<readonly CodebasePlace[]>;
+  /** Адрес открытой страницы встроенного браузера — для `#web`. */
+  browserUrl?(): string;
   settings: Settings;
   /** Модальное окно со всеми настройками приложения. */
   settingsModal: SettingsOpener;
@@ -365,6 +367,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Места проекта — тот же поиск по смыслу, что у палитры: `#codebase` спрашивает его
     // по тому, что уже набрано в поле ввода.
     ...(deps.codebase ? { codebase: deps.codebase } : {}),
+    ...(deps.browserUrl ? { browserUrl: deps.browserUrl } : {}),
     composerText: () => input.value,
     session: () => active(),
     focus: () => input.focus(),

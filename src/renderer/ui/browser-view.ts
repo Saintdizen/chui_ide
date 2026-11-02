@@ -53,6 +53,11 @@ export interface BrowserView {
   setAgentAction(id: string, action: string): void;
   readonly isOpen: boolean;
   readonly pageId: string | null;
+  /**
+   * Адрес открытой страницы — для `#web` в чате: по нему видно, о чём речь.
+   * Пустая строка — показывать нечего (документ из проекта, ничего не открыто).
+   */
+  readonly url: string;
 }
 
 export interface BrowserViewDeps {
@@ -653,6 +658,10 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
 
     get pageId(): string | null {
       return activeId;
+    },
+
+    get url(): string {
+      return currentUrl;
     },
   };
 }

@@ -65,6 +65,11 @@ export interface AttachmentsDeps {
   codebase?: (query: string) => Promise<readonly CodebasePlace[]>;
   /** Что сейчас набрано в поле ввода: это и есть запрос для `#codebase`. */
   composerText(): string;
+  /**
+   * Адрес открытой страницы встроенного браузера — для `#web`. Нет вкладки или
+   * адрес пуст — пункт говорит, что прикладывать нечего.
+   */
+  browserUrl?(): string;
   /** Активная беседа: у каждой вкладки свои вложения. */
   session(): ChatSession;
   /** Вернуть фокус в поле ввода после прикладывания контекста. */
@@ -81,7 +86,7 @@ export interface AttachmentsView {
   /** Приложить то, что открыто в редакторе: выделение, а если его нет — файл. */
   attachBest(): void;
   /** Приложить контекст вида `#`: выделение, файл, пометки языка, правки или места проекта. */
-  attachFrom(kind: 'selection' | 'file' | 'problems' | 'diff' | 'codebase'): void;
+  attachFrom(kind: 'selection' | 'file' | 'problems' | 'diff' | 'codebase' | 'web'): void;
   /** Выбор изображений системным диалогом. */
   attachImagesFromDialog(): Promise<void>;
   /** Приложить готовое изображение (data-URL): снимок страницы из встроенного браузера. */
@@ -591,8 +596,23 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     takeForSend,
     attachBest,
     attachFrom: (kind) => {
-      // Правки и места проекта — асинхронные: `git status` знает только модель, а чтение
-      // файлов и поиск по смыслу идут через RPC.
+      // Страница браузера — только адрес: вкладку открывает человек, а не мы.
+      if (kind === 'web') {
+        const url = deps.browserUrl?.() ?? '';
+        if (!url) {
+          showToast('В браузере не открыта страница');
+          return;
+        }
+        addAttachment({
+          kind: 'web',
+          label: basename(url),
+          title: `Страница ${url}`,
+          text: `Человек смотрит страницу: ${url}\nЕё содержимое можно прочитать инструментом \`web\`.`,
+        });
+        return;
+      }
+      // Остальное асинхронно: `git status` знает только модель, а чтение файлов и
+      // поиск по смыслу идут через RPC.
       if (kind === 'diff' || kind === 'codebase') {
         void (kind === 'diff' ? attachmentFromDiff() : attachmentFromCodebase()).then((item) => {
           if (item) addAttachment(item);

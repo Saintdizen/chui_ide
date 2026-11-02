@@ -1613,6 +1613,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     commands,
     workspace,
     git,
+    // Страница встроенного браузера: адрес открытой вкладки — для `#web`.
+    browserUrl: () => browserView.url,
     // `#codebase`: места проекта по смыслу — те же два источника, что у палитры.
     // Без открытого проекта список пуст: прикладывать нечего, и об этом скажет чат.
     codebase: async (query: string) => {

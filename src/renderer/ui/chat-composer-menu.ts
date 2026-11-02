@@ -28,7 +28,7 @@ export interface MentionSession {
 }
 
 /** Вид контекста, который прикладывают: им же помечен `#`-пункт. */
-export type ContextKind = 'selection' | 'file' | 'problems' | 'diff' | 'codebase';
+export type ContextKind = 'selection' | 'file' | 'problems' | 'diff' | 'codebase' | 'web';
 
 /** Слэш-команды: подставляют готовый запрос и сами прикладывают контекст. */
 const SLASH_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string; prompt: string }> = [
@@ -69,6 +69,8 @@ const CONTEXT_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string;
   { id: '#diff', title: 'Мои правки', hint: 'Незакоммиченные изменения репозитория', kind: 'diff' },
   // Места по смыслу: модель видит не только открытый файл, а весь проект под вопрос.
   { id: '#codebase', title: 'Места в проекте', hint: 'Файлы и строки, близкие по смыслу', kind: 'codebase' },
+  // Страница из встроенного браузера: адрес открытой вкладки — то, о чём речь.
+  { id: '#web', title: 'Страница браузера', hint: 'Адрес открытой вкладки', kind: 'web' },
 ];
 
 export interface ComposerMenuDeps {

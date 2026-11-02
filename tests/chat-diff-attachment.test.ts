@@ -29,6 +29,22 @@ function make(git: unknown) {
   return { view, session };
 }
 
+/** Как `make`, но с адресом открытой страницы браузера: `''` — ничего не открыто. */
+function makeWeb(url: string) {
+  const session = { attachments: [] as ChatAttachment[] };
+  const view = createAttachments({
+    rpc: {} as never,
+    documents: {} as never,
+    editors: { selectedText: () => '', currentPath: null } as never,
+    workspace: {} as never,
+    composerText: () => '',
+    browserUrl: () => url,
+    session: () => session as never,
+    focus: () => undefined,
+  });
+  return { view, session };
+}
+
 /** Как `make`, но с местами по смыслу и набранным вопросом. */
 function makeCodebase(
   codebase: (query: string) => Promise<readonly { path: string; line: number; text: string }[]>,
@@ -76,6 +92,24 @@ describe('#diff', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(session.attachments).toEqual([]);
     expect(toasts.list).toEqual(['Это не git-репозиторий']);
+  });
+});
+
+describe('#web', () => {
+  it('прикладывает адрес открытой страницы, а не её содержимое', () => {
+    const { view, session } = makeWeb('https://example.com/doc');
+    view.attachFrom('web');
+    expect(session.attachments).toHaveLength(1);
+    expect(session.attachments[0]?.kind).toBe('web');
+    expect(session.attachments[0]?.text).toContain('https://example.com/doc');
+  });
+
+  it('страницы нет — говорит, что прикладывать нечего', () => {
+    toasts.list = [];
+    const { view, session } = makeWeb('');
+    view.attachFrom('web');
+    expect(session.attachments).toEqual([]);
+    expect(toasts.list).toEqual(['В браузере не открыта страница']);
   });
 });
 

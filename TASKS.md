@@ -99,8 +99,9 @@ curl -sSL https://microsoft.github.io/language-server-protocol/specifications/ls
    `assistant(tool_calls) → tool`** (`MIDRUN_KEEP_TURNS` в `service.ts`). Разрез
    между ними ломает протокол у строгих провайдеров (Anthropic). Резать только там,
    где нет висящих `tool_calls`.
-2. **Нет `#web`.** `#file`, `#selection`, `#problems`, `#diff` и `#codebase`
-   есть; `#web` — инструмент `web` модели.
+2. **`#web` без содержимого:** прикладывается только адрес открытой страницы
+   встроенного браузера, текст страницы в контекст не попадает (его тянет инструмент
+   `web` ходом модели). `#file`, `#selection`, `#problems`, `#diff` и `#codebase` есть.
 3. **Контекст не виден списком:** сколько токенов заняло что — нужно перед отправкой
    (как «Context» в VS Code).
 4. **Ответ не делает кликабельными пути к файлам** и номера строк.
