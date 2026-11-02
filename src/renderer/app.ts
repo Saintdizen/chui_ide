@@ -1600,6 +1600,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     edits,
     commands,
     workspace,
+    git,
     settings,
     settingsModal,
     host,

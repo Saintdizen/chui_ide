@@ -34,6 +34,7 @@ import type { EditService } from '../core/edits';
 import type { EditorApi } from '../core/editor-api';
 import type { HostService } from '../core/host';
 import type { WorkspaceModel } from '../core/workspace-model';
+import type { GitModel } from '../core/git-model';
 import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
@@ -131,6 +132,11 @@ export interface ChatDeps {
   commands: CommandRegistry;
   /** Рабочая папка: её корень — ключ, по которому main находит историю бесед. */
   workspace: WorkspaceModel;
+  /**
+   * Изменения репозитория — для `#diff`. Необязательно: без него пункт не показывается,
+   * ведь панель чата может жить и без открытого проекта.
+   */
+  git?: GitModel;
   settings: Settings;
   /** Модальное окно со всеми настройками приложения. */
   settingsModal: SettingsOpener;
@@ -349,6 +355,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     documents: deps.documents,
     editors: deps.editors,
     workspace: deps.workspace,
+    ...(deps.git ? { git: deps.git } : {}),
     session: () => active(),
     focus: () => input.focus(),
   });

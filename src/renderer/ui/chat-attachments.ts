@@ -9,6 +9,7 @@ import { entryIsDirectory } from '../../shared/entry-kind';
 import { dropAttachment, keepLatest, takeSent } from '../../shared/chat-attachments';
 import type { DocumentStore } from '../core/document-store';
 import type { EditorApi } from '../core/editor-api';
+import type { GitModel } from '../core/git-model';
 import { languageFromPath } from '../core/languages';
 import type { RpcClient } from '../core/rpc';
 import { relativePath, type WorkspaceModel } from '../core/workspace-model';
@@ -35,6 +36,9 @@ const CHIP_ICON: Partial<Record<ChatAttachment['kind'], 'warning' | 'chat'>> = {
   session: 'chat',
 };
 
+/** Сколько файлов разбираем целиком: остальные — только списком. */
+const MAX_DIFF_FILES = 10;
+
 /** Каталоги, которые в `@`-подсказку не попадают: шум и вес обхода. */
 const MENTION_SKIP = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
 const MAX_MENTIONS = 4000;
@@ -44,6 +48,8 @@ export interface AttachmentsDeps {
   documents: DocumentStore;
   editors: EditorApi;
   workspace: WorkspaceModel;
+  /** Изменения репозитория: нужны только для `#diff`. */
+  git?: GitModel;
   /** Активная беседа: у каждой вкладки свои вложения. */
   session(): ChatSession;
   /** Вернуть фокус в поле ввода после прикладывания контекста. */
@@ -59,8 +65,8 @@ export interface AttachmentsView {
   takeForSend(): ChatAttachment[];
   /** Приложить то, что открыто в редакторе: выделение, а если его нет — файл. */
   attachBest(): void;
-  /** Приложить контекст вида `#`: выделение, файл или пометки языка. */
-  attachFrom(kind: 'selection' | 'file' | 'problems'): void;
+  /** Приложить контекст вида `#`: выделение, файл, пометки языка или правки. */
+  attachFrom(kind: 'selection' | 'file' | 'problems' | 'diff'): void;
   /** Выбор изображений системным диалогом. */
   attachImagesFromDialog(): Promise<void>;
   /** Приложить готовое изображение (data-URL): снимок страницы из встроенного браузера. */
@@ -333,6 +339,74 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     };
   }
 
+  /**
+   * Правки рабочего дерева и индекса для `#diff`.
+   *
+   * Без этого модель видит файл в исходном виде и предлагает сделать то, что уже
+   * сделано. Берём и индекс, и рабочее дерево: для вопроса «что я уже поменял»
+   * разница между ними не важна, а пропустить одну половину — значит соврать.
+   *
+   * Не git-репозиторий — не ошибка: чат живёт и в обычной папке, поэтому молча
+   * возвращаем `null` без тоста об ошибке.
+   */
+  async function attachmentFromDiff(): Promise<ChatAttachment | null> {
+    const git = deps.git;
+    if (!git?.isRepository) {
+      showToast('Это не git-репозиторий', 'error');
+      return null;
+    }
+    const files = [...git.staged, ...git.unstaged];
+    if (files.length === 0) {
+      showToast('Изменений нет: рабочее дерево чистое');
+      return null;
+    }
+    // Больше десятка файлов в один вопрос — это уже не контекст, а дамп. Список
+    // остальных всё равно уходит: по нему видно, что ещё тронуто.
+    const parts: string[] = [];
+    const limit = Math.min(files.length, MAX_DIFF_FILES);
+    for (const file of files.slice(0, limit)) {
+      const patch = await diffTextOf(git, file.path, file.staged);
+      parts.push(`### ${file.path}\n${patch}`);
+    }
+    if (files.length > limit) {
+      const rest = files.slice(limit).map((file) => file.path);
+      parts.push(`### Ещё изменено (без содержимого):\n${rest.join('\n')}`);
+    }
+    return {
+      kind: 'diff',
+      label: `правки: ${files.length}`,
+      title: `Незакоммиченные изменения (${files.length})`,
+      text: parts.join('\n\n'),
+    };
+  }
+
+  /**
+   * Текст одного файла в виде `@@`-блоков: для `#diff` достаточно формы `git diff`
+   * без шапки: заголовок файла уже есть в `### path`.
+   */
+  async function diffTextOf(git: GitModel, path: string, staged: boolean): Promise<string> {
+    try {
+      const diff = await git.diff(path, staged);
+      if (diff.hunks.length === 0) return '(без построчных изменений)';
+      // У блока есть только границы — ни текста, ни знаков: тянем строки из двух версий
+      // файла. Контекст у блока берётся в его рамках: `oldCount` в старом файле.
+      const before = diff.original.split('\n');
+      const after = diff.modified.split('\n');
+      const lines: string[] = [];
+      for (const hunk of diff.hunks) {
+        lines.push(`@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`);
+        const oldFrom = Math.max(0, hunk.oldStart - 1);
+        const newFrom = Math.max(0, hunk.newStart - 1);
+        for (const line of before.slice(oldFrom, oldFrom + hunk.oldCount)) lines.push(`-${line}`);
+        for (const line of after.slice(newFrom, newFrom + hunk.newCount)) lines.push(`+${line}`);
+      }
+      return lines.join('\n');
+    } catch (error) {
+      // Один файл не прочитался — не повод терять остальные: пишем причину на его месте.
+      return `(не удалось получить diff: ${error instanceof Error ? error.message : String(error)})`;
+    }
+  }
+
   /** Выделение, а если его нет — файл целиком. */
   function attachBest(): void {
     if (deps.editors.selectedText().trim()) addAttachment(attachmentFrom('selection'));
@@ -450,7 +524,16 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     render,
     takeForSend,
     attachBest,
-    attachFrom: (kind) => addAttachment(attachmentFrom(kind)),
+    attachFrom: (kind) => {
+      // Правки — асинхронные: `git status` знает только модель, а чтение файлов — диск.
+      if (kind === 'diff') {
+        void attachmentFromDiff().then((item) => {
+          if (item) addAttachment(item);
+        });
+        return;
+      }
+      addAttachment(attachmentFrom(kind));
+    },
     attachImagesFromDialog,
     attachImage: (image) => addImage(image),
     attachContext: (item) => addAttachment(item),
