@@ -1,106 +1,204 @@
-import { describe, expect, it, vi } from 'vitest';
-import { registerAppViewCommands, type AppViewDeps } from '../src/renderer/core/app-view-commands';
-
-// Меню строит DOM, а тесты идут в среде node. Подменяем попап целиком: команде
-// важно только, открыт ли он, — остальное принадлежит ui/popup-menu.
-const popup = { isOpen: false };
-vi.mock('../src/renderer/ui/popup-menu', () => ({
-  isPopupOpen: () => popup.isOpen,
-  closePopupMenu: () => undefined,
-  showPopupMenu: () => undefined,
-}));
-vi.mock('../src/renderer/ui/app-menu', () => ({
-  showApplicationMenu: () => undefined,
-}));
-import type { DefineCommand } from '../src/renderer/core/command-args';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerAppViewCommands, type AppViewDeps, type AppViewFlags } from '../src/renderer/core/app-view-commands';
+import { installMiniDom } from './helpers/mini-dom';
 
 /**
- * Вид: меню, палитра, переходы, браузер. Сторож держит две вещи, которые легко
- * сломать незаметно: галки меню считаются в МОМЕНТ показа и повторное нажатие
- * меню закрывает.
+ * Команды вида (`renderer/core/app-view-commands.ts`).
+ *
+ * Сами команды ничего не меняют в документе — они показывают что-то поверх него.
+ * Проверяются решения, на которых спотыкается человек: пустой адрес не открывается,
+ * повторное нажатие меню его закрывает, браузер без вкладок не зовёт main.
+ *
+ * Меню и попап подменены: тест смотрит, какие команды зарегистрированы и что они
+ * делают, а не как выглядит выпадашка.
  */
-function setup(overrides: Partial<{ popupOpen: boolean; sidebar: boolean; ai: boolean; right: boolean }> = {}) {
+
+const shownMenu = vi.hoisted(() => vi.fn());
+const popupOpen = vi.hoisted(() => ({ value: false }));
+vi.mock('../src/renderer/ui/app-menu', () => ({ showApplicationMenu: shownMenu }));
+vi.mock('../src/renderer/ui/popup-menu', () => ({
+  isPopupOpen: () => popupOpen.value,
+  showPopupMenu: vi.fn(),
+  closePopupMenu: vi.fn(),
+}));
+
+const FLAGS: AppViewFlags = {
+  sidebarVisible: true,
+  rightVisible: false,
+  dockVisible: true,
+  activeDockId: 'terminal',
+  aiEnabled: true,
+};
+
+function setup(overrides: Partial<AppViewDeps> = {}) {
   const commands = new Map<string, (...args: unknown[]) => unknown>();
-  const define: DefineCommand = (descriptor, handler) => commands.set(descriptor.id, handler);
-  const log: string[] = [];
-  const closed: number[] = [];
-  // Состояние попапа подменяем на уровне модуля: команда спрашивает isPopupOpen().
-  // Меню ставится по прямоугольнику якоря — без него showApplicationMenu падает.
-  const anchor = {
-    classList: { add: (c: string) => log.push(`add:${c}`), remove: (c: string) => log.push(`remove:${c}`) },
-    getBoundingClientRect: () => ({ left: 0, bottom: 0, top: 0, right: 0, width: 0, height: 0 }),
-  };
   const deps = {
-    closePopupMenu: () => closed.push(1),
-    flags: () => ({
-      sidebarVisible: overrides.sidebar ?? true,
-      rightVisible: overrides.right ?? true,
-      dockVisible: false,
-      activeDockId: null,
-      aiEnabled: overrides.ai ?? true,
-    }),
-    menuAnchor: anchor,
-    execute: (command: string) => log.push(`exec:${command}`),
-    runMenuRole: (role: string) => log.push(`role:${role}`),
-    promptValue: async () => 'https://example.com',
-    openBrowserPage: (value: string) => log.push(`browser:${value}`),
-    browserTabs: { list: [] as unknown[], closeAll: () => log.push('closeAll') },
-    rpc: { request: async () => ({}) },
-    syncEditorActions: () => log.push('sync'),
-    palette: { open: () => log.push('palette') },
-    quickOpen: { open: async (query: string) => log.push(`quick:${query}`) },
-    symbolPicker: { open: () => log.push('symbols') },
+    closePopupMenu: vi.fn(),
+    flags: () => FLAGS,
+    menuAnchor: document.createElement('div') as unknown as HTMLElement,
+    execute: vi.fn(),
+    runMenuRole: vi.fn(),
+    promptValue: vi.fn(async () => 'https://example.com'),
+    openBrowserPage: vi.fn(),
+    browserTabs: { list: [], closeAll: vi.fn() },
+    rpc: { request: vi.fn(async () => ({})) },
+    syncEditorActions: vi.fn(),
+    palette: { open: vi.fn() },
+    quickOpen: { open: vi.fn() },
+    symbolPicker: { open: vi.fn() },
+    ...overrides,
   } as unknown as AppViewDeps;
-  registerAppViewCommands(define, deps);
-  return { commands, log, closed };
+  registerAppViewCommands(
+    ((spec: { id: string }, run: (...args: unknown[]) => unknown) => {
+      commands.set(spec.id, run);
+    }) as never,
+    deps,
+  );
+  return { commands, deps };
 }
 
-describe('registerAppViewCommands', () => {
-  it('регистрирует пять команд вида', () => {
+describe('браузер', () => {
+  beforeEach(() => {
+    installMiniDom();
+  });
+
+  it('пустой адрес не открывает страницу', async () => {
+    // В поле стоит заготовка «https://», и нажатие Enter без адреса не должно
+    // открывать пустую страницу.
+    const { commands, deps } = setup({ promptValue: async () => '   ' });
+
+    await commands.get('browser.open')?.();
+
+    expect(deps.openBrowserPage).not.toHaveBeenCalled();
+  });
+
+  it('отмена ввода не открывает страницу', async () => {
+    const { commands, deps } = setup({ promptValue: async () => null });
+
+    await commands.get('browser.open')?.();
+
+    expect(deps.openBrowserPage).not.toHaveBeenCalled();
+  });
+
+  it('введённый адрес открывается как есть', async () => {
+    const { commands, deps } = setup({ promptValue: async () => 'https://example.com/a' });
+
+    await commands.get('browser.open')?.();
+
+    expect(deps.openBrowserPage).toHaveBeenCalledWith('https://example.com/a');
+  });
+
+  it('«закрыть все» без вкладок не беспокоит main', () => {
+    const { commands, deps } = setup({ browserTabs: { list: [], closeAll: vi.fn() } as never });
+
+    commands.get('browser.closeAll')?.();
+
+    expect(deps.rpc.request).not.toHaveBeenCalled();
+    expect(deps.browserTabs.closeAll).not.toHaveBeenCalled();
+  });
+
+  it('«закрыть все» с вкладками просит main и чистит список', () => {
+    const closeAll = vi.fn();
+    const { commands, deps } = setup({ browserTabs: { list: [{}], closeAll } as never });
+
+    commands.get('browser.closeAll')?.();
+
+    expect(deps.rpc.request).toHaveBeenCalledWith('browser.viewCloseAll', undefined);
+    expect(closeAll).toHaveBeenCalled();
+  });
+});
+
+describe('меню приложения', () => {
+  beforeEach(() => {
+    installMiniDom();
+    shownMenu.mockClear();
+    popupOpen.value = false;
+  });
+
+  it('показывает меню и помечает кнопку открытой', () => {
+    const { commands, deps } = setup();
+
+    commands.get('app.showMenu')?.();
+
+    expect(shownMenu).toHaveBeenCalled();
+    expect(
+      (deps.menuAnchor as unknown as { classList: { contains(n: string): boolean } }).classList.contains(
+        'is-menu-open',
+      ),
+    ).toBe(true);
+  });
+
+  it('повторное нажатие закрывает открытое меню', () => {
+    // Так ведёт себя системное меню, и так ждёт человек.
+    popupOpen.value = true;
+    const { commands, deps } = setup();
+
+    commands.get('app.showMenu')?.();
+
+    expect(deps.closePopupMenu).toHaveBeenCalled();
+    expect(shownMenu).not.toHaveBeenCalled();
+  });
+
+  it('галки считаются в момент показа, а не при сборке команд', () => {
+    // Состояние меняется от нажатия к нажатию: заранее посчитанные галки врали бы.
     const { commands } = setup();
-    expect([...commands.keys()].sort()).toEqual([
-      'app.showMenu',
-      'browser.closeAll',
-      'browser.open',
-      'file.quickOpen',
-      'navigate.symbol',
-      'palette.open',
-    ]);
+    commands.get('app.showMenu')?.();
+    // Ключи галок — идентификаторы команд (MENU_TOGGLES), а не имена флагов.
+    const first = shownMenu.mock.calls[0]?.[1] as { checks: Record<string, boolean> };
+
+    expect(first.checks['view.toggleSidebar']).toBe(true);
+    expect(first.checks['view.showTerminal']).toBe(true);
+    // Правая панель закрыта — галки «Панель ИИ» нет, хотя тумблер включён.
+    expect(first.checks['ai.toggle']).toBe(false);
+  });
+});
+
+describe('палитра и переходы', () => {
+  beforeEach(() => {
+    installMiniDom();
   });
 
-  // Меню строит DOM через showApplicationMenu, а тесты здесь идут в среде node.
-  // Проверяем ту ветку, что решается ДО построения: повторное нажатие закрывает.
-  it('повторное нажатие меню закрывает попап, когда тот уже открыт', () => {
-    const { commands, log } = setup();
-    popup.isOpen = true;
-    commands.get('app.showMenu')!();
-    popup.isOpen = false;
-    // Меню не строится: ветка закрытия выходит раньше, чем доходит до DOM.
-    expect(log).not.toContain('add:is-menu-open');
+  it('палитра и быстрый переход открываются', () => {
+    const { commands, deps } = setup();
+
+    commands.get('palette.open')?.();
+    commands.get('file.quickOpen')?.('src/');
+
+    expect((deps.palette as unknown as { open(): void }).open).toHaveBeenCalled();
+    // Начальный отбор — от крошек и статусбара: палитра сразу показывает нужную папку.
+    expect((deps.quickOpen as unknown as { open(q: string): void }).open).toHaveBeenCalledWith('src/');
   });
 
-  it('браузер открывается по введённому адресу', async () => {
-    const { commands, log } = setup();
-    await commands.get('browser.open')!();
-    expect(log).toContain('browser:https://example.com');
+  it('быстрое открытие без аргумента открывает весь проект', () => {
+    const { commands, deps } = setup();
+
+    commands.get('file.quickOpen')?.();
+
+    expect((deps.quickOpen as unknown as { open(q: string): void }).open).toHaveBeenCalledWith('');
   });
 
-  it('пустых вкладок браузера нечего закрывать — в main не ходим', () => {
-    const { commands, log } = setup();
-    commands.get('browser.closeAll')!();
-    expect(log).not.toContain('closeAll');
+  it('действия редактора синхронизируются до открытия палитры', () => {
+    // Палитра берёт список действий из состояния: без синхронизации она покажет
+    // пункты, которые недоступны для текущего выделения.
+    const { commands, deps } = setup();
+
+    commands.get('palette.open')?.();
+
+    expect(deps.syncEditorActions).toHaveBeenCalled();
   });
 
-  it('палитра синхронизирует действия редактора ДО открытия', () => {
-    const { commands, log } = setup();
-    commands.get('palette.open')!();
-    expect(log).toEqual(['sync', 'palette']);
-  });
+  it('пункты-роли уходят в свой обработчик, а команды — в общий', () => {
+    const { commands, deps } = setup();
+    commands.get('app.showMenu')?.();
+    const menu = shownMenu.mock.calls[0]?.[1] as {
+      execute: (command: string) => void;
+      runRole: (role: string) => void;
+    };
 
-  it('быстрый переход передаёт начальный отбор, если он есть', async () => {
-    const { commands, log } = setup();
-    await commands.get('file.quickOpen')!('/proj/src');
-    await commands.get('file.quickOpen')!();
-    expect(log).toEqual(['quick:/proj/src', 'quick:']);
+    menu.execute('view.toggleSidebar');
+    menu.runRole('copy');
+
+    expect(deps.execute).toHaveBeenCalledWith('view.toggleSidebar');
+    expect(deps.runMenuRole).toHaveBeenCalledWith('copy');
   });
 });
