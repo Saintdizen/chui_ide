@@ -46,7 +46,12 @@ import { toMonikers, type MonikerEntry } from '../../../shared/lsp-moniker';
 import { toInlineValues, type InlineValue } from '../../../shared/lsp-inline-value';
 import { toInlayHints, type InlayHint } from '../../../shared/lsp-inlay-hints';
 import { commandFromLens, toCodeLenses, type CodeLensEntry } from '../../../shared/lsp-code-lens';
-import { toSignatureHelp, type SignatureHelp } from '../../../shared/lsp-signature';
+import {
+  signatureContext,
+  toSignatureHelp,
+  type SignatureContext,
+  type SignatureHelp,
+} from '../../../shared/lsp-signature';
 import { toInlineSnippets } from '../../../shared/lsp-inline';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import { toFileSymbols } from '../../../shared/lsp-symbols';
@@ -282,10 +287,11 @@ export class LspFeatures {
    * оттуда приходят подписи, активный довод и границы параметров для подсветки.
    * `null` — сервер молчит или подсказать нечего; показ пропускаем, это не ошибка.
    */
-  async signatureHelp(path: string, position: LspPosition): Promise<SignatureHelp | null> {
+  async signatureHelp(path: string, position: LspPosition, context?: SignatureContext): Promise<SignatureHelp | null> {
     const result = await this.request(path, 'textDocument/signatureHelp', {
       textDocument: { uri: pathToUri(path) },
       position: toLspPosition(position),
+      ...signatureContext(context),
     });
     return toSignatureHelp(result);
   }

@@ -18,7 +18,7 @@
  * «где мы находимся» держать не нужно.
  */
 
-import { signatureTrigger, type SignatureHelp } from '../../../shared/lsp-signature';
+import { signatureTrigger, type SignatureContext, type SignatureHelp } from '../../../shared/lsp-signature';
 import { COMMENT, STRING } from '../highlight/tokens';
 import type { TextBuffer } from '../core/text-buffer';
 import type { EditorChange, EditorController } from '../input/editor-controller';
@@ -31,10 +31,17 @@ export interface SignatureAssistantOptions {
    * Ответ сервера на позицию курсора (1-based). `null` — сказать нечего. Обязателен:
    * без источника подсказку не показать, и слой не создаётся.
    */
-  source: (path: string, position: { line: number; column: number }) => Promise<SignatureHelp | null>;
+  source: (
+    path: string,
+    position: { line: number; column: number },
+    context: SignatureContext,
+  ) => Promise<SignatureHelp | null>;
   /** Активный файл (`null` — панель пуста): по нему адресуем запрос серверу. */
   path: () => string | null;
 }
+
+/** Чем вызвано решение спросить сервер: знаком-триггером или правкой в уже открытом вызове. */
+type RequestReason = { kind: 'trigger'; character: string } | { kind: 'content' };
 
 export class SignatureAssistant implements KeyInterceptor {
   private readonly view: EditorView;
@@ -47,6 +54,8 @@ export class SignatureAssistant implements KeyInterceptor {
   private requestId = 0;
   /** Строка, где показана карточка: ушли на другую — карточка уже не про этот вызов. */
   private shownLine = -1;
+  /** Что показано: уходит серверу в контексте, чтобы он не прислал то же второй раз. */
+  private shownHelp: SignatureHelp | null = null;
   private requests = 0;
   private dismissed = 0;
 
@@ -110,16 +119,21 @@ export class SignatureAssistant implements KeyInterceptor {
       return;
     }
     if (action === 'request') {
-      void this.request(caret);
+      void this.request(caret, { kind: 'trigger', character: before });
       return;
     }
     // Прочая правка: карточка живёт, пока курсор на той же строке, — иначе она над чужим
     // вызовом и вводит в заблуждение.
-    if (this.widget.isVisible && this.buffer.lineAt(caret) !== this.shownLine) this.hide();
+    if (this.widget.isVisible && this.buffer.lineAt(caret) !== this.shownLine) {
+      this.hide();
+      return;
+    }
+    // Дописали символ довода при открытой карточке — номер довода мог смениться (`f(a, b`).
+    if (this.widget.isVisible) void this.request(caret, { kind: 'content' });
   }
 
   /** Спросить сервер и показать карточку, если ответ ещё про текущее место. */
-  private async request(caret: number): Promise<void> {
+  private async request(caret: number, reason: RequestReason): Promise<void> {
     const path = this.path();
     if (!path) {
       this.hide();
@@ -130,7 +144,7 @@ export class SignatureAssistant implements KeyInterceptor {
     const position = this.buffer.positionAt(caret);
     let help: SignatureHelp | null = null;
     try {
-      help = await this.source(path, position);
+      help = await this.source(path, position, this.contextAt(caret, position, reason));
     } catch {
       // Сервер недоступен — молчания достаточно: карточки не будет.
       return;
@@ -141,6 +155,7 @@ export class SignatureAssistant implements KeyInterceptor {
       return;
     }
     this.shownLine = this.buffer.lineAt(caret);
+    this.shownHelp = help;
     this.widget.show(help, this.anchor(caret));
   }
 
@@ -148,7 +163,31 @@ export class SignatureAssistant implements KeyInterceptor {
     if (this.widget.isVisible) this.dismissed += 1;
     this.requestId += 1;
     this.shownLine = -1;
+    this.shownHelp = null;
     this.widget.hide();
+  }
+
+  /**
+   * Контекст вызова для сервера: чем он вызван, что уже показано и строка до каретки.
+   * По контексту сервер перебирает перегрузки (`f(a, b` — второй довод) и не шлёт
+   * заново то, что уже показал.
+   */
+  private contextAt(
+    caret: number,
+    position: { line: number; column: number },
+    reason: RequestReason,
+  ): SignatureContext {
+    const lineStart = this.buffer.lineStart(position.line);
+    const head =
+      reason.kind === 'trigger'
+        ? { triggerKind: 2 as const, triggerCharacter: reason.character }
+        : { triggerKind: 3 as const };
+    return {
+      ...head,
+      isRetrigger: this.shownHelp !== null,
+      activeSignatureHelp: this.shownHelp ?? undefined,
+      text: this.buffer.getText(lineStart, caret),
+    };
   }
 
   /** Где каретка: карточку показываем у неё, а не у края окна. */

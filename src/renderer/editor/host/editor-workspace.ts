@@ -42,7 +42,7 @@ import type { PeekAnchor } from '../widgets/peek-widget';
 import type { CompletionItem } from '../complete/completions';
 import type { ImportAlias, ProjectCompletion } from '../complete/assistant';
 import type { CompletionTriggers } from './lsp-features';
-import type { SignatureHelp } from '../../../shared/lsp-signature';
+import type { SignatureContext, SignatureHelp } from '../../../shared/lsp-signature';
 import type { FoldRange } from '../../../shared/fold-ranges';
 import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-lens';
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
@@ -174,7 +174,11 @@ export interface EditorWorkspaceOptions {
   /** Дотягивание подсказки (см. `LspFeatures.resolveCompletion`). */
   resolveCompletionItem?: (path: string, item: unknown) => Promise<{ detail?: string; documentation?: string } | null>;
   /** Подсказка о параметрах вызова: путь и позиция → разбор (см. `LspFeatures.signatureHelp`). */
-  signatureFromLanguage?: (path: string, position: { line: number; column: number }) => Promise<SignatureHelp | null>;
+  signatureFromLanguage?: (
+    path: string,
+    position: { line: number; column: number },
+    context: SignatureContext,
+  ) => Promise<SignatureHelp | null>;
   /**
    * Источник мест символа — языковой сервер (`LspFeatures`). Он же включает переход к
    * определению и поиск ссылок: без него эти команды не предлагаются, потому что

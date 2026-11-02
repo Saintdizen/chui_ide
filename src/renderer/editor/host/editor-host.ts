@@ -27,7 +27,7 @@ import type { FoldRange } from '../../../shared/fold-ranges';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import type { GitLineChange } from '../../../shared/git-line-changes';
 import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-lens';
-import type { SignatureHelp } from '../../../shared/lsp-signature';
+import type { SignatureContext, SignatureHelp } from '../../../shared/lsp-signature';
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
 import type { DocumentColor } from '../../../shared/lsp-document-color';
 import type { DocumentHighlightSpan } from '../../../shared/lsp-document-highlight';
@@ -242,7 +242,11 @@ export interface EditorHostOptions {
    * Подсказка о параметрах вызова от языкового сервера: путь и позиция (1-based) → разбор
    * (см. `shared/lsp-signature.ts`). Не задано — карточки о параметрах нет вовсе.
    */
-  signatureFromLanguage?: (path: string, position: { line: number; column: number }) => Promise<SignatureHelp | null>;
+  signatureFromLanguage?: (
+    path: string,
+    position: { line: number; column: number },
+    context: SignatureContext,
+  ) => Promise<SignatureHelp | null>;
   /**
    * Источник мест символа — языковой сервер (см. `LspFeatures`). Не задан — перехода к
    * определению и ссылок у панели не будет вовсе: показывать нечего и открывать некуда.
@@ -742,7 +746,7 @@ export class EditorHost {
     // сигнатуру своей грамматикой не вывести (см. `complete/signature.ts`).
     this.signature = options.signatureFromLanguage
       ? new SignatureAssistant(this.view, this.controller, buffer, new SignatureWidget(container), {
-          source: (path, position) => options.signatureFromLanguage!(path, position),
+          source: (path, position, context) => options.signatureFromLanguage!(path, position, context),
           path: () => this.activePath,
         })
       : null;

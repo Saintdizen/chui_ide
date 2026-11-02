@@ -478,7 +478,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Дотягивание подсказки: описание символа подтягивается при выделении строки.
     resolveCompletionItem: (path, item) => lsp.resolveCompletion(path, item),
     // Подсказка о параметрах вызова: карточка у каретки по набранной `(` или `,`.
-    signatureFromLanguage: (path, position) => lsp.signatureHelp(path, position),
+    // Контекст (ручной вызов / знак / повтор) уходит серверу: без него он не знает,
+    // что карточка уже открыта, и второй раз присылает те же перегрузки.
+    signatureFromLanguage: (path, position, context) => lsp.signatureHelp(path, position, context),
     // Определение и ссылки — списком мест, как и прочие переходы.
     symbols: {
       definition: (path, position) => lsp.definition(path, position),

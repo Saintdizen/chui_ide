@@ -40,6 +40,41 @@ export interface SignatureHelp {
 }
 
 /**
+ * Почему спросили подсказку — уходит серверу как `context` в
+ * `textDocument/signatureHelp`. Без него сервер считает вызов ручным и не знает,
+ * что карточка уже открыта: пересылает те же перегрузки снова.
+ */
+export interface SignatureContext {
+  /** 1 — вызвано вручную, 2 — знаком-триггером, 3 — правкой текста. */
+  readonly triggerKind: 1 | 2 | 3;
+  /** Знак, вызвавший подсказку (только при `triggerKind: 2`). */
+  readonly triggerCharacter?: string;
+  /** Повторный запрос при уже показанной карточке — сервер может ответить пусто. */
+  readonly isRetrigger?: boolean;
+  /** Что уже показано: по нему сервер не присылает то же второй раз. */
+  readonly activeSignatureHelp?: SignatureHelp;
+  /**
+   * Строка до каретки. Не поле протокола: по ней `toSignatureHelp` правит номер
+   * довода у вложенного вызова (`f(g(`) — сервер считает его от своей скобки.
+   */
+  readonly text?: string;
+}
+
+/**
+ * Причина запроса → поле `context` протокола. Ручной вызов не передаём: там по
+ * умолчанию `1`, и явное поле только шумит в переписке с сервером.
+ */
+export function signatureContext(context: SignatureContext | undefined): Record<string, unknown> {
+  if (!context) return {};
+  const protocol: Record<string, unknown> = {};
+  if (context.triggerKind !== 1) protocol.triggerKind = context.triggerKind;
+  if (context.triggerCharacter) protocol.triggerCharacter = context.triggerCharacter;
+  if (context.isRetrigger) protocol.isRetrigger = true;
+  if (context.activeSignatureHelp) protocol.activeSignatureHelp = context.activeSignatureHelp;
+  return Object.keys(protocol).length > 0 ? { context: protocol } : {};
+}
+
+/**
  * Разметка из ответа сервера: строка, `MarkupContent` или их массив. Пустое —
  * `null`: карточке нечего показывать, и это не ошибка.
  */
@@ -95,7 +130,7 @@ function parametersOf(label: string, raw: unknown): SignatureParameter[] {
  * пуст или подписей в нём нет. Индексы приводятся к допустимым здесь, чтобы показа
  * не пришлось спотыкаться о чужие числа.
  */
-export function toSignatureHelp(result: unknown): SignatureHelp | null {
+export function toSignatureHelp(result: unknown, text?: string): SignatureHelp | null {
   if (!result || typeof result !== 'object') return null;
   const raw = (result as { signatures?: unknown }).signatures;
   if (!Array.isArray(raw) || raw.length === 0) return null;
@@ -116,9 +151,8 @@ export function toSignatureHelp(result: unknown): SignatureHelp | null {
 
   const activeSignature = clampIndex((result as { activeSignature?: unknown }).activeSignature, signatures.length);
   const parameters = signatures[activeSignature]!.parameters.length;
-  const activeParameter =
-    parameters === 0 ? -1 : clampIndex((result as { activeParameter?: unknown }).activeParameter, parameters);
-
+  const fromServer = clampIndex((result as { activeParameter?: unknown }).activeParameter, parameters);
+  const activeParameter = parameters === 0 ? -1 : parameterAt(text, fromServer, parameters);
   return { signatures, activeSignature, activeParameter };
 }
 
@@ -126,6 +160,37 @@ export function toSignatureHelp(result: unknown): SignatureHelp | null {
 function clampIndex(value: unknown, size: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(Math.trunc(value), size - 1));
+}
+
+/**
+ * Номер довода по тексту до каретки. Сервер считает его от своей скобки и промахивается
+ * там, где довод сам содержит вызов или запятую в строке: `f(g(1, <caret>` — второй
+ * довод `g`, а не `f`. Считаем по глубине скобок от внешнего вызова: запятые глубже
+ * него не наши; строки, шаблоны и комментарии не считаем совсем.
+ * Текст неизвестен — оставляем число сервера.
+ */
+function parameterAt(text: string | undefined, fromServer: number, parameters: number): number {
+  if (text === undefined || text.length === 0) return fromServer;
+  let depth = 0;
+  let commas = 0;
+  let quote: string | null = null;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (quote !== null) {
+      if (char === '\\') index += 1;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '/' && text[index + 1] === '/') return Math.min(commas, parameters - 1);
+    if (char === '(') depth += 1;
+    else if (char === ')') depth = Math.max(0, depth - 1);
+    else if (char === ',' && depth <= 1) commas += 1;
+  }
+  return Math.min(commas, parameters - 1);
 }
 
 /** Часть подписи для карточки: текст и признак «это активный параметр». */

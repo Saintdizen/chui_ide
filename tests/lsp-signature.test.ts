@@ -132,6 +132,39 @@ describe('нарезка подписи по активному параметр
   });
 });
 
+describe('номер довода по тексту до каретки', () => {
+  /** Две подписи, сервер назвал второй довод: текст заставит его пересчитать. */
+  const twoParams = () => ({
+    signatures: [{ label: 'f(a, b)', parameters: [{ label: 'a' }, { label: 'b' }] }],
+    activeSignature: 0,
+    activeParameter: 1,
+  });
+
+  it('вложенный вызов: снаружи курсор в первом доводе `f`, сервер назвал второй', () => {
+    const help = toSignatureHelp(twoParams(), 'f(g(')!;
+    expect(help.activeParameter).toBe(0);
+  });
+
+  it('вложенный вызов с доводом целиком: `f(g(a), ` — второй довод `f`', () => {
+    const help = toSignatureHelp(twoParams(), 'f(g(a), ')!;
+    expect(help.activeParameter).toBe(1);
+  });
+
+  it('запятая внутри строки — не разделитель доводов', () => {
+    const help = toSignatureHelp(twoParams(), 'f("a,b", ')!;
+    expect(help.activeParameter).toBe(1);
+  });
+
+  it('запятая в строке не сдвигает довод', () => {
+    const help = toSignatureHelp(twoParams(), 'f("a,b")')!;
+    expect(help.activeParameter).toBe(0);
+  });
+
+  it('без текста — число сервера как есть', () => {
+    expect(toSignatureHelp(twoParams())!.activeParameter).toBe(1);
+  });
+});
+
 describe('знак, запускающий подсказку', () => {
   it('открывает скобка и запятая, закрывает закрывающая', () => {
     expect(signatureTrigger('(')).toBe('request');
