@@ -343,6 +343,8 @@ export interface ChatConversation {
    * посреди работы, человек должен видеть шаги, а не пустую панель.
    */
   plan?: PlanStep[];
+  /** Планы прошлых прогонов этой беседы: что уже сделано и когда. */
+  planHistory?: PlanArchiveEntry[];
 }
 
 /** Всё, что main хранит по одной рабочей папке. */
@@ -456,6 +458,13 @@ export type PlanStepStatus = 'pending' | 'in_progress' | 'done';
 export interface PlanStep {
   text: string;
   status: PlanStepStatus;
+}
+
+/** План прогона, вытесненный следующим: когда он был и чем кончился. */
+export interface PlanArchiveEntry {
+  /** Когда план сменился — ISO-время, как у сообщений ленты. */
+  at: number;
+  steps: PlanStep[];
 }
 
 /** Модель обновила план работы — в ленте появляется чек-лист. */

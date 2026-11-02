@@ -1,4 +1,4 @@
-import type { ChatConversation, ChatHistory, ChatMessage } from '../../shared/api';
+import type { ChatConversation, ChatHistory, ChatMessage, PlanStep } from '../../shared/api';
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
 import type { ChatSession } from './chat-session';
@@ -64,6 +64,15 @@ export function serializeSession(session: ChatSession): ChatConversation {
     // План прогона — рядом с целью: перезапуск посреди работы не должен
     // оставлять панель пустой, когда шаги уже известны.
     ...(session.plan && session.plan.length > 0 ? { plan: session.plan.map((step) => ({ ...step })) } : {}),
+    // Планы прошлых прогонов: по ним видно, как работа шла, а не только где остановилась.
+    ...(session.planHistory && session.planHistory.length > 0
+      ? {
+          planHistory: session.planHistory.map((entry) => ({
+            at: entry.at,
+            steps: entry.steps.map((step: PlanStep) => ({ ...step })),
+          })),
+        }
+      : {}),
     // Цель переживает перезапуск: иначе окно, закрытое посреди работы, теряло бы
     // условие, ради которого она шла, и агент начинал бы следующий ход с нуля.
     ...(session.goal ? { goal: { ...session.goal } } : {}),

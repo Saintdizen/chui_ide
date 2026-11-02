@@ -1001,6 +1001,41 @@
   color: var(--green_prime_background);
 }
 
+/* Прошлые планы беседы: свёрнуты по умолчанию — по ним видно, как шла работа,
+   не отнимая места у текущего чек-листа. */
+.plan-history-list {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--separator_color);
+}
+
+.plan-history-title {
+  margin-bottom: 2px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.plan-history-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text_color_tertiary);
+  cursor: pointer;
+}
+
+.plan-history-time {
+  font-family: var(--font_mono);
+}
+
+.plan-history-count {
+  margin-left: auto;
+  font-family: var(--font_mono);
+}
+
+.plan-history .plan-step {
+  padding-left: 12px;
+}
+
 /* Кнопка «к последнему сообщению» в правом нижнем углу ленты. Крепится к футеру
    и висит НАД композером: фиксированный отступ от низа панели не знал о высоте
    поля ввода и при нескольких строках кнопка ложилась прямо на него. Висит она

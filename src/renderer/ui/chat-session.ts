@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   ChatRunTrace,
   ChatUsage,
+  PlanArchiveEntry,
   PlanStep,
   ToolFileChange,
 } from '../../shared/api';
@@ -103,4 +104,10 @@ export interface ChatSession {
    * бы ей чужой план (или пустоту вместо своего).
    */
   plan?: PlanStep[];
+  /**
+   * Планы прошлых прогонов: что уже сделано и когда. Новый план вытесняет
+   * текущий сюда, поэтому по ленте видно, как работа шла по шагам, а не только
+   * её последнее состояние. Живёт в беседе и переживает перезапуск.
+   */
+  planHistory?: PlanArchiveEntry[];
 }

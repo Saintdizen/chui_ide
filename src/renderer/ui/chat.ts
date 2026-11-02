@@ -44,7 +44,7 @@ import { createMarkdownRenderer } from './chat-markdown';
 import { createChatComposer } from './chat-composer';
 import { createComposerMenu } from './chat-composer-menu';
 import { createChangesPanel } from './chat-changes';
-import { createPlanPanel } from './chat-plan';
+import { archivePlan, createPlanPanel } from './chat-plan';
 import { createGoalPanel } from './chat-goal';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
@@ -652,6 +652,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         // План прошлого прогона: закрытое окно посреди работы не должно
         // оставлять панель пустой — шаги нужны тому же праву, что и цель.
         session.plan = conversation.plan;
+        session.planHistory = conversation.planHistory;
         // Память чтений из файла: следующий ход после открытия окна не начнётся
         // с чистого листа и не перечитает то, что уже читали до закрытия.
         session.reads = conversation.reads;
@@ -1975,8 +1976,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     renderPlan: (steps, session) => {
       // План — свойство беседы, а не панели: без этого переключение вкладки
       // показывало бы чужой чек-лист, а сохранение не знало бы, что писать.
+      session.planHistory = archivePlan(session.planHistory, session.plan, Date.now());
       session.plan = steps.length > 0 ? steps.map((step) => ({ ...step })) : undefined;
-      if (session.id === activeId) planPanel.render(steps);
+      if (session.id === activeId) {
+        planPanel.render(steps);
+        planPanel.renderHistory(session.planHistory ?? []);
+      }
       scheduleSave();
     },
     setGoal: (goal, session) => {
