@@ -28,6 +28,7 @@ import {
   type InheritanceResult,
 } from '../../shared/type-inheritance';
 import { RpcFailure } from '../ipc/router';
+import type { WorkspaceChangeKind } from './workspace';
 
 /** Файл больше этого не читаем ради обхода: держать его целиком в памяти не стоит. */
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -48,7 +49,7 @@ export interface CodeIndexPorts {
   /** Кэш содержимого больше не верен для этого файла. */
   invalidate(file: string): void;
   /** Сказать дереву, что файл изменился. */
-  notifyChanged(file: string): void;
+  notifyChanged(file: string, kind?: WorkspaceChangeKind): void;
 }
 
 /**
@@ -161,7 +162,7 @@ export function createCodeIndex(ports: CodeIndexPorts): {
         await beforeChange(write.file);
         await fs.writeFile(write.file, write.text, 'utf8');
         invalidate(write.file);
-        notifyChanged(write.file);
+        notifyChanged(write.file, 2);
         changed.push(write.file);
       }
 

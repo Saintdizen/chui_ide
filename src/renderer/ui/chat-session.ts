@@ -1,4 +1,12 @@
-import type { ChatAttachment, ChatGoal, ChatMessage, ChatRunTrace, ChatUsage, ToolFileChange } from '../../shared/api';
+import type {
+  ChatAttachment,
+  ChatGoal,
+  ChatMessage,
+  ChatRunTrace,
+  ChatUsage,
+  PlanStep,
+  ToolFileChange,
+} from '../../shared/api';
 import type { ToolPresetId } from '../../shared/tool-presets';
 import type { ChatRunLog } from '../../shared/run-log';
 import type { ReadCoverageSnapshot } from '../../shared/read-coverage';
@@ -89,4 +97,10 @@ export interface ChatSession {
    * Закрытая цель остаётся здесь же: по ней видно, ради чего шла работа.
    */
   goal?: ChatGoal;
+  /**
+   * План последнего прогона. Хранится в беседе, а не только в панели: панель
+   * одна на все вкладки, и без этого переключение на другую беседу показывало
+   * бы ей чужой план (или пустоту вместо своего).
+   */
+  plan?: PlanStep[];
 }

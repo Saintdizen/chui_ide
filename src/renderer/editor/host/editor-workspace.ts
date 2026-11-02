@@ -152,15 +152,19 @@ export interface EditorWorkspaceOptions {
   semanticTokens?: (path: string, languageId: string) => Promise<readonly SemanticToken[]>;
   /** Исполнить команду линзы: её выбирает сервер, а запускает приложение. */
   lensCommand?: (path: string, command: CodeLensCommand) => void;
-  /** Подсказки-вставки файла: путь и текст → подсказки (см. `LspFeatures.inlayHints`). */
-  inlayHints?: (path: string, text: string) => Promise<readonly InlayHint[]>;
+  /** Подсказки-вставки: путь, конец и начало видимой области → подсказки (`LspFeatures.inlayHints`). */
+  inlayHints?: (
+    path: string,
+    end: { line: number; column: number },
+    start?: { line: number; column: number },
+  ) => Promise<readonly InlayHint[]>;
   /** Наведение от языкового сервера: путь и позиция → текст разметки. */
   hoverFromLanguage?: (path: string, position: { line: number; column: number }) => Promise<HoverExternalInfo | null>;
   /** Подсказки языкового сервера: путь и позиция → дополнения (см. `LspFeatures.completion`). */
   completionFromLanguage?: (
     path: string,
     position: { line: number; column: number },
-  ) => Promise<readonly CompletionItem[]>;
+  ) => Promise<{ items: readonly CompletionItem[]; isIncomplete: boolean }>;
   /** Символы проекта из карты: ими расширяется список повторным Ctrl+Space. */
   projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;
   /** Файлы проекта (относительные пути) — для подсказок пути внутри импорта. */

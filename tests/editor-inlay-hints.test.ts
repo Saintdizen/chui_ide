@@ -46,4 +46,17 @@ describe('LspFeatures.inlayHints', () => {
     const features = new LspFeatures(rpc);
     await expect(features.inlayHints('/p/a.py', { line: 1, column: 1 })).resolves.toEqual([]);
   });
+
+  it('начало видимой части сужает диапазон запроса', async () => {
+    const { rpc, calls } = recordingRpc([]);
+    const features = new LspFeatures(rpc);
+
+    await features.inlayHints('/p/big.py', { line: 120, column: 1 }, { line: 80, column: 1 });
+
+    // Оба конца переводятся с единственной правкой: строка −1, столбец как есть.
+    expect((calls[0]!.params as { range: unknown }).range).toEqual({
+      start: { line: 79, character: 0 },
+      end: { line: 119, character: 0 },
+    });
+  });
 });

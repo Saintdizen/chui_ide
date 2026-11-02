@@ -65,11 +65,11 @@ export interface StreamHost {
   /** Подтянуть ленту к низу (если пользователь её не читает). */
   scrollToEnd(session: ChatSession): void;
   /** Показать шаги плана агента. */
-  renderPlan(steps: ChatPlanPayload['steps']): void;
+  renderPlan(steps: ChatPlanPayload['steps'], session: ChatSession): void;
   /** Показать цель работы (или спрятать, когда она закрыта). */
   setGoal(goal: ChatGoalPayload['goal'], session: ChatSession): void;
   /** Спрятать план (генерация кончилась). */
-  hidePlan(): void;
+  hidePlan(session: ChatSession): void;
   /** Перерисовать панель изменений после файловых операций инструмента. */
   renderChanges(): void;
   /** Переключить «занято»: панель по этому гасит ввод и меняет кнопку. */
@@ -189,7 +189,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     };
 
     buffer = '';
-    host.hidePlan();
+    host.hidePlan(session);
     host.scrollToEnd(session);
     host.setStreaming(session);
     // Ждём первого куска текста: ожидание человека видно в замерax.
@@ -238,7 +238,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
               return;
             }
             if (event === ChatStreamEvent.Plan) {
-              host.renderPlan((payload as ChatPlanPayload).steps);
+              host.renderPlan((payload as ChatPlanPayload).steps, session);
               activity.state('строит план…');
               return;
             }
@@ -402,7 +402,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         showToast('Не удалось получить ответ модели', 'error');
       }
     } finally {
-      host.hidePlan();
+      host.hidePlan(session);
       activity.dispose();
       host.setStreaming(null);
       host.setBusy(false, session);

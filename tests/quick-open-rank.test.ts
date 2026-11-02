@@ -59,4 +59,38 @@ describe('rankFiles', () => {
   it('пробелы в запросе игнорируются по краям', () => {
     expect(rankFiles(FILES, '  queue  ')).toContain('src/queue.js');
   });
+
+  describe('недавние (MRU)', () => {
+    it('пустой запрос идёт по истории, а не по алфавиту', () => {
+      const recent = ['src/renderer/ui/chat.ts', 'docs/roadmap.md'];
+      expect(rankFiles(FILES, '', 50, recent).slice(0, 2)).toEqual(recent);
+    });
+
+    it('после недавних — остальное без повторов', () => {
+      const result = rankFiles(FILES, '', 50, ['src/app.js']);
+      expect(result[0]).toBe('src/app.js');
+      // Каждый путь ровно один раз: история не дублирует список.
+      expect(new Set(result).size).toBe(result.length);
+      expect(result).toHaveLength(FILES.length);
+    });
+
+    it('чужие для проекта пути из общей истории отбрасываются', () => {
+      // История общая на все проекты: открытый когда-то другой проект палитре не нужен.
+      const result = rankFiles(FILES, '', 3, ['/other/project/file.ts', 'README.md']);
+      expect(result).toEqual(['README.md', 'package.json', 'src/queue.js']);
+    });
+
+    it('недавние уважают limit на пустом запросе', () => {
+      expect(rankFiles(FILES, '', 2, ['docs/roadmap.md', 'README.md'])).toEqual(['docs/roadmap.md', 'README.md']);
+    });
+
+    it('с запросом недавнее даёт надбавку, а совпадение в имени её перебивает', () => {
+      // «app.ts» и «append.ts» начинаются с запроса одинаково — тогда решает история.
+      expect(rankFiles(['app.ts', 'append.ts'], 'app', 50, ['append.ts'])[0]).toBe('append.ts');
+      // Совпадение в пути подряд выше, чем буквы по порядку в имени.
+      expect(rankFiles(['src/config.ts', 'cfg.ts'], 'cfg', 50)[0]).toBe('cfg.ts');
+      // При равном совпадении недавний из них — первый.
+      expect(rankFiles(['cfg.ts', 'app/cfg.ts'], 'cfg', 50, ['app/cfg.ts'])[0]).toBe('app/cfg.ts');
+    });
+  });
 });

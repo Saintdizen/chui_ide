@@ -35,6 +35,7 @@ import { normalizeRootOverrides } from '../shared/explorer-settings';
 import { sanitizeBadgeRules } from '../shared/icon-badges';
 import { DEFAULT_GIT_SETTINGS, sanitizeGitSettings } from '../shared/git-settings';
 import { normalizeKeybindingOverrides, type KeybindingSettings } from '../shared/keybindings';
+import { normalizeRecentCommands, type CommandPaletteSettings } from '../shared/recent-commands';
 import { sanitizeThemeFile, type ThemeFile } from '../shared/theme-file';
 import { sanitizeUiScale } from '../shared/ui-scale';
 import { isWebSearchProvider, type WebSearchProvider } from '../shared/web-search';
@@ -152,6 +153,7 @@ interface StoredSettings {
   lsp: LspSettings;
   git: GitSettings;
   keybindings: KeybindingSettings;
+  commandPalette: CommandPaletteSettings;
 }
 
 const DEFAULT_SYSTEM_PROMPT = 'Ты — ассистент chui_iDE: кратко, правка — минимальный диф, API не выдумывай.';
@@ -366,6 +368,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
   // Сочетаний по умолчанию тут нет: они живут в коде (`renderer/core/default-keybindings.ts`).
   // Здесь — только то, что человек поменял сам.
   keybindings: { overrides: [] },
+  commandPalette: { recent: [] },
 };
 
 const ENV_KEYS: Record<string, string> = {
@@ -509,6 +512,7 @@ export class SettingsStore {
       },
       // Копия: снимок настроек не должен меняться вслед за правкой списка.
       keybindings: { overrides: this.data.keybindings.overrides.map((item) => ({ ...item })) },
+      commandPalette: { recent: [...this.data.commandPalette.recent] },
       git: { ...this.data.git },
     };
   }
@@ -601,6 +605,9 @@ export class SettingsStore {
     }
     if (patch.keybindings) {
       this.data.keybindings = { overrides: normalizeKeybindingOverrides(patch.keybindings.overrides) };
+    }
+    if (patch.commandPalette) {
+      this.data.commandPalette = { recent: normalizeRecentCommands(patch.commandPalette.recent) };
     }
     if (patch.git) {
       const next = { ...this.data.git, ...patch.git };
@@ -1092,6 +1099,7 @@ function loadSettings(filePath: string): StoredSettings {
     lsp: sanitizeLsp({ ...DEFAULT_SETTINGS.lsp, ...(parsed.lsp ?? {}) }),
     // Файл могут править руками: сочетания приводим к известному виду.
     keybindings: { overrides: normalizeKeybindingOverrides(parsed.keybindings?.overrides) },
+    commandPalette: { recent: normalizeRecentCommands(parsed.commandPalette?.recent) },
     git: sanitizeGitSettings(parsed.git),
   };
 }

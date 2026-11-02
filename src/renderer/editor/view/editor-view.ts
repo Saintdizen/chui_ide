@@ -161,6 +161,13 @@ export class EditorView {
   private caretNodes: HTMLElement[] = [];
   /** Идущая анимация прокрутки (`null` — не идёт). */
   private scrollAnimation: { from: number; to: number; startedAt: number; frame: number; last: number } | null = null;
+  /**
+   * Видимые строки прошлого кадра: `null` — ещё не рисовали. Сравнивается, чтобы не
+   * дёргать подписчика (`onVisibleRangeChange`) на каждой правке в том же окне.
+   */
+  private lastVisible: { first: number; last: number } | null = null;
+  /** Оповещение о смене видимых строк: по нему перезапрашиваются подсказки-вставки. */
+  private visibleWatcher: ((range: { first: number; last: number }) => void) | null = null;
   private disposed = false;
   /**
    * Перенос длинных строк. Пока выключен, одна строка занимает один ряд и вся
@@ -703,6 +710,23 @@ export class EditorView {
   }
 
   /**
+   * Номера видимых строк (с 1, включительно) с запасом. Считаются той же функцией, что
+   * и рисование (`visibleLines`), — второго ответа на вопрос «что видно» в редакторе
+   * быть не должно: разошлись бы на свёртке и переносе. Пока не рисовали — весь файл.
+   */
+  visibleRange(): { first: number; last: number } {
+    return this.lastVisible ?? { first: 1, last: Math.max(1, this.buffer.lineCount) };
+  }
+
+  /**
+   * Подписаться на смену видимых строк (прокрутка, размер окна, свёртка). Зовётся, когда
+   * окно действительно сдвинулось: держим последний ответ и не зовём без нужды.
+   */
+  onVisibleRangeChange(watcher: ((range: { first: number; last: number }) => void) | null): void {
+    this.visibleWatcher = watcher;
+  }
+
+  /**
    * Где на полотне стоит каретка — в координатах содержимого. Нужно, чтобы поставить
    * рядом скрытое поле ввода (там живёт IME): окно выбора иероглифов появляется возле
    * курсора, а для этого браузеру надо знать, где он.
@@ -1148,6 +1172,12 @@ export class EditorView {
     // Ряды — в строки буфера: дальше всё считается строками, а скрытые слои пропускают.
     const first = this.lineOfRow(firstRow);
     const last = Math.min(this.buffer.lineCount, this.lineOfRow(lastRow + 1) - 1);
+    // Окно сдвинулось — сказать подписчику (по нему перезапрашиваются подсказки-вставки).
+    const before = this.lastVisible;
+    if (!before || before.first !== first || before.last !== last) {
+      this.lastVisible = { first, last };
+      this.visibleWatcher?.({ first, last });
+    }
 
     // Порядок важен: сначала строки — они уточняют самую широкую, потом размер
     // полотна по ней, иначе широкая строка кадр останется за краем.

@@ -60,6 +60,12 @@ const FAKE_SERVER = [
   "const SAVE = process.argv[3] === 'save';",
   "const SYMBOLS = process.argv[3] === 'symbols';",
   "const WATCH = process.argv[3] === 'watch';",
+  "const FILEOPS = process.argv[3] === 'fileops';",
+  "const CFG = process.argv[3] === 'cfg';",
+  "const PROGRESS = process.argv[3] === 'progress';",
+  "const FOLDERS = process.argv[3] === 'folders';",
+  "const INLINE = process.argv[3] === 'inline';",
+  "const RANGES = process.argv[3] === 'ranges';",
   'let buffer = Buffer.alloc(0);',
   'function send(message) {',
   '  const body = JSON.stringify(message);',
@@ -76,6 +82,12 @@ const FAKE_SERVER = [
   '            ? { openClose: true, change: 1, save: { includeText: true }, willSave: true }',
   '            : { openClose: true, change: 1 },',
   '          ...(WATCH ? { workspace: { didChangeWatchedFiles: {} } } : {}),',
+  '          ...(FILEOPS ? { workspace: { fileOperations: { didCreate: { filters: [] } } } } : {}),',
+  '          ...(CFG ? { workspace: { didChangeConfiguration: { dynamicRegistration: false } } } : {}),',
+  '          ...(PROGRESS ? { referencesProvider: true } : {}),',
+  '          ...(FOLDERS ? { workspace: { workspaceFolders: true } } : {}),',
+  '          ...(INLINE ? { inlineCompletionProvider: true } : {}),',
+  '          ...(RANGES ? { documentRangeFormattingProvider: true } : {}),',
   '          ...(SYMBOLS ? { workspaceSymbolProvider: true } : {}),',
   '        },',
   '      },',
@@ -84,8 +96,19 @@ const FAKE_SERVER = [
   '  }',
   '  if (message.method) {',
   "    appendFileSync(LOG, message.method + '\\n');",
-  "    if (message.method === 'workspace/symbol')",
+  "    if (message.method === 'workspace/symbol') {",
   "      return send({ jsonrpc: '2.0', id: message.id, result: [{ name: 'widget', kind: 12, data: { id: 7 } }] });",
+  '    }',
+  "    if (message.method === 'textDocument/inlineCompletion' && INLINE) {",
+  "      return send({ jsonrpc: '2.0', id: message.id, result: { items: [{ insertText: 'const answer = 42;', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } }, { insertText: { value: 'console.log(x);' } }] } });",
+  '    }',
+  "    if (message.method === 'textDocument/rangesFormatting' && RANGES) {",
+  "      return send({ jsonrpc: '2.0', id: message.id, result: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, newText: 'ok' }] });",
+  '    }',
+  "    if (message.method === 'textDocument/references' && PROGRESS) {",
+  "      send({ jsonrpc: '2.0', method: '$/progress', params: { token: 'srv-1', value: { kind: 'begin', title: 'Ищу ссылки' } } });",
+  '      return;',
+  '    }',
   "    if (message.method === 'workspaceSymbol/resolve')",
   "      return send({ jsonrpc: '2.0', id: message.id, result: { name: 'widget', kind: 12, location: { uri: process.argv[4], range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } } } } });",
   '    return;',
@@ -111,7 +134,7 @@ const FAKE_SERVER = [
 ].join('\n');
 
 async function project(
-  mode: 'save' | 'watch' | 'plain' | 'symbols',
+  mode: 'save' | 'watch' | 'plain' | 'symbols' | 'fileops' | 'cfg' | 'progress' | 'folders' | 'inline' | 'ranges',
 ): Promise<{ root: string; file: string; log: string; server: FakeServer }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-lsp-save-'));
   dirs.push(root);
@@ -207,6 +230,114 @@ describe('didSave и наблюдение за файлами', () => {
     lsp.watchedFiles([file], 2);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(await logOf(log)).not.toContain('workspace/didChangeWatchedFiles');
+  });
+
+  it('создание файла уходит как didCreateFiles', async () => {
+    const { root, file, log, server } = await project('fileops');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    lsp.open(file, 'typescript', 'const value = 1;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
+    lsp.fileOperation('create', [path.join(root, 'new.ts')]);
+    await until(async () => (await logOf(log)).includes('workspace/didCreateFiles'));
+    expect(await logOf(log)).toContain('workspace/didCreateFiles');
+  });
+
+  it('переименование несёт старое имя, а не только новое', async () => {
+    // `didChangeWatchedFiles` даёт два независимых пути, и связь «старое → новое»
+    // теряется. `didRenameFiles` — единственное место, где она сохраняется.
+    const { root, file, log, server } = await project('fileops');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    lsp.open(file, 'typescript', 'const value = 1;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
+    lsp.fileOperation('rename', [path.join(root, 'moved.ts')], file);
+    await until(async () => (await logOf(log)).includes('workspace/didRenameFiles'));
+    expect(await logOf(log)).toContain('workspace/didRenameFiles');
+  });
+
+  it('удаление файла уходит как didDeleteFiles', async () => {
+    const { root, file, log, server } = await project('fileops');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    lsp.open(file, 'typescript', 'const value = 1;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
+    lsp.fileOperation('delete', [file]);
+    await until(async () => (await logOf(log)).includes('workspace/didDeleteFiles'));
+    expect(await logOf(log)).toContain('workspace/didDeleteFiles');
+  });
+
+  it('сервер без fileOperations не получает didCreateFiles', async () => {
+    // Объявления два разных: сервер может знать только `didChangeWatchedFiles`.
+    // Слать ему незнакомый метод — ошибка протокола.
+    const { root, file, log, server } = await project('watch');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    lsp.open(file, 'typescript', 'const value = 1;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
+    lsp.fileOperation('create', [path.join(root, 'new.ts')]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(await logOf(log)).not.toContain('workspace/didCreateFiles');
+  });
+
+  it('правка настроек уходит как didChangeConfiguration', async () => {
+    // Без этого уведомления сервер держит старые настройки до перезапуска IDE:
+    // обновили интерпретатор в настройках — подсказки идут по старому.
+    const { root, file, log, server } = await project('cfg');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    lsp.open(file, 'typescript', 'const value = 1;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
+    lsp.settingsChanged();
+    await until(async () => (await logOf(log)).includes('workspace/didChangeConfiguration'));
+    expect(await logOf(log)).toContain('workspace/didChangeConfiguration');
+  });
+
+  it('сервер без workspaceConfiguration не получает правку настроек', async () => {
+    const { root, file, log, server } = await project('watch');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    lsp.open(file, 'typescript', 'const value = 1;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
+    lsp.settingsChanged();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(await logOf(log)).not.toContain('workspace/didChangeConfiguration');
+  });
+
+  it('отмена запроса гасит и его индикатор прогресса', async () => {
+    const { root, file, log, server } = await project('progress');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    lsp.open(file, 'typescript', 'const value = 1;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
+    // Запрос, под который сервер открыл индикатор прогресса.
+    const pending = lsp.references(file, 'typescript', 'const value = 1;\n', 1, 7, true);
+    await until(async () => (await logOf(log)).includes('textDocument/references'));
+    // Свежий запрос того же вида вытесняет устаревший: ключ отмены общий.
+    void lsp.references(file, 'typescript', 'const value = 1;\n', 1, 7, false);
+    await pending.catch(() => undefined);
+    await until(async () => (await logOf(log)).includes('window/workDoneProgress/cancel'));
+    expect(await logOf(log)).toContain('$/cancelRequest');
+    expect(await logOf(log)).toContain('window/workDoneProgress/cancel');
+  });
+
+  it('новый корень уезжает серверу как workspaceFolders', async () => {
+    const { root, log, server } = await project('folders');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    const second = `${root}/second`;
+    lsp.rootsChanged([second], []);
+    await until(async () => (await logOf(log)).includes('workspace/didChangeWorkspaceFolders'));
+    expect(await logOf(log)).toContain('workspace/didChangeWorkspaceFolders');
+  });
+
+  it('серые подсказки сервера едут строкой', async () => {
+    const { root, log, server } = await project('inline');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    const snippets = await lsp.inlineCompletions('/p/a.ts', 'typescript', 'const a = 1;\n', 1, 1);
+    expect(snippets).toEqual(['const answer = 42;', 'console.log(x);']);
+    expect(await logOf(log)).toContain('textDocument/inlineCompletion');
   });
 
   it('символ без location доспрошивается через workspaceSymbol/resolve', async () => {

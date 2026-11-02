@@ -62,6 +62,20 @@ export interface CompletionEntry {
 }
 
 /**
+ * Ответ сервера списком. `isIncomplete` — «ответ обрезан»: сервер сказал, что
+ * выдал не всё, и список надо перезапросить на следующем символе. Без этого флага
+ * клиент обычно держит первый ответ: после `foo.b` уже неправда (см. `assistant.ts`).
+ */
+export interface CompletionList extends Array<CompletionEntry> {
+  /**
+   * Сервер сказал «выдал не всё» (`isIncomplete`): список нужно перезапросить, когда
+   * набрано ещё. Наследуется от массива ради совместимости: раньше функция отдавала
+   * просто список, и звать `toCompletions(raw)[0]` остаётся законным.
+   */
+  isIncomplete?: boolean;
+}
+
+/**
  * Виды подсказок LSP → короткое пояснение. Номера у LSP фиксированы (1..25), и это
  * единственное место, где они переводятся в текст: держать таблицу в двух местах
  * значило бы однажды их развести.
@@ -127,12 +141,16 @@ export function completionContext(context: CompletionContext | undefined): Recor
  * Разобрать ответ сервера в список подсказок. Битые элементы пропускаем, повторные
  * подписи убираем (серверы любят отдавать одно и то же дважды — из разных модулей).
  */
-export function toCompletions(raw: unknown): CompletionEntry[] {
-  if (!raw) return [];
+export function toCompletions(raw: unknown): CompletionList {
+  // Пустой ответ — просто пустой список: признак неполноты нужен только рядом с
+  // элементами, а лишнее свойство различимо при глубоком сравнении (и в тестах).
+  const out: CompletionList = [];
+  if (!raw) return out;
   const list = Array.isArray(raw) ? raw : (raw as { items?: unknown }).items;
-  if (!Array.isArray(list)) return [];
+  if (!Array.isArray(list)) return out;
+  // Флаг есть только у объектной формы: массив означает «выдал всё» (так в протоколе).
+  const isIncomplete = !Array.isArray(raw) && (raw as { isIncomplete?: unknown }).isIncomplete === true;
 
-  const out: CompletionEntry[] = [];
   const seen = new Set<string>();
   for (const item of list) {
     const entry = toEntry(item);
@@ -140,7 +158,9 @@ export function toCompletions(raw: unknown): CompletionEntry[] {
     seen.add(entry.label);
     out.push(entry);
   }
-  return sortByServer(out);
+  sortByServer(out);
+  out.isIncomplete = isIncomplete;
+  return out;
 }
 
 /**

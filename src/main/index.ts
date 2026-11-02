@@ -268,6 +268,9 @@ if (!app.requestSingleInstanceLock()) {
       // (см. `LspService.scanProject`) — поиск символов оставался бы пустым.
       createSeedProvider(() => workspace.rootPath()),
     );
+    // Изменение настроек языковых серверов — им же: интерпретатор берётся при старте
+    // сервера, и без уведомления старый живёт до перезапуска IDE (обычно до конца дня).
+    settings.onDidChange(() => lsp.settingsChanged());
     // Карта символов проекта: объявления всех файлов Python и Node без тел, собранные
     // заранее и лежащие в пользовательских данных. Разбор делает тот же языковой сервер
     // (своего парсера у нас нет), а карта лишь хранит ответ и переживает перезапуск:
@@ -386,7 +389,22 @@ if (!app.requestSingleInstanceLock()) {
     const history = new HistoryStore(path.join(app.getPath('userData'), 'history'));
     // Снимок прежнего содержимого перед каждой перезаписью — источник локальной
     // истории. Ошибку снимка не поднимаем: история вспомогательная, файл важнее.
-    workspace.onFilesChanged = (file) => lsp.watchedFiles([file], 2);
+    workspace.onFilesChanged = (changes) => {
+      for (const [file, kind] of changes) lsp.watchedFiles([file], kind);
+      // Создание и удаление — ещё и `didCreateFiles`/`didDeleteFiles`: сервер по ним
+      // узнаёт о новом модуле сразу, а не после перезапуска (и сохраняет связь имён
+      // при переименовании, где `fs.watch` видит два независимых пути).
+      for (const [file, kind] of changes) {
+        if (kind === 1) lsp.fileOperation('create', [file]);
+        else if (kind === 3) lsp.fileOperation('delete', [file]);
+      }
+    };
+    // Переименование — своим уведомлением: сервер переносит состояние файла,
+    // а не считает старый удалённым, а новый незнакомым.
+    workspace.onFileRenamed = (from, to) => lsp.fileOperation('rename', [to], from);
+    // Корни задают область проекта: сервер получает их при `initialize`, и о смене
+    // должен узнать, иначе его индекс останется по старой области.
+    workspace.onRootsChanged = (added, removed) => lsp.rootsChanged(added, removed);
 
     workspace.onBeforeChange = (file, reason) => {
       const root = workspace.rootPath();

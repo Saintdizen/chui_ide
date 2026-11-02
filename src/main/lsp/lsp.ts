@@ -197,6 +197,8 @@ class JsonRpcConnection {
       resolve: (value: unknown) => void;
       reject: (error: Error) => void;
       partial?: string;
+      /** Токен индикатора прогресса, открытого сервером под этот запрос. */
+      progress?: string | number;
     }
   >();
   /** Номер запроса по ключу «вид запроса»: по нему отменяем устаревшие (см. `request`). */
@@ -235,6 +237,9 @@ class JsonRpcConnection {
     // Частичные результаты: даём серверу свой токен в запросе и копим то, что он пришлёт
     // кусками (см. `dispatch`). Длинный поиск ссылок так начинается раньше конца.
     let partial: string | undefined;
+    // Свой токен прогресса: по нему сервер сообщает, что начал работу, а мы знаем,
+    // чей это индикатор — без токена связь пришлось бы угадывать.
+    let workDone: string | undefined;
     let outParams = params;
     if (options.partial && params && typeof params === 'object') {
       partial = `partial-${id}`;
@@ -244,12 +249,17 @@ class JsonRpcConnection {
       };
       this.partials.set(partial, []);
     }
+    if (params && typeof params === 'object') {
+      workDone = `work-${id}`;
+      outParams = { ...(outParams as Record<string, unknown>), workDoneToken: workDone };
+    }
 
     return new Promise((resolve, reject) => {
       this.pending.set(id, {
         resolve,
         reject,
         ...(partial ? { partial } : {}),
+        ...(workDone ? { progress: workDone } : {}),
       });
       this.send({ jsonrpc: '2.0', id, method, params: outParams });
     });
@@ -266,6 +276,12 @@ class JsonRpcConnection {
     if (pending.partial) this.partials.delete(pending.partial);
     this.forgetKey(id);
     this.send({ jsonrpc: '2.0', method: '$/cancelRequest', params: { id } });
+    // Отмены запроса мало: если сервер открыл под него индикатор прогресса, он
+    // продолжает работу до `workDoneProgress/cancel`. Спецификация требует сказать
+    // и это — иначе индекс строится в холостую до конца.
+    if (pending.progress !== undefined) {
+      this.notify('window/workDoneProgress/cancel', { token: pending.progress });
+    }
     pending.reject(new Error('Запрос отменён'));
   }
 
@@ -281,6 +297,30 @@ class JsonRpcConnection {
     const items = Array.isArray(value) ? value : ((value as { items?: unknown } | null)?.items ?? null);
     if (Array.isArray(items)) this.partials.get(key)!.push(...items);
     return true;
+  }
+
+  /**
+   * Привязать прогресс сервера к ждущему запросу: в `$/progress` с `workDoneProgress`
+   * токен говорит, чей это работа. Запоминаем его в одном ждущем запросе — по нему
+   * потом отменяем и саму работу (`window/workDoneProgress/cancel`).
+   */
+  private bindProgress(params: unknown): void {
+    if (this.pending.size === 0 || !params || typeof params !== 'object') return;
+    const { token, value } = params as { token?: unknown; value?: unknown };
+    if (typeof token !== 'string' && typeof token !== 'number') return;
+    if ((value as { kind?: unknown } | null)?.kind !== 'begin') return;
+    // Токен наш (`work-<номер>`), если запрос его назвал: тогда запись точная.
+    const own = typeof token === 'string' ? /^work-(\d+)$/.exec(token) : null;
+    if (own) {
+      const pending = this.pending.get(Number(own[1]));
+      if (pending) pending.progress = token;
+      return;
+    }
+    // Чужой — привязываем к самому старому ждущему: точнее сказать нечего.
+    const oldest = this.pending.keys().next();
+    if (oldest.done) return;
+    const pending = this.pending.get(oldest.value);
+    if (pending && pending.progress === undefined) pending.progress = token;
   }
 
   /** Снять ключ отмены, если он указывает на этот номер запроса. */
@@ -330,6 +370,9 @@ class JsonRpcConnection {
     this.onTraffic?.('server', message);
     // Частичный результат: пришёл уведомлением по нашему токену — копим и дальше не отдаём.
     if (message.method === '$/progress' && this.collectPartial(message.params)) return;
+    // Тот же `$/progress` с `begin` говорит, что сервер начал работу — запоминаем,
+    // чтобы отмена запроса погасила и её.
+    if (message.method === '$/progress') this.bindProgress(message.params);
 
     // Ответ на наш запрос: id есть, method нет.
     if (message.id !== undefined && message.method === undefined) {
@@ -405,6 +448,8 @@ interface LspCapabilities {
     resolveProvider?: boolean;
   };
   hoverProvider?: boolean;
+  /** Сервер умеет серые подсказки вперёд (`textDocument/inlineCompletion`). */
+  inlineCompletionProvider?: unknown;
   definitionProvider?: boolean;
   /** Родственные `definition`: объявление, тип, реализации. */
   declarationProvider?: unknown;
@@ -416,6 +461,12 @@ interface LspCapabilities {
   textDocumentSyncWillSave?: boolean;
   /** Наблюдение за файлами вне редактора (`workspace.didChangeWatchedFiles`). */
   workspaceWatchedFiles?: boolean;
+  /** Сервер попросил уведомлять его об операциях с файлами (`workspace.fileOperations`). */
+  workspaceFileOperations?: boolean;
+  /** Сервер просит присылать `workspace/didChangeConfiguration`. */
+  workspaceConfiguration?: boolean;
+  /** Сервер умеет многокорневую область (`workspace.workspaceFolders`). */
+  workspaceFolders?: boolean;
   signatureHelpProvider?: { triggerCharacters?: string[] };
   /** Поиск символов по всему проекту — «перейти к символу». */
   workspaceSymbolProvider?: boolean;
@@ -442,7 +493,15 @@ interface LspCapabilities {
 function withSyncCapabilities(capabilities: unknown): LspCapabilities {
   const caps = (capabilities ?? {}) as Record<string, unknown>;
   const sync = caps.textDocumentSync as { save?: unknown } | undefined;
-  const workspace = caps.workspace as { didChangeWatchedFiles?: unknown } | undefined;
+  const workspace = caps.workspace as
+    | {
+        didChangeWatchedFiles?: unknown;
+        fileOperations?: unknown;
+        didChangeConfiguration?: unknown;
+        workspaceFolders?: unknown;
+      }
+    | undefined;
+  const operations = workspace?.fileOperations as { didCreate?: unknown } | undefined;
   const save = sync && typeof sync === 'object' ? sync.save : undefined;
   const syncSave =
     save === true
@@ -455,7 +514,37 @@ function withSyncCapabilities(capabilities: unknown): LspCapabilities {
     ...(syncSave ? { textDocumentSyncSave: syncSave } : {}),
     textDocumentSyncWillSave: Boolean((sync as { willSave?: unknown } | undefined)?.willSave),
     workspaceWatchedFiles: Boolean(workspace?.didChangeWatchedFiles),
+    workspaceFileOperations: Boolean(operations?.didCreate),
+    workspaceConfiguration: workspace?.didChangeConfiguration !== undefined,
+    workspaceFolders: workspace?.workspaceFolders === true,
   };
+}
+
+/**
+ * Фильтр файловых операций «любой файл»: сервер просит его в объявлении
+ * `fileOperations`. Сузить нечем — о созданиях и удалениях нам надо знать
+ * про любой файл проекта, иначе часть модулей останется для сервера невидимой.
+ */
+const UNFILTERED_FILE_OPERATION = { scheme: 'file', pattern: '**/*' };
+
+/** Строка в `insertText` LSP: бывает либо строкой, либо `StringValue`. */
+function insertTextOf(value: unknown): string {
+  if (typeof value === 'string') return value;
+  const text = (value as { value?: unknown } | null)?.value;
+  return typeof text === 'string' ? text : '';
+}
+
+/** Подсказки вперёд: `insertText` строкой или `StringValue`, с откатом на `label`. */
+function toInlineSnippets(result: unknown): string[] {
+  const list = Array.isArray(result) ? result : ((result as { items?: unknown } | null)?.items ?? []);
+  if (!Array.isArray(list)) return [];
+  const out: string[] = [];
+  for (const item of list) {
+    const raw = item as { insertText?: unknown; label?: unknown } | null;
+    const text = insertTextOf(raw?.insertText) || (typeof raw?.label === 'string' ? raw.label : '');
+    if (text) out.push(text);
+  }
+  return out;
 }
 
 /** Символ без `location` — сервер просит доспросить его отдельно. */
@@ -810,6 +899,26 @@ export class LspService {
     });
   }
 
+  /**
+   * Сменился набор корней области — сказать серверу
+   * (`workspace/didChangeWorkspaceFolders`). Без этого второй корень для него не
+   * существует: поиск символов и переходы ищут только в первом.
+   * `added`/`removed` считает вызывающий: серверу нужна разница, а не всё сразу.
+   */
+  rootsChanged(added: readonly string[], removed: readonly string[]): void {
+    if (added.length === 0 && removed.length === 0) return;
+    const folder = (root: string) => ({
+      uri: pathToFileURL(root).toString(),
+      name: path.basename(root) || root,
+    });
+    for (const runtime of this.runtimes.values()) {
+      if (!runtime.capabilities.workspaceFolders) continue;
+      runtime.connection.notify('workspace/didChangeWorkspaceFolders', {
+        event: { added: added.map(folder), removed: removed.map(folder) },
+      });
+    }
+  }
+
   /** Документ сохранён на диск — сказать серверу (`didSave`). */
   saved(path: string): void {
     const runtime = this.runtimeForPath(path);
@@ -822,12 +931,56 @@ export class LspService {
     });
   }
 
-  /** Файл изменился или исчез на диске мимо редактора: `kind` 1 — создан, 2 — изменён, 3 — удалён. */
-  watchedFiles(paths: readonly string[], kind: 1 | 2 | 3): void {
-    const changes = paths.map((path) => ({ uri: pathToFileURL(path).toString(), type: kind }));
+  /**
+   * Настройки языковых серверов поменялись (путь к питону, аргументы, окружение).
+   *
+   * Перезапускать серверы не надо — они берут настройки при `initialize` и потом
+   * только по запросу. Но узнать о правке они должны сами: без `didChangeConfiguration`
+   * сервер держит старые до перезапуска IDE.
+   */
+  settingsChanged(): void {
+    const python = this.pythonPath();
+    for (const runtime of this.runtimes.values()) {
+      if (!runtime.capabilities.workspaceConfiguration) continue;
+      runtime.connection.notify('workspace/didChangeConfiguration', {
+        settings: { python: python ? { pythonPath: python } : {} },
+      });
+    }
+  }
+
+  /**
+   * Файл изменился или исчез на диске мимо редактора: `kind` 1 — создан, 2 — изменён,
+   * 3 — удалён, `null` — не знаем (переполнение наблюдения, перезапуск): такой путь
+   * отдаём как «изменён», потому что создание на сервере посчитали бы дублем.
+   */
+  watchedFiles(paths: readonly string[], kind: 1 | 2 | 3 | null): void {
+    const changes = paths.map((path) => ({ uri: pathToFileURL(path).toString(), type: kind ?? 2 }));
     for (const runtime of this.runtimes.values()) {
       if (runtime.capabilities.workspaceWatchedFiles) {
         runtime.connection.notify('workspace/didChangeWatchedFiles', { changes });
+      }
+    }
+  }
+
+  /**
+   * Файл появился, переехал или исчез по нашей вине (проводник, файловые операции).
+   *
+   * `didChangeWatchedFiles` для этого мало: `fs.watch` не различает переименование, и
+   * сервер видит два независимых пути, теряя связь «старое имя → новое». Отдельные
+   * `didCreateFiles`/`didRenameFiles`/`didDeleteFiles` эту связь сохраняют — по ним
+   * сервер переносит состояние файла, а не гадает.
+   */
+  fileOperation(kind: 'create' | 'rename' | 'delete', paths: readonly string[], oldPath?: string): void {
+    if (paths.length === 0 && !oldPath) return;
+    const files = paths.map((path) => ({ uri: pathToFileURL(path).toString() }));
+    for (const runtime of this.runtimes.values()) {
+      if (!runtime.capabilities.workspaceFileOperations) continue;
+      if (kind === 'create') runtime.connection.notify('workspace/didCreateFiles', { files });
+      else if (kind === 'delete') runtime.connection.notify('workspace/didDeleteFiles', { files });
+      else if (oldPath) {
+        runtime.connection.notify('workspace/didRenameFiles', {
+          files: [{ oldUri: pathToFileURL(oldPath).toString(), newUri: files[0]?.uri ?? '' }],
+        });
       }
     }
   }
@@ -1148,6 +1301,9 @@ export class LspService {
             // Серверы (pylsp, pyright) спрашивают настройки этим запросом.
             configuration: true,
             workspaceFolders: true,
+            // Файлы поменялись мимо редактора: без этого объявления сервер не ждёт
+            // `didChangeWatchedFiles`, и наш отказ (`workspaceWatchedFiles` выше) всегда ложен.
+            didChangeWatchedFiles: { dynamicRegistration: false },
             symbol: {},
             // Правки сервера (переименование) приходят с `documentChanges` — разбираем.
             // Заодно умеем операции с файлами: создать, переименовать, удалить (их применяет
@@ -1155,6 +1311,14 @@ export class LspService {
             workspaceEdit: {
               documentChanges: true,
               resourceOperations: ['create', 'rename', 'delete'],
+            },
+            // Операции с файлами, сделанные руками (проводник, терминал, `mv`):
+            // без объявления сервер не ждёт `didCreateFiles` и родни, и новый модуль
+            // остаётся невидимым, пока сервер не перезапустят.
+            fileOperations: {
+              didCreate: { filters: [UNFILTERED_FILE_OPERATION] },
+              didRename: { filters: [UNFILTERED_FILE_OPERATION] },
+              didDelete: { filters: [UNFILTERED_FILE_OPERATION] },
             },
           },
         },
@@ -1261,6 +1425,32 @@ export class LspService {
       const result = await runtime.connection.request('textDocument/formatting', {
         textDocument: { uri: pathToFileURL(path).toString() },
         options: { tabSize: 4, insertSpaces: true },
+      });
+      return toFormatEdits(result);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Форматирование нескольких кусков разом (rangesFormatting). Шлём один запрос
+   * вместо пачки `rangeFormatting`: сервер видит куски вместе и не разъезжается
+   * на стыках.
+   */
+  async formatRanges(
+    path: string,
+    ranges: ReadonlyArray<{ start: { line: number; character: number }; end: { line: number; character: number } }>,
+  ): Promise<TextEdit[]> {
+    const runtime = this.runtimeForPath(path);
+    if (!runtime) return [];
+    await runtime.initialized.catch(() => undefined);
+    const provider = runtime.capabilities.documentRangeFormattingProvider;
+    if (!provider || ranges.length === 0) return [];
+    try {
+      const result = await runtime.connection.request('textDocument/rangesFormatting', {
+        textDocument: { uri: pathToFileURL(path).toString() },
+        ranges,
+        options: { tabSize: 2, insertSpaces: true },
       });
       return toFormatEdits(result);
     } catch {
@@ -1383,6 +1573,36 @@ export class LspService {
   }
 
   /**
+   * Серые подсказки вперёд (`textDocument/inlineCompletion`): продолжение строки,
+   * которое редактор показывает бледным и принимает Tab. Своих таких у нас нет —
+   * спрашиваем сервер и только если он это умеет.
+   */
+  async inlineCompletions(
+    path: string,
+    languageId: string,
+    text: string,
+    line: number,
+    column: number,
+  ): Promise<string[]> {
+    const runtime = await this.runtimeForDocument(path, languageId);
+    if (!runtime?.capabilities.inlineCompletionProvider) return [];
+
+    const answer = await this.withDocument(runtime, path, languageId, text, (uri) =>
+      runtime.connection
+        .request('textDocument/inlineCompletion', {
+          textDocument: { uri },
+          position: {
+            line: Math.max(line - 1, 0),
+            character: Math.max(column - 1, 0),
+          },
+          context: { triggerKind: 2 },
+        })
+        .catch(() => null),
+    );
+    return toInlineSnippets(answer);
+  }
+
+  /**
    * Ссылки на символ: где он ещё встречается. Позиция — объявление символа
    * (её даёт `workspace/symbol`). `includeDeclaration` — включать ли в ответ само
    * объявление: агенту оно обычно уже известно, и он просит только использования.
@@ -1413,7 +1633,7 @@ export class LspService {
             },
             context: { includeDeclaration },
           },
-          undefined,
+          `references-${path}`,
           // Ссылок бывает много: просим сервер отдавать их кусками — так первые места
           // видны, не дожидаясь конца поиска (см. `JsonRpcConnection.request`).
           { partial: true },

@@ -14,6 +14,7 @@ import { EditorController } from '../editor/input/editor-controller';
 import { EditorInputBinding } from '../editor/input/editor-input';
 import { EditorView } from '../editor/view/editor-view';
 import { CompletionAssistant } from '../editor/complete/assistant';
+import type { CompletionItem } from '../editor/complete/completions';
 import { completeStatement } from '../editor/complete/statement';
 import { FindWidget } from '../editor/widgets/find-widget';
 import { GotoLineWidget } from '../editor/widgets/goto-widget';
@@ -123,27 +124,30 @@ const assistant = new CompletionAssistant(view, controller, buffer, suggest, {
   currentPath: () => 'src/app.ts',
   // Подставной языковой сервер: одна подсказка с авто-импортом — так проба проверяет,
   // что дополнительные правки (строка import) применяются вместе со вставкой.
-  lsp: async (prefix) =>
-    prefix === ''
-      ? [
-          // Вид у элементов разный — на нём проверяется «умное» дополнение: в позиции
-          // значения класс не годится, а функция годится.
-          { label: 'TypeOnlyName', kind: 'external' as const, detail: 'класс' },
-          { label: 'ValueOnlyName', kind: 'external' as const, detail: 'функция' },
-        ]
-      : prefix === 'Path'
+  lsp: async (prefix) => {
+    const items: CompletionItem[] =
+      prefix === ''
         ? [
-            {
-              label: 'Path',
-              kind: 'external' as const,
-              detail: 'класс',
-              insert: 'Path',
-              additionalEdits: [
-                { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1, newText: 'from pathlib import Path\n' },
-              ],
-            },
+            // Вид у элементов разный — на нём проверяется «умное» дополнение: в позиции
+            // значения класс не годится, а функция годится.
+            { label: 'TypeOnlyName', kind: 'external' as const, detail: 'класс' },
+            { label: 'ValueOnlyName', kind: 'external' as const, detail: 'функция' },
           ]
-        : [],
+        : prefix === 'Path'
+          ? [
+              {
+                label: 'Path',
+                kind: 'external' as const,
+                detail: 'класс',
+                insert: 'Path',
+                additionalEdits: [
+                  { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1, newText: 'from pathlib import Path\n' },
+                ],
+              },
+            ]
+          : [];
+    return { items, isIncomplete: false };
+  },
 });
 // Наведение с двумя источниками ПО ПРИОРИТЕТУ: отладочная подсказка (значение из
 // остановленного кадра) идёт раньше языковой. Переключатель `debugHoverControl.on`
@@ -409,16 +413,19 @@ const symbolsWorkspace = new EditorWorkspace(symbolsRoot, symbolsRegistry, {
   },
   // Подсказки сервера: подставной источник отдаёт готовые элементы — проверяем, что
   // они подмешиваются в список впереди своих слов и вставляются по Enter.
-  completionFromLanguage: async () => [
-    { label: 'value', kind: 'external' as const, detail: 'переменная', insert: 'value', resolve: { label: 'value' } },
-    {
-      label: 'valuableThing',
-      kind: 'external' as const,
-      detail: 'функция',
-      insert: 'valuableThing()',
-      resolve: { label: 'valuableThing' },
-    },
-  ],
+  completionFromLanguage: async () => ({
+    items: [
+      { label: 'value', kind: 'external' as const, detail: 'переменная', insert: 'value', resolve: { label: 'value' } },
+      {
+        label: 'valuableThing',
+        kind: 'external' as const,
+        detail: 'функция',
+        insert: 'valuableThing()',
+        resolve: { label: 'valuableThing' },
+      },
+    ],
+    isIncomplete: false,
+  }),
   // Дотягивание подсказки: описание приходит отдельным запросом — проверяем, что
   // строка списка его дописывает (проверка `own-editor-probe.cjs`).
   resolveCompletionItem: async (_path, item) => {

@@ -164,6 +164,23 @@ describe('разбор подсказок LSP', () => {
     expect(toCompletions([raw])[0]!.source).toBe(raw);
   });
 
+  it('флаг неполноты берётся только из объектной формы', () => {
+    const raw = { isIncomplete: true, items: [{ label: 'a' }, { label: 'b' }] };
+    const list = toCompletions(raw);
+    expect(list).toHaveLength(2);
+    expect(list.isIncomplete).toBe(true);
+  });
+
+  it('плоский массив — ответ полный: повтора не будет', () => {
+    const list = toCompletions([{ label: 'a' }]);
+    expect(list).toHaveLength(1);
+    expect(list.isIncomplete).toBe(false);
+  });
+
+  it('isIncomplete: false в объекте — тоже полный ответ', () => {
+    expect(toCompletions({ isIncomplete: false, items: [{ label: 'a' }] }).isIncomplete).toBe(false);
+  });
+
   it('пустой и неожиданный ответ — пустой список', () => {
     expect(toCompletions(null)).toEqual([]);
     expect(toCompletions(undefined)).toEqual([]);

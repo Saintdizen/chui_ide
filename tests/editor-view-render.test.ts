@@ -158,3 +158,97 @@ describe('устойчивость вида', () => {
     ).toContain('новая');
   });
 });
+
+/**
+ * Закреплённые заголовки блоков (sticky scroll). Слой живёт поверх поля прокрутки и
+ * повторяет заголовки вмещающих блоков: прокрутил внутрь функции — её начало видно
+ * сверху. Проверяется прямо по DOM слоя.
+ */
+describe('закреплённые заголовки (sticky scroll)', () => {
+  beforeEach(() => {
+    installMiniDom();
+  });
+
+  /** Строки исходника в «функции» с вложенным блоком: два диапазона свёртки. */
+  /**
+   * Строки исходника: функция с вложенным блоком, а перед ней восемьдесят заполнителей.
+   * Заполнители — чтобы строка 81 не влезала в экран (600px / 20 = 30 строк): иначе
+   * прокрутка не сдвинется и верхом окажется начало файла.
+   */
+  const PAD = Array.from({ length: 80 }, (_, i) => `const pad${i} = ${i};`);
+  const SOURCE = [
+    ...PAD,
+    'function f() {',
+    '  if (x) {',
+    '    a();',
+    '    b();',
+    '  }',
+    '}',
+    ...Array.from({ length: 60 }, (_, i) => `const tail${i} = ${i};`),
+  ].join('\n');
+  /** Номера строк тела функции при таком префиксе: заголовок — 81. */
+  const FN = PAD.length + 1;
+
+  function stickyRows(root: any): string[] {
+    const rows = (root?.querySelectorAll('.own-editor-sticky-row') ?? []) as unknown as {
+      textContent: string;
+    }[];
+    return rows.map((row) => row.textContent);
+  }
+
+  /**
+   * Прокрутить так, чтобы строка (с 1) оказалась вверху экрана. `revealOffset` ставит
+   * строку лишь в видимую часть (при прокрутке сверху — к нижнему краю), поэтому после
+   * него ставим прокрутку напрямую: вид пересчитывает окно в `refresh`. Плавность гасим:
+   * без неё прыжок идёт кадрами, и проверка ловила бы вид посреди анимации.
+   */
+  function scrollToLine(view: EditorView, buffer: TextBuffer, line: number): void {
+    view.setSmoothScroll(false);
+    view.revealOffset(buffer.lineStart(line));
+    const viewport = (view as unknown as { viewport: { scrollTop: number } }).viewport;
+    viewport.scrollTop = (line - 1) * METRICS.lineHeight;
+    view.refresh(0);
+  }
+
+  it('в начале файла слой пуст', () => {
+    const { view, buffer, root } = makeView(SOURCE);
+    view.setFoldRanges([
+      { startLine: FN, endLine: FN + 5 },
+      { startLine: FN + 1, endLine: FN + 4 },
+    ]);
+    scrollToLine(view, buffer, 1);
+
+    // Верх — строка 1, вне блоков: прикалывать нечего.
+    expect(stickyRows(root)).toEqual([]);
+  });
+
+  it('внутри функции приколот её заголовок', () => {
+    const { view, buffer, root } = makeView(SOURCE);
+    view.setFoldRanges([{ startLine: FN, endLine: FN + 5 }]);
+    scrollToLine(view, buffer, FN + 2);
+
+    expect(stickyRows(root)).toEqual(['function f() {']);
+  });
+
+  it('внутри вложенного блока — цепочка сверху вниз', () => {
+    const { view, buffer, root } = makeView(SOURCE);
+    view.setFoldRanges([
+      { startLine: FN, endLine: FN + 5 },
+      { startLine: FN + 1, endLine: FN + 4 },
+    ]);
+    scrollToLine(view, buffer, FN + 3);
+
+    // Порядок — от внешнего к внутреннему: так читается «где я».
+    expect(stickyRows(root)).toEqual(['function f() {', '  if (x) {']);
+  });
+
+  it('внутри свёрнутого блока слой пуст', () => {
+    const { view, buffer, root } = makeView(SOURCE);
+    view.setFoldRanges([{ startLine: FN, endLine: FN + 5 }]);
+    // Верх — внутри свёрнутой функции: её строки не видны, прикалывать нечего.
+    scrollToLine(view, buffer, FN + 3);
+    view.toggleFold(FN);
+
+    expect(stickyRows(root)).toEqual([]);
+  });
+});

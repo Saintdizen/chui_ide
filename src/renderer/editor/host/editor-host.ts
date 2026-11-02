@@ -190,10 +190,16 @@ export interface EditorHostOptions {
   /** Включать ли лигатуры шрифта. */
   ligatures?: boolean;
   /**
-   * Подсказки-вставки файла (inlay hints) от языкового сервера: путь и текст → подсказки
-   * (см. `shared/lsp-inlay-hints.ts`). Не задано — подсказок в коде нет вовсе.
+   * Подсказки-вставки файла (inlay hints) от языкового сервера: путь, конец и начало
+   * видимой области → подсказки (см. `shared/lsp-inlay-hints.ts`). Раньше здесь был
+   * текст, и серверу передавался весь документ; теперь запрос ограничен экраном.
+   * Не задано — подсказок в коде нет вовсе.
    */
-  inlayHints?: (path: string, text: string) => Promise<readonly InlayHint[]>;
+  inlayHints?: (
+    path: string,
+    end: { line: number; column: number },
+    start?: { line: number; column: number },
+  ) => Promise<readonly InlayHint[]>;
   /** Схема оформления: цвета токенов и обвязки. */
   /** Сниппеты всех языков: к текущему языку отберёт подсказка. */
   snippets?: () => readonly Snippet[];
@@ -209,7 +215,7 @@ export interface EditorHostOptions {
   completionFromLanguage?: (
     path: string,
     position: { line: number; column: number },
-  ) => Promise<readonly CompletionItem[]>;
+  ) => Promise<{ items: readonly CompletionItem[]; isIncomplete: boolean }>;
   /**
    * Символы проекта по имени — карта символов. Ими расширяется список подсказок:
    * повторный Ctrl+Space показывает сначала свой проект, затем зависимости.
@@ -450,7 +456,13 @@ export class EditorHost {
   private foldTimer: number | null = null;
 
   /** Подсказки-вставки (inlay hints) — источник от приложения; спрашиваем по файлу. */
-  private readonly inlayHintSource: ((path: string, text: string) => Promise<readonly InlayHint[]>) | undefined;
+  private readonly inlayHintSource:
+    | ((
+        path: string,
+        end: { line: number; column: number },
+        start?: { line: number; column: number },
+      ) => Promise<readonly InlayHint[]>)
+    | undefined;
   /** Номер запроса подсказок: ответ на прежний текст не показываем. */
   private inlayRequestId = 0;
   private inlayTimer: number | null = null;
@@ -631,6 +643,10 @@ export class EditorHost {
     if (options.cursorStyle !== undefined) this.view.setCursorStyle(options.cursorStyle);
     if (options.cursorBlink !== undefined) this.view.setCursorBlink(options.cursorBlink);
     if (options.rulers) this.view.setRulers(options.rulers);
+    // Прокрутили — видимое окно сменилось: подсказки-вставки спрашивались для старого
+    // места, и без перезапроса новая часть файла останется без них. С паузой — чтобы
+    // не дёргать сервер на каждом колесе (см. `scheduleInlayHints`).
+    this.view.onVisibleRangeChange(() => this.scheduleInlayHints());
     this.viewport = this.view.element.querySelector<HTMLElement>('.own-editor-viewport');
     // Значок «только чтение» — поверх панели: файл большой, правки в нём выключены.
     this.readOnlyBadge = document.createElement('div');
@@ -683,7 +699,9 @@ export class EditorHost {
       lsp: options.completionFromLanguage
         ? (_prefix, position) => {
             const path = this.activePath;
-            if (!path) return Promise.resolve([]);
+            // Пустой ответ — не «подсказок нет», а «спросить не у кого»: признак
+            // неполноты здесь нечего выставлять, и список не будет перезапрашиваться.
+            if (!path) return Promise.resolve({ items: [], isIncomplete: false });
             // Текст — серверу ДО вопроса. Знак набран, а синхронизация могла ещё
             // не уехать (правка идёт разными путями): тогда сервер ответит по
             // устаревшему документу, и подсказка будет не про то место.
@@ -2283,8 +2301,9 @@ export class EditorHost {
   }
 
   /**
-   * Подсказки-вставки текущего файла: спросить у приложения и отдать виду. Вид покажет их
-   * только у видимых строк, поэтому спрашиваем на весь файл — но при смене файла или
+   * Подсказки-вставки текущего файла: спросить у приложения и отдать виду. Спрашиваем
+   * только видимую часть (плюс запас), а не весь файл: ответ на тысячу строк, из которых
+   * на экране десяток, одинаково дорог серверу при любой прокрутке. При смене файла или
    * текста ответ прошлого запроса уже не к месту (по номеру запроса).
    */
   private async refreshInlayHints(): Promise<void> {
@@ -2292,12 +2311,27 @@ export class EditorHost {
     const source = this.inlayHintSource;
     const path = this.path;
     if (!source || !path) return;
-    const text = this.registry.get(path)?.text ?? '';
     const id = (this.inlayRequestId += 1);
-    const hints = await source(path, text).catch(() => []);
+    const window = this.inlayWindow();
+    const hints = await source(path, window.end, window.start).catch(() => []);
     if (id !== this.inlayRequestId || this.path !== path) return;
     this.view.setInlayHints(hints);
     void this.refreshDocumentColors(path);
+  }
+
+  /**
+   * Строки, на которые спрашиваем подсказки-вставки: экран с запасом в экран сверху и
+   * снизу. Без запаса прокрутка на строку за край давала бы мигание пустым местом.
+   * Позиции возвращаем 1-based — как их ждёт источник (см. `inlayHints` в lsp-features).
+   */
+  private inlayWindow(): { start: { line: number; column: number }; end: { line: number; column: number } } {
+    const range = this.view.visibleRange();
+    const total = Math.max(1, this.controller.bufferRef.lineCount);
+    const height = Math.max(1, range.last - range.first + 1);
+    // Считаем в индексах вью (с нуля), а наружу отдаём с единицы.
+    const first = Math.max(0, range.first - height);
+    const last = Math.min(total - 1, range.last + height);
+    return { start: { line: first + 1, column: 1 }, end: { line: last + 1, column: 1 } };
   }
 
   /**

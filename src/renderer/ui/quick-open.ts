@@ -30,6 +30,12 @@ export function createQuickOpen(deps: {
   workspace: WorkspaceModel;
   /** Открыть файл по абсолютному пути — тот же вход, что у дерева и вкладок. */
   openFile(path: string): void | Promise<void>;
+  /**
+   * Недавно открытые файлы проекта (относительные пути, свежие сверху). Только чтение:
+   * палитра спрашивает их перед каждым показом списка, чтобы учитывать и те файлы,
+   * которые открыли мимо неё (дерево, переход по ошибке, чат).
+   */
+  recentFiles?(): readonly string[];
 }): QuickOpenView {
   const input = h('input', {
     class: 'palette-input',
@@ -48,6 +54,22 @@ export function createQuickOpen(deps: {
   let cursor = 0;
   /** Режим выбора: пока задан, `run` возвращает путь сюда, а не открывает файл. */
   let picking: ((path: string | null) => void) | null = null;
+
+  /**
+   * Недавние проекта — на момент отрисовки: список мог измениться мимо палитры.
+   * История хранит абсолютные пути (её пишет `openPath`), а палитра работает
+   * относительными, как их отдаёт `workspace.listFiles`: переводим здесь, отсекая
+   * чужое проекту (палитра — про текущий корень).
+   */
+  function recentFiles(): readonly string[] {
+    const projectRoot = deps.workspace.root;
+    const history = deps.recentFiles?.() ?? [];
+    if (!projectRoot) return [];
+    const prefix = projectRoot.endsWith('/') ? projectRoot : `${projectRoot}/`;
+    return history
+      .filter((path) => path.startsWith(prefix) && path.length > prefix.length)
+      .map((path) => path.slice(prefix.length));
+  }
 
   async function loadFiles(): Promise<void> {
     const current = deps.workspace.root;
@@ -88,7 +110,7 @@ export function createQuickOpen(deps: {
       return;
     }
 
-    matches = rankFiles(files, input.value);
+    matches = rankFiles(files, input.value, 50, recentFiles());
     cursor = Math.min(cursor, Math.max(matches.length - 1, 0));
 
     if (matches.length === 0) {

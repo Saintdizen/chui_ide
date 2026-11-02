@@ -142,6 +142,7 @@ import { createProblemPanel } from './ui/problem-panel';
 import { problemBadgeText } from '../shared/problem-list';
 import { TODO_QUERY, toTodoItems } from '../shared/todo-list';
 import { createPalette } from './ui/palette';
+import { createRecentCommands } from './core/recent-commands';
 import { createPythonEnvPopover } from './ui/python-env-popover';
 import { createLazyPopover } from './ui/lazy-popover';
 import { createMeaningSearch } from './ui/meaning-search';
@@ -177,6 +178,7 @@ import { createTextModal } from './ui/text-modal';
 import { createStatusBar } from './ui/statusbar';
 import { needsLspRefresh, statusPatch } from './core/status-state';
 import type { SectionId, SettingsModalView } from './ui/settings-modal';
+import { createRecentFiles } from './core/recent-files';
 import { createTabs, type PagesTabSource } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
 import { createDebugPanel } from './ui/debug-panel';
@@ -419,7 +421,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       return text ? { text } : null;
     },
     // Подсказки от сервера подмешиваются к словам языка и документа.
-    completionFromLanguage: (path, position) => lsp.completion(path, position),
+    completionFromLanguage: (path, position) => lsp.completionList(path, position),
     // Повторный Ctrl+Space расширяет список символами проекта: сначала свои объявления,
     // потом из зависимостей. Источник — карта символов: она отвечает мгновенно и без
     // языкового сервера, а `package` в ответе и есть признак чужого объявления.
@@ -570,12 +572,21 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       // Main оба тоже проверяет (`requireAiEnabled`), но он тогда уже ответил
       // отказом — а значит, на каждую паузу в наборе летел бы RPC-вызов в никуда
       // и сыпался бы toast об ошибке. Редактор должен молчать сам.
-      enabled: () => settings.ai.enabled && settings.ai.inlineCompletion.enabled,
+      // Серверный путь работает и без модели: `enabled` пропускает, если есть хоть один источник.
+      enabled: () => settings.ai.inlineCompletion.enabled,
       debounceMs: () => settings.ai.inlineCompletion.debounceMs,
       complete: async ({ path, language, prefix, suffix }) => {
         // Проверяем ещё и здесь: `enabled()` спрашивают по краю, а пауза в наборе
         // и сам запрос могут попасть в разные стороны тумблера.
-        if (!settings.ai.enabled) return null;
+        // Модель выключена — спросить язык: серверы умеют `textDocument/inlineCompletion`.
+        // Отказ сервера ничем не отличается от «подсказать нечего», и молчание — норма.
+        if (!settings.ai.enabled) {
+          const [first] = await lsp.inlineCompletion(path, {
+            line: prefix.split('\n').length,
+            column: (prefix.split('\n').at(-1)?.length ?? 0) + 1,
+          });
+          return first ?? null;
+        }
         try {
           const result = await rpc.request('ai.complete', {
             path: workspace.relative(path),
@@ -612,8 +623,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     codeLenses: (path) => lsp.codeLenses(path),
     lensCommand: (path, command) => void runLensCommand(path, command),
     // Подсказки-вставки: тип переменной, имя параметра — прямо в коде. Серверу нужен
-    // диапазон, а своего текста у него нет: конец документа считаем по тексту файла.
-    inlayHints: (path, text) => lsp.inlayHints(path, endOfText(text)),
+    // диапазон, и спрашиваем только видимую часть файла (см. `inlayWindow` в editor-host).
+    inlayHints: (path, end, start) => lsp.inlayHints(path, end, start),
     // Плашки цветов: сервер CSS/SCSS/LESS знает, что `#3b82f6` и `rgb(...)` — цвет.
     documentColors: (path) => lsp.documentColors(path),
     // Вхождения символа: сервер знает области видимости, свой поиск по тексту — нет.
@@ -1784,7 +1795,21 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   const emptyState = createEmptyState();
   layout.editorHost.appendChild(emptyState.element);
 
-  const palette = createPalette({ commands });
+  const recentCommands = createRecentCommands();
+  recentCommands.restore(settings.commandPalette?.recent ?? []);
+  // История палитры живёт в настройках (settings.json): переключаешь проект — привычные
+  // команды на месте. Пишем не на каждый выбор, а перед показом палитры: так очередь
+  // из пяти подряд команд даёт одну запись, а не пять.
+  const palette = createPalette({
+    commands,
+    recent: recentCommands,
+    onBeforeShow: () => {
+      const known = new Set(commands.list().map((descriptor) => descriptor.id));
+      const recent = recentCommands.ids().filter((id) => known.has(id));
+      if (JSON.stringify(recent) === JSON.stringify(settings.commandPalette?.recent ?? [])) return;
+      void rpc.request('settings.update', { commandPalette: { recent } }).catch(() => undefined);
+    },
+  });
   document.body.appendChild(palette.element);
 
   // F1 внутри редактора — наша палитра: две палитры в одном окне только путают.
@@ -1942,11 +1967,13 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     explorer.reveal(path);
   };
 
+  const recentFiles = createRecentFiles();
   const openPath = async (path: string, options: { preview?: boolean } = {}): Promise<void> => {
     // PDF — тоже не текст, и показывать его умеет сам движок: вкладка-страница со
     // встроенным просмотрщиком (см. `shared/pdf.ts`). Документ ему не нужен:
     // открывать в редакторе нечего, а вкладку ведёт `BrowserTabs`.
     if (isPdfPath(path)) {
+      noteOpened(path);
       openPdfTab(path);
       return;
     }
@@ -1956,6 +1983,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       const document = edits.binaryDocument(path);
       openEditors.open(document, options);
       explorer.reveal(path);
+      noteOpened(path);
       return;
     }
     // Картинка — не текст: бинарь открывать редактором нельзя. Заводим документ-заглушку
@@ -1965,14 +1993,24 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       const document = edits.binaryDocument(path);
       openEditors.open(document, options);
       explorer.reveal(path);
+      noteOpened(path);
       return;
     }
     const document = await edits.ensureDocument(path);
     openEditors.open(document, options);
     editors.open(document);
     explorer.reveal(path);
+    noteOpened(path);
   };
 
+  /**
+   * Запомнить открытие в истории MRU. Зовётся на любом успешном пути открытия, поэтому
+   * история видит все входы (дерево, чат, палитра), а не только саму палитру. Пути вне
+   * проекта модуль отбрасывает сам —см. `createRecentFiles` в `core/recent-files.ts`.
+   */
+  const noteOpened = (path: string): void => {
+    recentFiles.remember(path);
+  };
   /**
    * Применить операции с файлами из `WorkspaceEdit` сервера (создать, переименовать,
    * удалить) — по порядку. Возвращает текст ошибки или null. «Пропустить молча» уважаем:
@@ -2021,7 +2059,15 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
 
   // Быстрый открыватель файлов (Ctrl+Shift+O): отдельный вход, тот же `openPath`,
   // что у дерева и вкладок, поэтому открытие ведёт себя одинаково.
-  const quickOpen = createQuickOpen({ rpc, workspace, openFile: (path) => openPath(path) });
+  // История открытых файлов (MRU): пустая палитра идёт по ней, а не по алфавиту. Живёт
+  // в памяти этого окна; отметку ставит `openPath`, поэтому история видит все входы —
+  // дерево, чат, переход по ошибке, а не только саму палитру.
+  const quickOpen = createQuickOpen({
+    rpc,
+    workspace,
+    openFile: (path) => openPath(path),
+    recentFiles: () => recentFiles.paths(),
+  });
   document.body.appendChild(quickOpen.element);
 
   // Диалог ввода: условие точки останова. Один на приложение — открывается по месту.
@@ -3727,14 +3773,4 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       semanticLines: () => editors.semanticLineCount(),
     };
   }
-}
-
-/**
- * Конец текста в понятиях «строка и столбец» (оба с единицы) — для диапазона запросов,
- * которым серверу нужен весь документ (подсказки-вставки). Строк n, столбец — за
- * последним знаком последней строки.
- */
-function endOfText(text: string): { line: number; column: number } {
-  const lines = text.split('\n');
-  return { line: lines.length, column: (lines[lines.length - 1]?.length ?? 0) + 1 };
 }

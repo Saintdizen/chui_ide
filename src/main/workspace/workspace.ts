@@ -51,6 +51,9 @@ import {
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
 
+/** Вид события дерева — те же числа, что в LSP `FileChangeType`. */
+export type WorkspaceChangeKind = 1 | 2 | 3;
+
 /**
  * Файлы исключений в корне проекта. `.gitignore` читаем тоже: проект уже сказал
  * им, что не является его частью, и искать в собранном или сгенерированном —
@@ -119,6 +122,12 @@ interface RootState {
  */
 const MASS_CHANGE_LIMIT = 5;
 
+/**
+ * Сколько миллисекунд после нашей собственной записи событие наблюдателя о том же
+ * пути считаем эхом. Дольше — это уже чужая правка.
+ */
+const SELF_WRITE_DEDUP_MS = 1000;
+
 export class WorkspaceService {
   /**
    * Корни рабочей области: у обычного проекта он один, но их может быть несколько —
@@ -135,6 +144,15 @@ export class WorkspaceService {
    * «правка файла», а десяток — «переключили ветку»: потребителям нужно разное.
    */
   private pendingCount = 0;
+  /**
+   * Все пути окна со своим видом события (LSP FileChangeType: 1 — создан, 2 — изменён,
+   * 3 — удалён). В уведомление для дерева идёт только последний путь, но языковому
+   * серверу нужны все: переименование приходит двумя событиями (старое имя пропало,
+   * новое появилось), и одного из них ему мало.
+   */
+  private pendingKinds = new Map<string, WorkspaceChangeKind>();
+  /** Когда мы сами последний раз писали путь: эхо наблюдателя за ним не считаем чужим. */
+  private readonly selfWrites = new Map<string, number>();
   /**
    * Содержимое прочитанных файлов. Чтение — самая дорогая часть поиска (на дереве
    * в 7,5 тысяч файлов это 788 мс из 875), поэтому повторный поиск читает только
@@ -216,8 +234,24 @@ export class WorkspaceService {
    * мешать самой правке файла, поэтому ошибку здесь глотает вызывающий.
    */
   onBeforeChange: ((file: string, reason: 'save' | 'delete') => Promise<void> | void) | null = null;
-  /** Правки вне редактора: наблюдатель увидел изменение, создание или удаление файла. */
-  onFilesChanged: ((path: string) => void) | null = null;
+  /**
+   * Правки вне редактора: пакет изменений за одно окно сжатия. В уведомление для
+   * дерева идёт только последний путь, а языковому серверу нужны все: переименование
+   * приходит двумя событиями (старое имя пропало, новое появилось).
+   */
+  onFilesChanged: ((changes: ReadonlyArray<readonly [string, WorkspaceChangeKind]>) => void) | null = null;
+
+  /**
+   * Переименование — отдельно от пакета событий: серверу важно знать, что это ОДИН
+   * файл под новым именем, а не «удалился старый и появился незнакомый новый».
+   */
+  onFileRenamed: ((from: string, to: string) => void) | null = null;
+
+  /**
+   * Список корней области поменялся (`addRoot`/`removeRoot`). Языковому серверу
+   * нужны все: иначе файлы новой папки для него чужие.
+   */
+  onRootsChanged: ((added: ReadonlyArray<string>, removed: ReadonlyArray<string>) => void) | null = null;
 
   /** Активный корень — им отвечают операции без явного пути. */
   rootPath(): string | null {
@@ -258,6 +292,9 @@ export class WorkspaceService {
     this.roots = [...this.roots, state];
     this.active = state.root;
     this.startWatcher(state);
+    // Сервер получил при `initialize` один корень и о новом не знает: его вывод
+    // считается от старой области, а файлы новой папки он видит как чужие.
+    this.onRootsChanged?.([state.root], []);
     return this.infoFor(state.root);
   }
 
@@ -272,6 +309,9 @@ export class WorkspaceService {
     this.active = next;
     // Содержимое убранного корня держать в памяти незачем — чистим кэш целиком.
     this.contents.clear();
+    // Сервер должен забыть убранную папку: иначе её файлы продолжают числиться
+    // в его индексе и всплывают в поиске символов и переходах.
+    this.onRootsChanged?.([], [target]);
     if (!this.active) return null;
     return this.infoFor(this.active);
   }
@@ -536,7 +576,7 @@ export class WorkspaceService {
       throw error;
     }
     this.contents.invalidate(file);
-    this.notifyChanged(file);
+    this.notifyChanged(file, 1);
     return file;
   }
 
@@ -559,9 +599,12 @@ export class WorkspaceService {
     // самое, но с другим `mtime`; проще забыть оба.
     this.contents.invalidate(source);
     this.contents.invalidate(target);
-    // Старое имя тоже исчезло с диска — дерево должно убрать и его.
-    this.notifyChanged(source);
-    this.notifyChanged(target);
+    // Старое имя тоже исчезло с диска — дерево должно убрать и его. Для языкового
+    // сервера это разные события: старого пути больше нет (удалён), новый появился.
+    // Связь имён ему говорит отдельное уведомление: по нему он переносит состояние.
+    this.onFileRenamed?.(source, target);
+    this.notifyChanged(source, 3);
+    this.notifyChanged(target, 1);
     return target;
   }
 
@@ -602,7 +645,7 @@ export class WorkspaceService {
       );
     }
     this.contents.invalidate(resolved);
-    this.notifyChanged(resolved);
+    this.notifyChanged(resolved, 3);
   }
 
   async search(options: SearchOptions, signal?: AbortSignal): Promise<SearchResult> {
@@ -1183,7 +1226,7 @@ export class WorkspaceService {
       collectFiles: () => this.collectFiles(),
       beforeChange: (file) => this.onBeforeChange?.(file, 'save'),
       invalidate: (file) => this.contents.invalidate(file),
-      notifyChanged: (file) => this.notifyChanged(file),
+      notifyChanged: (file, kind) => this.notifyChanged(file, kind ?? 2),
     });
     return this.codeIndexInstance;
   }
@@ -1257,16 +1300,28 @@ export class WorkspaceService {
    * Для второго случая ставим `many` и отдаём корень — потребитель (карта символов)
    * по нему делает общий пересчёт вместо точечного.
    */
-  private scheduleChange(changedPath: string): void {
-    if (this.pendingChange !== changedPath) this.pendingCount += 1;
-    this.pendingChange = changedPath;
+  private scheduleChange(changedPath: string, kind: WorkspaceChangeKind = 2, named = false): void {
+    const previous = this.pendingKinds.get(changedPath);
+    if (previous === undefined) this.pendingCount += 1;
+    // Уже собранное изменение перевешивает создание: файл успел поменяться —
+    // для языкового сервера это правка, а не новинка. Удаление перевешивает всё:
+    // файла нет ни при каком порядке событий.
+    this.pendingKinds.set(changedPath, previous === 3 || kind === 3 ? 3 : previous === 2 || kind === 2 ? 2 : 1);
+    // Уведомление называет последний путь: так было и раньше (дерево ждёт именно
+    // его — переименование должно дойти под новым именем), а полный список с видами
+    // едет отдельно: по нему живёт языковой сервер, которому нужны оба имени.
+    // Запоздавшее эхо наблюдателя путь не подменяет: событие по старому имени
+    // приходит уже после нашего `rename`, и уведомление уезжало бы со старым именем.
+    if (named || !this.selfWritten(changedPath)) this.pendingChange = changedPath;
     if (this.watchTimer) return;
     this.watchTimer = setTimeout(() => {
       this.watchTimer = null;
       const changed = this.pendingChange ?? this.active;
       const many = this.pendingCount > MASS_CHANGE_LIMIT;
+      const batch = [...this.pendingKinds];
       this.pendingChange = null;
       this.pendingCount = 0;
+      this.pendingKinds.clear();
       if (!this.active) return;
       // Уведомление несёт корень, к которому относится правка: дерево перечитывает
       // именно его ветку, а не всю область.
@@ -1276,7 +1331,7 @@ export class WorkspaceService {
         ? { root, path: root, many: true }
         : { root, path: changed ?? this.active };
       this.onChange(PushTopic.WorkspaceChanged, payload);
-      this.onFilesChanged?.(changed ?? root);
+      this.onFilesChanged?.(batch.length > 0 ? batch : [[changed ?? root, 2]]);
     }, 120);
   }
 
@@ -1287,21 +1342,59 @@ export class WorkspaceService {
    * остаётся старым. Поэтому о своих изменениях сообщаем явно, наблюдатель же
    * отвечает за чужие — правки внешним инструментом или в терминале.
    */
-  private notifyChanged(target: string): void {
+  private notifyChanged(target: string, kind: WorkspaceChangeKind = 2): void {
     if (!this.active) return;
-    this.scheduleChange(target);
+    this.selfWrites.set(target, Date.now());
+    this.scheduleChange(target, kind, true);
+  }
+
+  /**
+   * Эхо ли это нашей собственной записи: наблюдатель ответил тем же путём сразу после
+   * неё. Эхо не считается вторым изменением — иначе одна правка вела себя как две
+   * (счётчик пакета раздувался и переименование выглядело «массовым»).
+   */
+  private selfWritten(target: string): boolean {
+    const at = this.selfWrites.get(target);
+    if (at === undefined) return false;
+    // Запись НЕ удаляем: наблюдатель присылает по событию на каждое имя, а для
+    // переименования это два имени. Стёртая отметка пропускала второе событие
+    // старого пути, и уведомление уезжало со старым именем вместо нового.
+    return Date.now() - at <= SELF_WRITE_DEDUP_MS;
+  }
+
+  /**
+   * Вид события наблюдателя. `fs.watch` говорит только `rename` или `change`, и в
+   * `rename` смешаны создание, удаление и переименование. Различить их можно одним
+   * способом — спросить диск: файла больше нет — удалён, а если он только что появился
+   * (mtime почти равен текущему времени) — создан. Иначе считаем правкой.
+   */
+  private async watchedKind(target: string, eventType: 'rename' | 'change'): Promise<void> {
+    // Своё же событие уже отправлено: второй раз не сообщаем и не копим пакет.
+    if (this.selfWritten(target)) return;
+    if (eventType === 'change') {
+      this.scheduleChange(target, 2);
+      return;
+    }
+    try {
+      const stat = await fs.stat(target);
+      // Порог в 2 секунды: переименованный старый файл не должен выглядеть новым.
+      this.scheduleChange(target, Date.now() - stat.mtimeMs < 2000 ? 1 : 2);
+    } catch {
+      this.scheduleChange(target, 3);
+    }
   }
 
   /** Наблюдатель за корнем: у каждого корня он свой — папки независимы. */
   private startWatcher(state: RootState): void {
     const root = state.root;
     try {
-      state.watcher = watch(root, { recursive: true }, (_eventType, filename) => {
+      state.watcher = watch(root, { recursive: true }, (eventType, filename) => {
         const name = filename?.toString();
+        const full = name ? path.join(root, name) : root;
         // Правила исключения перечитываем сразу: иначе правка `.ai_ignore`
         // подействовала бы только при следующем открытии проекта.
         if (name && IGNORE_FILES.some((file) => file === name)) void this.reloadIgnore(root);
-        this.scheduleChange(name ? path.join(root, name) : root);
+        void this.watchedKind(full, eventType);
       });
       // Наблюдение поднимается не с первого раза: пока оно лежало (это секунды),
       // правки прошли мимо него и пропали бы насовсем — ни дерево, ни git-пометки
@@ -1359,6 +1452,11 @@ export class WorkspaceService {
       this.watchTimer = null;
     }
     this.pendingChange = null;
+    // Накопленное окно принадлежит закрытому корню: если оставить его, следующии
+    // проект начнёт с чужими путями, а повтор пути засчитается дважды.
+    this.pendingCount = 0;
+    this.pendingKinds.clear();
+    this.selfWrites.clear();
     for (const state of this.roots) this.stopWatcher(state);
   }
 }

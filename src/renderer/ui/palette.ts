@@ -1,4 +1,5 @@
 import type { CommandDescriptor, CommandRegistry } from '../core/commands';
+import { orderByRecent } from '../core/recent-commands';
 import { clear, h } from './dom';
 
 export interface PaletteView {
@@ -19,7 +20,16 @@ const MAX_ITEMS = 500;
  * Палитра команд (Ctrl+Shift+P). Работает поверх реестра команд,
  * поэтому любая новая команда появляется здесь автоматически.
  */
-export function createPalette(deps: { commands: CommandRegistry }): PaletteView {
+export function createPalette(deps: {
+  commands: CommandRegistry;
+  /** История запусков: недавние команды показываются сверху. Нет — порядок регистрации. */
+  recent?: { ids(): readonly string[]; remember(id: string): void };
+  /**
+   * Зовётся перед показом, и только потом строится список: приложению есть когда
+   * сохранить историю (одной записью, а не на каждый запуск) и обновить настройки.
+   */
+  onBeforeShow?: () => void;
+}): PaletteView {
   const input = h('input', {
     class: 'palette-input',
     type: 'text',
@@ -35,6 +45,7 @@ export function createPalette(deps: { commands: CommandRegistry }): PaletteView 
   const run = (descriptor: CommandDescriptor): void => {
     // Недоступную команду не запускаем ни кликом, ни Enter: она уже показана серой.
     if (!deps.commands.isEnabled(descriptor.id)) return;
+    deps.recent?.remember(descriptor.id);
     close();
     void deps.commands.execute(descriptor.id);
   };
@@ -42,8 +53,10 @@ export function createPalette(deps: { commands: CommandRegistry }): PaletteView 
   const render = (): void => {
     clear(list);
     const query = input.value.trim().toLowerCase();
-    matches = deps.commands
-      .list()
+    // Недавние — сверху, но только когда не ищут: при наборе порядок задаёт совпадение,
+    // иначе редкая команда с хорошим совпадением пряталась бы под двадцатью привычными.
+    const source = query ? deps.commands.list() : orderByRecent(deps.commands.list(), deps.recent?.ids() ?? []);
+    matches = source
       .filter((descriptor) => {
         if (!query) return true;
         const haystack =
@@ -110,6 +123,9 @@ export function createPalette(deps: { commands: CommandRegistry }): PaletteView 
   });
 
   function open(): void {
+    // Сначала повод приложению (сохранить историю, обновить настройки), потом список:
+    // иначе палитра покажет устаревший порядок на один запуск.
+    deps.onBeforeShow?.();
     overlay.hidden = false;
     input.value = '';
     cursor = 0;

@@ -56,6 +56,13 @@ const WORDS_AROUND = 400;
 const LSP_RETRY_MS = 300;
 
 /**
+ * Сколько раз догонять обрезанный ответ (`isIncomplete`). Один запрос — частый случай;
+ * бесконечное «ещё немного» превратило бы список в поток запросов, когда сервер просит
+ * дотягивать всегда (так делают серверы без фильтрации — отдать всё и ждать уточнения).
+ */
+const MAX_INCOMPLETE_RETRIES = 5;
+
+/**
  * Пауза перед вопросом к карте символов при обычном наборе.
  *
  * Печатают быстрее, чем отвечает мост, и спрашивать на каждую букву значило бы держать
@@ -328,7 +335,7 @@ export interface CompletionAssistantOptions {
     position: { line: number; column: number },
     /** Почему спросили: 1 — вручную, 2 — знаком, 3 — дотягивание. Сервер решает по этому. */
     context?: CompletionContext,
-  ) => Promise<readonly CompletionItem[]>;
+  ) => Promise<{ items: readonly CompletionItem[]; isIncomplete: boolean }>;
   /**
    * Символы проекта по имени — карта символов (`index` в main: объявления своего кода
    * и зависимостей, собранные заранее). Нужны в двух местах: повторный Ctrl+Space
@@ -1086,15 +1093,22 @@ export class CompletionAssistant {
     // вызов сюда не доходит — он идёт другим путём и сразу с `1`.
     const context = attempt > 0 ? ({ triggerKind: 3 } as const) : (this.pendingTrigger ?? undefined);
     void lsp(prefix, position, context)
-      .then((extra) => {
+      .then(({ items, isIncomplete }) => {
         // Курсор уехал или пришёл новый запрос — ответ про прежнее место не показываем.
         if (id !== this.lspRequestId || this.controller.caret !== caret) return;
+        // Сервер сказал «список обрезан»: он не знает про то, что набрано дальше, и
+        // список без перезапроса устаревает с следующим символом. Спрашиваем снова
+        // с `triggerKind: 3` — этого и ждёт сервер (tsserver отдаёт так проектные
+        // символы по частям). Без флага клиент молча показывал первый ответ.
+        if (isIncomplete && attempt < MAX_INCOMPLETE_RETRIES) {
+          this.lspRetry = window.setTimeout(() => this.askServer(prefix, caret, attempt + 1, only), LSP_RETRY_MS);
+        }
         // Набранное начало проверяем и у ответа сервера: часть серверов отдаёт список
         // ЦЕЛИКОМ, полагаясь на отбор у клиента (см. `fuzzy.ts` — правила те же, что
         // и у наших слов, чтобы `gT` находил `getTitle` и у серверных подсказок).
         const local = this.widget.allItems;
         const known = new Set(local.map((item) => item.label));
-        let fresh = extra.filter((item) => !known.has(item.label) && hasMatch(item, prefix));
+        let fresh = items.filter((item) => !known.has(item.label) && hasMatch(item, prefix));
         // «Умное» дополнение режет и ответ сервера: имена типов в позиции значения
         // бесполезны, откуда бы они ни пришли. Пусто после отбора — не повод гасить
         // список: слова файла уже показаны, и они остаются.

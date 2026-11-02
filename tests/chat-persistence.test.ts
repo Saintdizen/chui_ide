@@ -113,6 +113,21 @@ describe('serializeSession', () => {
     expect(conversation.context).toEqual([{ role: 'user', content: 'Контекст сжатой беседы:\n\nрезюме' }]);
   });
 
+  it('план прогона сохраняется: перезапуск посреди работы не теряет шаги', () => {
+    const steps = [
+      { text: 'найти вызов', status: 'done' as const },
+      { text: 'починить', status: 'in_progress' as const },
+    ];
+    const conversation = serializeSession(makeSession({ plan: steps }));
+    expect(conversation.plan).toEqual(steps);
+    // Копия: правка шага в панели не должна утекать в готовый снимок.
+    expect(conversation.plan?.[0]).not.toBe(steps[0]);
+  });
+
+  it('пустой план в файл не пишется', () => {
+    expect('plan' in serializeSession(makeSession({ plan: [] }))).toBe(false);
+  });
+
   it('без сжатия отдельного контекста нет — файл не дублируется', () => {
     const conversation = serializeSession(makeSession({ history: [user('привет')] }));
     expect('context' in conversation).toBe(false);

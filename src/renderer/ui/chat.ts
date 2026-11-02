@@ -7,6 +7,7 @@ import {
   type ChatDeltaPayload,
   type ChatMessage,
   type PickedImage,
+  type PlanStep,
   type ReasoningEffort,
   type Settings,
 } from '../../shared/api';
@@ -507,6 +508,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     attachments.render();
     renderChanges();
     goalPanel.render(next.goal ?? null);
+    // Панель плана одна на все вкладки: без перерисовки на новой вкладке
+    // остался бы чек-лист предыдущей беседы — или её пустота вместо плана.
+    const nextPlan = planPanelOf(next);
+    if (nextPlan) planPanel.render(nextPlan);
+    else planPanel.hide();
     renderTabs();
     syncSessionInfo();
 
@@ -538,6 +544,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       input.value = next.draft;
       attachments.render();
       renderChanges();
+      const nextPlan = planPanelOf(next);
+      if (nextPlan) planPanel.render(nextPlan);
+      else planPanel.hide();
     }
 
     renderTabs();
@@ -620,6 +629,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         session.turnsSinceCompact = 0;
         session.trace = conversation.trace;
         session.goal = conversation.goal;
+        // План прошлого прогона: закрытое окно посреди работы не должно
+        // оставлять панель пустой — шаги нужны тому же праву, что и цель.
+        session.plan = conversation.plan;
         // Память чтений из файла: следующий ход после открытия окна не начнётся
         // с чистого листа и не перечитает то, что уже читали до закрытия.
         session.reads = conversation.reads;
@@ -637,6 +649,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       const restored = history.activeUid ? sessions.find((item) => item.uid === history.activeUid) : undefined;
       activeId = (restored ?? sessions[0]!).id;
       syncActiveView();
+      // Панель одна на все вкладки: после старта показываем план той беседы,
+      // которая открыта, иначе чек-лист прогона терялся до следующего события.
+      const shown = planPanelOf(restored ?? sessions[0]!);
+      if (shown) planPanel.render(shown);
+      else planPanel.hide();
       // Старт всегда открывает беседу с конца — там последний ответ. Один
       // `scrollTop` тут не годится: лента только что вошла в документ, и картинки
       // с карточками файлов ещё не получили высоту (см. `scrollToEndSoon`).
@@ -677,6 +694,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return sanitizeToolPreset(active().toolPreset ?? settings.ai.toolPreset);
   }
 
+  /**
+   * План беседы в виде, который принимает панель: пустой список — это тоже
+   * ответ (плана нет), но `undefined` — «показать нечего» — отличается тем, что
+   * панель нужно прятать, а не рисовать с нулём шагов.
+   */
+  function planPanelOf(session: ChatSession): PlanStep[] | undefined {
+    return session.plan && session.plan.length > 0 ? session.plan : undefined;
+  }
+
   /** Обновить вид активной беседы после восстановления вкладок. */
   function syncActiveView(): void {
     const next = active();
@@ -687,6 +713,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Цель принадлежит беседе, а панель над полем одна — показываем цель той,
     // что открыта: у соседней вкладки может быть своя, и путать их нельзя.
     goalPanel.render(next.goal ?? null);
+    const nextPlan = planPanelOf(next);
+    if (nextPlan) planPanel.render(nextPlan);
+    else planPanel.hide();
     // Набор инструментов у каждой беседы свой: показать соседкин — значит соврать
     // о том, что уйдёт модели следующим вопросом.
     syncToolPreset();
@@ -1919,7 +1948,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     markdown,
     messageHost: (session) => currentTurn(session),
     scrollToEnd: (session) => scrollToEnd(session),
-    renderPlan: (steps) => planPanel.render(steps),
+    renderPlan: (steps, session) => {
+      // План — свойство беседы, а не панели: без этого переключение вкладки
+      // показывало бы чужой чек-лист, а сохранение не знало бы, что писать.
+      session.plan = steps.length > 0 ? steps.map((step) => ({ ...step })) : undefined;
+      if (session.id === activeId) planPanel.render(steps);
+      scheduleSave();
+    },
     setGoal: (goal, session) => {
       // Цель пишем в СВОЮ беседу: прогон мог идти в фоновой вкладке, а панель
       // показывает активную. Перерисовываем только если она и есть активная.
@@ -1927,7 +1962,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       if (session.id === activeId) goalPanel.render(goal);
       scheduleSave();
     },
-    hidePlan: () => planPanel.hide(),
+    hidePlan: (session) => {
+      // Новый ход начинает план заново: старые шаги в беседе не оставляем, иначе
+      // они вернулись бы на экран после перезапуска как чужая работа.
+      if (session.plan) {
+        session.plan = undefined;
+        scheduleSave();
+      }
+      if (session.id === activeId) planPanel.hide();
+    },
     renderChanges,
     setBusy,
     closeApprovals,

@@ -155,6 +155,19 @@ export interface Settings {
   git: GitSettings;
   /** Изменённые горячие клавиши: поверх сочетаний по умолчанию. */
   keybindings: KeybindingSettings;
+  commandPalette: CommandPaletteSettings;
+}
+
+/**
+ * Палитра команд.
+ *
+ * Раньше здесь был только список в порядке регистрации, и человек, живущий в двух
+ * командах, искал их каждый раз заново. Храним недавние: по ним палитра сортируется
+ * сверху вниз (см. `orderByRecent` в `core/recent-commands.ts`).
+ */
+export interface CommandPaletteSettings {
+  /** Выполненные команды: свежие сверху. Чужие и удалённые отбрасываются при показе. */
+  recent: string[];
 }
 
 /** Провайдер, которого добавляют или меняют из интерфейса. Ключ задаётся отдельно. */
@@ -320,4 +333,5 @@ export interface SettingsPatch {
   lsp?: Partial<LspSettings>;
   git?: Partial<GitSettings>;
   keybindings?: Partial<KeybindingSettings>;
+  commandPalette?: Partial<CommandPaletteSettings>;
 }

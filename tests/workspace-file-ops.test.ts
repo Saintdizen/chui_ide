@@ -107,6 +107,20 @@ describe('переименование', () => {
     // Дереву нужно убрать старое имя и добавить новое: одного мало.
     expect(seen.some((item) => item.includes('z.ts'))).toBe(true);
   });
+
+  it('переименование отдаётся связкой старый → новый', async () => {
+    // Языковому серверу нужна сама связка: `fs.watch` даёт два независимых пути,
+    // и без отдельного уведомления новое имя для него — незнакомый файл.
+    const root = await makeRoot();
+    await fs.writeFile(path.join(root, 'a.ts'), 'x\n', 'utf8');
+    const ws = service();
+    const pairs: [string, string][] = [];
+    ws.onFileRenamed = (from, to) => pairs.push([from, to]);
+    await ws.open(root);
+
+    await ws.rename(path.join(root, 'a.ts'), path.join(root, 'z.ts'));
+    expect(pairs).toEqual([[path.join(root, 'a.ts'), path.join(root, 'z.ts')]]);
+  });
 });
 
 describe('копия', () => {

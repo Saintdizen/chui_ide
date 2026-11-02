@@ -47,6 +47,7 @@ import { toInlineValues, type InlineValue } from '../../../shared/lsp-inline-val
 import { toInlayHints, type InlayHint } from '../../../shared/lsp-inlay-hints';
 import { commandFromLens, toCodeLenses, type CodeLensEntry } from '../../../shared/lsp-code-lens';
 import { toSignatureHelp, type SignatureHelp } from '../../../shared/lsp-signature';
+import { toInlineSnippets } from '../../../shared/lsp-inline';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import { toFileSymbols } from '../../../shared/lsp-symbols';
 import { toWorkspaceEdits, toWorkspaceFileEdits, type WorkspaceEdits } from '../../../shared/lsp-workspace-edit';
@@ -193,7 +194,24 @@ export class LspFeatures {
    * (`CompletionItem`), поэтому вид списка не знает, откуда пришло: от сервера это
    * или из нашего словаря. `insert` сервера важнее подписи — им и вставляем.
    */
+  async completionList(
+    path: string,
+    position: LspPosition,
+    context?: CompletionContext,
+  ): Promise<{ items: CompletionItem[]; isIncomplete: boolean }> {
+    const items = await this.completionEntries(path, position, context);
+    return items;
+  }
+
   async completion(path: string, position: LspPosition, context?: CompletionContext): Promise<CompletionItem[]> {
+    return (await this.completionEntries(path, position, context)).items;
+  }
+
+  private async completionEntries(
+    path: string,
+    position: LspPosition,
+    context?: CompletionContext,
+  ): Promise<{ items: CompletionItem[]; isIncomplete: boolean }> {
     const result = await this.request(path, 'textDocument/completion', {
       textDocument: { uri: pathToUri(path) },
       position: toLspPosition(position),
@@ -207,7 +225,7 @@ export class LspFeatures {
     // Причину вызова сервер видит только в `context`. Без неё он считает вызов ручным
     // (`triggerKind=1`) и не знает знака — а по нему решает, что вернуть: после `.`
     // список членов, после `@` — декораторы, в комментарии — ничего.
-    return entries.map((entry) => ({
+    const items = entries.map((entry) => ({
       label: entry.label,
       kind: 'external' as const,
       detail: entry.detail || 'сервер',
@@ -233,6 +251,7 @@ export class LspFeatures {
       // Исходный элемент — по нему список доводит строку через `completionItem/resolve`.
       ...(entry.source !== undefined ? { resolve: entry.source } : {}),
     }));
+    return { items, isIncomplete: entries.isIncomplete === true };
   }
 
   /**
@@ -243,6 +262,19 @@ export class LspFeatures {
   async resolveCompletion(path: string, item: unknown): Promise<ResolvedCompletion | null> {
     const result = await this.request(path, 'completionItem/resolve', item);
     return toResolvedCompletion(result);
+  }
+
+  /**
+   * Серые подсказки вперёд от сервера (`textDocument/inlineCompletion`, LSP 3.18).
+   * Пустой список — сервер такого не умеет или предложить нечего; это не ошибка.
+   */
+  async inlineCompletion(path: string, position: LspPosition): Promise<string[]> {
+    const result = await this.request(path, 'textDocument/inlineCompletion', {
+      textDocument: { uri: pathToUri(path) },
+      position: toLspPosition(position),
+      context: { triggerKind: 1 },
+    });
+    return toInlineSnippets(result);
   }
 
   /**
@@ -350,14 +382,28 @@ export class LspFeatures {
    * Подсказки-вставки: тип переменной, имя параметра. Серверу нужен диапазон — своего
    * текста у моста нет, поэтому конец документа передаёт вызывающий. Пустой ответ —
    * сервер не умеет или нечего подсказать; это не ошибка.
+   *
+   * Спрашиваем ТОЛЬКО видимую часть. Весь документ на каждую правку — это ответ на
+   * тысячи строк, из которых на экране видны десятки, и счёт растёт с размером файла.
+   * Спецификация разрешает ограничить диапазон: `range` — область, где нужны подсказки.
+   * Прокрутили вниз — спросим снова (см. `refreshInlayHints` в `editor-host.ts`).
    */
-  async inlayHints(path: string, end: { line: number; column: number }): Promise<InlayHint[]> {
+  async inlayHints(
+    path: string,
+    end: { line: number; column: number },
+    start?: { line: number; column: number },
+  ): Promise<InlayHint[]> {
+    // Позиции у нас 1-based, у сервера — 0-based. Конец — «за последний символ»
+    // (`line - 1`, столбец как есть), иначе сервер может включить всю последнюю строку.
+    // Один столбец в конце документа: там подсказке уже некуда встать.
+    const from = {
+      line: Math.max(0, start ? start.line - 1 : 0),
+      character: Math.max(0, start ? start.column - 1 : 0),
+    };
+    const to = { line: Math.max(from.line, end.line - 1), character: Math.max(0, end.column - 1) };
     const result = await this.request(path, 'textDocument/inlayHint', {
       textDocument: { uri: pathToUri(path) },
-      range: {
-        start: { line: 0, character: 0 },
-        end: { line: Math.max(0, end.line - 1), character: Math.max(0, end.column - 1) },
-      },
+      range: { start: from, end: to },
     });
     return toInlayHints(result);
   }
