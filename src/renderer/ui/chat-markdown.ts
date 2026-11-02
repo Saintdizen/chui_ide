@@ -15,12 +15,45 @@ import { showToast } from './toast';
 export interface MarkdownDeps {
   /** Вставка кода в позицию курсора; `false` — открытого редактора нет. */
   insertCode(code: string): boolean;
+  /**
+   * Открыть путь из ответа модели. `line`/`column` есть, только если их назвали:
+   * без них открываем файл с начала.
+   */
+  openPath?(path: string, line?: number, column?: number): void;
 }
 
 /** Разобранный блок разметки и ключ-исходник, по которому узнаётся его неизменность. */
 interface MarkdownBlock {
   key: string;
   node: HTMLElement;
+}
+
+/** Путь из ответа модели: что показать и куда открыть. */
+interface Place {
+  path: string;
+  /** Как это было написано — по этому тексту ничего не пересобираем. */
+  text: string;
+  line?: number;
+  column?: number;
+}
+
+/**
+ * Кандидат в путь внутри обычного текста. Шире, чем `looksLikePath`: здесь
+ * отбираем только похожее по форме, а решает уже `parsePlace`.
+ */
+const PLACE_IN_TEXT =
+  /(?<![\w/.-])((?:[\w.-]+\/)+[\w.-]+|\w+\.(?:ts|tsx|js|jsx|json|css|md|yaml|yml|toml|sh|py|rs|go|java|html))(?::\d+){0,2}(?![\w/])/g;
+
+/** Номер строки и колонки за инлайн-кодом: `app.ts`:12:4. */
+const NUMBER_IN_TEXT = /^:\d+(?::\d+)?(?![\w/])/;
+
+/** Расширения, которые точно файл: без слэша `v1.2` иначе стало бы ссылкой. */
+const FILE_EXTENSIONS = /\.(ts|tsx|js|jsx|json|css|md|yaml|yml|toml|sh|py|rs|go|java|html)$/i;
+
+function looksLikePath(path: string): boolean {
+  if (path.startsWith('/') || path.startsWith('./') || path.startsWith('../')) return true;
+  if (path.includes('/')) return true;
+  return FILE_EXTENSIONS.test(path);
 }
 
 export function createMarkdownRenderer(deps: MarkdownDeps): {
@@ -255,11 +288,15 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
 
     for (const match of text.matchAll(pattern)) {
       const start = match.index ?? 0;
-      if (start > last) nodes.push(text.slice(last, start));
+      if (start > last) nodes.push(...plainRun(text.slice(last, start)));
 
       const token = match[0];
       if (token.startsWith('`')) {
-        nodes.push(inlineCode(token.slice(1, -1)));
+        // Номер строки может стоять и за обратными кавычками: `app.ts`:12.
+        const tail = NUMBER_IN_TEXT.exec(text.slice(start + token.length));
+        nodes.push(inlineCode(token.slice(1, -1) + (tail ? tail[0] : '')));
+        last = start + token.length + (tail ? tail[0].length : 0);
+        continue;
       } else if (token.startsWith('$$')) {
         nodes.push(mathNode(token.slice(2, -2), true));
       } else if (token.startsWith('$')) {
@@ -274,8 +311,74 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
       last = start + token.length;
     }
 
+    if (last < text.length) nodes.push(...plainRun(text.slice(last)));
+    return nodes;
+  }
+
+  /**
+   * Путь из текста модели и место в нём: `src/main/app.ts`, `app.ts:12`, `app.ts:12:5`.
+   * Только со слэшем или известным расширением — иначе `v1.2` стал бы ссылкой.
+   */
+  function parsePlace(raw: string): Place | null {
+    const trimmed = raw.trim().replace(/^`+|`+$/g, '');
+    // Номер строки и столбца — хвост после последнего двоеточия. Отделяем их
+    // заранее: иначе знак препинания в конце фразы или `:7` от второго номера
+    // попали бы в путь, и файл не нашёлся бы.
+    const cleaned = trimmed.replace(/[.,;:!?)]+$/, '');
+    const tail = /(?::\d+){1,2}$/.exec(cleaned);
+    const rest = tail ? cleaned.slice(0, tail.index) : cleaned;
+    const numbers = tail ? tail[0].slice(1).split(':').map(Number) : [];
+    const path = rest.replace(/^`+|`+$/g, '');
+    if (!looksLikePath(path)) return null;
+    const line = numbers[0];
+    const column = numbers[1];
+    return {
+      path,
+      text: trimmed,
+      ...(line ? { line } : {}),
+      ...(column ? { column } : {}),
+    };
+  }
+
+  /**
+   * Путь в тексте ответа: кликабельный. Разбираем только то, что похоже на путь
+   * в проекте, — иначе любое слово с точкой стало бы ссылкой.
+   */
+  function plainRun(text: string): Child[] {
+    if (!deps.openPath || text.length === 0) return [text];
+    const nodes: Child[] = [];
+    let last = 0;
+    for (const match of text.matchAll(PLACE_IN_TEXT)) {
+      const start = match.index ?? 0;
+      // Совпадение могло начаться с хвоста пути (`ui/chat.ts:12` внутри
+      // `src/renderer/ui/chat.ts:12`): тогда берём слово целиком по пробелам.
+      const from = Math.max(text.lastIndexOf(' ', start) + 1, text.lastIndexOf('\n', start) + 1);
+      if (from < last) continue;
+      // Конец слова — до пробела; точку и запятые в конце фразы отбрасываем,
+      // но номер строки после двоеточия остаётся частью пути.
+      const word = (/^[^\s]+/.exec(text.slice(from))?.[0] ?? '').replace(/[.,;:!?)]+$/, '');
+      const place = parsePlace(word) ?? parsePlace(match[0] ?? '');
+      if (!place) continue;
+      if (from > last) nodes.push(text.slice(last, from));
+      nodes.push(placeNode(place, 'text'));
+      last = from + word.length;
+    }
+    if (last === 0) return [text];
     if (last < text.length) nodes.push(text.slice(last));
     return nodes;
+  }
+
+  function placeNode(place: Place, kind: 'code' | 'text'): HTMLElement {
+    return h(
+      'button',
+      {
+        class: kind === 'code' ? 'md-path is-code' : 'md-path',
+        type: 'button',
+        title: `${place.text} — открыть`,
+        onClick: () => deps.openPath?.(place.path, place.line, place.column),
+      },
+      place.text,
+    );
   }
 
   /**
@@ -289,11 +392,13 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
   }
 
   /**
-   * Инлайн-код красим теми же токенами, что и блоки кода. Язык у фрагмента не
-   * указан, поэтому угадываем по виду: команда оболочки, Python или (по умолчанию)
-   * JavaScript — он же покрывает TS: имена, свойства и вызовы читаются как надо.
+   * Инлайн-код красим теми же токенами, что и блоки кода: язык не указан, угадываем по виду.
    */
   function inlineCode(code: string): HTMLElement {
+    // Код из одного пути — это ссылка на файл: модель пишет `src/main/app.ts`,
+    // и человек ждёт, что по нему можно кликнуть.
+    const place = deps.openPath ? parsePlace(code) : null;
+    if (place) return placeNode(place, 'code');
     const node = h('code', { class: 'md-code' });
     highlightInto(node, code, guessInlineLanguage(code));
     return node;

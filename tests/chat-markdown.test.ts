@@ -223,6 +223,85 @@ describe('разметка ленты чата', () => {
    * Кнопки под блоком кода. Без них ответ модели переносят руками — самая частая
    * работа с ответом, где есть код.
    */
+  describe('ссылки на файлы', () => {
+    type Node = {
+      attributes?: Record<string, string>;
+      children?: Node[];
+      text?: string;
+      listeners?: Map<string, EventListener[]>;
+    };
+
+    /** Кликабельные пути ответа: подпись и то, что было бы открыто. */
+    function places(markdown: string) {
+      const opened: string[] = [];
+      const renderer = createMarkdownRenderer({
+        insertCode: () => false,
+        openPath: (path, line, column) =>
+          opened.push([path, line, column].filter((part) => part !== undefined).join(':')),
+      });
+      const body = new FakeElement('div') as unknown as HTMLElement;
+      renderer.renderInto(body, markdown);
+      const found: { title: string; caption: string; click(): void }[] = [];
+      const walk = (node: Node): void => {
+        const title = node.attributes?.title ?? '';
+        if (title.endsWith('— открыть')) {
+          found.push({
+            title,
+            // Подпись кнопки — текстовое содержимое узла.
+            caption: (node as unknown as { textContent?: string }).textContent ?? '',
+            click: () => {
+              for (const listener of node.listeners?.get('click') ?? []) {
+                listener({ preventDefault() {}, stopPropagation() {} } as never);
+              }
+            },
+          });
+        }
+        for (const child of node.children ?? []) walk(child);
+      };
+      walk(body as unknown as Node);
+      return { found, opened };
+    }
+
+    it('путь в инлайн-коде открывает файл на названной строке', () => {
+      const { found, opened } = places('Правка в `src/main/app.ts:42:7` сделана.');
+
+      expect(found.map((place) => place.caption)).toEqual(['src/main/app.ts:42:7']);
+      found[0]?.click();
+      expect(opened).toEqual(['src/main/app.ts:42:7']);
+    });
+
+    it('путь без номера строки остаётся кликабельным — открыть с начала', () => {
+      const { found, opened } = places('Смотри `shared/api/ai.ts`.');
+      found[0]?.click();
+      expect(opened).toEqual(['shared/api/ai.ts']);
+    });
+
+    it('голый путь в тексте тоже кликабельный', () => {
+      const { found } = places('Подробнее — src/renderer/ui/chat.ts:12.');
+      // Точка в конце фразы — знак препинания, а не часть пути.
+      expect(found.map((place) => place.title)).toEqual(['src/renderer/ui/chat.ts:12 — открыть']);
+    });
+
+    it('обычные слова и номера версий ссылками не становятся', () => {
+      const { found } = places('Версия v1.2, файл a.ts и число 12 — ничего не открываем.');
+      // `a.ts` — имя с известным расширением, его считаем путём; `v1.2` — нет.
+      expect(found.map((place) => place.title)).toEqual(['a.ts — открыть']);
+    });
+
+    it('без обработчика пути остаются текстом', () => {
+      const renderer = createMarkdownRenderer({ insertCode: () => false });
+      const body = new FakeElement('div') as unknown as HTMLElement;
+      renderer.renderInto(body, 'Правка в `src/main/app.ts`.');
+      const found: string[] = [];
+      const walk = (node: Node): void => {
+        if (node.attributes?.title) found.push(node.attributes.title);
+        for (const child of node.children ?? []) walk(child);
+      };
+      walk(body as unknown as Node);
+      expect(found.filter((title) => title.endsWith('— открыть'))).toEqual([]);
+    });
+  });
+
   describe('действия блока кода', () => {
     const CODE = '```ts\nconst a = 1;\n```';
 

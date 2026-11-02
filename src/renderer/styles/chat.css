@@ -660,6 +660,31 @@
   text-decoration: underline dotted;
 }
 
+/* Путь из ответа модели — кнопка, а не ссылка: ведёт в файл проекта, а не в сеть. */
+.md-path {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--link_color);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+/* Путь был инлайн-кодом: фон и моно-шрифт остаются, меняется только цвет. */
+.md-path.is-code {
+  padding: 1px 4px;
+  border-radius: var(--radius_xs);
+  background: var(--element_background);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.md-path:hover {
+  text-decoration: underline solid;
+}
+
 /* ── размышления модели ─────────────────────────────────────────────────── */
 
 /* Счётчик шагов: по нему видно, что размышления собраны из нескольких врезок. */

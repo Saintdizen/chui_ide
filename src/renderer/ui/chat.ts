@@ -1957,7 +1957,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /** Разбор ответа в узлы: движок markdown живёт в отдельном модуле. */
-  const markdown = createMarkdownRenderer({ insertCode: (code) => deps.editors.insertAtCursor(code) });
+  const markdown = createMarkdownRenderer({
+    insertCode: (code) => deps.editors.insertAtCursor(code),
+    // Путь в ответе модели ведёт в файл: открываем и встаём на названную строку.
+    openPath: (path, line, column) => void revealFile(path, line, column),
+  });
 
   /**
    * Стриминг ответа вынесен в отдельный модуль: он умеет всё сам и лишь просит
