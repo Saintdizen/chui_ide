@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   graphemeAt,
   graphemeBoundaries,
@@ -79,5 +79,107 @@ describe('Graphemes', () => {
 
   it.runIf(segmentation)('кириллица распознаётся словом', () => {
     expect(wordAt('функция вызова', 2)).toMatchObject({ start: 0, end: 7 });
+  });
+
+  /**
+   * Составные знаки. Здесь ошибка стоит дорого: если разрезать кластер посередине,
+   * Delete съест половину символа, и текст редактор потеряет.
+   */
+  it.runIf(segmentation)('буква с ударением — один кластер, а не два', () => {
+    // «й» как «и» + комбинируемая бревис: два кодовых пункта, один видимый знак.
+    const text = 'и\u0306';
+
+    expect(graphemeBoundaries(text)).toEqual([0, 2]);
+    expect(graphemeAt(text, 1)).toEqual({ start: 0, end: 2 });
+    expect(nextGraphemeBoundary(text, 0)).toBe(2);
+    expect(previousGraphemeBoundary(text, 2)).toBe(0);
+  });
+
+  it.runIf(segmentation)('эмодзи с модификатором тона — один кластер', () => {
+    const text = '👍\u{1F3FD}';
+
+    expect(graphemeBoundaries(text)).toEqual([0, text.length]);
+  });
+
+  it.runIf(segmentation)('семейство эмодзи со склейкой — один кластер', () => {
+    // Семья собирается из нескольких эмодзи, соединённых ZWJ: для человека это
+    // один знак, и разрезать его нельзя.
+    const text = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+
+    expect(graphemeBoundaries(text)).toEqual([0, text.length]);
+  });
+
+  it.runIf(segmentation)('флаг из двух региональных знаков — один кластер', () => {
+    const text = '\u{1F1F7}\u{1F1FA}';
+
+    expect(graphemeBoundaries(text)).toEqual([0, text.length]);
+  });
+
+  it.runIf(segmentation)('границы идут по возрастанию и заканчиваются длиной', () => {
+    // На этом свойстве держатся и каретка, и выделение: по ним считается шаг.
+    const boundaries = graphemeBoundaries('a\u0301bc👍\u{1F3FD}');
+
+    for (let index = 1; index < boundaries.length; index += 1) {
+      expect(boundaries[index]!).toBeGreaterThan(boundaries[index - 1]!);
+    }
+    expect(boundaries.at(-1)).toBe('a\u0301bc👍\u{1F3FD}'.length);
+    expect(boundaries[0]).toBe(0);
+  });
+
+  it('пустой текст даёт единственную границу', () => {
+    // Нулевая длина — не ошибка: каретке нужно хотя бы одно место.
+    expect(graphemeBoundaries('')).toEqual([0]);
+  });
+
+  it('смещение за концом текста не выходит за пределы', () => {
+    const text = 'abc';
+
+    expect(nextGraphemeBoundary(text, 99)).toBe(text.length);
+    // Уход влево с конца встаёт на НАЧАЛО последнего знака, а не на конец текста:
+    // Backspace удаляет знак, а не переносит каретку в никуда.
+    expect(previousGraphemeBoundary(text, 99)).toBe(text.length - 1);
+    expect(previousGraphemeBoundary(text, -5)).toBe(0);
+  });
+
+  /**
+   * Запасное разбиение, когда платформенного `Intl.Segmenter` нет (старый движок).
+   * Проверяется отдельным модулем с подменой глобального `Intl`: иначе эти строки
+   * не исполнились бы ни разу, а именно они спасают редактор на старых движках.
+   */
+  it('без Intl.Segmenter слова режутся запасным разбиением', async () => {
+    const saved = (globalThis as { Intl?: unknown }).Intl;
+    (globalThis as { Intl?: unknown }).Intl = { Segmenter: undefined };
+    try {
+      // Отдельная копия модуля: у обычной уже вычислен движок сегментации.
+      // Свежая копия модуля: у обычной движок сегментации уже вычислен при импорте.
+      vi.resetModules();
+      const fresh = await import('../src/renderer/editor/core/graphemes');
+      const segments = fresh.wordSegments('const value = 42 /* x */');
+
+      expect(
+        segments
+          .filter((item) => item.isWordLike)
+          .map((item) => 'const value = 42 /* x */'.slice(item.start, item.end)),
+      ).toEqual(['const', 'value', '42', 'x']);
+      // Подчёркивание — часть слова: `user_name` не должен резаться на два.
+      expect(fresh.wordAt('user_name', 2)).toMatchObject({ start: 0, end: 9 });
+    } finally {
+      (globalThis as { Intl?: unknown }).Intl = saved;
+    }
+  });
+
+  it('без Intl.Segmenter знаки режутся по кодовым точкам', async () => {
+    const saved = (globalThis as { Intl?: unknown }).Intl;
+    (globalThis as { Intl?: unknown }).Intl = { Segmenter: undefined };
+    try {
+      vi.resetModules();
+      const fresh = await import('../src/renderer/editor/core/graphemes');
+
+      // Суррогатная пара остаётся одним знаком и в запасном разбиении.
+      expect(fresh.graphemeBoundaries('a👍b')).toEqual([0, 1, 3, 4]);
+      expect(fresh.graphemeAt('a👍b', 2)).toEqual({ start: 1, end: 3 });
+    } finally {
+      (globalThis as { Intl?: unknown }).Intl = saved;
+    }
   });
 });
