@@ -107,11 +107,12 @@ describe('команды иерархии исполняются', () => {
     const revealed: [string, number, number][] = [];
     const opened: string[] = [];
     const request = vi.fn(options.request ?? (async () => null));
+    const monikers = vi.fn(async (): Promise<unknown[]> => []);
     createSymbolPickers({
       define: (spec: { id: string }, run: () => unknown) => {
         commands.set(spec.id, run);
       },
-      lsp: NO_EDITS as never,
+      lsp: { ...NO_EDITS, monikers } as never,
       editors: {
         currentPath: options.currentPath === undefined ? '/p/a.ts' : options.currentPath,
         cursor: () => ({ line: 1, column: 1 }),
@@ -132,7 +133,7 @@ describe('команды иерархии исполняются', () => {
       },
     });
     // Счётчик — объект: примитив скопировался бы в момент возврата, и тест видел бы 0.
-    return { commands, request, revealed, opened, counters };
+    return { commands, request, revealed, opened, counters, monikers };
   }
 
   beforeEach(() => {
@@ -335,6 +336,51 @@ describe('команды иерархии исполняются', () => {
     built.commands.get('index.rebuild')?.();
     return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
       expect(built.counters.refreshed).toBeGreaterThan(0);
+    });
+  });
+
+  it('моникер без файла не запрашивается у сервера', () => {
+    const built = build({ currentPath: null });
+
+    built.commands.get('editor.moniker')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      expect(built.monikers).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenCalledWith('Откройте файл', 'error');
+    });
+  });
+
+  it('моникера нет — сказано, что сервер этого не умеет', () => {
+    const built = build();
+    built.monikers.mockResolvedValue([]);
+
+    built.commands.get('editor.moniker')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining('Моникер не найден'));
+      expect(shown).not.toHaveBeenCalled();
+    });
+  });
+
+  it('моникеры показываются, а первый сразу копируется в буфер', () => {
+    // Буфера обмена в заглушке DOM нет: без этой подмены копирование молча падало бы
+    // в `catch`, и тест не увидел бы ни тоста, ни ошибки.
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { clipboard: { writeText: async () => undefined } },
+    });
+    // Чаще всего нужен именно один — заставлять выбирать его руками незачем.
+    const built = build();
+    built.monikers.mockResolvedValue([
+      { identifier: 'clangd://index/main/func@run', scheme: 'clangd', unique: true },
+      { identifier: 'ts://a.ts/run', scheme: 'ts', unique: false },
+    ]);
+
+    built.commands.get('editor.moniker')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      const items = shown.mock.calls[0]?.[0] as { label: string; hint: string }[];
+      expect(items.map((item) => item.label)).toEqual(['clangd://index/main/func@run', 'ts://a.ts/run']);
+      expect(items[0]?.hint).toBe('clangd · уникальный');
+      expect(items[1]?.hint).toBe('ts');
+      expect(toast).toHaveBeenCalledWith('Моникер скопирован');
     });
   });
 });
