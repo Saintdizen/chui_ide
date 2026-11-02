@@ -319,7 +319,17 @@ export async function fileAction(ctx: ToolContext, args: Record<string, unknown>
     };
   if (action === 'move') return await moveFile(ctx.workspace, args);
   if (action === 'delete') return await deleteFile(ctx.workspace, args);
-  if (action === 'replace') return await replaceInFiles(ctx.workspace, args);
+  // `replace` тоже снят: его заменял `search` + `edit`. Не документированное действие
+  // в приёмнике — второй способ делать то же самое; остаются только имена файлов.
+  if (action === 'replace')
+    return {
+      ok: false,
+      summary: 'действие replace снято — замена текста идёт через search + edit',
+      detail:
+        'Инструмент file больше не ищет и не меняет текст: найдя места через `search`, ' +
+        'правь их `edit {edits: [{path, edits: [{oldText, newText}]}]}`. Файл целиком — ' +
+        'тот же `edit` без `oldText`. file оставлен для move и delete.',
+    };
   return unknownAction(action, 'file: move, delete.');
 }
 

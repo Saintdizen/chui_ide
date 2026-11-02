@@ -58,7 +58,18 @@ async function withStubCommand(name: string, ok: boolean): Promise<() => void> {
   roots.push(dir);
   const code = ok ? 0 : 1;
   if (process.platform === 'win32') {
-    await fs.writeFile(path.join(dir, `${name}.cmd`), `@echo off\r\nexit /b ${code}\r\n`, 'utf8');
+    // `execFile('git')` на Windows ищет по PATHEXT и находит только `git.cmd`;
+    // скрипт без расширения там не запускается вовсе, а `.cmd` идёт через cmd.exe,
+    // который `execFile` (без shell) не поднимает. Поэтому зовём node — он есть
+    // на любой машине, где идут тесты, и это исполняемый файл настоящего вида.
+    const body = `require('node:process').exit(${code});`;
+    const js = path.join(dir, `${name}-stub.js`);
+    await fs.writeFile(js, body, 'utf8');
+    await fs.writeFile(
+      path.join(dir, `${name}.cmd`),
+      `@echo off\r\n"${process.execPath}" "${js}" %*\r\n`,
+      'utf8',
+    );
   } else {
     const file = path.join(dir, name);
     await fs.writeFile(file, `#!/bin/sh\nexit ${code}\n`, 'utf8');
@@ -71,11 +82,8 @@ async function withStubCommand(name: string, ok: boolean): Promise<() => void> {
   };
 }
 
-/**
- * Работает ли заглушка из PATH: на Windows `.cmd`/`.bat` через `execFile` не
- * запускается (нужен cmd.exe), поэтому там остаётся терпимая проверка «как получится».
- */
-const stubSupported = process.platform !== 'win32';
+/** Заглушка работает везде: на Windows её представляет `<имя>.cmd` через node. */
+const stubSupported = true;
 
 let gitAvailable = true;
 

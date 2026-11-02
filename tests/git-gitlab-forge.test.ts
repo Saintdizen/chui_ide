@@ -38,7 +38,8 @@ beforeAll(async () => {
   });
 });
 
-const stubSupported = process.platform !== 'win32';
+/** Заглушка работает везде: на Windows её представляет `glab.cmd`, зовущий node. */
+const stubSupported = true;
 
 function git(cwd: string, args: string[]): Promise<void> {
   return new Promise((resolve) => {
@@ -50,8 +51,29 @@ async function withGlabScript(body: string): Promise<{ restore: () => void; call
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-glab-stub-'));
   roots.push(dir);
   const calls = path.join(dir, 'calls.txt');
-  await fs.writeFile(path.join(dir, 'glab'), `#!/bin/sh\necho "$@" >> "${calls}"\n${body}\n`, 'utf8');
+  // На POSIX — sh-скрипт; на Windows — модуль node и `.cmd`, который его зовёт.
+  // `execFile('glab')` на Windows ищет по PATHEXT и sh-скрипт без
+  // расширения не исполняет вовсе — на этой платформе тесты и снимались.
+  const envKey = 'glab_stub_calls';
+  const bodyFile = path.join(dir, 'glab-body.sh');
+  await fs.writeFile(bodyFile, `echo "$@" >> "$${envKey}"
+${body}
+`, 'utf8');
+  process.env[envKey] = calls;
+  const mjs = path.join(dir, 'glab-stub.mjs');
+  await fs.writeFile(
+    mjs,
+    "import { spawnSync } from 'node:child_process';\n" +
+      'spawnSync("sh", [' + JSON.stringify(bodyFile) + ', ...process.argv.slice(2)], { stdio: "inherit" });\n',
+    'utf8',
+  );
+  await fs.writeFile(path.join(dir, 'glab'), `#!/bin/sh\n${await fs.readFile(bodyFile, 'utf8')}`, 'utf8');
   await fs.chmod(path.join(dir, 'glab'), 0o755);
+  await fs.writeFile(
+    path.join(dir, 'glab.cmd'),
+    `@echo off\r\n"${process.execPath}" "${mjs}" %*\r\n`,
+    'utf8',
+  );
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   return {

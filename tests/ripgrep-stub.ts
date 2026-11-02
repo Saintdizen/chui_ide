@@ -2,17 +2,19 @@
  * Поддельный `rg` для тестов: подкладывает в PATH свою программу, пишет в файл
  * пришедшие аргументы и отдаёт заданный вывод.
  *
- * На Windows без оболочки спавн ищет исполняемый файл только по PATHEXT, поэтому
- * `rg` без расширения и `rg.cmd` для него не существуют (ENOENT). Завести свою
- * `rg.exe` тоже нельзя: начинка не та, что ждёт загрузчик. В таком случае тесты
- * на Windows проверяют только настоящий `rg` из образа, а разбор конкретных
- * аргументов и вывода — на остальных системах, где заглушка работает.
+ * На Windows спавн ищет исполняемый файл по PATHEXT, поэтому имя без расширения
+ * он находит только как `rg.cmd` — а его запускает через cmd.exe. Вместо отказа
+ * от заглушки пишем ещё и `.cmd`-обёртку, зовущую node с тем же телом: PATH и
+ * разбор аргументов тогда проверяются на всех системах, а не на двух из трёх.
+ * Настоящий `rg` из образа эти тесты тоже видят — если стоит `rg.cmd` в пути
+ * раньше настоящего, заглушка побеждает, и это ожидаемо.
  */
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
-export const stubSupported = process.platform !== 'win32';
+/** Заглушка работает везде: на Windows её представляет `rg.cmd`. */
+export const stubSupported = true;
 
 export interface RipgrepStub {
   /** Аргументы последнего запуска, по одному в строке. */
@@ -33,6 +35,10 @@ export async function withRipgrep(output: string, name = 'rg'): Promise<RipgrepS
   const file = join(dir, name);
   await writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
   await chmod(file, 0o755);
+  // Windows не запускает файл без расширения: спавн ищет `rg` по PATHEXT и
+  // находит только `rg.cmd`, запуская его через cmd.exe.
+  const cmd = join(dir, `${name}.cmd`);
+  await writeFile(cmd, `@echo off\r\n"${process.execPath}" "${file}" %*\r\n`, 'utf8');
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${delimiter}${previous}`;
   return {

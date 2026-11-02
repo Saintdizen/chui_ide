@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { failureMessage } from '../src/main/python/environments';
+import { conflictLines, failureMessage } from '../src/main/python/environments';
 
 /**
  * Сообщение о сбое команды окружения. Смысл подсказок — назвать причину там, где
@@ -34,5 +34,27 @@ describe('failureMessage', () => {
 
   it('не падает без вывода вовсе', () => {
     expect(failureMessage('x', [], null, [])).toContain('код выхода null');
+  });
+});
+
+/**
+ * `pip install` не ищет несовместимость версий: успешная установка двух
+ * взаимоисключающих пакетов печатает «Successfully installed», и молчит о
+ * конфликте. Называет его только `pip check` — его вывод и разбираем.
+ */
+describe('conflictLines', () => {
+  it('берёт строки с противоречиями как есть', () => {
+    const lines = conflictLines(
+      'pkg-a 1.0 requires pkg-b<2, but you have pkg-b 2.1 which is incompatible.',
+    );
+    expect(lines).toEqual(['pkg-a 1.0 requires pkg-b<2, but you have pkg-b 2.1 which is incompatible.']);
+  });
+
+  it('чистое окружение — пусто, а не «No broken requirements found»', () => {
+    expect(conflictLines('No broken requirements found.')).toEqual([]);
+  });
+
+  it('сбой самого pip — не пустота, а названная причина', () => {
+    expect(conflictLines('pip check не отработал: spawn ENOENT')).toEqual(['pip check не отработал: spawn ENOENT']);
   });
 });

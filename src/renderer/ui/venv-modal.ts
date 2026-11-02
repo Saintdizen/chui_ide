@@ -341,7 +341,15 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
       );
 
       const installed = result.installed.length > 0 ? ` В него поставлено: ${result.installed.join(', ')}.` : '';
-      showToast(`Окружение ${result.environment.label} создано.${installed}`, 'info');
+      // Конфликт версий — то, о чём `pip install` промолчал: тост говорит прямо,
+      // что окружение создано, но части пакетов вместе не живётся.
+      const conflicts = result.conflicts?.length
+        ? ` Внимание, конфликт версий: ${result.conflicts.join('; ')}`
+        : '';
+      showToast(
+        `Окружение ${result.environment.label} создано.${installed}${conflicts}`,
+        conflicts ? 'error' : 'info',
+      );
       await refresh();
       // Новое окружение становится основным — закрываем окно, работа продолжается в нём.
       close();

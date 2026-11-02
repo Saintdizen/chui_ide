@@ -36,6 +36,12 @@ export interface CreateVenvResult {
   environment: PythonEnvironment;
   /** Что реально поставили: `requirements.txt` и/или имена пакетов. */
   installed: string[];
+  /**
+   * Конфликты версий по `pip check` — пусто, если всё согласовано.
+   * `pip install` об успешной установке пишет «Successfully installed» и не ищет
+   * несовместимость: две взаимоисключающие версии того же пакета проходят молча.
+   */
+  conflicts?: string[];
 }
 
 /** Что поставить в главное окружение проекта. */

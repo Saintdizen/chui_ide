@@ -28,7 +28,7 @@ import { censusHeader, isFailure, loadCensus, retryNames } from './census-data';
 import { estimateTextTokens } from '../src/shared/context-fit';
 import { AGENT_TOOLS, toOpenAiTools } from '../src/shared/tools';
 import { ROSTER_TOOLS, WIDENED_TOOLS } from '../src/shared/tool-presets';
-import { callFailureReason } from '../src/shared/step-counts';
+import { callFailureReason, refusalShape } from '../src/shared/step-counts';
 
 const sample = loadCensus();
 console.log(censusHeader(sample));
@@ -103,12 +103,16 @@ for (const messages of sample.messages) {
         // симптом, код — лечение, и разбирать 30 % отказов `edit` без него
         // значит гадать (замер 29.10: 116 из 152 в «other»).
         const code = callFailureReason({ ok: false, summary: text });
+        // Сверить не текст ли сам по себе, а форма с префиксом — второе мнение
+        // о том же отказе: если код ответил `arg`, а форма не узнаётся — значит
+        // делит строку с другим отказом (два отказа в одном вызове).
+        const textCode = callFailureReason({ ok: false, summary: `Ошибка: ${refusalShape({ ok: false, summary: text })}` });
         perCode.set(`${name}.${code}`, (perCode.get(`${name}.${code}`) ?? 0) + 1);
         // «other» — не ответ, а дыра: так выглядит текст отказа, под который
         // не подобрана форма. Собираем их отдельно, иначе чинить нечего.
         // Тем же беден `exit` (ответ команды) и `arg` (общее «не задан
         // аргумент»): вид называется, причина — только в форме.
-        if (code === 'other' || code === 'exit' || code === 'arg') unknown.set(reason, (unknown.get(reason) ?? 0) + 1);
+        if (code === 'other' || code === 'exit' || code === 'arg') unknown.set(`${reason}  [${code}${textCode === code ? '' : ` → ${textCode}`}]`, (unknown.get(`${reason}  [${code}${textCode === code ? '' : ` → ${textCode}`}]`) ?? 0) + 1);
       }
     }
 

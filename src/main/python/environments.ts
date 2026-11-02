@@ -139,8 +139,9 @@ export async function createVenv(
       await runCommand(python, ['-m', 'pip', 'install', ...packages], root, emit, signal);
       installed.push(...packages);
     }
-
+    const conflicts = installed.length > 0 ? await pipCheck(python, root, emit, signal) : [];
     emit({ type: 'done', message: 'Готово' });
+
     const inside = isInsidePath(root, venvDir);
     return {
       environment: {
@@ -156,6 +157,7 @@ export async function createVenv(
         primary: inside,
       },
       installed,
+      ...(conflicts.length > 0 ? { conflicts } : {}),
     };
   } catch (error) {
     // `python -m venv` при сбое оставляет половину каталога (например, без
@@ -308,6 +310,63 @@ export function activationForInterpreter(root: string | null, configured: string
 }
 
 /* ── вспомогательное ────────────────────────────────────────────────────── */
+
+/**
+ * Конфликты версий по `pip check`. `pip install` не ищет несовместимость: две
+ * взаимоисключающие версии одного пакета проходят молча, и «Successfully
+ * installed» читается как успех. Код возврата 1 — найденные противоречия,
+ * а не поломка: ошибкой не считаем, но называем их.
+ */
+async function pipCheck(
+  python: string,
+  cwd: string,
+  emit: (event: VenvProgressPayload) => void,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  // Не через runCommand(): его отклонённый промис всплывает безобрабẗанным, и
+  // прогон падает на штатном «код 1 = есть противоречия». Здесь код возврата —
+  // такой же ответ, как цифра 0, поэтому слушаем `close`, а не ждём ошибку.
+  return await new Promise<string[]>((resolve) => {
+    const child = spawn(python, ['-m', 'pip', 'check'], {
+      cwd,
+      env: { ...process.env, NO_COLOR: '1', PIP_DISABLE_PIP_VERSION_CHECK: '1', PIP_NO_INPUT: '1' },
+      windowsHide: true,
+    });
+    const output: string[] = [];
+    const onData = (chunk: Buffer): void => {
+      for (const line of chunk.toString('utf8').split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        output.push(line);
+        emit({ type: 'output', message: line });
+      }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    const onAbort = (): void => {
+      child.kill();
+    };
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+    child.on('error', (error) => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve([`pip check не отработал: ${error.message}`]);
+    });
+    child.on('close', (code) => {
+      signal?.removeEventListener('abort', onAbort);
+      if (code === 0) resolve([]);
+      else resolve(conflictLines(output.join('\n')));
+    });
+  });
+}
+
+export function conflictLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^no broken requirements found/iu.test(line))
+    .slice(0, 20);
+}
+
 
 export async function runCommand(
   command: string,
