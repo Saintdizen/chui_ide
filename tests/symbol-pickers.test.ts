@@ -103,6 +103,7 @@ describe('команды иерархии исполняются', () => {
     options: { request?: (method: string, params?: unknown) => Promise<unknown>; currentPath?: string | null } = {},
   ) {
     const commands = new Map<string, () => unknown>();
+    const counters = { refreshed: 0 };
     const revealed: [string, number, number][] = [];
     const opened: string[] = [];
     const request = vi.fn(options.request ?? (async () => null));
@@ -126,9 +127,12 @@ describe('команды иерархии исполняются', () => {
         opened.push(path);
       },
       meaningSearch: {} as never,
-      refreshSymbolIndex: () => {},
+      refreshSymbolIndex: () => {
+        counters.refreshed += 1;
+      },
     });
-    return { commands, request, revealed, opened };
+    // Счётчик — объект: примитив скопировался бы в момент возврата, и тест видел бы 0.
+    return { commands, request, revealed, opened, counters };
   }
 
   beforeEach(() => {
@@ -291,6 +295,46 @@ describe('команды иерархии исполняются', () => {
 
       await items[0]?.onSelect?.();
       expect(built.opened).toContain('/p/base.ts');
+    });
+  });
+
+  it('перестройка карты символов различает идущую сборку и готовую', () => {
+    // Текстов два: пока идёт warming, обещать «пересобрана» нельзя — человек пойдёт
+    // искать символы, которых в карте ещё нет.
+    const warming = build({ request: async () => ({ phase: 'warming', files: 120, decls: 0 }) });
+    warming.commands.get('index.rebuild')?.();
+
+    return new Promise((resolve) => setTimeout(resolve, 10))
+      .then(() => {
+        expect(toast).toHaveBeenCalledWith('Пересобираю карту символов: 120 файлов в ней');
+        toast.mockClear();
+        const ready = build({
+          request: async () => ({ phase: 'ready', files: 120, decls: 900 }),
+        });
+        ready.commands.get('index.rebuild')?.();
+        return new Promise((done) => setTimeout(done, 10));
+      })
+      .then(() => {
+        expect(toast).toHaveBeenCalledWith('Карта символов пересобрана: 120 файлов, 900 объявлений');
+      });
+  });
+
+  it('отказ перестройки не молчит', () => {
+    const built = build({ request: async () => Promise.reject(new Error('индексатор занят')) });
+
+    built.commands.get('index.rebuild')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      expect(toast).toHaveBeenCalledWith('Не удалось пересобрать карту символов', 'error');
+    });
+  });
+
+  it('перестройка обновляет карту в окне после успеха', () => {
+    // Иначе виджеты показывали бы старую карту до перезапуска.
+    const built = build({ request: async () => ({ phase: 'ready', files: 1, decls: 1 }) });
+
+    built.commands.get('index.rebuild')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      expect(built.counters.refreshed).toBeGreaterThan(0);
     });
   });
 });
