@@ -149,6 +149,7 @@ function defineLookup(node: any): void {
   node.scrollTo = () => {};
   node.scrollIntoView = () => {};
   node.setSelectionRange = () => {};
+  node.select = () => {};
   // Метрики как у моноширинного шрифта 13px: виждеты привязываются к ним, и нули
   // сделали бы проверку раскладки фиктивной.
   node.getBoundingClientRect = () => {
@@ -303,6 +304,14 @@ export function installMiniDom(): { root: MiniNode; document: any; window: any }
     devicePixelRatio: 1,
     matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
   };
-  Object.assign(globalThis, { document, window });
+  // Глобальные имена, которые код берёт без `window.` (браузер отдаёт их так же).
+  Object.assign(globalThis, {
+    document,
+    window,
+    requestAnimationFrame: window.requestAnimationFrame,
+    cancelAnimationFrame: window.cancelAnimationFrame,
+    getComputedStyle: window.getComputedStyle,
+    matchMedia: window.matchMedia,
+  });
   return { root: body, document, window };
 }
