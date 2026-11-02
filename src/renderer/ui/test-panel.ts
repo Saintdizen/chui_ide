@@ -87,12 +87,6 @@ export interface TestPanelView {
    * сводка и список файлов остались бы пустыми.
    */
   setCoverage(report: CoverageReport | null): void;
-  /**
-   * Показать готовый отчёт покрытия. Нужен раннерам, которые печатают отчёт не в
-   * терминал, а файлом (Node): панель сама его из вывода не собирает, и без этого
-   * сводка и список файлов остались бы пустыми.
-   */
-  setCoverage(report: CoverageReport | null): void;
 }
 
 export function createTestPanel(deps: TestPanelDeps): TestPanelView {

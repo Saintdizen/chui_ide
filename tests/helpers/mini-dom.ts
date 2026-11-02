@@ -102,7 +102,9 @@ function defineEvents(node: any): void {
   };
   // `click` зовёт обработчики: тесту нужно нажимать, а не только вешать.
   node.click = () => {
-    for (const handler of node.handlers.click ?? []) handler({ target: node, preventDefault() {} });
+    for (const handler of node.handlers.click ?? []) {
+      handler({ target: node, preventDefault() {}, stopPropagation() {} });
+    }
   };
 }
 
@@ -118,8 +120,10 @@ function defineLookup(node: any): void {
   node.querySelector = (selector: string) => find(node, selector);
   node.querySelectorAll = (selector: string) => {
     const found: any[] = [];
+    // Класс ищется и по `className`, и по `classList`: `h()` пишет `class` в
+    // атрибут и в `className`, а виждеты добавляют классы через `classList`.
     walk(node, (item) => {
-      if (matches(item, selector)) found.push(item);
+      if (matchesSelector(item, selector)) found.push(item);
     });
     return found;
   };
@@ -127,7 +131,7 @@ function defineLookup(node: any): void {
   node.closest = (selector: string) => {
     let cursor: any = node;
     while (cursor) {
-      if (matches(cursor, selector)) return cursor;
+      if (matchesSelector(cursor, selector)) return cursor;
       cursor = cursor.parentNode;
     }
     return null;
@@ -160,12 +164,18 @@ function walk(node: any, visit: (item: any) => void): void {
   }
 }
 
-function matches(node: any, selector: string): boolean {
+function matchesSelector(node: any, selector: string): boolean {
   if (selector.startsWith('.')) {
-    const wanted = selector.slice(1);
-    return String(node.className ?? '')
+    // `.a.b` — все классы обязательны, как в настоящем `querySelectorAll`.
+    const fromClass = String(node.className ?? '')
       .split(/\s+/)
-      .includes(wanted);
+      .filter(Boolean);
+    const fromList = Array.from((node.classList?.classes as Set<string> | undefined) ?? []);
+    const own = new Set([...fromClass, ...fromList]);
+    return selector
+      .split('.')
+      .filter(Boolean)
+      .every((name) => own.has(name));
   }
   if (selector.startsWith('#')) return node.id === selector.slice(1);
   return String(node.tagName ?? '').toLowerCase() === selector.toLowerCase();
@@ -174,7 +184,7 @@ function matches(node: any, selector: string): boolean {
 function find(node: any, selector: string): any {
   let found: any = null;
   walk(node, (item) => {
-    if (!found && matches(item, selector)) found = item;
+    if (!found && matchesSelector(item, selector)) found = item;
   });
   return found;
 }
