@@ -451,6 +451,24 @@ function withSyncCapabilities(capabilities: unknown): LspCapabilities {
   };
 }
 
+/** Разбор ответа `prepareRename`.
+ *
+ * Ответ по спецификации — `Range` или `{range, placeholder}`. `Range` без имени
+ * значит «можно, но имя не подскажем»: тогда окно откроется с пустым полем.
+ * Отказ приходит ОШИБКОЙ запроса (код `RequestFailed`) — её ловит вызывающий и
+ * передаёт `message` человеку как причину.
+ */
+function toPrepareRename(raw: unknown): { word: string; message: string | null } | null {
+  // Отказ сервера (`RequestFailed`) — не ответ, а ошибка запроса: текст причины
+  // сообщает вызывающий, здесь её взять неоткуда.
+  if (typeof raw === 'string') return { word: '', message: raw };
+  if (!raw || typeof raw !== 'object') return null;
+  const word = (raw as { placeholder?: unknown }).placeholder;
+  const asString = typeof word === 'string' ? word : '';
+  const message = (raw as { message?: unknown }).message;
+  return { word: asString, message: typeof message === 'string' ? message : null };
+}
+
 export class LspService {
   private readonly runtimes = new Map<string, ServerRuntime>();
   /** Подъёмы, которые ещё не завершились: ключ — язык. */
@@ -1405,6 +1423,24 @@ export class LspService {
    * модель renderer, тем же путём, что и правка по позициям. `null` — сервер не умеет
    * переименование.
    */
+  // prepareRename: спросить сервер, можно ли переименовать в этой точке.
+  async prepareRename(
+    path: string,
+    languageId: string,
+    text: string,
+    line: number,
+    column: number,
+  ): Promise<{ word: string; message: string | null } | null> {
+    const runtime = await this.runtimeForDocument(path, languageId);
+    if (!runtime?.capabilities.renameProvider) return null;
+    const position = { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) };
+    return this.withDocument(runtime, path, languageId, text, (uri) =>
+      runtime.connection
+        .request('textDocument/prepareRename', { textDocument: { uri }, position })
+        .then((raw) => toPrepareRename(raw))
+        .catch(() => null),
+    );
+  }
   async rename(
     path: string,
     languageId: string,

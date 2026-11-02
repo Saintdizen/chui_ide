@@ -36,6 +36,27 @@ describe('разбор наведения', () => {
   });
 });
 
+describe('prepareRename', () => {
+  it('имя из placeholder отдаётся для подстановки в окно', async () => {
+    const { rpc, calls } = fakeRpc({ range: {}, placeholder: 'value' });
+    const features = new LspFeatures(rpc);
+    const prepared = await features.prepareRename('/p/a.py', { line: 2, column: 5 });
+    expect(prepared?.word).toBe('value');
+    const params = calls[0]!.params as { method: string; params: { position: unknown } };
+    expect(params.method).toBe('textDocument/prepareRename');
+    // Позиция 1-based → 0-based: это забота моста, а не вызывающего.
+    expect(params.params.position).toEqual({ line: 1, character: 4 });
+  });
+
+  it('отказ сервера не срывает переименование: `message` есть, `word` нет', async () => {
+    // Сервер вправе ответить ошибкой (`RequestFailed`) — её ловит вызывающий и
+    // показывает как причину, а не обрывает команду.
+    const { rpc } = fakeRpc(null, { fail: true });
+    const features = new LspFeatures(rpc);
+    expect(await features.prepareRename('/p/a.py', { line: 1, column: 1 })).toBeNull();
+  });
+});
+
 describe('LspFeatures', () => {
   it('наведение переводит позицию в 0-based и отдаёт текст', async () => {
     const { rpc, calls } = fakeRpc({ contents: { value: 'подсказка' } });

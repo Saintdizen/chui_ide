@@ -522,7 +522,24 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Переименование: имя спрашиваем диалогом, правки применяет документная модель.
     renameSymbol: (path, position) => {
       void (async () => {
-        const newName = await promptValue({ title: 'Переименовать символ', label: 'Новое имя', value: '' });
+        // Спрашиваем сервер ДО диалога: он знает, есть ли под курсором символ и можно
+        // ли его вообще переименовывать (`prepareRename`). Раньше окно открывалось на
+        // пустом месте, и человек узнавал об отказе лишь после ввода имени. Заодно
+        // сервер даёт готовое имя для подстановки — не всегда это слово под курсором.
+        const prepared = await lsp.prepareRename(path, position).catch(() => null);
+        if (!prepared) {
+          showToast('Здесь нечего переименовать', 'info');
+          return;
+        }
+        if (prepared.message) {
+          showToast(prepared.message, 'error');
+          return;
+        }
+        const newName = await promptValue({
+          title: 'Переименовать символ',
+          label: 'Новое имя',
+          value: prepared.word ?? '',
+        });
         if (!newName) return;
         const edit = await lsp.workspaceEdit(path, position, newName);
         if (!edit || (edit.files.length === 0 && edit.operations.length === 0)) {

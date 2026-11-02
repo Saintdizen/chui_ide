@@ -73,6 +73,13 @@ export interface LspPosition {
   column: number;
 }
 
+/** Разбор `prepareRename`: имя для подстановки. `null` — сервер имени не дал. */
+function toPreparedRename(raw: unknown): { word: string; message: string | null } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const word = (raw as { placeholder?: unknown }).placeholder;
+  return typeof word === 'string' ? { word, message: null } : null;
+}
+
 /**
  * Мост к языковому серверу одного проекта. Держит только шаблон запроса: путь и метод,
  * плюс перевод позиций. Всё остальное — разбор ответа в вызывающих.
@@ -129,10 +136,20 @@ export class LspFeatures {
   }
 
   /**
-   * Переименование символа под позицией. Сервер отвечает правками сразу в нескольких
-   * файлах, поэтому отдаём `FileEdit[]` — их применяет документная модель renderer тем
-   * же путём, что и правка по позициям (с undo). `null` — сервер правок не дал или отказался.
+   * Можно ли переименовать в этой точке (`prepareRename`): имя для подстановки и
+   * причина отказа. `null` — сервер не умеет или в этом месте переименовывать нечего.
    */
+  async prepareRename(
+    path: string,
+    position: LspPosition,
+  ): Promise<{ word: string | null; message: string | null } | null> {
+    const result = await this.request(path, 'textDocument/prepareRename', {
+      textDocument: { uri: pathToUri(path) },
+      position: toLspPosition(position),
+    }).catch(() => null);
+    return toPreparedRename(result);
+  }
+
   async rename(path: string, position: LspPosition, newName: string): Promise<FileEdit[] | null> {
     const result = await this.request(path, 'textDocument/rename', {
       textDocument: { uri: pathToUri(path) },
