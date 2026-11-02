@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { minimapBar, minimapScale, minimapSlider, rowForMinimapY } from '../src/renderer/editor/view/minimap';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { Minimap, minimapBar, minimapScale, minimapSlider, rowForMinimapY } from '../src/renderer/editor/view/minimap';
+import { installMiniDom } from './helpers/mini-dom';
 
 /**
  * Арифметика миникарты (`editor/view/minimap.ts`).
@@ -131,5 +132,107 @@ describe('черта строки на карте', () => {
     // Рисовать нечего: видимая часть строки целиком за краем карты. Нулевая по
     // ширине черта была бы мусором в разметке на каждую такую строку.
     expect(minimapBar(`${' '.repeat(300)}x`, 120)).toBeNull();
+  });
+});
+
+/**
+ * Сам виджет миникарты: холст, ползунок и переход по клику.
+ *
+ * Холст подменён заглушкой, которая записывает `fillRect`: в Node настоящего canvas
+ * нет, но всё, что выше (раскладка, ползунок, клик), — настоящий код.
+ */
+describe('виджет миникарты', () => {
+  beforeEach(() => {
+    installMiniDom();
+  });
+
+  function fakeCanvas() {
+    const rects: { x: number; y: number; w: number; h: number }[] = [];
+    const context = {
+      fillStyle: '',
+      globalAlpha: 1,
+      setTransform() {},
+      clearRect() {},
+      fillRect(x: number, y: number, w: number, h: number) {
+        rects.push({ x, y, w, h });
+      },
+    };
+    return { context, rects };
+  }
+
+  function makeMinimap(options: { rowCount?: number; scrollTop?: number } = {}) {
+    const canvas = fakeCanvas();
+    const scrolled: number[] = [];
+    const element = new Minimap({
+      text: (line) => `строка ${line}`,
+      rowCount: () => options.rowCount ?? 100,
+      lineHeight: () => 20,
+      scrollTop: () => options.scrollTop ?? 0,
+      viewportHeight: () => 400,
+      color: () => '#fff',
+      scrollToRow: (row) => scrolled.push(row),
+    });
+    // Холст создаёт сам виджет: подменяем `getContext` у его canvas-узла.
+    const node = element.element.querySelector('.own-editor-minimap-canvas') as unknown as {
+      getContext(): unknown;
+      width: number;
+      height: number;
+      handlers: Record<string, ((event: unknown) => void)[]>;
+    };
+    node.getContext = () => canvas.context;
+    (element.element as unknown as { clientHeight: number }).clientHeight = 400;
+    return { minimap: element, scrolled, rects: canvas.rects, node };
+  }
+
+  it('рисует по черте на каждую строку и ставит ползунок по прокрутке', () => {
+    const { minimap, rects } = makeMinimap({ rowCount: 40, scrollTop: 200 });
+
+    minimap.render();
+
+    // 40 строк на 400px — строка 10px, каждую видно: 40 черт.
+    expect(rects).toHaveLength(40);
+    const slider = minimap.element.querySelector('.own-editor-minimap-slider') as unknown as {
+      style: { top?: string; height?: string };
+      hidden: boolean;
+    };
+    expect(slider.hidden).toBe(false);
+    // Прокрутка 200px при строке 20px — первая видимая строка 10, из 40 строк на
+    // карте 400px это четверть высоты: ползунок на 100px.
+    expect(slider.style.top).toBe('100px');
+  });
+
+  it('пустой файл — ползунка нет, черт нет', () => {
+    const { minimap, rects } = makeMinimap({ rowCount: 0 });
+
+    minimap.render();
+
+    expect(rects).toEqual([]);
+    const slider = minimap.element.querySelector('.own-editor-minimap-slider') as unknown as {
+      hidden: boolean;
+    };
+    expect(slider.hidden).toBe(true);
+  });
+
+  it('клик по карте переводит редактор к строке под указателем', () => {
+    const { minimap, scrolled, node } = makeMinimap({ rowCount: 100 });
+    minimap.render();
+
+    // Клик по середине карты (400px высоты) — 50-я строка.
+    for (const handler of node.handlers.mousedown ?? []) {
+      handler({ clientY: 200, preventDefault() {} });
+    }
+
+    expect(scrolled).toEqual([50]);
+  });
+
+  it('прокрутка в начало даёт первую строку', () => {
+    const { minimap, scrolled, node } = makeMinimap({ rowCount: 100 });
+    minimap.render();
+
+    for (const handler of node.handlers.mousedown ?? []) {
+      handler({ clientY: 0, preventDefault() {} });
+    }
+
+    expect(scrolled).toEqual([0]);
   });
 });
