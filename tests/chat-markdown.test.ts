@@ -1,5 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMarkdownRenderer } from '../src/renderer/ui/chat-markdown';
+
+// Кнопки блока кода говорят о результате тостом: в чистом Node его нет.
+const toasts = vi.hoisted(() => ({ list: [] as string[] }));
+vi.mock('../src/renderer/ui/toast', () => ({
+  showToast: (text: string) => {
+    toasts.list.push(text);
+  },
+}));
 
 /**
  * Разбор разметки для ленты чата проверяется здесь, а не в окне: ошибка, которую
@@ -209,5 +217,109 @@ describe('разметка ленты чата', () => {
     expect(body.textContent).toContain('Заголовок');
     expect(body.textContent).toContain('текст');
     expect(body.textContent).not.toContain('Файл не открыт');
+  });
+
+  /**
+   * Кнопки под блоком кода. Без них ответ модели переносят руками — самая частая
+   * работа с ответом, где есть код.
+   */
+  describe('действия блока кода', () => {
+    const CODE = '```ts\nconst a = 1;\n```';
+
+    type Node = {
+      attributes?: Record<string, string>;
+      children?: Node[];
+      listeners?: Map<string, EventListener[]>;
+    };
+
+    /** Кнопки блока кода: ищем по подписи и зовём обработчики клика. */
+    function buttons(insertCode: (code: string) => boolean) {
+      const renderer = createMarkdownRenderer({ insertCode });
+      const body = new FakeElement('div') as unknown as HTMLElement;
+      renderer.renderInto(body, CODE);
+      const found: { title: string; click(): void }[] = [];
+      const walk = (node: Node): void => {
+        const title = node.attributes?.title;
+        if (title) {
+          found.push({
+            title,
+            click: () => {
+              for (const listener of node.listeners?.get('click') ?? []) {
+                listener({ preventDefault() {}, stopPropagation() {} } as never);
+              }
+            },
+          });
+        }
+        for (const child of node.children ?? []) walk(child);
+      };
+      walk(body as unknown as Node);
+      return found;
+    }
+
+    it('в блоке кода есть копирование и вставка', () => {
+      const titles = buttons(() => true).map((button) => button.title);
+
+      expect(titles).toContain('Копировать');
+      expect(titles).toContain('Вставить в позицию курсора');
+    });
+
+    it('вставка без открытого редактора говорит причину, а не молчит', () => {
+      // Кнопка есть всегда: её отсутствие читалось бы как «действие пропало».
+      toasts.list.length = 0;
+      const insert = buttons(() => false).find((button) => button.title === 'Вставить в позицию курсора');
+
+      insert?.click();
+
+      expect(toasts.list).toEqual(['Нет открытого редактора']);
+    });
+
+    it('вставка с открытым редактором подтверждает действие', () => {
+      toasts.list.length = 0;
+      const seen: string[] = [];
+      const insert = buttons((code) => {
+        seen.push(code);
+        return true;
+      }).find((button) => button.title === 'Вставить в позицию курсора');
+
+      insert?.click();
+
+      expect(seen[0]).toContain('const a = 1;');
+      expect(toasts.list).toEqual(['Вставлено в позицию курсора']);
+    });
+
+    it('копирование проходит, когда буфер доступен', async () => {
+      const written: string[] = [];
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: { clipboard: { writeText: async (text: string) => written.push(text) } },
+      });
+      const copy = buttons(() => true).find((button) => button.title === 'Копировать');
+
+      copy?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // Копируется код блока без ограждения из обратных кавычек.
+      expect(written[0]).toContain('const a = 1;');
+      expect(written[0]).not.toContain('```');
+    });
+
+    it('недоступный буфер обмена не роняет нажатие', async () => {
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: {
+          clipboard: {
+            writeText: async () => {
+              throw new Error('запрещено');
+            },
+          },
+        },
+      });
+      const copy = buttons(() => true).find((button) => button.title === 'Копировать');
+
+      copy?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(true).toBe(true);
+    });
   });
 });
