@@ -90,6 +90,11 @@ describe('symbol-pickers', () => {
  * Прежние тесты проверяли список команд и отказы по имени; сами действия
  * (иерархия вызовов и типов, список экспортов, моникер) не исполнялись ни разу.
  */
+/**
+ * Обработчики команд объявлены как `() => void openCallHierarchy(...)`: промис
+ * наружу НЕ возвращается (так у всех команд — ошибку ловит сама команда). Поэтому
+ * ждать их через `await command()` бессмысленно: нужно дождаться микрозадач.
+ */
 describe('команды иерархии исполняются', () => {
   const NO_EDITS = () => ({});
   const rect = { left: 10, top: 20 };
@@ -133,9 +138,43 @@ describe('команды иерархии исполняются', () => {
     // Файла нет — команда говорит о причине, а не идёт к серверу.
     const built = build({ currentPath: null });
 
-    await built.commands.get('editor.callers')?.();
+    built.commands.get('editor.callers')?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(built.request).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith('Откройте файл', 'error');
+  });
+
+  it('сервер не ответил — сказано, что нужен языковой сервер', () => {
+    // `prepareCallHierarchy` без узлов: сервер символов для этого языка не отвечает.
+    const built = build({ request: async () => null });
+
+    built.commands.get('editor.callees')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining('языковой сервер'), 'error');
+    });
+  });
+
+  it('никто не вызывает — так и говорит, без пустого списка', () => {
+    // Настоящий ответ LSP: узел есть, входящих вызовов нет.
+    const node = {
+      name: 'run',
+      kind: 12,
+      uri: 'file:///p/a.ts',
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+      selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+    };
+    const built = build({
+      request: async (_method, params) => {
+        const method = (params as { method?: string }).method;
+        return method === 'textDocument/prepareCallHierarchy' ? [node] : [];
+      },
+    });
+
+    built.commands.get('editor.callers')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      expect(toast).toHaveBeenCalledWith('Никто не вызывает run');
+      expect(shown).not.toHaveBeenCalled();
+    });
   });
 });
