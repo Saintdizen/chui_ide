@@ -170,4 +170,74 @@ describe('сводки по корням', () => {
   it('правки внутри папок: пустой список даёт пустую карту', () => {
     expect(changeInsideFolders([]).size).toBe(0);
   });
+
+  it('коммит передаёт сообщение, пути и amend, затем обновляет статус', async () => {
+    const { model: git, setAnswer, rpc } = model();
+    setAnswer(status([file('/p/a.ts')]));
+
+    await git.commit('сообщение', ['/p/a.ts'], true);
+
+    expect(rpc.request).toHaveBeenCalledWith('git.commit', {
+      message: 'сообщение',
+      paths: ['/p/a.ts'],
+      amend: true,
+    });
+    // Статус после коммита перезапрашивается: файлы уже другие.
+    expect(rpc.request.mock.calls.filter((call) => call[0] === 'git.status').length).toBeGreaterThan(0);
+  });
+
+  it('отложенные изменения и одиночные коммиты идут своими методами', async () => {
+    const { model: git, rpc, setAnswer } = model();
+    setAnswer(status([]));
+    rpc.request.mockClear();
+
+    await git.stashSave({ includeUntracked: true });
+    await git.stashApply(2);
+    await git.stashPop(1);
+    await git.stashDrop(0);
+    await git.cherryPick('abc123');
+    await git.revert('def456');
+    await git.reset('hard', 'abc123');
+
+    const methods = rpc.request.mock.calls.map((call) => call[0]);
+    for (const method of [
+      'git.stashSave',
+      'git.stashApply',
+      'git.stashPop',
+      'git.stashDrop',
+      'git.cherryPick',
+      'git.revert',
+      'git.reset',
+    ]) {
+      expect(methods, method).toContain(method);
+    }
+  });
+
+  it('сброс передаёт режим и коммит: это необратимая операция', async () => {
+    const { model: git, rpc } = model();
+    rpc.request.mockClear();
+
+    await git.reset('soft', 'HEAD~2');
+
+    expect(rpc.request).toHaveBeenCalledWith('git.reset', { mode: 'soft', commit: 'HEAD~2' });
+  });
+
+  it('чтение (diff, blame, log, headText) не трогает состояние статуса', () => {
+    // Это запросы «покажи»: они обязаны быть дешёвыми и не перерисовывать дерево.
+    const { model: git, rpc } = model();
+    rpc.request.mockClear();
+
+    git.diff('/p/a.ts', true, 'HEAD~1');
+    git.blame('/p/a.ts', { startLine: 3, endLine: 5 });
+    git.log('/p/a.ts', 10);
+    git.headText('/p/a.ts');
+
+    expect(rpc.request.mock.calls.map((call) => call[0])).toEqual(['git.diff', 'git.blame', 'git.log', 'git.headText']);
+    // Границы строк уходят в main как есть — по ним строится происхождение.
+    expect(rpc.request).toHaveBeenCalledWith('git.blame', {
+      path: '/p/a.ts',
+      startLine: 3,
+      endLine: 5,
+    });
+  });
 });
