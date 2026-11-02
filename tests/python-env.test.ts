@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { findEnvironments } from '../src/main/python/environments';
 import {
   comparePythonVersions,
   DEFAULT_VENV_DIR,
@@ -236,5 +239,80 @@ describe('comparePythonVersions', () => {
   it('сортировка по убыванию — от новой к старой', () => {
     const sorted = ['3.9.0', '3.14.0', '3.12.1'].sort((a, b) => comparePythonVersions(b, a));
     expect(sorted).toEqual(['3.14.0', '3.12.1', '3.9.0']);
+  });
+});
+
+/**
+ * Обнаружение окружений и создание venv (`main/python/environments.ts`).
+ *
+ * Прежние тесты покрывали чистые функции (пути, разбор cfg). Сам поиск окружений и
+ * создание каталога не проверялись — а именно там решается, увидит ли человек своё
+ * окружение в списке.
+ *
+ * Проект собирается во временном каталоге; `python -m venv` не запускается (его на
+ * машине может не быть) — проверяется разметка дерева и отказы.
+ */
+describe('поиск окружений', () => {
+  let dir = '';
+
+  afterEach(async () => {
+    if (dir) await fs.rm(dir, { recursive: true, force: true });
+    dir = '';
+  });
+
+  /**
+   * Окружение узнаётся по файлу интерпретатора внутри, а не по папке: пустой
+   * каталог `venv` окружением не считается. Версия читается из `pyvenv.cfg`.
+   */
+  async function venv(root: string, name: string, version = '3.12.1'): Promise<void> {
+    const base = path.join(root, name);
+    await fs.mkdir(path.join(base, 'bin'), { recursive: true });
+    await fs.writeFile(path.join(base, 'bin', 'python'), '');
+    await fs.writeFile(path.join(base, 'pyvenv.cfg'), `home = /usr/bin\nversion = ${version}\n`);
+  }
+
+  it('находит окружения в корне проекта и в .venv', async () => {
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    dir = await mkdtemp(path.join(tmpdir(), 'chui-venv-'));
+    await venv(dir, '.venv');
+    await venv(dir, 'venv', '3.11.4');
+
+    const found = await findEnvironments(dir, 'linux');
+
+    expect(found.map((item) => item.label).sort()).toEqual(['.venv', 'venv']);
+    expect(found.find((item) => item.label === '.venv')?.version).toBe('3.12.1');
+  });
+
+  it('папка без pyvenv.cfg окружением не считается', async () => {
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    dir = await mkdtemp(path.join(tmpdir(), 'chui-venv-'));
+    await fs.mkdir(path.join(dir, 'venv'), { recursive: true });
+
+    const found = await findEnvironments(dir, 'linux');
+
+    expect(found.map((item) => item.label)).not.toContain('venv');
+  });
+
+  it('несколько окружений — первое в списке основное', async () => {
+    // Порядок важен: человек запускает «обычный» запуск, и он должен попасть в
+    // основное окружение, а не в случайное.
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    dir = await mkdtemp(path.join(tmpdir(), 'chui-venv-'));
+    await venv(dir, '.venv');
+
+    const found = await findEnvironments(dir, 'linux');
+
+    expect(found[0]?.primary).toBe(true);
+  });
+
+  it('пустой проект — пустой список, без ошибки', async () => {
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    dir = await mkdtemp(path.join(tmpdir(), 'chui-venv-'));
+
+    await expect(findEnvironments(dir, 'linux')).resolves.toEqual([]);
   });
 });
