@@ -216,6 +216,8 @@ export class WorkspaceService {
    * мешать самой правке файла, поэтому ошибку здесь глотает вызывающий.
    */
   onBeforeChange: ((file: string, reason: 'save' | 'delete') => Promise<void> | void) | null = null;
+  /** Правки вне редактора: наблюдатель увидел изменение, создание или удаление файла. */
+  onFilesChanged: ((path: string) => void) | null = null;
 
   /** Активный корень — им отвечают операции без явного пути. */
   rootPath(): string | null {
@@ -1274,6 +1276,7 @@ export class WorkspaceService {
         ? { root, path: root, many: true }
         : { root, path: changed ?? this.active };
       this.onChange(PushTopic.WorkspaceChanged, payload);
+      this.onFilesChanged?.(changed ?? root);
     }, 120);
   }
 

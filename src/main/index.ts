@@ -386,12 +386,19 @@ if (!app.requestSingleInstanceLock()) {
     const history = new HistoryStore(path.join(app.getPath('userData'), 'history'));
     // Снимок прежнего содержимого перед каждой перезаписью — источник локальной
     // истории. Ошибку снимка не поднимаем: история вспомогательная, файл важнее.
+    workspace.onFilesChanged = (file) => lsp.watchedFiles([file], 2);
+
     workspace.onBeforeChange = (file, reason) => {
       const root = workspace.rootPath();
       if (!root) return;
       // Возвращаем обещание, чтобы WorkspaceService дождался снимка: иначе запись
       // могла бы обогнать чтение и в историю попал бы уже новый текст.
-      return history.capture(root, file, reason).catch(() => undefined);
+      const captured = history.capture(root, file, reason).catch(() => undefined);
+      // Сохранение и удаление говорит языковому серверу: без `didSave` проверки на
+      // сохранении (ruff --fix, ESLint fixAll) не запускаются вовсе.
+      if (reason === 'save') lsp.saved(file);
+      else lsp.watchedFiles([file], 3);
+      return captured;
     };
 
     const deps = {

@@ -406,6 +406,10 @@ interface LspCapabilities {
   };
   hoverProvider?: boolean;
   definitionProvider?: boolean;
+  /** Сохранение объявлено (`textDocumentSync.save`) — значит, `didSave` слать. */
+  textDocumentSyncSave?: { includeText: boolean };
+  /** Наблюдение за файлами вне редактора (`workspace.didChangeWatchedFiles`). */
+  workspaceWatchedFiles?: boolean;
   signatureHelpProvider?: { triggerCharacters?: string[] };
   /** Поиск символов по всему проекту — «перейти к символу». */
   workspaceSymbolProvider?: boolean;
@@ -423,6 +427,25 @@ interface LspCapabilities {
   /** Точная семантическая подсветка: по ней разбираем ответ (легенду объявляет сервер). */
   semanticTokensProvider?: {
     legend?: { tokenTypes?: unknown; tokenModifiers?: unknown };
+  };
+}
+
+/** Возможности синхронизации: `save` из `textDocumentSync` и наблюдение за файлами. */
+function withSyncCapabilities(capabilities: unknown): LspCapabilities {
+  const caps = (capabilities ?? {}) as Record<string, unknown>;
+  const sync = caps.textDocumentSync as { save?: unknown } | undefined;
+  const workspace = caps.workspace as { didChangeWatchedFiles?: unknown } | undefined;
+  const save = sync && typeof sync === 'object' ? sync.save : undefined;
+  const syncSave =
+    save === true
+      ? { includeText: false }
+      : save && typeof save === 'object'
+        ? { includeText: (save as { includeText?: unknown }).includeText === true }
+        : undefined;
+  return {
+    ...(caps as LspCapabilities),
+    ...(syncSave ? { textDocumentSyncSave: syncSave } : {}),
+    workspaceWatchedFiles: Boolean(workspace?.didChangeWatchedFiles),
   };
 }
 
@@ -742,6 +765,28 @@ export class LspService {
     });
     // Пометки пересчитываются сервером: старые гасим, чтобы не висели на экране.
     this.publish(PushTopic.LspDiagnostics, { path, diagnostics: [] });
+  }
+
+  /** Документ сохранён на диск — сказать серверу (`didSave`). */
+  saved(path: string): void {
+    const runtime = this.runtimeForPath(path);
+    if (!runtime || this.openedIn.get(path) !== runtime) return;
+    const save = runtime.capabilities.textDocumentSyncSave;
+    if (!save) return;
+    runtime.connection.notify('textDocument/didSave', {
+      textDocument: { uri: pathToFileURL(path).toString() },
+      ...(save.includeText && this.latestText.has(path) ? { text: this.latestText.get(path) } : {}),
+    });
+  }
+
+  /** Файл изменился или исчез на диске мимо редактора: `kind` 1 — создан, 2 — изменён, 3 — удалён. */
+  watchedFiles(paths: readonly string[], kind: 1 | 2 | 3): void {
+    const changes = paths.map((path) => ({ uri: pathToFileURL(path).toString(), type: kind }));
+    for (const runtime of this.runtimes.values()) {
+      if (runtime.capabilities.workspaceWatchedFiles) {
+        runtime.connection.notify('workspace/didChangeWatchedFiles', { changes });
+      }
+    }
   }
 
   close(path: string): void {
@@ -1088,7 +1133,7 @@ export class LspService {
     if (refusal) this.refusals.set(runtime.config.language, refusal);
 
     // Возможности решают, что можно спрашивать: их отсутствие — не ошибка.
-    runtime.capabilities = result?.capabilities ?? {};
+    runtime.capabilities = withSyncCapabilities(result?.capabilities);
     runtime.connection.notify('initialized', {});
     // Трассировка — уведомление КЛИЕНТА серверу: включаем, если человек просил.
     if (this.settings().trace) runtime.connection.notify('$/setTrace', { value: 'verbose' });
