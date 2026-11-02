@@ -26,6 +26,7 @@
  */
 
 import type { TextBuffer } from '../core/text-buffer';
+import type { CompletionContext } from '../../../shared/lsp-completions';
 import { COMMENT, STRING } from '../highlight/tokens';
 import { snippetsForLanguage, type Snippet } from '../../../shared/snippets';
 import type { ImportAlias } from '../../../shared/imports';
@@ -322,7 +323,12 @@ export interface CompletionAssistantOptions {
    * Приходят асинхронно и подмешиваются в уже показанный список, когда ответят.
    * Не задано — подсказки только из слов и сниппетов.
    */
-  lsp?: (prefix: string, position: { line: number; column: number }) => Promise<readonly CompletionItem[]>;
+  lsp?: (
+    prefix: string,
+    position: { line: number; column: number },
+    /** Почему спросили: 1 — вручную, 2 — знаком, 3 — дотягивание. Сервер решает по этому. */
+    context?: CompletionContext,
+  ) => Promise<readonly CompletionItem[]>;
   /**
    * Символы проекта по имени — карта символов (`index` в main: объявления своего кода
    * и зависимостей, собранные заранее). Нужны в двух местах: повторный Ctrl+Space
@@ -432,6 +438,11 @@ export class CompletionAssistant {
   private triggers = new Set<string>();
   /** Отложенный повтор запроса к серверу — снимаем, если место/файл сменились. */
   private lspRetry: number | null = null;
+  /**
+   * Причина текущего вопроса к серверу: `2` со знаком (`.` → `()` → `[`) или `1`
+   * (Ctrl+Space). Сбрасывается после ответа, чтобы следующий набор не выдал вчерашний знак.
+   */
+  private pendingTrigger: CompletionContext | null = null;
   /** Отложенный вопрос к карте символов при наборе (см. `scheduleIndex`). */
   private indexTimer: number | null = null;
 
@@ -592,6 +603,9 @@ export class CompletionAssistant {
       // (по буквам) этого не умеет: там имя уже есть, а здесь его ещё нет.
       if (this.triggers.has(charBefore(this.buffer, caret))) {
         this.widget.hide();
+        // Причина — символ (`2`): серверы после `.`/`:` отдают мемберов, а на ручной
+        // вызов отвечают общим списком или пустотой.
+        this.pendingTrigger = { triggerKind: 2, triggerCharacter: charBefore(this.buffer, caret) };
         this.askServer(prefix, caret);
         return;
       }
@@ -617,6 +631,9 @@ export class CompletionAssistant {
     items.push(...this.namedArguments(prefix));
     const caret = this.controller.caret;
     this.widget.show(items, this.anchor(caret), prefix.length);
+    // Обычный набор — ручной вызов (`1`): символ уже был набран раньше, и он бы
+    // уводил сервер к мемберам совсем другого выражения.
+    this.pendingTrigger = null;
     this.askServer(prefix, caret);
     // Карта проекта отвечает следом и своим чередом: список уже виден, поэтому
     // никакого ожидания сервера тут нет.
@@ -1065,7 +1082,10 @@ export class CompletionAssistant {
     if (!lsp) return;
     const id = ++this.lspRequestId;
     const position = this.buffer.positionAt(caret);
-    void lsp(prefix, position)
+    // Причина запроса: повтор после обрезанного ответа (`3`) или обычный набор. Ручной
+    // вызов сюда не доходит — он идёт другим путём и сразу с `1`.
+    const context = attempt > 0 ? ({ triggerKind: 3 } as const) : (this.pendingTrigger ?? undefined);
+    void lsp(prefix, position, context)
       .then((extra) => {
         // Курсор уехал или пришёл новый запрос — ответ про прежнее место не показываем.
         if (id !== this.lspRequestId || this.controller.caret !== caret) return;

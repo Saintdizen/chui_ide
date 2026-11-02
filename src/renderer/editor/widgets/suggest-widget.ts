@@ -221,6 +221,17 @@ export class SuggestWidget {
     // строка в списке, а при совпадении по «горбам» это единственная подсказка об этом.
     renderLabel(label, item);
 
+    // Сигнатура/тип рядом с именем (`labelDetails.detail` 3.17) — отдельным
+    // узлом, без поиска по подписи: у TypeScript-сервера это `(x: number): string`,
+    // и именно по нему выбирают между перегрузками. Своей строкой под списком
+    // это не заменить: там описание, а тут вид того, что вставится.
+    if (item.labelDetail) {
+      const signature = document.createElement('span');
+      signature.className = 'own-editor-suggest-signature';
+      signature.textContent = item.labelDetail;
+      label.append(signature);
+    }
+
     const detail = document.createElement('span');
     // Вид подсказки красим классом: значок в списке — по нему, а не по тексту.
     detail.className = `own-editor-suggest-detail is-${item.kind}`;

@@ -40,6 +40,20 @@ export interface CompletionEntry {
   /** Подсказка помечена как устаревшая (`tags: [Deprecated]` или `deprecated`). */
   readonly deprecated?: boolean;
   /**
+   * Правая часть подписи (`labelDetails.detail`): параметры функции, тип свойства.
+   * Это часть САМОЙ подписи, а не пояснение: у tsserver `label` — имя, а сигнатура
+   * лежит рядом и серым. Без него список читается как голый список имен.
+   */
+  readonly labelDetail?: string;
+  /**
+   * Что заменит вставка по мнению сервера (`textEdit.range` в координатах файла).
+   * Нужен, когда сервер хочет заменить больше или меньше набранного префикса:
+   * например, `foo.bar` целиком, а не только `bar`.
+   */
+  readonly range?: { readonly from: number; readonly to: number };
+  /** Знаки, после которых выбор допустим (`commitCharacters`); пусто — любые. */
+  readonly commitCharacters?: readonly string[];
+  /**
    * Исходный элемент сервера: его отправляем назад в `completionItem/resolve`, когда
    * человек выделил строку. Серверы, умеющие доводить элемент, в первом ответе часто
    * опускают описание и подробность — именно поэтому без resolve попап выглядит голым.
@@ -81,6 +95,35 @@ const KIND_LABELS: Record<number, string> = {
 };
 
 /**
+ * Причина запроса подсказок — уходит серверу как `context` в `textDocument/completion`.
+ *
+ * Зачем. Сервер по `triggerKind` решает, что вернуть: при `2` (TriggerCharacter) он
+ * отдаёт то, что положено после этого знака, а при `3` (TriggerForIncompleteCompletions)
+ * дотягивает обрезанный список. Без контекста серверы (pyright, rust-analyzer, clangd)
+ * считают запрос ручным — и мемберы после точки просто не приходят.
+ */
+export interface CompletionContext {
+  /** 1 — вызвано вручную, 2 — символом, 3 — после обрезанного ответа. */
+  readonly triggerKind: 1 | 2 | 3;
+  /** Знак, вызвавший подсказку (только при `triggerKind: 2`). */
+  readonly triggerCharacter?: string;
+}
+
+/**
+ * Причина запроса → поле `context` протокола. Ручной вызов не передаём: там по
+ * умолчанию `1`, и явное поле только шумит в переписке с сервером.
+ */
+export function completionContext(context: CompletionContext | undefined): Record<string, unknown> {
+  if (!context || context.triggerKind === 1) return {};
+  return {
+    context: {
+      triggerKind: context.triggerKind,
+      ...(context.triggerCharacter ? { triggerCharacter: context.triggerCharacter } : {}),
+    },
+  };
+}
+
+/**
  * Разобрать ответ сервера в список подсказок. Битые элементы пропускаем, повторные
  * подписи убираем (серверы любят отдавать одно и то же дважды — из разных модулей).
  */
@@ -114,8 +157,15 @@ function toEntry(raw: unknown): CompletionEntry | null {
     label?: unknown;
     kind?: unknown;
     insertText?: unknown;
-    textEdit?: { newText?: unknown };
+    textEdit?: {
+      newText?: unknown;
+      range?: { start?: { line?: unknown; character?: unknown }; end?: { line?: unknown; character?: unknown } };
+      insert?: unknown;
+      replace?: unknown;
+    };
     detail?: unknown;
+    labelDetails?: { detail?: unknown };
+    commitCharacters?: unknown;
     insertTextFormat?: unknown;
     additionalTextEdits?: unknown;
     filterText?: unknown;
@@ -145,6 +195,11 @@ function toEntry(raw: unknown): CompletionEntry | null {
     // Исходный элемент — для `completionItem/resolve` (см. `CompletionEntry.source`).
     source: raw,
     ...(additionalEdits ? { additionalEdits } : {}),
+    // `insert`/`replace` — форма InsertReplaceEdit: два участка на выбор (набор и замена).
+    // Берём замену: она шире и не обрезает то, что уже написано (VS Code делает так же).
+    ...(editRange(value.textEdit) ?? {}),
+    ...labelDetailField(value.labelDetails),
+    ...commitChars(value.commitCharacters),
     ...(typeof value.filterText === 'string' ? { filterText: value.filterText } : {}),
     ...(typeof value.sortText === 'string' ? { sortText: value.sortText } : {}),
     ...(value.preselect === true ? { preselect: true } : {}),
@@ -158,6 +213,58 @@ function toEntry(raw: unknown): CompletionEntry | null {
 function isDeprecated(value: { deprecated?: unknown; tags?: unknown }): boolean {
   if (value.deprecated === true) return true;
   return Array.isArray(value.tags) && value.tags.includes(1);
+}
+
+/**
+ * Правая часть подписи из `labelDetails.detail` — в VS Code это сигнатура рядом с
+ * именем (`foo(a, b)`), а не описание под списком. Пустое не берём: место занимать
+ * нечем, а строка и без этого тесная.
+ */
+/** `labelDetails.detail` — правая часть подписи; её показываем рядом с именем. */
+function labelDetailField(value: unknown): { labelDetail?: string } {
+  const detail = labelDetail(value);
+  return detail ? { labelDetail: detail } : {};
+}
+
+function labelDetail(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const detail = (value as { detail?: unknown }).detail;
+  return typeof detail === 'string' && detail.trim() ? detail : undefined;
+}
+
+/**
+ * Границы замены из `textEdit`: `{range}` или `InsertReplaceEdit {insert, replace}`.
+ *
+ * Зачем. Без них вставка уходит поверх набранного префикса, и серверный `textEdit`
+ * (`foo($0)`, авто-импорт) перекрывает то, что сервер сам назвал границами — например
+ * случай, когда подсказка заменяет не только слово, но и точку перед ним. Формы две:
+ * обычная (одна граница) и вставка-замена (две); для вставки берём `insert`, потому
+ * что мы дописываем к набираемому тексту, а не затираем соседний.
+ */
+function editRange(value: unknown): { range: { from: number; to: number } } | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const edit = value as { range?: unknown; insert?: unknown; replace?: unknown };
+  // Формы две: обычная (`range`) и вставка-замена (`insert` + `replace`). Берём
+  // `replace`: он шире и не оставляет хвост от уже набранного. `insert` — это
+  // только когда сервер не прислал `replace`.
+  const anchor = (edit.range ?? edit.replace ?? edit.insert) as
+    | { start?: { line?: unknown; character?: unknown }; end?: { line?: unknown; character?: unknown } }
+    | undefined;
+  const start = anchor?.start;
+  const end = anchor?.end;
+  if (typeof start?.line !== 'number' || typeof start.character !== 'number') return undefined;
+  if (typeof end?.line !== 'number' || typeof end.character !== 'number') return undefined;
+  // Наружу — плоские номера строк: вставка идёт по смещениям буфера, а не по LSP-позициям.
+  // Однострочные границы обязательны: многострочная заменя — не подсказка, а правка.
+  if (start.line !== end.line) return undefined;
+  return { range: { from: start.character, to: end.character } };
+}
+
+/** Знаки, после которых выбор можно применять (сервер: `commitCharacters`). */
+function commitChars(value: unknown): { commitCharacters?: readonly string[] } {
+  if (!Array.isArray(value)) return {};
+  const chars = value.filter((item): item is string => typeof item === 'string' && item.length === 1);
+  return chars.length > 0 ? { commitCharacters: chars } : {};
 }
 
 /**

@@ -28,7 +28,13 @@ import type { DocumentHighlightSpan } from '../../../shared/lsp-document-highlig
 import { toDocumentHighlights } from '../../../shared/lsp-document-highlight';
 import { toDocumentColors } from '../../../shared/lsp-document-color';
 import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations';
-import { toCompletions, toResolvedCompletion, type ResolvedCompletion } from '../../../shared/lsp-completions';
+import {
+  completionContext,
+  toCompletions,
+  toResolvedCompletion,
+  type CompletionContext,
+  type ResolvedCompletion,
+} from '../../../shared/lsp-completions';
 import { toCodeActions, toLspDiagnostics, type CodeActionItem } from '../../../shared/lsp-code-actions';
 import { pickAnyRefactors, pickRefactors, type RefactorAction } from '../../../shared/lsp-refactor';
 import { toFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
@@ -157,12 +163,21 @@ export class LspFeatures {
    * (`CompletionItem`), поэтому вид списка не знает, откуда пришло: от сервера это
    * или из нашего словаря. `insert` сервера важнее подписи — им и вставляем.
    */
-  async completion(path: string, position: LspPosition): Promise<CompletionItem[]> {
+  async completion(path: string, position: LspPosition, context?: CompletionContext): Promise<CompletionItem[]> {
     const result = await this.request(path, 'textDocument/completion', {
       textDocument: { uri: pathToUri(path) },
       position: toLspPosition(position),
+      // Без `context` сервер считает вызов ручным (triggerKind=1) и не знает знака.
+      // Это ломает всё, что сервер решает по причине вызова: завершение после `.`,
+      // вставку импортов, отказ показывать список в комментариях. Форму поля собирает
+      // `completionContext`: ручной вызов не передаём вовсе.
+      ...completionContext(context),
     });
-    return toCompletions(result).map((entry) => ({
+    const entries = toCompletions(result);
+    // Причину вызова сервер видит только в `context`. Без неё он считает вызов ручным
+    // (`triggerKind=1`) и не знает знака — а по нему решает, что вернуть: после `.`
+    // список членов, после `@` — декораторы, в комментарии — ничего.
+    return entries.map((entry) => ({
       label: entry.label,
       kind: 'external' as const,
       detail: entry.detail || 'сервер',
@@ -175,6 +190,16 @@ export class LspFeatures {
       ...(entry.sortText !== undefined ? { sortText: entry.sortText } : {}),
       ...(entry.preselect ? { preselect: true } : {}),
       ...(entry.deprecated ? { deprecated: true } : {}),
+      // Границы замены от сервера (`textEdit.range`). Без них вставка идёт по
+      // набранному префиксу, а он врёт везде, где сервер заменяет не префикс:
+      // у JS/TS после точки, у CSS вместо `-webkit-…`, у `InsertReplaceEdit`.
+      ...(entry.range ? { range: entry.range } : {}),
+      // Знаки завершения (`commitCharacters`): сервер говорит, после каких
+      // символов выбор уже однозначен. Без них точку после `println` приходится
+      // дописывать руками, а список в этот момент держит фокус.
+      ...(entry.commitCharacters ? { commitCharacters: entry.commitCharacters } : {}),
+      // Правая часть подписи (`labelDetails.detail`): параметры метода и тип.
+      ...(entry.labelDetail ? { labelDetail: entry.labelDetail } : {}),
       // Исходный элемент — по нему список доводит строку через `completionItem/resolve`.
       ...(entry.source !== undefined ? { resolve: entry.source } : {}),
     }));

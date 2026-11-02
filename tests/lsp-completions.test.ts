@@ -1,5 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { toCompletions, toResolvedCompletion } from '../src/shared/lsp-completions';
+import {
+  completionContext,
+  toCompletions,
+  toResolvedCompletion,
+  type CompletionContext,
+} from '../src/shared/lsp-completions';
+
+describe('контекст запроса подсказок', () => {
+  it('набор символа уезжает серверу как triggerKind 2 с самим знаком', () => {
+    // Без этого pyright и rust-analyzer считают вызов ручным и молчат после `.`.
+    expect(completionContext({ triggerKind: 2, triggerCharacter: '.' })).toEqual({
+      context: { triggerKind: 2, triggerCharacter: '.' },
+    });
+  });
+
+  it('дотягивание обрезанного ответа — triggerKind 3 без знака', () => {
+    expect(completionContext({ triggerKind: 3 })).toEqual({ context: { triggerKind: 3 } });
+  });
+
+  it('ручной вызов (или его отсутствие) не шумит полем context', () => {
+    expect(completionContext({ triggerKind: 1 })).toEqual({});
+    expect(completionContext(undefined)).toEqual({});
+  });
+
+  it('знак без причины не передаётся: протокол ждёт его только с triggerKind 2', () => {
+    const context: CompletionContext = { triggerKind: 2 };
+    expect(completionContext(context)).toEqual({ context: { triggerKind: 2 } });
+  });
+});
 
 describe('разбор подсказок LSP', () => {
   it('принимает и список, и обёртку CompletionList', () => {
@@ -22,6 +50,44 @@ describe('разбор подсказок LSP', () => {
     expect(
       toCompletions([{ label: 'print', insertText: 'print()', textEdit: { newText: 'print($0)' } }])[0],
     ).toMatchObject({ insert: 'print($0)' });
+  });
+
+  it('labelDetails.detail рисуется рядом с именем, как в VS Code', () => {
+    // Сервер отдаёт `foo` + `labelDetails.detail: '(a: int)'` — это сигнатура, а не
+    // описание под списком. Без неё не видно, какие из перегрузок отличаются.
+    expect(
+      toCompletions([{ label: 'foo', labelDetails: { detail: '(a: int)', description: 'm.py' } }])[0],
+    ).toMatchObject({
+      label: 'foo',
+      labelDetail: '(a: int)',
+    });
+  });
+
+  it('место для labelDetails не занимается пустотой', () => {
+    expect(toCompletions([{ label: 'foo', labelDetails: {} }])[0]?.labelDetail).toBeUndefined();
+    expect(toCompletions([{ label: 'foo', labelDetails: { detail: '  ' } }])[0]?.labelDetail).toBeUndefined();
+  });
+
+  it('commitCharacters переносятся в элемент', () => {
+    expect(toCompletions([{ label: 'foo', commitCharacters: ['.', '('] }])[0]).toMatchObject({
+      commitCharacters: ['.', '('],
+    });
+  });
+
+  it('границы замены из InsertReplaceEdit берутся из replace — он шире', () => {
+    // Форма `{insert, replace}`: две границы на выбор. Брат берётся шире, иначе
+    // вставка оставляет хвост от уже набранного.
+    const item = toCompletions([
+      {
+        label: 'foo',
+        textEdit: {
+          newText: 'foo()',
+          insert: { start: { line: 0, character: 3 }, end: { line: 0, character: 3 } },
+          replace: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+        },
+      },
+    ])[0];
+    expect(item?.range).toEqual({ from: 0, to: 3 });
   });
 
   it('вид символа переводится в пояснение; свой detail главнее', () => {

@@ -58,6 +58,23 @@ export interface CompletionItem {
   readonly sortText?: string;
   /** Сервер советует выделить сразу. */
   readonly preselect?: boolean;
+  /**
+   * Правая часть подписи — сигнатура или путь (сервер: `labelDetails.detail`).
+   * В VS Code она стоит серым сразу после имени (`readFileSync(file, options)`),
+   * и по ней видно отличие перегрузок, не открывая описание. Не задано — нет
+   * правой части: отрисовка её просто не создаёт, отдельного строкового
+   * поля в DOM не появляется.
+   */
+  readonly labelDetail?: string;
+  /**
+   * Границы текста, который заменит вставка (сервер: `textEdit.range`).
+   * Не задано — заменяется набранный префикс до каретки (наше правило).
+   * Задано — верим серверу: у TypeScript там бывает `this.` или часть пути, а
+   * подстановка начала префикса оставила бы обрубок в тексте.
+   */
+  readonly range?: { readonly from: number; readonly to: number };
+  /** Знаки, после которых выбор допустим (сервер: `commitCharacters`). */
+  readonly commitCharacters?: readonly string[];
   /** Подсказка помечена как устаревшая. */
   readonly deprecated?: boolean;
   /** Описание символа (из `completionItem/resolve`): показывается под подписью. */
