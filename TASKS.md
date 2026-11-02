@@ -12,19 +12,14 @@
 ## Окружение
 
 `web` даёт 404, `fetch` на `code.visualstudio.com` — «нет связи». Документация —
-через `terminal`: `curl -sSL <url>.md` (HTML — SPA, отдаёт одну шапку). Спецификация
-LSP — полный `metaModel.json`, не `specification.md` (тот обрезан до 42 КБ):
-
-```
-curl -sSL https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/metaModel/metaModel.json
-```
+через `terminal`: `curl -sSL <url>.md` (HTML — SPA, отдаёт одну шапку).
 
 ## План
 
 Порядок работы, сверху вниз. Без теста и `check:static` пункт не закрыт; «проверить»
 сначала доводится до воспроизведения — или вычёркивается.
 
-1. **`#web` без содержимого:** прикладывается только адрес страницы, текст тянет инструмент `web`.
+Открытых пунктов нет.
 
 ## Часть 1. LSP
 
@@ -90,4 +85,4 @@ curl -sSL https://microsoft.github.io/language-server-protocol/specifications/ls
 
 ## Часть 5. Чат
 
-1. **`#web` без содержимого:** прикладывается только адрес страницы, текст тянет инструмент `web`.
+Задач нет.
