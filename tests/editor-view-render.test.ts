@@ -130,3 +130,31 @@ describe('номера строк и обновление', () => {
     expect(lines().length).toBeLessThan(500);
   });
 });
+
+describe('устойчивость вида', () => {
+  beforeEach(() => {
+    installMiniDom();
+  });
+
+  it('правка в буфере не роняет вид', () => {
+    // Каретку ведёт контроллер, а вид обязан пережить любую правку: удаление всего
+    // текста — самый частый способ получить за концом документа.
+    const { buffer, view } = makeView('первая\nвторая');
+
+    buffer.delete(0, buffer.text.length);
+    expect(() => view.refresh(0)).not.toThrow();
+  });
+
+  it('многострочный файл перерисовывается после вставки строки', () => {
+    const { buffer, view, lines } = makeView('a\nb');
+
+    buffer.insert(0, 'новая\n');
+    view.refresh(0);
+
+    expect(
+      lines()
+        .map((line) => line.textContent)
+        .join(''),
+    ).toContain('новая');
+  });
+});
