@@ -106,7 +106,9 @@ for (const messages of sample.messages) {
         perCode.set(`${name}.${code}`, (perCode.get(`${name}.${code}`) ?? 0) + 1);
         // «other» — не ответ, а дыра: так выглядит текст отказа, под который
         // не подобрана форма. Собираем их отдельно, иначе чинить нечего.
-        if (code === 'other') unknown.set(reason, (unknown.get(reason) ?? 0) + 1);
+        // Тем же беден `exit` (ответ команды) и `arg` (общее «не задан
+        // аргумент»): вид называется, причина — только в форме.
+        if (code === 'other' || code === 'exit' || code === 'arg') unknown.set(reason, (unknown.get(reason) ?? 0) + 1);
       }
     }
 
@@ -159,7 +161,7 @@ if (refusalReasons.size > 0) {
 }
 
 if (unknown.size > 0) {
-  console.log('\nother — дыры классификатора (тексты, под которые нет формы в step-counts):');
+  console.log('\nother/exit/arg — формы без своей причины (тексты отказов, которых не знает step-counts):');
   for (const [reason, count] of [...unknown.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) {
     console.log(`  ${String(count).padStart(3)}  ${reason}`);
   }

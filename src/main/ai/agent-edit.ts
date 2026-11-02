@@ -92,7 +92,10 @@ export const EDITOR_MISSING: ToolOutcome = {
  */
 export function normalizeWrite(args: Record<string, unknown>): unknown {
   const top = typeof args.path === 'string' && args.path.trim().length > 0 ? args.path : undefined;
-  const raw = args.edits;
+  // Массив правок может называться и `patches`/`hunks` (`apply_patch` кладёт их
+  // под `patches`, а потом — файлы в `patches[]`): тогда у файла без `path`
+  // верхний путь тоже работает.
+  const raw = args.edits ?? args.patches ?? args.hunks;
 
   // Обёртки нет совсем: `path` и замена лежат рядом на верхнем уровне.
   if (raw === undefined) {
@@ -116,22 +119,29 @@ export function normalizeWrite(args: Record<string, unknown>): unknown {
       // объявленная форма `edits` в схеме именно такая. Сворачиваем в `edits[]`,
       // иначе разбор дойдёт до `oldText` как до чужого поля и откажет.
       const hunk = flatHunk(item);
-      const file = hasInnerEdits(item) || hunk ? { ...item, edits: item.edits ?? [hunk] } : item;
-      return typeof file.path !== 'string' && top ? { ...file, path: top } : file;
+      const editsFor = item.edits ?? item.patches ?? item.hunks;
+      const file: Record<string, unknown> = { ...(item as Record<string, unknown>) };
+      if (!Array.isArray(item.edits) && (hasInnerEdits(item) || hunk)) file.edits = Array.isArray(editsFor) ? editsFor : [hunk];
+      const named = typeof file.path !== 'string' && top ? { ...file, path: top } : file;
+      // Внутренний список зовётся `edits`, какое бы имя ни выбрала модель.
+      const inner = named.edits ?? named.patches ?? named.hunks;
+      return Array.isArray(inner) && inner !== named.edits ? { ...named, edits: inner } : named;
     });
   }
 
-  // Плоская форма: элементы — сами замены. Собираем их по путям (свой или верхний).
+  // Плоская форма: элементы — сами замены. Но файл может быть назван вокруг
+  // массива: `{path, edits: [{startLine, newText}]}` без единого `path` в самих
+  // заменах — та же ошибка обёртки (замер 30.10: 3 отказа `edit` из 16).
   const groups = new Map<string, unknown[]>();
   for (const item of list) {
+    // Замена без своего пути: адрес берём с верхнего уровня.
     const itemPath = isRecord(item) && typeof item.path === 'string' ? item.path : top;
     // Путь не найти — не угадываем: пусть отказ назовёт форму (это данные, а не шум).
     if (!itemPath) return list;
-    const hunk = isRecord(item) ? flatHunk(item) : null;
     const bucket = groups.get(itemPath) ?? [];
     // Замена во плоской форме (`{path, oldText, newText}` среди замен) — тоже по адресу:
     // иначе до разбора дошёл бы `path` как чужое поле замены, и вызов бы отвалился.
-    bucket.push(hunk ?? item);
+    bucket.push(isRecord(item) ? (flatHunk(item) ?? item) : item);
     groups.set(itemPath, bucket);
   }
   return [...groups.entries()].map(([filePath, edits]) => ({
@@ -142,7 +152,7 @@ export function normalizeWrite(args: Record<string, unknown>): unknown {
 
 /** Элемент правки — файл с вложенными заменами, а не сама замена. */
 export function hasInnerEdits(item: unknown): boolean {
-  return isRecord(item) && Array.isArray(item.edits);
+  return isRecord(item) && (Array.isArray(item.edits) || Array.isArray(item.patches) || Array.isArray(item.hunks));
 }
 
 /**
@@ -294,11 +304,23 @@ export async function fileAction(ctx: ToolContext, args: Record<string, unknown>
   // раз, а поле — ровно перед тем, как его заполнить. `contents` у `create` и
   // `replacement` у `replace` путали чаще всего («не задан аргумент contents»
   // приходил на `replace` — модель несла новое содержимое из привычки).
-  if (action === 'create') return await createFile(ctx.workspace, args);
+  // `create` живёт в приёмнике ради старых бесед, но схемой не объявлен: новая
+  // запись идёт через `edit` (новый файл — запись целиком в `edits`). Молча
+  // исполнять необъявленное действие — значит оставлять два способа записи;
+  // поэтому отвечаем вслух и называем один (замер 30.10: 12 вызовов вне схемы).
+  if (action === 'create')
+    return {
+      ok: false,
+      summary: 'действие create снято — новый файл пишется через edit',
+      detail:
+        'Инструмент file больше не создаёт файлы: та же запись есть у edit — ' +
+        '`edit {edits: [{path, edits: [{newText: "…"}]}]}` без `oldText` создаёт файл целиком. ' +
+        'file оставлен для move и delete.',
+    };
   if (action === 'move') return await moveFile(ctx.workspace, args);
   if (action === 'delete') return await deleteFile(ctx.workspace, args);
   if (action === 'replace') return await replaceInFiles(ctx.workspace, args);
-  return unknownAction(action, 'file: create, move, delete, replace.');
+  return unknownAction(action, 'file: move, delete.');
 }
 
 /**

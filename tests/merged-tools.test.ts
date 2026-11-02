@@ -129,6 +129,16 @@ describe('слитые инструменты: разбор', () => {
     expect(move.summary).toContain('from');
   });
 
+  it('file create отвечает вслух и называет один способ записи', async () => {
+    // Замер 30.10: 12 вызовов `file {action: create}` — схема его не объявляет,
+    // но имя живёт в старых беседах. Молча исполнять необъявленное — значит
+    // держать второй способ записи; отказ называет `edit`.
+    const outcome = await runTool(ctx, 'file', JSON.stringify({ action: 'create', path: '/p/a.ts', contents: 'x' }));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('edit');
+    expect(outcome.detail).toContain('newText');
+  });
+
   it('недостающий аргумент назван по имени поля', async () => {
     const outcome = await runTool(ctx, 'browser', JSON.stringify({ action: 'click' }));
     expect(outcome.ok).toBe(false);

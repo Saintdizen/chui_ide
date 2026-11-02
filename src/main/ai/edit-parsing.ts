@@ -154,10 +154,10 @@ function parseEditFile(value: unknown, index: number, lastPath?: string): { anch
   // Самая частая ошибка — замена вместо файла: в элементе oldText и newText, а
   // обёртки с путём нет. Об этом и говорим, иначе модель пришлёт то же снова.
   if (typeof filePath !== 'string' || filePath.trim().length === 0) {
-    const inner = Array.isArray(raw.edits) ? raw.edits : [];
+    const innerForHint = Array.isArray(raw.edits) ? raw.edits : [];
     const swap = typeof raw.oldText === 'string' || typeof raw.newText === 'string';
     const lastHint = lastPathHint(lastPath);
-    const whole = inner.some((item) => {
+    const whole = innerForHint.some((item) => {
       if (typeof item !== 'object' || item === null) return false;
       const hunk = item as Record<string, unknown>;
       return typeof hunk.newText === 'string' && hunk.oldText === undefined;

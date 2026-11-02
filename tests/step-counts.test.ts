@@ -127,10 +127,9 @@ describe('счётчик шагов', () => {
       { id: 'b', name: 'read', args: '{}', ok: true, summary: 'x' },
     ];
     const calls = buildCountsRecord(log).steps[0]!.calls;
-    // Код-заглушку `command` в записи не держим: вид назван, причины нет.
-    // Отказ всё равно виден — по `ok` и по форме.
-    expect(calls[0]).toMatchObject({ ok: false });
-    expect(calls[0]!.reason).toBeUndefined();
+    // Код `exit`: команда отработала и ответила «нет» — это ответ, а не
+    // поломка, и он в записи есть.
+    expect(calls[0]!.reason).toBe('exit');
     expect(calls[0]!.unknown).toBeTruthy();
     expect(calls[1]).toMatchObject({ ok: true });
     expect(calls[1]!.reason).toBeUndefined();
@@ -200,7 +199,8 @@ describe('счётчик шагов', () => {
     expect(record.steps[0]!.calls.map((item) => item.reason)).toEqual([
       'action',
       'arg',
-      undefined,
+      // Провал без своего кода теперь зовётся `exit`: команда ответила «нет».
+      'exit',
       'not-found',
       'arg',
       'anchor',
@@ -213,9 +213,9 @@ describe('счётчик шагов', () => {
       'unavailable',
       'unavailable',
       'unavailable',
-      // Команда провалилась без внятного текста: причина = форма, кода нет.
-      undefined,
-      undefined,
+      // Две команды провалились (`p` и `q`): у обоих код `exit`.
+      'exit',
+      'exit',
       'unavailable',
     ]);
     expect(callFailureReason({ ok: true, summary: 'ok' })).toBe('other');
@@ -273,8 +273,10 @@ describe('счётчик шагов', () => {
         ],
       }),
     );
-    // Код `command` — заглушка: причина не в нём, а в тексте, и текст едет формой.
-    expect(second.steps[0]!.calls[0]!.reason).toBeUndefined();
+    // Упавшая команда теперь называет себя кодом `exit`: это ответ, а не
+    // поломка инструмента, и в таблице отказов он стоит отдельно (47 из 94).
+    // Код при этом не заглушка — форма едет вместе с ним, и отчёт видит оба.
+    expect(second.steps[0]!.calls[0]!.reason).toBe('exit');
     expect(second.steps[0]!.calls[0]!.unknown).toBe('код выхода 1');
     // Код молчит — отказ всё равно назван формой, по ней и стоит новая форма.
     expect(second.steps[0]!.calls[1]!.reason).toBeUndefined();
@@ -307,8 +309,9 @@ describe('счётчик шагов', () => {
     );
     const call = record.steps[0]!.calls[0]!;
     expect(call.ok).toBe(false);
-    // Код-заглушку не держим — она не причина, а его место занимает форма.
-    expect(call.reason).toBeUndefined();
+    // Провал без отдельного кода называет себя `exit`: это ответ вызова, а не
+    // разбор аргументов, — а форму рядом держим, по ней и чинят.
+    expect(call.reason).toBe('exit');
     expect(call.unknown).toBe('1 тест упал: ждали 2, получили 3');
   });
 

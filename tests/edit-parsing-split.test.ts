@@ -115,6 +115,43 @@ describe('разбор правок отдельно от инструменто
     expect(message).toContain('у правки это поле зовётся `newText`');
   });
 
+  it('путь вокруг массива замен: адрес берётся сверху', () => {
+    // Замер 30.10: 3 отказа `edit` из 16 — файл назван вокруг массива, а в
+    // заменах пути нет: `{path, edits: [{startLine, newText}]}`. Отказывать
+    // не за что: адрес один, текст один.
+    const parsed = parseEdits(
+      normalizeWrite({
+        path: '/proj/a.ts',
+        edits: [
+          { startLine: 1, endLine: 1, newText: 'первая' },
+          { startLine: 2, endLine: 2, newText: 'вторая' },
+        ],
+      }) as unknown[],
+    );
+    expect(parsed.positions[0]!.path).toBe('/proj/a.ts');
+    expect(parsed.positions[0]!.edits.map((item) => item.newText)).toEqual(['первая', 'вторая']);
+  });
+
+  it('путь вокруг одной замены: адрес берётся сверху', () => {
+    // Замер 30.10:
+    // `{path, edits: [{startLine, newText}]}`. Отказывать не за что:
+    // адрес один, текст один.
+    const parsed = parseEdits(
+      normalizeWrite({
+        path: '/proj/a.ts',
+        edits: [{ startLine: 1, endLine: 1, newText: 'первая' }],
+      }) as unknown[],
+    );
+    expect(parsed.positions.map((item) => item.path)).toEqual(['/proj/a.ts']);
+    expect(parsed.positions[0]!.edits[0]!.newText).toBe('первая');
+  });
+
+  it('обёртка apply_patch: файлы под верхним `patches` и правки под `patches`', () => {
+    const parsed = parseEdits(normalizeWrite({ patches: [{ path: '/p/a.ts', patches: [{ oldText: 'x', newText: 'y' }] }] }) as unknown[]);
+    expect(parsed.anchors[0]!.path).toBe('/p/a.ts');
+    expect(parsed.anchors[0]!.patches[0]).toMatchObject({ oldText: 'x', newText: 'y' });
+  });
+
   it('замены в соседнем `edits` разбираются, а не отказывают', () => {
     // `{path, edits: [...]}` проходил раскладку: сторож ниже это утверждает.
     const parsed = parseEdits([{ path: '/proj/a.ts', edits: [{ oldText: 'a', newText: 'b' }] }]);
