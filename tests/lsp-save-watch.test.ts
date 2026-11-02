@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LspService } from '../src/main/lsp/lsp';
 
@@ -57,6 +58,7 @@ const FAKE_SERVER = [
   '// node argv: [exec, script, log, mode] — лог в argv[2], режим в argv[3].',
   'const LOG = process.argv[2];',
   "const SAVE = process.argv[3] === 'save';",
+  "const SYMBOLS = process.argv[3] === 'symbols';",
   "const WATCH = process.argv[3] === 'watch';",
   'let buffer = Buffer.alloc(0);',
   'function send(message) {',
@@ -72,6 +74,7 @@ const FAKE_SERVER = [
   '        capabilities: {',
   '          textDocumentSync: SAVE ? { openClose: true, change: 1, save: { includeText: true } } : { openClose: true, change: 1 },',
   '          ...(WATCH ? { workspace: { didChangeWatchedFiles: {} } } : {}),',
+  '          ...(SYMBOLS ? { workspaceSymbolProvider: true } : {}),',
   '        },',
   '      },',
   '    });',
@@ -79,6 +82,10 @@ const FAKE_SERVER = [
   '  }',
   '  if (message.method) {',
   "    appendFileSync(LOG, message.method + '\\n');",
+  "    if (message.method === 'workspace/symbol')",
+  "      return send({ jsonrpc: '2.0', id: message.id, result: [{ name: 'widget', kind: 12, data: { id: 7 } }] });",
+  "    if (message.method === 'workspaceSymbol/resolve')",
+  "      return send({ jsonrpc: '2.0', id: message.id, result: { name: 'widget', kind: 12, location: { uri: process.argv[4], range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } } } } });",
   '    return;',
   '  }',
   '  if (message.id !== undefined) send({ jsonrpc: "2.0", id: message.id, result: null });',
@@ -102,7 +109,7 @@ const FAKE_SERVER = [
 ].join('\n');
 
 async function project(
-  mode: 'save' | 'watch' | 'plain',
+  mode: 'save' | 'watch' | 'plain' | 'symbols',
 ): Promise<{ root: string; file: string; log: string; server: FakeServer }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-lsp-save-'));
   dirs.push(root);
@@ -119,7 +126,7 @@ async function project(
     server: {
       language: 'typescript',
       command: process.execPath,
-      args: [script, log, mode],
+      args: [script, log, mode, pathToFileURL(file).toString()],
       enabled: true,
       label: 'заглушка',
     },
@@ -198,5 +205,17 @@ describe('didSave и наблюдение за файлами', () => {
     lsp.watchedFiles([file], 2);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(await logOf(log)).not.toContain('workspace/didChangeWatchedFiles');
+  });
+
+  it('символ без location доспрошивается через workspaceSymbol/resolve', async () => {
+    // Спецификация разрешает `workspace/symbol` отдавать символы БЕЗ локации: сервер
+    // экономит силы на больших проектах и ждёт, что клиент доспросит ненужное.
+    // Раньше такой символ молча выкидывался из списка — теперь дозапрашиваем.
+    const { root, log, server } = await project('symbols');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    const found = await lsp.projectSymbols('widget');
+    expect(found.some((symbol) => symbol.name === 'widget')).toBe(true);
+    expect(await logOf(log)).toContain('workspaceSymbol/resolve');
   });
 });

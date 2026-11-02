@@ -455,6 +455,11 @@ function withSyncCapabilities(capabilities: unknown): LspCapabilities {
   };
 }
 
+/** Символ без `location` — сервер просит доспросить его отдельно. */
+function isUnresolvedSymbol(item: unknown): boolean {
+  return Boolean(item) && typeof item === 'object' && !('location' in (item as object));
+}
+
 /** Разбор ответа `prepareRename`.
  *
  * Ответ по спецификации — `Range` или `{range, placeholder}`. `Range` без имени
@@ -1299,6 +1304,22 @@ export class LspService {
     return mergeSymbols(results, indexed);
   }
 
+  /** Символы без локации: доспросить через `workspaceSymbol/resolve`. */
+  private async resolveSymbols(runtime: ServerRuntime, raw: unknown): Promise<ProjectSymbol[]> {
+    if (!Array.isArray(raw)) return [];
+    // Символ без `location` — незаконченный: сервер просит доспросить его по id.
+    const pending = raw.filter((item) => isUnresolvedSymbol(item));
+    if (pending.length === 0) return toProjectSymbols(raw, fileURLToPath);
+    const resolved = await Promise.all(
+      pending.map((item) => runtime.connection.request('workspaceSymbol/resolve', item).catch(() => item)),
+    );
+    // Собираем ответ обратно: `resolve` возвращает те же объекты с дополненной `location`,
+    // а `toProjectSymbols` уже отбросит те, где локации так и не появилось.
+    const queue = [...resolved];
+    const filled = raw.map((item) => (isUnresolvedSymbol(item) ? (queue.shift() ?? item) : item));
+    return toProjectSymbols(filled, fileURLToPath);
+  }
+
   /** Символы от всех поднятых серверов, умеющих искать по проекту. */
   private async serverSymbols(query: string): Promise<ProjectSymbol[]> {
     const results: ProjectSymbol[] = [];
@@ -1310,7 +1331,7 @@ export class LspService {
         const raw = await runtime.connection.request('workspace/symbol', {
           query,
         });
-        results.push(...toProjectSymbols(raw, fileURLToPath));
+        results.push(...(await this.resolveSymbols(runtime, raw)));
       } catch {
         // Сервер не ответил — это не повод терять результаты остальных.
       }
