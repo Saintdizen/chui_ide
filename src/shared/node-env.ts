@@ -357,6 +357,20 @@ export function installCommand(manager: NodePackageManager): string {
 }
 
 /** Проблемы окружения по фактам. Пустой список — окружение в порядке. */
+/**
+ * Жалоба на версию Node, если она известна вместе с `engines.node` и не подходит.
+ * Неизвестное — не ошибка: непрочитанная версия не повод пугать человека.
+ */
+function pushEngineIssue(issues: NodeIssue[], facts: NodeEnvFacts): void {
+  if (!facts.engineRange || !facts.nodeVersion) return;
+  if (satisfiesNodeRange(facts.nodeVersion, facts.engineRange)) return;
+  issues.push({
+    kind: 'engine-mismatch',
+    severity: 'warning',
+    message: `${facts.label}: Node ${facts.nodeVersion} не подходит под engines.node (${facts.engineRange})`,
+  });
+}
+
 export function describeNodeEnvIssues(facts: NodeEnvFacts): NodeIssue[] {
   const issues: NodeIssue[] = [];
 
@@ -370,6 +384,11 @@ export function describeNodeEnvIssues(facts: NodeEnvFacts): NodeIssue[] {
         message: `${facts.label}: node_modules пуст — вероятно, установка не завершилась`,
       });
     }
+    // Дальше по функциям — проверки зависимостей, которых здесь нет. Но версию Node
+    // проверять нужно и здесь: `engines.node` объявляют именно в проектах без
+    // зависимостей (утилиты и примеры), и ранний `return` терял единственную
+    // существенную жалобу такого проекта.
+    pushEngineIssue(issues, facts);
     return issues;
   }
 
@@ -394,14 +413,7 @@ export function describeNodeEnvIssues(facts: NodeEnvFacts): NodeIssue[] {
     });
   }
 
-  // Версию Node проверяем только когда известно и то и другое: неизвестное не ошибка.
-  if (facts.engineRange && facts.nodeVersion && !satisfiesNodeRange(facts.nodeVersion, facts.engineRange)) {
-    issues.push({
-      kind: 'engine-mismatch',
-      severity: 'warning',
-      message: `${facts.label}: Node ${facts.nodeVersion} не подходит под engines.node (${facts.engineRange})`,
-    });
-  }
+  pushEngineIssue(issues, facts);
 
   if (!facts.lockfile) {
     issues.push({
