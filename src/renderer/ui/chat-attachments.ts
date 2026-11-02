@@ -43,6 +43,14 @@ const MAX_DIFF_FILES = 10;
 const MENTION_SKIP = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
 const MAX_MENTIONS = 4000;
 
+/** Место проекта по смыслу: строка кода и где она лежит. Для `#codebase`. */
+export interface CodebasePlace {
+  path: string;
+  /** Номер строки с 1: так же, как в редакторе и в отчётах поиска. */
+  line: number;
+  text: string;
+}
+
 export interface AttachmentsDeps {
   rpc: RpcClient;
   documents: DocumentStore;
@@ -50,6 +58,13 @@ export interface AttachmentsDeps {
   workspace: WorkspaceModel;
   /** Изменения репозитория: нужны только для `#diff`. */
   git?: GitModel;
+  /**
+   * Места по смыслу — для `#codebase`: запрос словами → готовые места проекта.
+   * Тот же поиск, что у палитры по смыслу; без него пункт молчит и говорит, почему.
+   */
+  codebase?: (query: string) => Promise<readonly CodebasePlace[]>;
+  /** Что сейчас набрано в поле ввода: это и есть запрос для `#codebase`. */
+  composerText(): string;
   /** Активная беседа: у каждой вкладки свои вложения. */
   session(): ChatSession;
   /** Вернуть фокус в поле ввода после прикладывания контекста. */
@@ -65,8 +80,8 @@ export interface AttachmentsView {
   takeForSend(): ChatAttachment[];
   /** Приложить то, что открыто в редакторе: выделение, а если его нет — файл. */
   attachBest(): void;
-  /** Приложить контекст вида `#`: выделение, файл, пометки языка или правки. */
-  attachFrom(kind: 'selection' | 'file' | 'problems' | 'diff'): void;
+  /** Приложить контекст вида `#`: выделение, файл, пометки языка, правки или места проекта. */
+  attachFrom(kind: 'selection' | 'file' | 'problems' | 'diff' | 'codebase'): void;
   /** Выбор изображений системным диалогом. */
   attachImagesFromDialog(): Promise<void>;
   /** Приложить готовое изображение (data-URL): снимок страницы из встроенного браузера. */
@@ -413,6 +428,57 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     else addAttachment(attachmentFrom('file'));
   }
 
+  /**
+   * Контекст `#codebase`: места проекта по смыслу вопроса. Берём тот же поиск, что
+   * в палитре по смыслу, но прикладываем не список на экране, а отрывки строк:
+   * модели нужно то, что написано, а не название места.
+   *
+   * Вопрос — текст, набранный в поле ввода: его и обшариваем. Пусто — берём файл
+   * и подсказываем, что можно написать словами.
+   */
+  async function attachmentFromCodebase(): Promise<ChatAttachment | null> {
+    if (!deps.codebase) {
+      showToast('Места по смыслу недоступны', 'error');
+      return null;
+    }
+    const query = deps.composerText().trim();
+    if (!query) {
+      showToast('Напишите в поле ввода, что искать', 'info');
+      return null;
+    }
+    let places: readonly CodebasePlace[];
+    try {
+      places = await deps.codebase(query);
+    } catch (error) {
+      showToast(`Поиск не удался: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      return null;
+    }
+    if (places.length === 0) {
+      showToast(`Ничего не нашлось по «${query}»`, 'info');
+      return null;
+    }
+
+    const lines: string[] = [];
+    let size = 0;
+    let used = 0;
+    for (const place of places) {
+      const line = `${place.path}:${place.line}: ${place.text.replaceAll('\n', ' ')}`;
+      // Предел тот же, что у файла целиком: место в промпте не бесконечное.
+      if (size + line.length > MAX_ATTACHMENT_CHARS) break;
+      lines.push(line);
+      size += line.length + 1;
+      used += 1;
+    }
+    const rest = places.length - used;
+
+    return {
+      kind: 'codebase',
+      label: 'Места в проекте',
+      title: `Места в проекте по «${query}»`,
+      text: `${lines.join('\n')}${rest > 0 ? `\n… ещё мест: ${rest}` : ''}`,
+    };
+  }
+
   /** Собрать вложение по произвольному пути: файл целиком или список папки. */
   async function attachmentFromPath(target: string, kind: 'file' | 'dir'): Promise<ChatAttachment | null> {
     try {
@@ -525,9 +591,10 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     takeForSend,
     attachBest,
     attachFrom: (kind) => {
-      // Правки — асинхронные: `git status` знает только модель, а чтение файлов — диск.
-      if (kind === 'diff') {
-        void attachmentFromDiff().then((item) => {
+      // Правки и места проекта — асинхронные: `git status` знает только модель, а чтение
+      // файлов и поиск по смыслу идут через RPC.
+      if (kind === 'diff' || kind === 'codebase') {
+        void (kind === 'diff' ? attachmentFromDiff() : attachmentFromCodebase()).then((item) => {
           if (item) addAttachment(item);
         });
         return;

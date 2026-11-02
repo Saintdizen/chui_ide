@@ -149,6 +149,51 @@ export function combineMeaning(
   return hits.slice(0, Math.max(0, limit));
 }
 
+/** Одно место в файле: строка-отрывок и её номер. */
+export interface CodebasePlace {
+  path: string;
+  line: number;
+  /** Отрывок строки, уже обрезанный по `PLACE_TEXT`; подсветка его не касается. */
+  text: string;
+}
+
+/** Сколько символов строки уходит в контекст: длинные строки не стоят своих токенов. */
+export const PLACE_TEXT = 200;
+
+/**
+ * Отобрать места для контекста беседы (`#codebase`).
+ *
+ * Это не список ссылок для показа, а то, что уйдёт модели в промпт, поэтому
+ * правила жёстче `combineMeaning`:
+ *
+ *   • **файлы, а не совпадения.** Поиск по смыслу легко выдаёт десяток строк
+ *     из одного файла — модели нужнее разные файлы, у которых уже отсечены хвосты.
+ *   • **на один файл — `perFile` строк**, не больше. Остальные файлы важнее повтора.
+ *   • **каждая строка обрезается** до `PLACE_TEXT`: одна минифицированная строка
+ *     иначе съест весь бюджет контекста.
+ *   • **порядок тот же**, что был (баллы, затем путь), — файлы только чередуются
+ *     между собой, так что самый релевантный остаётся первым.
+ */
+export function selectPlaces(hits: readonly MeaningHit[], limit: number, perFile: number): CodebasePlace[] {
+  const perPath = new Map<string, number>();
+  const places: CodebasePlace[] = [];
+
+  for (const hit of hits) {
+    if (places.length >= limit) break;
+    const used = perPath.get(hit.path) ?? 0;
+    if (used >= perFile) continue;
+    perPath.set(hit.path, used + 1);
+    const text = hit.label.trim();
+    places.push({
+      path: hit.path,
+      line: hit.line,
+      text: text.length > PLACE_TEXT ? `${text.slice(0, PLACE_TEXT)}…` : text,
+    });
+  }
+
+  return places;
+}
+
 /** Ключ позиции: файл и строка. По нему схлопываются дубли и совпадения с символом. */
 function spot(path: string, line: number): string {
   return `${path}:${line}`;

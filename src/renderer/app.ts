@@ -145,6 +145,9 @@ import { createPalette } from './ui/palette';
 import { createRecentCommands } from './core/recent-commands';
 import { createPythonEnvPopover } from './ui/python-env-popover';
 import { createLazyPopover } from './ui/lazy-popover';
+import type { SearchHit } from '../shared/api';
+import type { ProjectSymbol } from '../shared/lsp-symbols';
+import { combineMeaning, meaningRegex, selectPlaces } from '../shared/meaning-search';
 import { createMeaningSearch } from './ui/meaning-search';
 import { createQuickOpen } from './ui/quick-open';
 import { createSymbolPicker } from './ui/symbol-picker';
@@ -218,6 +221,13 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   const packages = new ProjectPackagesModel(rpc, workspace);
 
   const layout = createLayout(mount, { onChange: () => void persistLayout() });
+
+  // `#codebase` в чате: сколько мест собираем и сколько тянем строк из текстового
+  // поиска. Меньше, чем у палитры: всё это уйдёт в промпт и съест окно контекста.
+  const CODEBASE_TEXT_HITS = 120;
+  const CODEBASE_HITS = 40;
+  const CODEBASE_PLACES = 12;
+  const CODEBASE_PER_FILE = 3;
   // Адаптив панелей по ширине окна: мнение о размере отдельно от желания человека,
   // поэтому решение о видимости живёт в своей модели (`core/panel-layout`).
   const panelAuto = new AutoPanelLayout();
@@ -1603,11 +1613,30 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     commands,
     workspace,
     git,
+    // `#codebase`: места проекта по смыслу — те же два источника, что у палитры.
+    // Без открытого проекта список пуст: прикладывать нечего, и об этом скажет чат.
+    codebase: async (query: string) => {
+      const [symbols, found] = await Promise.all([
+        rpc.request('lsp.symbols', { query }).catch(() => [] as ProjectSymbol[]),
+        rpc
+          .request('workspace.search', {
+            query: meaningRegex(query),
+            isRegex: true,
+            caseSensitive: false,
+            maxResults: CODEBASE_TEXT_HITS,
+          })
+          .catch(() => null),
+      ]);
+      const lines = (found?.hits ?? []).map((hit: SearchHit) => ({
+        path: hit.path,
+        line: hit.line,
+        text: hit.text,
+      }));
+      return selectPlaces(combineMeaning(symbols, lines, query, CODEBASE_HITS), CODEBASE_PLACES, CODEBASE_PER_FILE);
+    },
     settings,
     settingsModal,
     host,
-    // Открытие файла — тем же путём, что у дерева и быстрого открытия: клик по
-    // файлу в ленте чата открывает вкладку, а не только ставит курсор.
     // Строки — те же, что у `show open`: файл-результат `present` открывается на
     // месте, если модель его назвала, а иначе — целиком (см. `OpenFileHandler`).
     openFile: async (path: string, position?: { line?: number; column?: number }) => {

@@ -48,6 +48,7 @@ import { createPlanPanel } from './chat-plan';
 import { createGoalPanel } from './chat-goal';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
+import type { CodebasePlace } from '../../shared/meaning-search';
 import {
   approvalReviewNote,
   createAskPrompt,
@@ -137,6 +138,11 @@ export interface ChatDeps {
    * ведь панель чата может жить и без открытого проекта.
    */
   git?: GitModel;
+  /**
+   * Места проекта по смыслу — для `#codebase`. Тот же поиск, что у палитры по смыслу;
+   * необязательно: без него пункт молчит и говорит, почему.
+   */
+  codebase?: (query: string) => Promise<readonly CodebasePlace[]>;
   settings: Settings;
   /** Модальное окно со всеми настройками приложения. */
   settingsModal: SettingsOpener;
@@ -356,6 +362,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     editors: deps.editors,
     workspace: deps.workspace,
     ...(deps.git ? { git: deps.git } : {}),
+    // Места проекта — тот же поиск по смыслу, что у палитры: `#codebase` спрашивает его
+    // по тому, что уже набрано в поле ввода.
+    ...(deps.codebase ? { codebase: deps.codebase } : {}),
+    composerText: () => input.value,
     session: () => active(),
     focus: () => input.focus(),
   });
