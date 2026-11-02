@@ -43,12 +43,23 @@ export interface ChatMessage {
   rating?: 'up' | 'down';
 }
 
+export type ChatAttachmentKind =
+  | 'file'
+  | 'selection'
+  | 'problems'
+  | 'diff'
+  | 'codebase'
+  | 'web'
+  | 'note'
+  | 'image'
+  | 'session';
+
 /**
  * Контекст, который renderer собрал сам и прикладывает к вопросу.
  * Так работают `#selection`, `#file` и `#problems` в панели ассистента.
  */
 export interface ChatAttachment {
-  kind: 'file' | 'selection' | 'problems' | 'diff' | 'codebase' | 'web' | 'note' | 'image' | 'session';
+  kind: ChatAttachmentKind;
   /** Короткая подпись для чипа в композере. */
   label: string;
   /** Заголовок блока в промпте: путь файла или описание. */
@@ -71,7 +82,30 @@ export interface ChatAttachment {
   truncated?: boolean;
 }
 
-/** Больше четырёх картинок в одном вопросе — это уже не вопрос, а альбом. */
+/** Виды контекста, которые renderer может приложить к вопросу. */
+export const CHAT_ATTACHMENT_KINDS = [
+  'file',
+  'selection',
+  'problems',
+  'diff',
+  'codebase',
+  'web',
+  'note',
+  'image',
+  'session',
+] as const satisfies readonly ChatAttachmentKind[];
+
+/**
+ * Проверка, что вложение пришло известного вида. Незнакомый вид — ошибка
+ * программиста: он попадёт в вес контекста, но не в промпт, и модель молча
+ * останется без того, что пользователь приложил.
+ */
+export function assertAttachmentKind(kind: string): asserts kind is ChatAttachmentKind {
+  if (!(CHAT_ATTACHMENT_KINDS as readonly string[]).includes(kind)) {
+    throw new Error(`attach: неизвестный вид вложения «${kind}»`);
+  }
+}
+
 export const MAX_CHAT_IMAGES = 4;
 /** Предел на картинку: больше не примет ни провайдер, ни смысл вложения. */
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;

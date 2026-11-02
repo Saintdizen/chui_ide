@@ -1,5 +1,10 @@
 import type { ChatAttachment, ChatMessage, ChatUsage } from '../../shared/api';
-import { contextUsage, estimateContextParts, type ContextUsage } from '../../shared/context-fit';
+import {
+  contextUsage,
+  estimateAttachmentTokens,
+  estimateContextParts,
+  type ContextUsage,
+} from '../../shared/context-fit';
 import { formatTokens } from '../../shared/usage';
 import { clear, h, svgIcon } from './dom';
 import { formatBalance, type AccountBalance } from '../../shared/balance';
@@ -50,6 +55,24 @@ interface Part {
   key: string;
   label: string;
   tokens: number;
+  /** Уточнение состава части: сколько из неё пришлось на что. */
+  note?: string;
+}
+
+/**
+ * Подпись к части «Файлы»: из чего она набралась.
+ *
+ * Считаем тем же `estimateAttachmentTokens`, что и сам вес, — иначе надпись
+ * и число разъедутся. Больше двух вложений перечислять смысла нет: строка
+ * узкая, а полный список виден по чипам в композере.
+ */
+function attachmentNote(attachments: readonly ChatAttachment[]): string {
+  if (attachments.length === 0) return '';
+  const labelled = attachments
+    .slice(0, 2)
+    .map((item) => `${item.label} — ${formatTokens(estimateAttachmentTokens(item))}`);
+  const rest = attachments.length - labelled.length;
+  return rest > 0 ? `${labelled.join(', ')}, ещё ${rest}` : labelled.join(', ');
 }
 
 /** Что занимает место в контексте: разбивка по частям запроса (см. `context-fit`). */
@@ -175,7 +198,12 @@ export function createSessionInfo(options: {
     const limit = usage.limit;
     const percent = usage.percent;
 
-    for (const part of parts) part.tokens = Math.round(part.tokens * scale);
+    for (const part of parts) {
+      part.tokens = Math.round(part.tokens * scale);
+      // Отдельный вес вложения: строки «Файлы» недостаточно. С картинками она
+      // врёт вдвое — считает только текст, а весит картинка.
+      part.note = part.key === 'files' ? attachmentNote(data.attachments) : '';
+    }
     const total = parts.reduce((sum, part) => sum + part.tokens, 0);
 
     gaugeValue.textContent =
@@ -209,14 +237,16 @@ export function createSessionInfo(options: {
       list.appendChild(
         h(
           'div',
-          { class: 'session-info-row' },
+          { class: 'session-info-row', title: part.note },
           h(
             'span',
             { class: 'session-info-label' },
             h('span', { class: `context-dot context-seg-${part.key}` }),
             part.label,
+            part.note ? h('span', { class: 'session-info-note' }, part.note) : '',
           ),
           h('span', { class: 'session-info-share' }, `${share.toFixed(1)}%`),
+          h('span', { class: 'session-info-tokens' }, formatTokens(part.tokens)),
         ),
       );
     }

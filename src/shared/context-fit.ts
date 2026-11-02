@@ -1,4 +1,4 @@
-import type { ChatAttachment, ChatMessage, ChatUsage } from './api';
+import { assertAttachmentKind, type ChatAttachment, type ChatMessage, type ChatUsage } from './api';
 import { contextWindow } from './providers';
 import { AGENT_TOOLS, parseToolArguments } from './tools';
 
@@ -86,7 +86,15 @@ export function estimateTextTokens(text: string): number {
   return Math.ceil(narrow / CHARS_PER_TOKEN + wide / CHARS_PER_TOKEN_WIDE);
 }
 
-/** Оценка одного сообщения: текст, служебные поля, вызовы инструментов и картинки. */
+/** Сколько токенов стоит одна картинка: считает провайдер по своим правилам, берём потолок. */
+export const IMAGE_TOKENS_ESTIMATE = IMAGE_TOKENS;
+
+/** Оценка токенов готового вложения чата — того же расчёта, что у истории. */
+export function estimateAttachmentTokens(item: { text: string; dataUrl?: string }): number {
+  // У картинки текст пустой, весь вес — в самой картинке.
+  return item.dataUrl ? IMAGE_TOKENS : estimateTextTokens(item.text);
+}
+
 function messageTokens(message: ChatMessage): number {
   let tokens = estimateTextTokens(message.content ?? '');
   if (message.name) tokens += estimateTextTokens(message.name);
@@ -165,6 +173,8 @@ export function estimateContextParts(input: ContextPartsInput): ContextParts {
   // Вопрос, который ещё не в истории, но уже уезжает в модель.
   if (input.pending) messages += estimateTextTokens(input.pending);
 
+  for (const item of input.attachments) assertAttachmentKind(item.kind);
+
   return {
     system: estimateTextTokens(input.systemPrompt),
     // Факт из последнего прогона важнее расчёта: он про тот набор, который
@@ -172,12 +182,11 @@ export function estimateContextParts(input: ContextPartsInput): ContextParts {
     tools: input.tools ? (input.toolsTokens ?? estimateTextTokens(JSON.stringify(AGENT_TOOLS))) : 0,
     messages,
     results,
-    files: input.attachments.reduce((sum, item) => sum + estimateTextTokens(item.text), 0),
+    files: input.attachments.reduce((sum, item) => sum + estimateAttachmentTokens(item), 0),
   };
 }
 
-/** Сколько контекста занято: итог — реальный, если провайдер его сообщил. */
-export interface ContextUsage {
+/** Сколько контекста занято: итог — реальный, если провайдер его сообщил. */ export interface ContextUsage {
   used: number;
   limit: number;
   percent: number;

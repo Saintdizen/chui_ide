@@ -204,6 +204,25 @@
   font-size: var(--font_small_size);
 }
 
+/* Токены части — числом рядом с долей: процент говорит о доле, а не о размере. */
+.session-info-tokens {
+  flex: 0 0 auto;
+  min-width: 4.5ch;
+  text-align: right;
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+/* Уточнение состава части: тише подписи, чтобы не спорить с ней. */
+.session-info-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
 .session-info-compact {
   width: 100%;
   justify-content: center;

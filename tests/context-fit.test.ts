@@ -14,6 +14,8 @@ import {
   SUPERSEDED_PLAN_MARKER,
   contextUsage,
   estimateTextTokens,
+  estimateAttachmentTokens,
+  IMAGE_TOKENS_ESTIMATE,
   estimateTokens,
   estimateContextParts,
   estimateMessagesTokens,
@@ -112,10 +114,24 @@ describe('estimateContextParts', () => {
     expect(actual).not.toBe(guessed);
   });
 
-  it('нулевой вес из прогона — тоже факт, а не «неизвестно»', () => {
-    // Режим «Вопрос»: инструменты выключены, прогон сообщил 0. Брать вместо него
-    // оценку по списку значило бы показать несуществующий расход.
-    expect(estimateContextParts({ ...base, tools: true, toolsTokens: 0 }).tools).toBe(0);
+  it('цена вложения считается тем же расчётом, что и у истории', () => {
+    // Иначе сумма частей в панели не сойдётся с итогом: кириллица там
+    // оценивается вдвое дороже латиницы, и «по символам/4» её занижает.
+    const cyrillic = 'привет '.repeat(50);
+    const file = { kind: 'file' as const, label: 'a.ts', title: 'a.ts', text: cyrillic };
+    expect(estimateAttachmentTokens(file)).toBe(estimateTextTokens(cyrillic));
+    expect(estimateContextParts({ ...base, attachments: [file] }).files).toBe(estimateTextTokens(cyrillic));
+  });
+
+  it('картинка считается по потолку, а не по пустому тексту', () => {
+    const image = {
+      kind: 'image' as const,
+      label: 'скрин',
+      title: 'скрин',
+      text: '',
+      dataUrl: 'data:image/png;base64,AAAA',
+    };
+    expect(estimateAttachmentTokens(image)).toBe(IMAGE_TOKENS_ESTIMATE);
   });
 });
 
