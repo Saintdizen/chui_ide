@@ -60,6 +60,25 @@ describe('tscProblems', () => {
   });
 });
 
+/**
+ * TypeScript 7 — это два пакета: оболочка `typescript` и платформенный
+ * `@typescript/typescript-<платформа>` с самим компилятором. Копия одной оболочки
+ * падает с «Unable to resolve … Either your platform is unsupported», поэтому
+ * копируем оба: иначе тест проверял бы не проект, а собственную подготовку.
+ */
+async function copyTypeScript(dir: string): Promise<void> {
+  await fs.cp(path.join(process.cwd(), 'node_modules', 'typescript'), path.join(dir, 'node_modules', 'typescript'), {
+    recursive: true,
+  });
+  const platform = `typescript-${process.platform}-${process.arch}`;
+  const from = path.join(process.cwd(), 'node_modules', '@typescript', platform);
+  // Платформенный пакет необязателен: без него tsc в этой системе просто не работает,
+  // и тогда тест не имеет смысла — о нём честно сообщаем пропуском.
+  await fs
+    .cp(from, path.join(dir, 'node_modules', '@typescript', platform), { recursive: true })
+    .catch(() => undefined);
+}
+
 describe('typecheckProject: называет причину, а не молчит', () => {
   let root = '';
   afterEach(async () => {
@@ -90,4 +109,44 @@ describe('typecheckProject: называет причину, а не молчи�
     expect(result.tool).toBeNull();
     expect(result.note).toContain('typescript');
   });
+
+  it('настоящий прогон tsc находит ошибку типа и отдаёт её путём проекта', async () => {
+    // Единственная проверка, где работает настоящий tsc: остальные проверяют отказы
+    // до запуска. Здесь же — разбор живого вывода и превращение пути в абсолютный.
+    const dir = await makeRoot();
+    await fs.writeFile(
+      path.join(dir, 'tsconfig.json'),
+      JSON.stringify({ compilerOptions: { strict: true, noEmit: true, skipLibCheck: true }, include: ['*.ts'] }),
+    );
+    await fs.writeFile(path.join(dir, 'bad.ts'), 'const n: number = "строка";\n');
+    await copyTypeScript(dir);
+
+    const result = await typecheckProject(dir, { budgetMs: 120_000 });
+
+    expect(result.tool).toBe('tsc');
+    const problem = result.problems.find((entry) => entry.path.endsWith('bad.ts'));
+    expect(problem, `вывод tsc: ${result.note}`).toBeDefined();
+    expect(problem?.path).toBe(path.join(dir, 'bad.ts'));
+    expect(problem?.severity).toBe('error');
+    expect(problem?.message).toContain('string');
+    expect(problem?.code).toBe('TS2322');
+  }, 180_000);
+
+  it('нулевой бюджет значит «без ограничения», а не «не проверять»', async () => {
+    // Ноль в контракте — именно «без потолка» (так гоняют тесты): проверка же
+    // должна состояться, иначе пустой ответ читался бы как чистый проект.
+    const dir = await makeRoot();
+    await fs.writeFile(
+      path.join(dir, 'tsconfig.json'),
+      JSON.stringify({ compilerOptions: { noEmit: true, skipLibCheck: true }, include: ['*.ts'] }),
+    );
+    await fs.writeFile(path.join(dir, 'clean.ts'), 'export const n: number = 1;\n');
+    await copyTypeScript(dir);
+
+    const result = await typecheckProject(dir, { budgetMs: 0 });
+
+    expect(result.tool).toBe('tsc');
+    expect(result.problems).toEqual([]);
+    expect(result.timedOut).toBe(false);
+  }, 180_000);
 });
