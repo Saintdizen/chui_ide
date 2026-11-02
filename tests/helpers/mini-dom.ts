@@ -287,11 +287,21 @@ export function installMiniDom(): { root: MiniNode; document: any; window: any }
     activeElement: null,
     hasFocus: () => true,
   };
+  // Окно хранит обработчики по типам: меню и горячие клавиши слушают `window`, и без
+  // этого их невозможно ни нажать, ни отпустить в тесте.
+  const winHandlers: Record<string, ((event: any) => void)[]> = {};
   const window: any = {
     document,
-    addEventListener() {},
-    removeEventListener() {},
-    dispatchEvent: () => true,
+    addEventListener(type: string, handler: (event: any) => void) {
+      (winHandlers[type] ??= []).push(handler);
+    },
+    removeEventListener(type: string, handler: (event: any) => void) {
+      winHandlers[type] = (winHandlers[type] ?? []).filter((item) => item !== handler);
+    },
+    dispatchEvent(event: { type: string }) {
+      for (const handler of winHandlers[event.type] ?? []) handler(event);
+      return true;
+    },
     setTimeout,
     clearTimeout,
     setInterval,
