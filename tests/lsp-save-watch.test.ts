@@ -72,7 +72,9 @@ const FAKE_SERVER = [
   '      id: message.id,',
   '      result: {',
   '        capabilities: {',
-  '          textDocumentSync: SAVE ? { openClose: true, change: 1, save: { includeText: true } } : { openClose: true, change: 1 },',
+  '          textDocumentSync: SAVE',
+  '            ? { openClose: true, change: 1, save: { includeText: true }, willSave: true }',
+  '            : { openClose: true, change: 1 },',
   '          ...(WATCH ? { workspace: { didChangeWatchedFiles: {} } } : {}),',
   '          ...(SYMBOLS ? { workspaceSymbolProvider: true } : {}),',
   '        },',
@@ -217,5 +219,18 @@ describe('didSave и наблюдение за файлами', () => {
     const found = await lsp.projectSymbols('widget');
     expect(found.some((symbol) => symbol.name === 'widget')).toBe(true);
     expect(await logOf(log)).toContain('workspaceSymbol/resolve');
+  });
+
+  it('willSave идёт перед didSave у сервера, который его объявил', async () => {
+    // Часть серверов готовит данные именно к моменту записи (переиндексация, снимок).
+    // Порядок важен: `willSave` говорит «сейчас запишут», `didSave` — «уже записали».
+    const { root, file, log, server } = await project('save');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    lsp.open(file, 'typescript', 'const value = 1;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
+    lsp.willSave(file);
+    await until(async () => (await logOf(log)).includes('textDocument/willSave'));
+    expect(await logOf(log)).toContain('textDocument/willSave');
   });
 });

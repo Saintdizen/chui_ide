@@ -412,6 +412,8 @@ interface LspCapabilities {
   implementationProvider?: unknown;
   /** Сохранение объявлено (`textDocumentSync.save`) — значит, `didSave` слать. */
   textDocumentSyncSave?: { includeText: boolean };
+  /** Объявлен ли `willSave` (`textDocumentSync.willSave`): сообщать ДО записи. */
+  textDocumentSyncWillSave?: boolean;
   /** Наблюдение за файлами вне редактора (`workspace.didChangeWatchedFiles`). */
   workspaceWatchedFiles?: boolean;
   signatureHelpProvider?: { triggerCharacters?: string[] };
@@ -451,6 +453,7 @@ function withSyncCapabilities(capabilities: unknown): LspCapabilities {
   return {
     ...(caps as LspCapabilities),
     ...(syncSave ? { textDocumentSyncSave: syncSave } : {}),
+    textDocumentSyncWillSave: Boolean((sync as { willSave?: unknown } | undefined)?.willSave),
     workspaceWatchedFiles: Boolean(workspace?.didChangeWatchedFiles),
   };
 }
@@ -794,6 +797,17 @@ export class LspService {
     });
     // Пометки пересчитываются сервером: старые гасим, чтобы не висели на экране.
     this.publish(PushTopic.LspDiagnostics, { path, diagnostics: [] });
+  }
+
+  /** Документ сейчас будет записан (`willSave`): сервер успевает подготовиться. */
+  willSave(path: string): void {
+    const runtime = this.runtimeForPath(path);
+    if (!runtime || this.openedIn.get(path) !== runtime) return;
+    if (!runtime.capabilities.textDocumentSyncWillSave) return;
+    runtime.connection.notify('textDocument/willSave', {
+      textDocument: { uri: pathToFileURL(path).toString() },
+      reason: 1,
+    });
   }
 
   /** Документ сохранён на диск — сказать серверу (`didSave`). */

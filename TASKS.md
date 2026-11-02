@@ -7,11 +7,11 @@
 
 Сделано: `didSave`, `workspace/didChangeWatchedFiles`, `textDocument/formatting`,
 `textDocument/prepareRename`, `declaration`/`typeDefinition`/`implementation`,
-`workspaceSymbol/resolve`. Осталось:
+`workspaceSymbol/resolve`, `documentLink`/`documentLink/resolve` (уже были сделаны),
+`willSave`. Осталось:
 
-1. **`documentLink` / `documentLink/resolve`.** Ссылки внутри файла (импорт на файл)
-   не открываются переходом — только вручную.
-2. **`willSave` и сохранение файлов вне редактора.** `didSave` идёт только для
-   открытых документов.
-3. **Pull-диагностика** (`textDocument/diagnostic`): работаем на push-модели и так её
+1. **Pull-диагностика** (`textDocument/diagnostic`): работаем на push-модели и так её
    и объявляем. Переход на pull — отдельная задача с кэшем и отменой запросов.
+2. **`didSave` для файлов, не открытых в редакторе.** Сейчас шлём только тем, что
+   отслеживает редактор (по спецификации — правильно), но сохранение через
+   встроенный файловый менеджер тоже стоило бы сообщать серверу.
