@@ -816,6 +816,8 @@ export interface ChuiMethods {
     params: { path: string; startLine: number; startColumn: number; endLine: number; endColumn: number };
     result: TextEdit[];
   };
+  /** Файл целиком (`textDocument/formatting`). Пусто — сервер не умеет. */
+  'lsp.formatDocument': { params: { path: string }; result: TextEdit[] };
 
   /**
    * Словарь орфографии: слова из файла, найденного в системе (aspell, hunspell,

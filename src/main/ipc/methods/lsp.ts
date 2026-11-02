@@ -89,6 +89,9 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
       }) ?? [],
   );
 
+  // Файл целиком: тот же путь, что и участок, только без границ.
+  router.register('lsp.formatDocument', (params) => deps.lsp?.formatDocument(params.path) ?? []);
+
   // Три источника серверов, и порядок между ними — это и есть приоритет:
   //
   //   1. окружение проекта (venv): pylsp и ruff видят пакеты проекта, а системный

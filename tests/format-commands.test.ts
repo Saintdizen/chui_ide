@@ -37,6 +37,8 @@ function setup(
     active?: ReturnType<typeof document> | null;
     hasSelection?: boolean;
     serverEdits?: unknown[];
+    /** Ответ `textDocument/formatting` — форматирование файла целиком. */
+    serverDocument?: unknown[];
     rpcAnswer?: unknown;
   } = {},
 ) {
@@ -46,7 +48,11 @@ function setup(
   const doc = options.active === undefined ? document() : options.active;
   const deps = {
     documents: { get: (path: string) => (doc && doc.path === path ? doc : undefined) },
-    lsp: { formatRange: async () => options.serverEdits ?? [] },
+    // Серверное форматирование проверяется отдельно (`serverDocument`); по умолчанию — не умеет.
+    lsp: {
+      formatRange: async () => options.serverEdits ?? [],
+      formatDocument: async () => options.serverDocument ?? [],
+    },
     edits: { applyFileEdits: async () => ({ failed: [] }) },
     rpc: { request: async () => options.rpcAnswer ?? null },
     openEditors: { active: doc },
@@ -105,6 +111,24 @@ describe('пути форматирования', () => {
     await commands.get('format.selection')!();
     expect(doc.value).toBe('y = 2');
     expect(toasts).toEqual(['Файл отформатирован']);
+  });
+
+  it('сервер умеет файл целиком — его правки важнее встроенного движка', async () => {
+    // Встроенный движок знает только отступы; сервер проекта форматирует по своим правилам
+    // (ruff format, gofmt, clang-format). Если он ответил — спрашивать движок поздно.
+    const edits = [{ range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 5 }, newText: 'x = 1\n' }];
+    const { commands, toasts, doc } = setup({ serverDocument: edits });
+    await commands.get('format.document')!();
+    expect(doc.value).toContain('x = 1');
+    expect(toasts).toEqual(['Файл отформатирован']);
+  });
+
+  it('сервер молчит — работает встроенный движок, как раньше', async () => {
+    const { commands, doc } = setup({ serverDocument: [] });
+    doc.value = 'x=1';
+    await commands.get('format.document')!();
+    // Движок этот файл не правит (нечего менять), но путь пройден без падения.
+    expect(typeof doc.value).toBe('string');
   });
 
   it('с выделением идёт в сервер, а не в инструмент проекта', async () => {

@@ -424,6 +424,8 @@ interface LspCapabilities {
    * и только что вставленный кусок, не переписывая файл целиком инструментом проекта.
    */
   documentRangeFormattingProvider?: unknown;
+  /** Умеет ли сервер отформатировать файл целиком (`textDocument/formatting`). */
+  documentFormattingProvider?: unknown;
   /** Точная семантическая подсветка: по ней разбираем ответ (легенду объявляет сервер). */
   semanticTokensProvider?: {
     legend?: { tokenTypes?: unknown; tokenModifiers?: unknown };
@@ -1202,6 +1204,21 @@ export class LspService {
             character: Math.max(0, range.endColumn - 1),
           },
         },
+        options: { tabSize: 4, insertSpaces: true },
+      });
+      return toFormatEdits(result);
+    } catch {
+      return [];
+    }
+  }
+
+  async formatDocument(path: string): Promise<TextEdit[]> {
+    const runtime = this.runtimeForPath(path);
+    if (!runtime?.capabilities.documentFormattingProvider) return [];
+    await runtime.initialized.catch(() => undefined);
+    try {
+      const result = await runtime.connection.request('textDocument/formatting', {
+        textDocument: { uri: pathToFileURL(path).toString() },
         options: { tabSize: 4, insertSpaces: true },
       });
       return toFormatEdits(result);

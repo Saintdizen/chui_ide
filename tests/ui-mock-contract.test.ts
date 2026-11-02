@@ -139,7 +139,11 @@ const NOT_MOCKED: Record<string, string[]> = {
     // Алиасы берутся из `tsconfig.json` проекта: без диска разбирать нечего.
     'workspace.importAliases',
   ],
-  'точные данные от языкового сервера — в браузере сервера нет': ['lsp.formatRange', 'lsp.semanticTokens'],
+  'точные данные от языкового сервера — в браузере сервера нет': [
+    'lsp.formatRange',
+    'lsp.formatDocument',
+    'lsp.semanticTokens',
+  ],
   'ключи и права ассистента — хранятся в настройках': [
     'ai.setWebSearchKey',
     'ai.clearWebSearchKey',

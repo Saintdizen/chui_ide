@@ -21,6 +21,8 @@ export interface FormatDocuments {
 /** Языковой сервер: отдаёт правки участка — применяем их обычным путём. */
 export interface FormatLsp {
   formatRange(path: string, range: FormatRange): Promise<readonly FormatEdit[]>;
+  /** Файл целиком (`textDocument/formatting`). Не умеет — пустой список. */
+  formatDocument(path: string): Promise<readonly FormatEdit[]>;
 }
 
 /** Правки сервера приходят только для чтения — копируем в то, что принимает сервис. */
@@ -110,6 +112,19 @@ export async function formatRangeWithServer(
 export async function formatDocument(deps: FormatDeps, document: TextDocument): Promise<FormatOutcome> {
   if (document.readOnly) return 'readonly';
   const engine = formatEngine(document.languageId);
+  // Языковой сервер знает про свой язык больше, чем сторонний инструмент: у Go это
+  // `gofmt` из gopls, у Rust — rustfmt, у C/C++ — clang-format. Раньше этот путь не
+  // пробовался вовсе: файлы без ruff/prettier в проекте получали `unavailable`,
+  // хотя сервер за них умел. Порядок именно такой — сервер первый: для `formatOnSave`
+  // важно, чтобы текст совпадал с тем, что видит сам сервер, и не возникало
+  // расхождений в диагностике.
+  const fromServer = await deps.lsp.formatDocument(document.path).catch(() => []);
+  if (fromServer.length > 0) {
+    const text = applyTextEdits(document.value, fromServer);
+    if (text === document.value) return 'unchanged';
+    document.setText(text, 'programmatic');
+    return 'changed';
+  }
   if (!engine) return 'unavailable';
   const method = engine === 'python' ? 'python.format' : 'node.format';
   // Ответ rpc не типизирован: инструмента могло не оказаться в проекте — это `unavailable`.

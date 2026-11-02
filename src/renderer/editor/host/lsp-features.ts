@@ -409,6 +409,11 @@ export class LspFeatures {
     return this.rpc.request('lsp.formatRange', { path, ...range }).catch(() => []);
   }
 
+  /** Файл целиком (`textDocument/formatting`). Пусто — сервер не умеет. */
+  async formatDocument(path: string): Promise<TextEdit[]> {
+    return this.rpc.request('lsp.formatDocument', { path }).catch(() => []);
+  }
+
   /**
    * Диапазоны свёртки файла от сервера. Пустой список — сервер ответил, сворачивать
    * нечего или он этого не умеет: вызывающий тогда считает блоки по отступам.
