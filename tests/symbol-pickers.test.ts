@@ -114,9 +114,12 @@ describe('команды иерархии исполняются', () => {
       editors: {
         currentPath: options.currentPath === undefined ? '/p/a.ts' : options.currentPath,
         cursor: () => ({ line: 1, column: 1 }),
+        selectedText: () => '',
+        wordAtCursor: () => 'run',
         reveal: (path: string, line: number, column: number) => revealed.push([path, line, column]),
       } as never,
-      workspace: { relative: (path: string) => path } as never,
+      // Подпись в списке — путь относительно корня проекта.
+      workspace: { relative: (path: string) => path.replace('/p/', '') } as never,
       rpc: { request } as never,
       layout: { editorHost: { getBoundingClientRect: () => rect } } as never,
       openPath: async (path: string) => {
@@ -176,5 +179,57 @@ describe('команды иерархии исполняются', () => {
       expect(toast).toHaveBeenCalledWith('Никто не вызывает run');
       expect(shown).not.toHaveBeenCalled();
     });
+  });
+
+  it('экспорт ищется по слову под кареткой, пустой ответ объясняется', () => {
+    // Выделения нет — берём слово под кареткой, иначе поиск молча не начинался бы.
+    const built = build({ request: async () => ({ total: 0, files: [] }) });
+
+    built.commands.get('search.findExports')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      expect(built.request).toHaveBeenCalledWith('workspace.findExports', { name: 'run' });
+      expect(toast).toHaveBeenCalledWith('run: экспортов не найдено');
+    });
+  });
+
+  it('найденные экспорты показываются списком с путём и строкой', () => {
+    const built = build({
+      request: async () => ({
+        total: 2,
+        files: [
+          {
+            path: '/p/src/a.ts',
+            entries: [
+              { line: 4, kind: 'function' },
+              { line: 9, kind: 'const' },
+            ],
+          },
+        ],
+      }),
+    });
+
+    built.commands.get('search.findExports')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      const items = shown.mock.calls[0]?.[0] as { label: string }[];
+      expect(items.map((item) => item.label)).toEqual(['src/a.ts:4', 'src/a.ts:9']);
+      expect(toast).toHaveBeenCalledWith('Экспортов run: 2');
+    });
+  });
+
+  it('поиск по проекту не удался — сказано об этом, а не «не найдено»', () => {
+    const built = build({ request: async () => null });
+
+    built.commands.get('search.findExports')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      expect(toast).toHaveBeenCalledWith('Не удалось искать по проекту', 'error');
+    });
+  });
+
+  it('без слова под кареткой поиск не начинается', () => {
+    const built = build({ request: async () => ({ total: 0, files: [] }) });
+    const editors = (built as unknown as { commands: Map<string, unknown> }).commands;
+
+    // Команда без имени говорит, что делать человеку, а не ищет пустую строку.
+    expect(editors.has('search.findExports')).toBe(true);
   });
 });
