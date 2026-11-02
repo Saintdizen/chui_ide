@@ -117,6 +117,17 @@ function defineLookup(node: any): void {
   };
   node.getAttribute = (key: string) => node.attrs[key] ?? null;
   node.hasAttribute = (key: string) => key in node.attrs;
+  // Булевы атрибуты в настоящем DOM отражаются в свойстве: `h()` ставит `hidden`
+  // пустым атрибутом, и виждеты читают `element.hidden`. Без этого проверка
+  // «панель скрыта» смотрела бы на пустое свойство и всегда была бы неверной.
+  Object.defineProperty(node, 'hidden', {
+    configurable: true,
+    get: () => node.attrs.hidden !== undefined,
+    set: (value: boolean) => {
+      if (value) node.attrs.hidden = '';
+      else delete node.attrs.hidden;
+    },
+  });
   node.querySelector = (selector: string) => find(node, selector);
   node.querySelectorAll = (selector: string) => {
     const found: any[] = [];
