@@ -15,14 +15,19 @@ interface Doc {
   path: string;
   value: string;
   readOnly: boolean;
+  /** Текст для диска: модель в `\n`, а формат (`LF`/`CRLF`) — свойство файла. */
+  diskText?: string;
   setText(value: string, origin: string): void;
 }
 
 function doc(path: string, value = 'on-disk', readOnly = false): TextDocument {
-  const d: Doc = {
+  const d: Doc & { diskText: string } = {
     path,
     value,
     readOnly,
+    // Фейк: настоящий `diskText` — модель в `\n`, приведённая к формату файла; без
+    // явного CRLF он равен `value`. Конкретный формат задают точечно через `Object.assign`.
+    diskText: value,
     setText(next, _origin) {
       d.value = next;
     },
@@ -167,6 +172,19 @@ describe('file-write: «Сохранить как»', () => {
     expect(rec.written).toEqual([{ path: '/proj/sub/b.ts', text: 'edited' }]);
     expect(rec.closed).toEqual(['/proj/sub/a.ts']);
     expect(rec.opened).toEqual(['/proj/sub/b.ts']);
+  });
+
+  it('сохранение как пишет тот же формат концов строк, что был в файле', async () => {
+    const d = doc('/proj/sub/a.ts', 'edited');
+    // Документ с CRLF-форматом: `diskText` собирает текст для диска из модели (в `\n`).
+    Object.assign(d, { diskText: 'первая\r\nвторая' });
+    const { fileWrite, rec } = setup({ docs: [d], dialogPath: '/proj/sub/b.ts' });
+
+    expect(await fileWrite.saveDocumentAs(d)).toBe(true);
+
+    // Смотрим не `value` (модель), а именно то, что ушло в writeFile: иначе перевод
+    // Windows-файла в LF остался бы незамеченным.
+    expect(rec.written).toEqual([{ path: '/proj/sub/b.ts', text: 'первая\r\nвторая' }]);
   });
 
   it('диалог отменили — ни записи, ни ошибки', async () => {

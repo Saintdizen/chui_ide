@@ -1,4 +1,5 @@
 import { applyTextEdits, type TextEdit } from '../../shared/edits';
+import { detectLineEnding, withLineEndings, type LineEnding } from '../../shared/line-endings';
 import { Emitter, type Disposable } from './events';
 
 /**
@@ -38,6 +39,17 @@ export class TextDocument {
   private currentVersion = 1;
   private savedVersion = 1;
   private diskMtimeMs = 0;
+  /**
+   * Каким концом строк файл лежит на диске. Модель документа всегда в `\n`, а
+   * запись возвращает файлу его собственный формат — иначе сохранение без правок
+   * перепишет все строки Windows-файла и раздует `git diff`.
+   */
+  private eol: LineEnding;
+  /**
+   * Формат, с которым файл лежит на диске. Отличается от `eol`, когда формат выбрали,
+   * но ещё не записали. По нему считается «не сохранён».
+   */
+  private diskEol: LineEnding;
 
   constructor(
     readonly path: string,
@@ -48,6 +60,8 @@ export class TextDocument {
   ) {
     this.uri = pathToUri(path);
     this.text = normalize(initialText);
+    this.eol = detectLineEnding(initialText);
+    this.diskEol = this.eol;
     this._onDidChange = this.changes.event;
     this._onDidChangeSaved = this.saved.event;
   }
@@ -74,7 +88,9 @@ export class TextDocument {
   }
 
   get dirty(): boolean {
-    return this.currentVersion !== this.savedVersion;
+    // Формат диска — такая же часть содержимого файла, как текст: выбор CRLF без записи
+    // оставил бы вкладку чистой, и при закрытии выбор пропал бы без вопроса.
+    return this.currentVersion !== this.savedVersion || this.eol !== this.diskEol;
   }
 
   /**
@@ -84,6 +100,34 @@ export class TextDocument {
    */
   get diskMtime(): number {
     return this.diskMtimeMs;
+  }
+
+  /** Конец строк файла: так он будет записан обратно. */
+  get lineEnding(): LineEnding {
+    return this.eol;
+  }
+
+  /**
+   * Текст ровно в том виде, в каком его писать на диск: модель в `\n`, а файл —
+   * своим концом строк. Единственное место, где модель превращается в байты.
+   */
+  get diskText(): string {
+    return withLineEndings(this.text, this.eol);
+  }
+
+  /**
+   * Перевести документ на другой конец строк. Текст модели при этом не меняется —
+   * он всегда в `\n`, а формат применится при записи (`diskText`) и сразу виден в
+   * заголовке (`lineEnding`).
+   */
+  setLineEnding(next: LineEnding): boolean {
+    if (next === this.eol) return false;
+    // Запоминаем формат — это и есть всё изменение: модель текста живёт в `\n` при любом
+    // формате, а концы появятся в `diskText` в момент записи. Правки в модель не годятся:
+    // вставив `\r` в текст, мы получили бы CRLF в самой модели, и позиции правок LSP
+    // разъехались бы с тем, что видит сервер. Undo не нужен: значение текста не менялось.
+    this.eol = next;
+    return true;
   }
 
   get lineCount(): number {
@@ -121,6 +165,7 @@ export class TextDocument {
   markSaved(mtimeMs: number = this.diskMtimeMs): void {
     const wasDirty = this.dirty;
     this.savedVersion = this.currentVersion;
+    this.diskEol = this.eol;
     this.diskMtimeMs = mtimeMs;
     // Событие — только когда пометка действительно снята: `markSaved` зовут и на
     // каждом перечитывании чистого документа, дёргать интерфейс там незачем.

@@ -2,6 +2,7 @@ import type { DefineCommand } from './command-args';
 import type { TextDocument } from './document';
 import { formatEngine, formatToolNames, type FormatEngine } from '../../shared/format';
 import { applyTextEdits } from '../../shared/edits';
+import { lineEndingLabel, type LineEnding } from '../../shared/line-endings';
 import { languageLabel } from '../../shared/languages';
 
 /**
@@ -199,4 +200,50 @@ export function registerFormatCommands(define: DefineCommand, deps: FormatDeps):
       await formatRangeWithServer(deps, document.path, workspace.selectionRange());
     },
   );
+
+  // Концы строк: выбор из двух вариантов, как в меню формата у других редакторов.
+  // Текст модели не меняется — меняется только то, что уйдёт на диск при записи. Поэтому
+  // о формате помнит сам документ, а вкладка становится «не сохранённой»: иначе выбор
+  // формата пропал бы при первом же закрытии без единой правки текста.
+  define(
+    {
+      id: 'format.lineEnding.lf',
+      title: 'Концы строк: LF',
+      category: 'Файл',
+      keywords: ['eol', 'crlf', 'lf', 'концы строк', 'перевод строки'],
+    },
+    async () => setLineEnding(deps, '\n'),
+  );
+
+  define(
+    {
+      id: 'format.lineEnding.crlf',
+      title: 'Концы строк: CRLF',
+      category: 'Файл',
+      keywords: ['eol', 'crlf', 'lf', 'концы строк', 'перевод строки'],
+    },
+    async () => setLineEnding(deps, '\r\n'),
+  );
+}
+
+/**
+ * Перевести активный документ на другой конец строк. `false` — менять нечего или нельзя:
+ * о причине говорим тостом, потому что молчание тут читалось бы как «команда сломана».
+ */
+async function setLineEnding(deps: FormatDeps, eol: LineEnding): Promise<void> {
+  const { openEditors, showToast } = deps;
+  const document = openEditors.active;
+  if (!document) {
+    showToast('Нет открытого файла');
+    return;
+  }
+  if (document.readOnly) {
+    showToast('Файл открыт только для чтения — концы строк не поменять');
+    return;
+  }
+  if (!document.setLineEnding(eol)) {
+    showToast(`Концы строк уже ${lineEndingLabel(eol)}`);
+    return;
+  }
+  showToast(`Концы строк: ${lineEndingLabel(eol)} — сохраните файл, чтобы записать их на диск`);
 }

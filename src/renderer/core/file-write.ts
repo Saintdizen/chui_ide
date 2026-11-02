@@ -231,7 +231,9 @@ export function createFileWrite(ports: FileWritePorts): FileWrite {
     if (policy.formatOnSave) await ports.save.format(document);
 
     try {
-      await ports.rpc.request('workspace.writeFile', { path: target, text: document.value });
+      // Формат строк тот же, что у исходного файла: `save as` не повод менять концы
+      // строк в проекте (см. `shared/line-endings.ts`).
+      await ports.rpc.request('workspace.writeFile', { path: target, text: document.diskText });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       showToast(`Не удалось сохранить как ${basename(target)}: ${reason}`, 'error');

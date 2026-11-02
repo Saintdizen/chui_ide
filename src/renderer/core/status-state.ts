@@ -13,6 +13,8 @@
  */
 
 import type { LspChip } from '../../shared/lsp-status';
+import type { LineEnding } from '../../shared/line-endings';
+import { lineEndingLabel } from '../../shared/line-endings';
 import type { VimMode } from '../editor/input/vim';
 import type { ProjectTools } from './project-tools';
 import { envWidgetLabel } from './env-widget';
@@ -33,6 +35,11 @@ export interface StatusInputs {
   formatLabel: string | null;
   /** Подпись языка для человека. */
   languageLabel: string | null;
+  /**
+   * Концы строк документа — так, как лежат на диске (`\n` или `\r\n`). `null` —
+   * документа нет или это не текст (картинка, Office): показывать нечего.
+   */
+  eol: LineEnding | null;
   /** Отступ, если язык диктует свой. */
   languageIndent: { tabSize: number; insertSpaces: boolean } | null;
   settings: {
@@ -59,6 +66,8 @@ export interface StatusPatch {
   version: number;
   tabSize: number;
   useTabs: boolean;
+  /** Подпись концов строк: `LF` или `CRLF`. `null` — не текст, показывать нечего. */
+  eol: string | null;
   branch: string | null;
   changes: number;
   projectKindId: string | null;
@@ -105,6 +114,8 @@ export function statusPatch(inputs: StatusInputs): StatusPatch {
     // поэтому в полосе видно ФАКТИЧЕСКОЕ значение, а не общее из настроек.
     tabSize: indent?.tabSize ?? inputs.settings.tabSize,
     useTabs: indent ? !indent.insertSpaces : !inputs.settings.insertSpaces,
+    // Формат файла, а не модели: человек ждёт увидеть, что файл windows-овский.
+    eol: inputs.eol === null ? null : lineEndingLabel(inputs.eol),
     branch: inputs.git.branch,
     changes: inputs.git.changeCount,
     projectKindId: inputs.projectKind && inputs.projectKind.source !== 'none' ? inputs.projectKind.id : null,

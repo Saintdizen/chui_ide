@@ -22,6 +22,7 @@ function inputs(over: Partial<StatusInputs> = {}): StatusInputs {
     format: null,
     formatLabel: null,
     languageLabel: 'Python',
+    eol: '\n',
     languageIndent: { tabSize: 4, insertSpaces: true },
     settings: { tabSize: 2, insertSpaces: true, lspEnabled: true },
     lspChip: { text: 'Pyright', title: 'Python', tone: 'ok' } as never,

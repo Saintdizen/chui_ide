@@ -3140,6 +3140,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
             ? officeFormatChip(activePath)
             : null,
       languageLabel: language ? languageLabel(language) : null,
+      // Концы строк — у документа, а не у файла на лету: после выбора формата в
+      // заголовке видно новое значение ещё до сохранения (`document.lineEnding`).
+      eol: format === null && active ? active.lineEnding : null,
       languageIndent: indent,
       settings: {
         tabSize: settings.editor.tabSize,

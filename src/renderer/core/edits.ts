@@ -74,9 +74,11 @@ export class EditService {
     const policy = this.deps.policy?.();
     const prepared = policy ? applySaveEdits(document.value, policy) : document.value;
     if (prepared !== document.value) document.setText(prepared, 'programmatic');
+    // На диск — в том формате, в каком файл пришёл: модель документа живёт в `\n`, а
+    // Windows-файл с `\r\n` после сохранения без правок иначе переписывался бы целиком.
     const { mtimeMs } = await this.deps.rpc.request('workspace.writeFile', {
       path: document.path,
-      text: prepared,
+      text: document.diskText,
     });
     document.markSaved(mtimeMs);
     return 'saved';

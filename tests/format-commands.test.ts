@@ -23,6 +23,11 @@ function document(overrides: Partial<{ path: string; text: string; readOnly: boo
     setText: (next: string) => {
       doc.value = next;
     },
+    lineEnding: '\n',
+    setLineEnding(next: '\n' | '\r\n') {
+      Object.assign(doc, { lineEnding: next });
+      return true;
+    },
   };
   return doc;
 }
@@ -58,9 +63,14 @@ function setup(
 }
 
 describe('registerFormatCommands', () => {
-  it('регистрирует ровно две команды форматирования', () => {
+  it('регистрирует команды форматирования и концов строк', () => {
     const { commands } = setup();
-    expect([...commands.keys()].sort()).toEqual(['format.document', 'format.selection']);
+    expect([...commands.keys()].sort()).toEqual([
+      'format.document',
+      'format.lineEnding.crlf',
+      'format.lineEnding.lf',
+      'format.selection',
+    ]);
   });
 
   it('форматирует файл инструментом проекта и меняет текст', async () => {
@@ -121,5 +131,40 @@ describe('пути форматирования', () => {
     expect(formatOutcomeMessage('python', 'changed')).toBe('Файл отформатирован');
     expect(formatOutcomeMessage('python', 'unchanged')).toBe('Менять нечего');
     expect(formatOutcomeMessage('node', 'unavailable')).toContain('в проекте нет');
+  });
+
+  it('выбор CRLF меняет формат файла, а не текст модели', async () => {
+    // Модель документа — всегда `\n`; CRLF тоже появляется только в `diskText`.
+    const target = document({ text: 'a\nb' });
+    let eol: '\n' | '\r\n' = '\n';
+    Object.assign(target, {
+      get lineEnding() {
+        return eol;
+      },
+      get diskText() {
+        return eol === '\r\n' ? target.value.replace(/\n/g, '\r\n') : target.value;
+      },
+      setLineEnding(next: '\n' | '\r\n') {
+        if (next === eol) return false;
+        eol = next;
+        return true;
+      },
+    });
+    const { commands, toasts } = setup({ active: target });
+
+    await commands.get('format.lineEnding.crlf')!();
+
+    expect(target.value).toBe('a\nb');
+    expect(target.lineEnding).toBe('\n');
+    expect(toasts).toEqual(['Концы строк: CRLF — сохраните файл, чтобы записать их на диск']);
+  });
+
+  it('выбор того же формата не меняет ничего и говорит об этом', async () => {
+    const target = document();
+    Object.assign(target, { setLineEnding: () => false });
+    const { commands, toasts } = setup({ active: target });
+    await commands.get('format.lineEnding.lf')!();
+    // Уже LF — команда говорит об этом вслух: человек нажал и ждёт ответа.
+    expect(toasts).toEqual(['Концы строк уже LF']);
   });
 });

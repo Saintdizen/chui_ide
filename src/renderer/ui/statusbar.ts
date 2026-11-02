@@ -36,7 +36,8 @@ export interface StatusState {
   tabSize: number;
   /** Отступ символом табуляции — так у языков вроде Makefile. */
   useTabs: boolean;
-  eol: string;
+  /** Подпись концов строк: `LF` / `CRLF`. `null` — не текст, виджет скрыт. */
+  eol: string | null;
   encoding: string;
   /** Ветка или null, если репозитория нет. */
   branch: string | null;
@@ -130,7 +131,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     version: 0,
     tabSize: 2,
     useTabs: false,
-    eol: 'LF',
+    eol: null,
     encoding: 'UTF-8',
     branch: null,
     changes: 0,
@@ -263,7 +264,11 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
 
   const render = (): void => {
     positionItem.textContent = `${state.line}:${state.column}`;
-    eolItem.textContent = state.eol;
+    // У картинки и документа Office концов строк нет — виджет не показываем,
+    // иначе человек читает «LF» у PNG.
+    eolItem.hidden = state.eol === null;
+    eolItem.textContent = state.eol ?? '';
+    eolItem.title = state.eol === null ? '' : `Концы строк: ${state.eol}`;
     encodingItem.textContent = state.encoding;
     indentItem.textContent = state.useTabs ? `таб ${state.tabSize}` : `${state.tabSize} пробела`;
     languageItem.textContent = state.language ?? '—';
