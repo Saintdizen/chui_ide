@@ -480,6 +480,11 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Определение и ссылки — списком мест, как и прочие переходы.
     symbols: {
       definition: (path, position) => lsp.definition(path, position),
+      // Обещание, тип и реализации: отдельные запросы, потому что `definition`
+      // отвечает на другой вопрос — «где это реализовано». В TS это важно.
+      declaration: (path, position) => lsp.related(path, position, 'declaration'),
+      typeDefinition: (path, position) => lsp.related(path, position, 'typeDefinition'),
+      implementation: (path, position) => lsp.related(path, position, 'implementation'),
       references: (path, position) => lsp.references(path, position),
     },
     // Хлебные крошки над текстом: символы файла (уже готовые из LSP) и место курсора.

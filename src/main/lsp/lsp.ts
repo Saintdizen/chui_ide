@@ -406,6 +406,10 @@ interface LspCapabilities {
   };
   hoverProvider?: boolean;
   definitionProvider?: boolean;
+  /** Родственные `definition`: объявление, тип, реализации. */
+  declarationProvider?: unknown;
+  typeDefinitionProvider?: unknown;
+  implementationProvider?: unknown;
   /** Сохранение объявлено (`textDocumentSync.save`) — значит, `didSave` слать. */
   textDocumentSyncSave?: { includeText: boolean };
   /** Наблюдение за файлами вне редактора (`workspace.didChangeWatchedFiles`). */
@@ -1382,6 +1386,60 @@ export class LspService {
         .then((raw) => toLocations(raw, fileURLToPath))
         // Как у скелета: не ответил — `null`, а не пусто. `[]` значило бы «искал,
         // не нашёл», и агент сделал бы из этого вывод об устаревании символа.
+        .catch(() => null as SymbolLocation[] | null),
+    );
+  }
+
+  /** Переход к объявлению (`textDocument/declaration`): интерфейс, а не реализация. */
+  declaration(path: string, languageId: string, text: string, line: number, column: number) {
+    return this.relatedAt(path, languageId, text, line, column, 'textDocument/declaration', 'declarationProvider');
+  }
+
+  /** Переход к типу (`textDocument/typeDefinition`): от переменной к её типу. */
+  typeDefinition(path: string, languageId: string, text: string, line: number, column: number) {
+    return this.relatedAt(
+      path,
+      languageId,
+      text,
+      line,
+      column,
+      'textDocument/typeDefinition',
+      'typeDefinitionProvider',
+    );
+  }
+
+  /** Переход к реализациям (`textDocument/implementation`): от интерфейса — ко всем реализующим. */
+  implementations(path: string, languageId: string, text: string, line: number, column: number) {
+    return this.relatedAt(
+      path,
+      languageId,
+      text,
+      line,
+      column,
+      'textDocument/implementation',
+      'implementationProvider',
+    );
+  }
+
+  /** Общий путь трёх родственных запросов: перевести позицию и разобрать locations. */
+  private async relatedAt(
+    path: string,
+    languageId: string,
+    text: string,
+    line: number,
+    column: number,
+    method: string,
+    provider: unknown,
+  ): Promise<SymbolLocation[] | null> {
+    const runtime = await this.runtimeForDocument(path, languageId);
+    if (!runtime || !provider) return null;
+    return this.withDocument(runtime, path, languageId, text, (uri) =>
+      runtime.connection
+        .request(method, {
+          textDocument: { uri },
+          position: { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) },
+        })
+        .then((raw) => toLocations(raw, fileURLToPath))
         .catch(() => null as SymbolLocation[] | null),
     );
   }

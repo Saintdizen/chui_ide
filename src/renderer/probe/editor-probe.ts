@@ -403,6 +403,9 @@ const symbolsWorkspace = new EditorWorkspace(symbolsRoot, symbolsRegistry, {
   symbols: {
     definition: async () => symbolAnswers.definition,
     references: async () => symbolAnswers.references,
+    declaration: async () => [],
+    typeDefinition: async () => [],
+    implementation: async () => [],
   },
   // Подсказки сервера: подставной источник отдаёт готовые элементы — проверяем, что
   // они подмешиваются в список впереди своих слов и вставляются по Enter.
@@ -587,6 +590,9 @@ const peekWorkspace = new EditorWorkspace(peekRoot, peekRegistry, {
   symbols: {
     definition: async () => peekAnswers.definition,
     references: async () => [],
+    declaration: async () => [],
+    typeDefinition: async () => [],
+    implementation: async () => [],
   },
   readText: async (path) => {
     peekReads.push(path);

@@ -117,6 +117,19 @@ export class LspFeatures {
     return toLocations(result, uriToPath);
   }
 
+  /** Три родственных перехода: обещание, тип, реализация. */
+  async related(
+    path: string,
+    position: LspPosition,
+    kind: 'declaration' | 'typeDefinition' | 'implementation',
+  ): Promise<SymbolLocation[]> {
+    const result = await this.request(path, `textDocument/${kind}`, {
+      textDocument: { uri: pathToUri(path) },
+      position: toLspPosition(position),
+    });
+    return toLocations(result, uriToPath);
+  }
+
   /** Ссылки на символ под позицией. */
   async references(path: string, position: LspPosition): Promise<SymbolLocation[]> {
     const result = await this.request(path, 'textDocument/references', {

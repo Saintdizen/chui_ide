@@ -23,10 +23,25 @@ import type { LocationRow, LocationsAnchor, LocationsWidget } from '../widgets/l
 export interface SymbolSource {
   definition(path: string, position: { line: number; column: number }): Promise<SymbolLocation[]>;
   references(path: string, position: { line: number; column: number }): Promise<SymbolLocation[]>;
+  /** Обещание символа: где он ОБЪЯВЛЕН (в отличие от `definition` — реализации). */
+  declaration(path: string, position: { line: number; column: number }): Promise<SymbolLocation[]>;
+  /** Тип символа — у TypeScript это интерфейс, а не место создания значения. */
+  typeDefinition(path: string, position: { line: number; column: number }): Promise<SymbolLocation[]>;
+  /** Реализации: у интерфейса — все классы, которые его реализуют. */
+  implementation(path: string, position: { line: number; column: number }): Promise<SymbolLocation[]>;
 }
 
 /** Что именно ищем — от этого зависит только подпись попапа и текст сообщения. */
-export type NavigationKind = 'definition' | 'references';
+export type NavigationKind = 'definition' | 'references' | 'declaration' | 'typeDefinition' | 'implementation';
+
+/** Надписи переходов. Пять видов, но сообщения отличаются только темой и ошибкой. */
+export const LABELS: Record<NavigationKind, { title: string; empty: string; failed: string }> = {
+  definition: { title: 'Определения', empty: 'Определение не найдено', failed: 'Не удалось перейти к определению' },
+  references: { title: 'Ссылки', empty: 'Ссылок не найдено', failed: 'Не удалось найти ссылки' },
+  declaration: { title: 'Объявления', empty: 'Объявление не найдено', failed: 'Не удалось перейти к объявлению' },
+  typeDefinition: { title: 'Типы', empty: 'Тип не найден', failed: 'Не удалось перейти к типу' },
+  implementation: { title: 'Реализации', empty: 'Реализаций не найдено', failed: 'Не удалось найти реализации' },
+};
 
 /** Что делать с найденными местами. */
 export type NavigationPlan =
@@ -122,17 +137,15 @@ export class SymbolNavigation {
 
     let locations: SymbolLocation[];
     try {
-      locations = await (kind === 'definition'
-        ? this.deps.source.definition(path, { line, column })
-        : this.deps.source.references(path, { line, column }));
+      locations = await this.deps.source[kind](path, { line, column });
     } catch {
-      this.deps.notice(kind === 'definition' ? 'Не удалось перейти к определению' : 'Не удалось найти ссылки');
+      this.deps.notice(LABELS[kind].failed);
       return;
     }
 
     const plan = planNavigation(locations);
     if (plan.kind === 'none') {
-      this.deps.notice(kind === 'definition' ? 'Определение не найдено' : 'Ссылок не найдено');
+      this.deps.notice(LABELS[kind].empty);
       return;
     }
     if (plan.kind === 'jump') {
@@ -140,10 +153,6 @@ export class SymbolNavigation {
       return;
     }
 
-    this.deps.widget.show(
-      kind === 'definition' ? 'Определения' : 'Ссылки',
-      locationRows(plan.targets, this.deps.label),
-      this.deps.anchor(),
-    );
+    this.deps.widget.show(LABELS[kind].title, locationRows(plan.targets, this.deps.label), this.deps.anchor());
   }
 }

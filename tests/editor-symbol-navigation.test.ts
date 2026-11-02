@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { locationRows, planNavigation } from '../src/renderer/editor/host/symbol-navigation';
+import { LABELS, locationRows, planNavigation } from '../src/renderer/editor/host/symbol-navigation';
 
 describe('решение по местам символа', () => {
   it('ни одного места — идти некуда', () => {
@@ -29,6 +29,18 @@ describe('решение по местам символа', () => {
       '/src/a.ts:5',
       '/src/b.ts:9',
     ]);
+  });
+});
+
+describe('подписи переходов', () => {
+  it('у каждого вида свой заголовок — обещание, тип и реализация не путаются', () => {
+    // Дефект, который это держит: раньше заголовок выбирался условием
+    // `kind === 'definition'`, и три новых вида молча показывались как «Ссылки».
+    const titles = new Set(Object.values(LABELS).map((label) => label.title));
+    expect(titles.size).toBe(Object.keys(LABELS).length);
+    expect(LABELS.declaration.title).toBe('Объявления');
+    expect(LABELS.typeDefinition.title).toBe('Типы');
+    expect(LABELS.implementation.title).toBe('Реализации');
   });
 });
 
