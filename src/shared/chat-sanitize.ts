@@ -198,6 +198,8 @@ export function repairToolPairs(messages: readonly ChatMessage[]): ChatMessage[]
 
     flush();
     if (message.role !== 'assistant' || !message.toolCalls?.length) {
+      // Обычная реплика посреди ожидания ход не закрывает: результаты вызовов
+      // могут прийти после неё, и пара обязана остаться целой.
       repaired.push(message);
       continue;
     }

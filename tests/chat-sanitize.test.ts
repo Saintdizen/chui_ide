@@ -236,6 +236,23 @@ describe('repairToolPairs', () => {
     expect(result.map((message) => message.role)).toEqual(['assistant', 'tool', 'user', 'assistant']);
   });
 
+  it('реплика модели посреди ожидания не отрывает результат от вызова', () => {
+    // Модель ответила текстом, не дождавшись инструмента. Ответ пришёл следом —
+    // и он обязан остаться после своего вызова, а не исчезнуть осиротевшим.
+    const result = repairToolPairs([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'read_file', arguments: '{}' }] },
+      { role: 'assistant', content: 'подождите, читаю' },
+      { role: 'tool', content: 'вывод', name: 'read_file', toolCallId: 'call_1' },
+      { role: 'user', content: 'спасибо' },
+    ]);
+    expect(result.map((message) => message.toolCallId ?? message.role)).toEqual([
+      'assistant',
+      'call_1',
+      'assistant',
+      'user',
+    ]);
+  });
+
   it('отвеченный вызов не трогаем, а лишний ответ убираем', () => {
     const result = repairToolPairs([
       { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'read_file', arguments: '{}' }] },

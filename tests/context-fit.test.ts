@@ -195,6 +195,25 @@ describe('trimMessagesToFit', () => {
     expect(result.messages.some((message) => message.toolCalls?.some((call) => call.id === 'c9'))).toBe(true);
   });
 
+  it('не начинает хвост с реплики модели, пока не пришли все результаты вызовов', () => {
+    // Модель ответила текстом, не дождавшись инструмента; результат идёт следом.
+    // Начать хвост с такого ответа значит оторвать `tool` от вызова.
+    const late: ChatMessage[] = [
+      user('старое'.repeat(4_000)),
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'read_file', arguments: '{}' }] },
+      assistant('подождите'),
+      { role: 'tool', toolCallId: 'c1', name: 'read_file', content: 'вывод' },
+    ];
+    const result = trimMessagesToFit(late, { limitTokens: 700 });
+
+    const ids = result.messages.map((message) => message.toolCallId ?? message.toolCalls?.[0]?.id ?? message.role);
+    // Либо пара целиком, либо ничего из неё — но висячего `tool` быть не должно.
+    const callAt = ids.indexOf('c1', 0);
+    const hasCall = result.messages.some((message) => message.toolCalls?.some((call) => call.id === 'c1'));
+    expect(hasCall || !ids.includes('c1')).toBe(true);
+    if (callAt === 0) expect(hasCall).toBe(true);
+  });
+
   it('оставляет хотя бы последний ход даже при сильном переполнении', () => {
     const huge: ChatMessage[] = [user('x'.repeat(100_000)), assistant('ответ')];
     const result = trimMessagesToFit(huge, { limitTokens: 100 });
