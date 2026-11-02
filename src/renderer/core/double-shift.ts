@@ -19,7 +19,10 @@ export interface KeyLike {
 export class DoubleShiftDetector {
   private pressed = false;
   private tainted = false;
-  private lastTap = 0;
+  /** Момент прошлого чистого отпускания; null — прошлого нет. Ноль — законное
+   *  время (`performance.now()` может его вернуть), и путать его с «нет нажатия»
+   *  нельзя: тогда нажатие ровно в 0 мс не начинало бы серию вовсе. */
+  private lastTap: number | null = null;
 
   keyDown(event: KeyLike): void {
     if (event.key === 'Shift') {
@@ -33,7 +36,7 @@ export class DoubleShiftDetector {
     // Любая другая клавиша: текущий Shift — часть сочетания, а не отдельное нажатие.
     this.tainted = true;
     // И прошлое чистое нажатие больше не «половина двойного»: человек печатал.
-    if (!this.pressed) this.lastTap = 0;
+    if (!this.pressed) this.lastTap = null;
   }
 
   /** Отпускание Shift. Истина — это было второе быстрое чистое нажатие подряд. */
@@ -44,8 +47,8 @@ export class DoubleShiftDetector {
       this.tainted = false;
       return false;
     }
-    const doubled = this.lastTap !== 0 && now - this.lastTap <= DOUBLE_SHIFT_MS;
-    this.lastTap = doubled ? 0 : now;
+    const doubled = this.lastTap !== null && now - this.lastTap <= DOUBLE_SHIFT_MS;
+    this.lastTap = doubled ? null : now;
     return doubled;
   }
 
@@ -53,7 +56,7 @@ export class DoubleShiftDetector {
   reset(): void {
     this.pressed = false;
     this.tainted = false;
-    this.lastTap = 0;
+    this.lastTap = null;
   }
 }
 
