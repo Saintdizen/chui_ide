@@ -232,4 +232,65 @@ describe('команды иерархии исполняются', () => {
     // Команда без имени говорит, что делать человеку, а не ищет пустую строку.
     expect(editors.has('search.findExports')).toBe(true);
   });
+
+  it('без файла иерархия типов не запрашивается', () => {
+    const built = build({ currentPath: null });
+
+    built.commands.get('editor.supertypes')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      expect(built.request).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenCalledWith('Откройте файл', 'error');
+    });
+  });
+
+  it('надтипов нет — так и говорит', () => {
+    const node = {
+      name: 'Dog',
+      kind: 5,
+      uri: 'file:///p/a.ts',
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+      selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+    };
+    const built = build({
+      request: async (_method, params) => {
+        const method = (params as { method?: string }).method;
+        return method === 'textDocument/prepareTypeHierarchy' ? [node] : [];
+      },
+    });
+
+    built.commands.get('editor.supertypes')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+      expect(toast).toHaveBeenCalledWith('У Dog нет надтипов');
+      expect(shown).not.toHaveBeenCalled();
+    });
+  });
+
+  it('надтипы показываются списком и открывают файл по клику', () => {
+    const node = {
+      name: 'Dog',
+      kind: 5,
+      uri: 'file:///p/a.ts',
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+      selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+    };
+    const parent = { ...node, name: 'Animal', uri: 'file:///p/base.ts' };
+    const built = build({
+      request: async (_method, params) => {
+        const method = (params as { method?: string }).method;
+        if (method === 'textDocument/prepareTypeHierarchy') return [node];
+        // Надтипы — просто список узлов (в отличие от вызовов, где есть `from`).
+        return [parent];
+      },
+    });
+
+    built.commands.get('editor.supertypes')?.();
+    return new Promise((resolve) => setTimeout(resolve, 10)).then(async () => {
+      const items = shown.mock.calls[0]?.[0] as { label: string; onSelect?: () => Promise<void> }[];
+      expect(items.map((entry) => entry.label)).toEqual(['Animal']);
+      expect(toast).toHaveBeenCalledWith('Надтипы Dog: 1');
+
+      await items[0]?.onSelect?.();
+      expect(built.opened).toContain('/p/base.ts');
+    });
+  });
 });
