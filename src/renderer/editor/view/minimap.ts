@@ -46,9 +46,12 @@ export function minimapSlider(
 ): { top: number; height: number } | null {
   if (rowCount <= 0 || height <= 0) return null;
   const scale = height / rowCount;
-  const top = Math.max(0, Math.min(height, firstRow * scale));
-  const size = Math.max(MIN_SLIDER_PX, Math.min(visibleRows, rowCount) * scale);
-  return { top, height: Math.max(MIN_SLIDER_PX, Math.min(size, height - top)) };
+  const size = Math.min(Math.max(MIN_SLIDER_PX, Math.min(visibleRows, rowCount) * scale), height);
+  // `top` прижимаем так, чтобы ползунок любой толщины поместился ЦЕЛИКОМ: у конца
+  // файла он иначе вылезал за карту на лишние пиксели и рисовался поверх строки
+  // состояния.
+  const top = Math.max(0, Math.min(firstRow * scale, height - size));
+  return { top, height: size };
 }
 
 /** Ряд строки под точкой карты: куда перейти по клику. */

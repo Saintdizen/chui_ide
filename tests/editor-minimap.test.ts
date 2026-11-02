@@ -38,9 +38,14 @@ describe('minimapSlider', () => {
   });
 
   it('в конце файла ползунок не выходит за низ', () => {
+    // Прежнее ожидание `top: 1000` при высоте 16 закрепляло дефект: ползунок
+    // уходил за нижний край карты на эти 16 пикселей. Прижатие к низу было в коде,
+    // но `Math.max(MIN_SLIDER_PX, …)` возвращал минимум и после прижатия.
     const slider = minimapSlider(100, 10, 100, 1000);
-    expect(slider?.top).toBe(1000);
-    expect(slider?.height).toBe(16);
+    // Видимая часть — 10 строк из 100 при высоте 1000: ползунок 100px, top = 900.
+    expect(slider?.top).toBe(900);
+    expect(slider?.height).toBe(100);
+    expect((slider?.top ?? 0) + (slider?.height ?? 0)).toBeLessThanOrEqual(1000);
   });
 
   it('пустой файл — ползунка нет', () => {
