@@ -114,3 +114,38 @@ describe('editorContextMenuPlan', () => {
     expect(labels(items)).toContain('Пропустить слово');
   });
 });
+
+/**
+ * История правок в меню: «Отменить» и «Повторить» остаются на своих местах, но
+ * гаснут, когда отменять нечего. Убирать их нельзя — список, который меняет
+ * длину от содержимого истории, двигает остальные пункты под курсором.
+ */
+describe('editorContextMenuPlan: история правок', () => {
+  const state = (over: Partial<EditorContextInfo>) =>
+    editorContextMenuPlan(info(over), deps().deps).filter(
+      (item) => 'label' in item && (item.label === 'Отменить' || item.label === 'Повторить'),
+    );
+
+  it('с пустой историей оба пункта серые', () => {
+    const [undo, redo] = state({ canUndo: false, canRedo: false });
+    expect(undo && 'enabled' in undo ? undo.enabled : undefined).toBe(false);
+    expect(redo && 'enabled' in redo ? redo.enabled : undefined).toBe(false);
+  });
+
+  it('есть что отменить — «Отменить» доступна, «Повторить» нет', () => {
+    const [undo, redo] = state({ canUndo: true, canRedo: false });
+    expect(undo && 'enabled' in undo ? undo.enabled : undefined).toBe(true);
+    expect(redo && 'enabled' in redo ? redo.enabled : undefined).toBe(false);
+  });
+
+  it('после отмены наоборот: доступна «Повторить»', () => {
+    const [undo, redo] = state({ canUndo: false, canRedo: true });
+    expect(undo && 'enabled' in undo ? undo.enabled : undefined).toBe(false);
+    expect(redo && 'enabled' in redo ? redo.enabled : undefined).toBe(true);
+  });
+
+  it('пункты не исчезают ни в каком состоянии истории', () => {
+    expect(state({ canUndo: false, canRedo: false })).toHaveLength(2);
+    expect(state({ canUndo: true, canRedo: true })).toHaveLength(2);
+  });
+});

@@ -43,11 +43,15 @@ export function editorContextMenuPlan(info: EditorContextInfo, deps: EditorMenuD
     {
       label: 'Отменить',
       hint: 'Ctrl+Z',
+      // Пункт не прячем: история может появиться после следующей правки, а
+      // список, прыгающий под курсором, читается как сломанное меню.
+      enabled: info.canUndo,
       onSelect: () => deps.runAction('editor.undo'),
     },
     {
       label: 'Повторить',
       hint: 'Ctrl+Y',
+      enabled: info.canRedo,
       onSelect: () => deps.runAction('editor.redo'),
     },
     { separator: true },

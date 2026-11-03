@@ -20,6 +20,13 @@ export type PopupMenuItem =
        * Отметка слева показывает, что включено прямо сейчас (тема, видимость панели).
        */
       checked?: boolean;
+      /**
+       * Пункт доступен? Не задано — да (так пишется большая часть меню).
+       * `false` — серый пункт: виден и объясняет, что команда есть, но сейчас
+       * не сработает (отменять нечего). Не прячем: исчезающий пункт двигает
+       * остальные под курсором и выглядит как сломанное меню.
+       */
+      enabled?: boolean;
       /** Подменю: открывается рядом с пунктом. */
       submenu?: readonly PopupMenuItem[];
       onSelect?(): void;
@@ -82,13 +89,15 @@ function buildLevel(level: Level): void {
     const entry = h(
       'button',
       {
-        class: `context-item${item.danger ? ' is-danger' : ''}${item.submenu ? ' has-submenu' : ''}`,
+        class: `context-item${item.danger ? ' is-danger' : ''}${item.submenu ? ' has-submenu' : ''}${item.enabled === false ? ' is-disabled' : ''}`,
         type: 'button',
         // Переключатель отдаём флажком: состояние читают и экранные читалки, а не
         // только глаз по отметке слева.
         role: 'checked' in item ? 'menuitemcheckbox' : 'menuitem',
         'aria-checked': 'checked' in item ? String(item.checked) : undefined,
         'aria-haspopup': item.submenu ? 'true' : undefined,
+        // Серый пункт: экранная читалка говорит «недоступен», а не «нажми меня».
+        'aria-disabled': item.enabled === false ? 'true' : undefined,
         // Подсказку справа показываем одной строкой и обрезаем по ширине панели:
         // команды запуска длинные и растягивали меню на весь экран. Полный текст
         // остаётся в системной подсказке при наведении.
@@ -114,6 +123,9 @@ function buildLevel(level: Level): void {
       event.stopPropagation();
       const at = own();
       if (at < 0) return;
+      // Серый пункт ничего не делает и меню не закрывает: его нажали, чтобы
+      // посмотреть, что команда есть, а не чтобы уйти из меню.
+      if (item.enabled === false) return;
       if (item.submenu) {
         openSubmenu(at, index());
         return;
@@ -214,7 +226,7 @@ function activateHighlighted(levelIndex: number): void {
   const index = highlighted(levelIndex);
   const entry = levels[levelIndex]?.entries[index];
   const item = entry ? itemOf.get(entry) : undefined;
-  if (item && 'submenu' in item && item.submenu) openSubmenu(levelIndex, index);
+  if (item && 'submenu' in item && item.submenu && item.enabled !== false) openSubmenu(levelIndex, index);
   else closeLevelsAbove(levelIndex);
 }
 
@@ -262,7 +274,7 @@ export function showPopupMenu(items: readonly PopupMenuItem[], x: number, y: num
     if (event.key === 'Enter' || event.key === ' ') {
       const index = highlighted(last);
       const item = levels[last]?.items[index];
-      if (item && !('separator' in item)) {
+      if (item && selectable(item)) {
         event.preventDefault();
         levels[last]?.entries[index]?.click();
       }
@@ -296,11 +308,19 @@ export function showPopupMenu(items: readonly PopupMenuItem[], x: number, y: num
   for (const level of levels) level.menu.addEventListener('contextmenu', (event) => event.preventDefault());
 }
 
-/** Первый пункт, который можно нажать: разделители пропускаем. */
+/** Пункт доступен, если поле не задано или истинно. */
+function selectable(item: PopupMenuItem): boolean {
+  return !('separator' in item) && item.enabled !== false;
+}
+
+/** Первый пункт, который можно нажать: разделители и серые пропускаем. */
 function firstSelectable(levelIndex: number): number {
   const level = levels[levelIndex];
-  const index = level?.items.findIndex((item) => !('separator' in item)) ?? 0;
-  return index < 0 ? 0 : index;
+  // Ни одного доступного — подсвечиваем первый как есть: пустое меню с невидимым
+  // фокусом хуже, чем подсвеченный серый пункт, который никуда не ведёт.
+  const index = level?.items.findIndex(selectable) ?? 0;
+  const any = level?.items.findIndex((item) => !('separator' in item)) ?? 0;
+  return index >= 0 ? index : any < 0 ? 0 : any;
 }
 
 export function closePopupMenu(): void {

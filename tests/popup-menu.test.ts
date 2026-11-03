@@ -223,3 +223,72 @@ describe('клавиатура в меню', () => {
     expect(menus()).toHaveLength(0);
   });
 });
+
+/**
+ * Серый пункт (`enabled: false`). Недоступная команда остаётся в списке: пункт,
+ * который пропадает и появляется, двигает соседей под курсором. Но нажимать его
+ * нельзя — ни мышью, ни с клавиатуры, и подменю у него не раскрывается.
+ */
+describe('недоступный пункт', () => {
+  beforeEach(() => {
+    installMiniDom();
+    closePopupMenu();
+  });
+
+  it('виден в меню, но помечен серым', () => {
+    showPopupMenu([{ label: 'Отменить', enabled: false, onSelect: vi.fn() }], 10, 10);
+
+    const [entry] = items(menus()[0] as HTMLElement);
+    expect(entry?.querySelector('.context-label')?.textContent).toBe('Отменить');
+    expect(entry?.className).toContain('is-disabled');
+    expect(entry?.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('клик не зовёт обработчик и не закрывает меню', () => {
+    const onSelect = vi.fn();
+    showPopupMenu([{ label: 'Отменить', enabled: false, onSelect }], 10, 10);
+
+    (items(menus()[0] as HTMLElement)[0] as unknown as { click(): void }).click();
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(menus()).toHaveLength(1);
+  });
+
+  it('Enter на сером пункте ничего не делает', async () => {
+    const onSelect = vi.fn();
+    showPopupMenu(
+      [
+        { label: 'Отменить', enabled: false, onSelect },
+        { label: 'Повторить', enabled: false, onSelect: vi.fn() },
+      ],
+      10,
+      10,
+    );
+
+    await press('Enter');
+
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('доступный пункт рядом работает как обычно', () => {
+    const onSelect = vi.fn();
+    showPopupMenu(
+      [
+        { label: 'Отменить', enabled: false, onSelect: vi.fn() },
+        { label: 'Вставить', onSelect },
+      ],
+      10,
+      10,
+    );
+
+    (items(menus()[0] as HTMLElement)[1] as unknown as { click(): void }).click();
+
+    expect(onSelect).toHaveBeenCalled();
+  });
+
+  it('без поля пункт доступен — старые меню не меняются', () => {
+    showPopupMenu([{ label: 'Открыть', onSelect: vi.fn() }], 10, 10);
+
+    expect(items(menus()[0] as HTMLElement)[0]?.className).not.toContain('is-disabled');
+  });
+});

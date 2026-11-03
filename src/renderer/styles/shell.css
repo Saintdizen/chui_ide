@@ -965,6 +965,19 @@
   color: var(--text_color_hover);
 }
 
+/* Серый пункт: команда есть, но сейчас не сработает (отменять нечего).
+   Остаётся в списке и не отвечает на наведение — иначе под курсором он
+   выглядел бы доступным. */
+.context-item.is-disabled {
+  color: var(--text_color_tertiary);
+  cursor: default;
+}
+
+.context-item.is-disabled:hover {
+  background: transparent;
+  color: var(--text_color_tertiary);
+}
+
 /* Отметка пункта-переключателя. Столбец под неё зарезервирован у всего уровня,
    поэтому подписи не смещаются вбок из-за того, что у одного пункта есть отметка. */
 .context-check {
