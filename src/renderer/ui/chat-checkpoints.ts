@@ -53,7 +53,13 @@ export function beginCheckpoint(session: ChatSession, messageIndex: number, ques
   if (!title) return;
   const checkpoint: Checkpoint = { messageIndex, title, files: new Map() };
   // Стек, а не массив: нужен только конец, а срез с начала каждый раз копирует всё.
-  const stack = session.checkpoints ?? [];
+  //
+  // Снимок на тот же вопрос ЗАМЕНЯЕТ прежний, а не ложится рядом. Повтор ответа
+  // (`regenerate`) — это тот же вопрос, пройденный заново: файлы к этому моменту
+  // уже в том виде, в каком их оставила прошлая попытка, и именно это «до» нужно
+  // вернуть. Без замены `addCheckpointFile` видел бы файлы уже записанными и
+  // молча пропускал их, а откат возвращал бы состояние до первой попытки.
+  const stack = (session.checkpoints ?? []).filter((item) => item.messageIndex !== messageIndex);
   session.checkpoints = [...stack, checkpoint].slice(-CHECKPOINT_LIMIT);
   return checkpoint;
 }

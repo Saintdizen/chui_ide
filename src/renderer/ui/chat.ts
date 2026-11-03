@@ -2291,6 +2291,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     session.usage = undefined;
     session.usageFresh = false;
     session.turnsSinceCompact = turnsSinceCompact(session.history);
+    // Повтор — тот же вопрос заново, и снимок для отката нужен СВЕЖИЙ: файлы
+    // сейчас в том виде, в каком их оставила прошлая попытка, и вернуть надо
+    // именно это. Без пересоздания `addCheckpointFile` увидел бы файлы уже
+    // записанными в старом снимке и молча пропустил их — правки второй попытки
+    // пережили бы откат к вопросу.
+    session.activeCheckpoint = beginCheckpoint(session, lastUser, asked.content);
     renderHistory(session);
     await stream.run(session, provider.id, model, []);
   }

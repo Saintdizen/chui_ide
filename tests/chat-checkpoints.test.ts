@@ -157,15 +157,18 @@ describe('предосмотр отката', () => {
 
   it('склоняет по-русски, а не пишет «2 файла/файлов»', () => {
     const chat = session();
+    // Пять ХОДОВ, а не пять снимков одного хода: снимок на тот же вопрос
+    // заменяет прежний (повтор ответа — тот же вопрос заново), так что пять
+    // файлов в одном снимке — это пять файлов, а не пять ходов.
+    const checkpoint = beginCheckpoint(chat, 0, 'один ход');
     for (const path of ['a', 'b', 'c', 'd', 'e']) {
-      const checkpoint = beginCheckpoint(chat, 0, `ход ${path}`);
       addCheckpointFile(checkpoint, `${path}.ts`, file('x'));
     }
-    // Пять файлов, пять ходов — оба слова во множественном «многом».
+    // Пять файлов, один ход — «файлов» много, «ход» один.
     const many = revertSummary(revertPreview(chat.checkpoints ?? [], 0), 'вопрос');
     expect(many).toContain('5 файлов');
     expect(many).not.toContain('/');
-    expect(many).toContain('5 ходов');
+    expect(many).toContain('1 ход');
   });
 
   it('два и три — «файла», одиннадцать — «файлов»', () => {
@@ -218,5 +221,30 @@ describe('предосмотр отката', () => {
     truncateCheckpoints(chat, 1);
     expect(hasCheckpoint(chat, 0)).toBe(true);
     expect(revertPlan(chat.checkpoints ?? [], 0).has('a.ts')).toBe(true);
+  });
+
+  /**
+   * Повтор ответа (`regenerate`) — это тот же вопрос, пройденный заново.
+   *
+   * Найдено при разборе: `beginCheckpoint` зовётся только из `send`, а повтор
+   * режет историю и запускает прогон, не трогая `activeCheckpoint`. Прошлый
+   * снимок с тем же номером остаётся, `addCheckpointFile` видит файлы уже
+   * записанными и МОЛЧА пропускает — и «откатить к вопросу» возвращает то, что
+   * было до ПЕРВОЙ попытки, оставляя правки второй.
+   */
+  it('повтор хода начинает снимок заново, а не досыпает в старый', () => {
+    const chat = session();
+    const first = beginCheckpoint(chat, 0, 'перепиши a.ts');
+    addCheckpointFile(first, 'a.ts', file('исходный'));
+
+    // Повтор того же вопроса: файл уже другой (агент первой попытки его правил).
+    const retry = beginCheckpoint(chat, 0, 'перепиши a.ts');
+    addCheckpointFile(retry, 'a.ts', file('после первой попытки'));
+
+    expect(retry?.files.get('a.ts')?.text).toBe('после первой попытки');
+    // И в стеке по этому вопросу остался ОДИН снимок — последний пройденный.
+    const same = (chat.checkpoints ?? []).filter((item) => item.messageIndex === 0);
+    expect(same).toHaveLength(1);
+    expect(same[0]?.files.get('a.ts')?.text).toBe('после первой попытки');
   });
 });
