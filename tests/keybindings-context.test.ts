@@ -24,13 +24,15 @@ const registry = (log: string[]): CommandRegistry => {
   return commands;
 };
 
-const press = (service: KeybindingService, key: string): void => {
+const press = (service: KeybindingService, key: string, handled = false): void => {
   const event = {
     key,
     code: key === 'Escape' ? 'Escape' : 'KeyZ',
     ctrlKey: false,
     altKey: false,
     shiftKey: false,
+    // `handled` — нажатие уже съедено кем-то в фазе перехвата (окно, поиск).
+    defaultPrevented: handled,
     preventDefault: () => undefined,
   } as unknown as KeyboardEvent;
   // `handle` — приватный: дёргаем через attach-слушатель нельзя без окна,
@@ -38,10 +40,10 @@ const press = (service: KeybindingService, key: string): void => {
   (service as unknown as { handle(e: KeyboardEvent): void }).handle(event);
 };
 
-const service = (log: string[], zen: { on: boolean }): KeybindingService => {
+const service = (log: string[], zen: { on: boolean }, unlessHandled = true): KeybindingService => {
   const defaults: Keybinding[] = [{ combo: 'Escape', command: 'editor.collapseSelections' }];
   const keys = new KeybindingService(registry(log), defaults);
-  keys.bindInContext({ combo: 'Escape', command: 'view.zen', when: () => zen.on });
+  keys.bindInContext({ combo: 'Escape', command: 'view.zen', when: () => zen.on, unlessHandled });
   return keys;
 };
 
@@ -70,5 +72,28 @@ describe('сочетание, зависящее от положения', () =>
     zen.on = true;
     press(keys, 'Escape');
     expect(log).toEqual(['editor.collapseSelections', 'view.zen']);
+  });
+
+  it('открытое окно ест Escape первым — дзен уступает молча', () => {
+    // Иначе одно нажатие закрывало бы и модалку поверх, и сам дзен: слушатель
+    // окна стоит раньше, но `preventDefault()` не мешает выполниться обоим.
+    const log: string[] = [];
+    press(service(log, { on: true }), 'Escape', true);
+    expect(log).toEqual([]);
+  });
+
+  it('без отметки «съедено» в дзене Escape выходит', () => {
+    const log: string[] = [];
+    press(service(log, { on: true }), 'Escape', false);
+    expect(log).toEqual(['view.zen']);
+  });
+
+  it('съеденное нажатие не достаётся никому — очередь обрывается', () => {
+    // Раньше `unlessHandled` значило лишь «пропусти контекст», и Escape
+    // проваливался в умолчания: окно закрылось бы, а заодно снялся бы
+    // мультикурсор в редакторе.
+    const log: string[] = [];
+    press(service(log, { on: true }, false), 'Escape', true);
+    expect(log).toEqual([]);
   });
 });

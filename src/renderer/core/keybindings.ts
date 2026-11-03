@@ -48,6 +48,15 @@ export function comboFromEvent(event: KeyboardEvent): string {
 export interface ContextBinding extends Keybinding {
   /** Когда действует. Проверяется на КАЖДОЕ нажатие: положение меняется на ходу. */
   when(): boolean;
+  /**
+   * Уступить, если кто-то в фазе перехвата нажатие уже съел.
+   *
+   * Без этого одно `Escape` в дзене закрывало бы и окно поверх (его ловит
+   * `ui/modal.ts` в фазе перехвата), и сам дзен: слушатель окна стоит раньше
+   * модалки, но `preventDefault()` не мешает выполниться обоим. По эталону
+   * очередь такая: окно/попап/поиск → дзен → обычный `Escape` редактора.
+   */
+  unlessHandled?: boolean;
 }
 
 export class KeybindingService {
@@ -101,7 +110,13 @@ export class KeybindingService {
 
   private handle(event: KeyboardEvent): void {
     const combo = comboFromEvent(event);
-    const contextual = this.contexts.find((item) => item.combo === combo && item.when());
+    // Нажатие уже съедено раньше нас (окно, поиск в фазе перехвата) — дальше не
+    // идём ВООБЩЕ: иначе одно Escape закрывало бы окно и снимало мультикурсор
+    // в редакторе заодно. Очередь обрывается на том, кто съел.
+    if (event.defaultPrevented) return;
+    const contextual = this.contexts.find(
+      (item) => item.combo === combo && item.when() && !(item.unlessHandled && event.defaultPrevented),
+    );
     if (contextual) {
       event.preventDefault();
       void this.commands.execute(contextual.command, ...(contextual.args ?? []));
