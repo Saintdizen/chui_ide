@@ -490,7 +490,18 @@ interface LspCapabilities {
   /** Точная семантическая подсветка: по ней разбираем ответ (легенду объявляет сервер). */
   semanticTokensProvider?: {
     legend?: { tokenTypes?: unknown; tokenModifiers?: unknown };
+    /** Умеет отвечать про участок файла, а не только про файл целиком. */
+    range?: unknown;
+    /** Умеет присылать правки к прежним токенам (`full/delta`). */
   };
+  /**
+   * Диагностика по запросу (`textDocument/diagnostic`), а не по публикации.
+   *
+   * `publishDiagnostics` серверы шлют сами и только про открытые файлы; в
+   * проекте, где правят один файл, остальные проверяются «когда-нибудь». С pull
+   * мы спрашиваем сами и получаем пометки про файл, которого сервер не открывал.
+   */
+  diagnosticProvider?: unknown;
 }
 
 /** Возможности синхронизации: `save` из `textDocumentSync` и наблюдение за файлами. */
@@ -596,6 +607,8 @@ export class LspService {
   private readonly openedIn = new Map<string, ServerRuntime>();
   /** Прежние числа семантических токенов: для `full/delta`. Сбрасывается на `close`. */
   private readonly semanticCache = new Map<string, { resultId: string; data: number[] }>();
+  /** Прежние пометки по запросу: `unchanged` отвечает «то же, что и в прошлый раз». */
+  private readonly pullState = new Map<string, { resultId: string; items: LspDiagnostic[] }>();
   /**
    * Языки, сервер которых поднять не удалось: язык → причина. Без кэша каждый файл
    * такого языка заново искал бы сервер (диск, PATH, окружения) — на пустом ответе
@@ -1071,6 +1084,7 @@ export class LspService {
     this.languageOfPath.delete(path);
     this.latestText.delete(path);
     this.semanticCache.delete(path);
+    this.pullState.delete(path);
     if (!runtime) return;
     // `didClose` только если документ и правда был открыт: иначе мы закрыли бы то,
     // чего сервер не видел (открытие ещё шло), и он потерял бы файл.
@@ -1092,6 +1106,7 @@ export class LspService {
     this.scanned.clear();
     this.latestText.clear();
     this.semanticCache.clear();
+    this.pullState.clear();
     this.openedIn.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);
   }
@@ -1323,6 +1338,10 @@ export class LspService {
             // проекта. Объявляем то, что умеем: `version` отбрасываем, если он старше
             // нашей правки (см. обработчик `publishDiagnostics`).
             publishDiagnostics: { versionSupport: true },
+            // Диагностика по запросу. Объявляем, чтобы сервер, умеющий
+            // `textDocument/diagnostic`, мог ответить о файле, которого не открывал.
+            // `relatedInformation` — не нужен от клиента, поэтому не заявляем.
+            diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false },
             // Дерево символов файла: у объявления появляются дети — так и показываем.
             documentSymbol: { hierarchicalDocumentSymbolSupport: true },
             rename: { prepareSupport: true },
@@ -1365,12 +1384,12 @@ export class LspService {
             // берём у отладчика (см. `LspFeatures.inlineValues`). Объявляем без динамической
             // регистрации — её мы не поддерживаем.
             inlineValue: {},
-            // Семантическая подсветка: точные роли поверх своей грамматики. Берём только
-            // полный запрос документа — частичный (range) не просим и не заявляем. Типы и
-            // модификаторы объявляем стандартные: сервер вернёт их индексами в легенде,
-            // а мы сопоставим с ролями палитры.
+            // Семантическая подсветка: точные роли поверх своей грамматики. Объявляем и
+            // `range`: большой файл не нужно разбирать целиком ради экрана (см.
+            // `semanticTokens`). Типы и модификаторы объявляем стандартные: сервер вернёт
+            // их индексами в легенде, а мы сопоставим с ролями палитры.
             semanticTokens: {
-              requests: { full: true },
+              requests: { full: true, range: true },
               tokenTypes: [...STANDARD_TOKEN_TYPES],
               tokenModifiers: [...STANDARD_TOKEN_MODIFIERS],
             },
@@ -1719,6 +1738,80 @@ export class LspService {
         // или не поднял проект. Шаг из-за этого не ломаем — ответ готовит вызывающий.
         .catch(() => null as FileSymbol[] | null),
     );
+  }
+
+  /**
+   * Пометки файла по запросу (`textDocument/diagnostic`), а не по публикации.
+   *
+   * `publishDiagnostics` серверы шлют сами и только про открытые документы:
+   * файл, который правят редко, проверяется в лучшем случае «когда-нибудь».
+   * Сервер, объявивший `diagnosticProvider`, так делать не обязан, и его можно
+   * спросить.
+   *
+   * Возвращаем `null`, если сервер так не умеет: пустой список стёр бы пометки,
+   * а вызывающему остаётся публикация.
+   */
+  async diagnosticsFor(path: string, text?: string): Promise<LspDiagnostic[] | null> {
+    const languageId = this.languageFor(path);
+    if (!languageId) return null;
+    const runtime = this.runtimes.get(languageId);
+    if (!runtime?.capabilities.diagnosticProvider) return null;
+    const previous = this.pullState.get(path);
+
+    try {
+      const report = await this.withDocument(
+        runtime,
+        path,
+        languageId,
+        text ?? this.latestText.get(path) ?? '',
+        (uri) =>
+          runtime.connection.request(
+            'textDocument/diagnostic',
+            { textDocument: { uri }, ...(previous ? { previousResultId: previous.resultId } : {}) },
+            `${path}\u0000textDocument/diagnostic`,
+          ),
+      );
+      return this.applyDiagnosticReport(path, report);
+    } catch (error) {
+      // Не молчим: обход проекта по этой ветке вернётся к `didOpen`, но причину
+      // надо видеть, а не искать по ответам.
+      console.warn('pull-диагностика не вышла:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Разобрать ответ `textDocument/diagnostic`: `full` или `unchanged`.
+   *
+   * `unchanged` означает «с прошлого раза не поменялось», и без запоминания
+   * прошлого ответа пометки пришлось бы терять.
+   */
+  private applyDiagnosticReport(path: string, report: unknown): LspDiagnostic[] {
+    const value = (report ?? {}) as {
+      kind?: unknown;
+      resultId?: unknown;
+      items?: unknown;
+      relatedDocuments?: unknown;
+    };
+    const resultId = typeof value.resultId === 'string' ? value.resultId : '';
+    if (value.kind === 'unchanged') {
+      const previous = this.pullState.get(path);
+      if (!previous) return [];
+      this.pullState.set(path, { resultId, items: previous.items });
+      return previous.items;
+    }
+    const items = Array.isArray(value.items) ? toDiagnostics(value.items) : [];
+    this.pullState.set(path, { resultId, items });
+    // `relatedDocuments` — пометки про ДРУГИЕ файлы, от которых пришла ошибка.
+    // Отдаём обычной публикацией: в редакторе это те же пометки.
+    if (value.relatedDocuments && typeof value.relatedDocuments === 'object') {
+      for (const [uri, document] of Object.entries(value.relatedDocuments as Record<string, unknown>)) {
+        const doc = document as { kind?: unknown; items?: unknown } | null;
+        if (doc?.kind !== 'full' || !Array.isArray(doc.items)) continue;
+        this.publish(PushTopic.LspDiagnostics, { path: fileURLToPath(uri), diagnostics: toDiagnostics(doc.items) });
+      }
+    }
+    return items;
   }
 
   /**
@@ -2185,6 +2278,17 @@ export class LspService {
     if (text === null || text.length > SWEEP_MAX_BYTES) return;
     if (this.languageOfPath.has(file) || this.transient.has(file)) return;
     const uri = pathToFileURL(file).toString();
+    // Сервер с `diagnosticProvider` спрашиваем напрямую: не ждём, пока он соизволит
+    // опубликовать пометки, и не держим ради этого файл открытым. Иначе — как было:
+    // `didOpen` и ожидание публикации (см. `awaitDiagnostics`).
+    if (runtime.capabilities.diagnosticProvider) {
+      const items = await this.diagnosticsFor(file, text);
+      if (items) {
+        this.sweptClosed.add(file);
+        this.publish(PushTopic.LspDiagnostics, { path: file, diagnostics: items });
+        return;
+      }
+    }
     const wait = this.awaitDiagnostics(file);
     this.transient.add(file);
     runtime.connection.notify('textDocument/didOpen', {
