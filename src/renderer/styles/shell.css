@@ -1467,7 +1467,10 @@ body > .overlay {
   .chat-tab.is-busy .tab-label::after,
   .msg-activity-dots i,
   .tool-state.is-running .icon,
-  .tool-group-state.is-running .icon {
+  .tool-group-state.is-running .icon,
+  /* Точка идущего макро-прогона — тот же случай: состояние, а не украшение.
+     Её одну и пропустили: остальные бесконечные в списке были. */
+  .status-macro-dot {
     animation: none !important;
   }
 
