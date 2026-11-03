@@ -842,6 +842,9 @@ module.exports = [
 
     'workspace.current': () => ({ root: currentRoot }),
 
+    // Сниппеты чужого проекта: в моке их нет — пусто, а не отказ.
+    'workspace.snippetFiles': () => ({ files: [] }),
+
     'session.load': (params) =>
       workspaceSessions.get(params.root) ?? {
         tabs: [],

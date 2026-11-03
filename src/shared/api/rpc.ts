@@ -330,6 +330,13 @@ export interface ChuiMethods {
     params: void;
     result: { aliases: { prefixes: Record<string, string>; exact: readonly string[] } };
   };
+  /**
+   * Сниппеты проекта из `.vscode/*.code-snippets`: имя файла и его текст.
+   *
+   * Отдаём как есть, разбор — в renderer (`shared/code-snippets.ts`): язык лежит
+   * в имени файла, а формат JSONC разбирается одним правилом для обоих.
+   */
+  'workspace.snippetFiles': { params: void; result: { files: { name: string; text: string }[] } };
   /** Сравнить две папки рабочей области: какие файлы различаются. */
   'workspace.compareFolders': { params: { left: string; right: string }; result: FolderCompareResult };
   /** Сессия проекта: восстановление при открытии и сохранение изменений. */

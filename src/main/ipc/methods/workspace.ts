@@ -1,4 +1,5 @@
 import { projectAliases } from '../../project/local-imports';
+import { readProjectSnippets } from '../../project/snippet-files';
 import type { RpcServices } from '../context';
 import type { RpcRouter } from '../router';
 
@@ -25,6 +26,12 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
   router.register('workspace.importAliases', async () => ({
     aliases: await projectAliases(deps.workspace.rootPath()),
   }));
+  // Сниппеты чужого проекта: `.vscode/*.code-snippets`. Читаем их здесь, потому
+  // что заранее не известно, сколько файлов и как они называются.
+  router.register('workspace.snippetFiles', async () => {
+    const root = deps.workspace.rootPath();
+    return { files: root ? await readProjectSnippets(root) : [] };
+  });
   router.register('workspace.compareFolders', (params) => deps.workspace.compareFolders(params.left, params.right));
   router.register('workspace.replace', (params) => deps.workspace.replace(params));
   router.register('workspace.structuralSearch', (params) => deps.workspace.findByStructure(params));

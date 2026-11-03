@@ -21,7 +21,8 @@ import { createLspProgressController } from './core/lsp-progress';
 import { createProjectDiagnosticsApplier } from './core/project-diagnostics';
 import { PROJECT_STAGE_EVENT } from '../shared/project-analysis';
 import type { ProjectStageEvent } from '../shared/project-analysis';
-import { DEFAULT_SNIPPETS } from '../shared/snippets';
+import { snippetsFromCodeSnippets, languageOfSnippetFile } from '../shared/code-snippets';
+import { DEFAULT_SNIPPETS, type Snippet } from '../shared/snippets';
 import { revertPrompt } from '../shared/unsaved';
 import { AutoSave } from './core/auto-save';
 import { createBlameController } from './core/blame';
@@ -425,7 +426,13 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     spellSaveWord: (word) => {
       void saveSettingsPatch({ editor: { spellWords: [...settings.editor.spellWords, word] } }).catch(() => undefined);
     },
-    snippets: () => [...settings.editor.snippets, ...DEFAULT_SNIPPETS],
+    snippets: () => [
+      // Сниппеты чужого проекта — первыми: триггер проекта важнее общего, он для
+      // этого проекта и написан. Затем пользовательские и встроенные.
+      ...projectSnippets(),
+      ...settings.editor.snippets,
+      ...DEFAULT_SNIPPETS,
+    ],
     // Наведение от сервера: текст разметки в карточку.
     hoverFromLanguage: async (path, position) => {
       const text = await lsp.hover(path, position);
@@ -774,6 +781,20 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // Фасад занимает его место сразу: `open`/`applySettings` до загрузки ничего не теряют —
   // `applySettings` копит последнее состояние, `open` создаёт окно и подставляет накопленное.
   // Закрывать до создания нечего, это `close()`.
+  /**
+   * Сниппеты проекта из `.vscode/*.code-snippets`.
+   *
+   * Читаются при открытии рабочей области, а не на каждое нажатие: файл лежит на
+   * диске, и обращение к main из подсказки подвесило бы ввод. Смена проекта (или
+   * создание первый в нём файла `.code-snippets`) — единственное, что их меняет.
+   */
+  let snippetsCache: Snippet[] = [];
+  const projectSnippets = (): readonly Snippet[] => snippetsCache;
+  const loadProjectSnippets = async (): Promise<void> => {
+    const { files } = await rpc.request('workspace.snippetFiles').catch(() => ({ files: [] }));
+    snippetsCache = files.flatMap((file) => snippetsFromCodeSnippets(file.text, languageOfSnippetFile(file.name)));
+  };
+
   let settingsView: SettingsModalView | null = null;
   let settingsLoading: Promise<SettingsModalView> | null = null;
   let pendingSettings: Settings | null = null;
@@ -3697,6 +3718,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     if (reason === 'roots') {
       void (async () => {
         await tools.refresh(workspace.root);
+        // У другого корня свои `.vscode/*.code-snippets`.
+        await loadProjectSnippets();
         syncRunControl();
         await refreshScan();
         preloadEnvironment();
@@ -3723,6 +3746,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Сменился ПРОЕКТ: окружение нового греем сразу (попап открывается без ожидания).
     void (async () => {
       await tools.refresh(workspace.root);
+      // Сниппеты проекта — вместе с инструментами: они часть того, что даёт проект.
+      await loadProjectSnippets();
       syncRunControl();
       await refreshScan();
       preloadEnvironment();
