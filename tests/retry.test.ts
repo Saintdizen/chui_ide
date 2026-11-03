@@ -25,9 +25,11 @@ describe('retryAfterMs', () => {
   });
 
   it('дата в будущем — миллисекунды до неё', () => {
+    // HTTP-дата (§ retry-after) — в секундах: toUTCString() отбрасывает миллисекунды,
+    // и +5000 может стать ровно 4000. Границу держим по той точности, что есть.
     const header = new Date(Date.now() + 5000).toUTCString();
     const value = retryAfterMs(header);
-    expect(value).toBeGreaterThan(4000);
+    expect(value).toBeGreaterThan(3000);
     expect(value).toBeLessThanOrEqual(5000);
   });
 

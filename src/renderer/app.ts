@@ -660,6 +660,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         refactorMenu: (path) => void fixes.runRefactorMenu(path),
         refactor: (path, action) => void fixes.runRefactor(path, action),
         codeActions: (path, position) => void fixes.runCodeActions(path, position),
+        revealInOS: (path) => void commands.execute('file.revealInOS', path),
       });
       showContextMenu(items, event.clientX, event.clientY);
     },

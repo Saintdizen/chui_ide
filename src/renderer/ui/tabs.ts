@@ -237,6 +237,13 @@ export function createTabs(deps: TabsDeps): Tabs {
               onSelect: () => void deps.commands.execute('file.revertFromDisk', path),
             },
             { separator: true },
+            // Обратное к «открыть файл»: дерево уже умеет показать файл, а из вкладки
+            // до этой команды приходилось идти в палитру и вспоминать путь.
+            {
+              label: 'Показать в проводнике',
+              onSelect: () => void deps.commands.execute('workspace.revealPath', path),
+            },
+            { separator: true },
             { label: 'Закрыть', hint: 'Ctrl+W', onSelect: () => void deps.commands.execute('file.close', path) },
             { label: 'Закрыть другие', onSelect: () => void deps.commands.execute('file.closeOthers', path) },
           ],

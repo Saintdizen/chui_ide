@@ -32,6 +32,7 @@ function deps(over: Partial<EditorMenuDeps> = {}) {
     refactorMenu: (path) => calls.push(`refactorMenu:${path}`),
     refactor: (path, action) => calls.push(`refactor:${path}:${action}`),
     codeActions: (path, position) => calls.push(`codeActions:${path}:${position.line}:${position.column}`),
+    revealInOS: (path) => calls.push(`revealInOS:${path}`),
     ...over,
   };
   return { deps: base, calls };
@@ -72,7 +73,16 @@ describe('editorContextMenuPlan', () => {
     expect(labels(items)).toContain('Развернуть (inline)…');
   });
 
-  it('без открытого файла не предлагает ни закладок, ни рефакторингов', () => {
+  it('показывает файл в проводнике системы, когда файл открыт', () => {
+    const { deps: depsObj, calls } = deps();
+    const items = editorContextMenuPlan(info(), depsObj);
+    const item = items.find((entry) => 'label' in entry && entry.label === 'Показать в проводнике системы');
+    expect(item).toBeDefined();
+    if (item && 'onSelect' in item) item.onSelect?.();
+    expect(calls).toEqual(['revealInOS:/p/a.ts']);
+  });
+
+  it('без открытого файла не предлагает показать в проводнике', () => {
     const withLsp = deps({ hasAction: () => true }).deps;
     const items = editorContextMenuPlan(info({ path: null }), withLsp);
     expect(labels(items)).not.toContain('Поставить закладку');

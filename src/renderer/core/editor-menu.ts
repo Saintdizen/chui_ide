@@ -30,6 +30,8 @@ export interface EditorMenuDeps {
   refactorMenu(path: string): void;
   refactor(path: string, action: RefactorAction): void;
   codeActions(path: string, position: { line: number; column: number }): void;
+  /** Файл в проводнике системы — по пути, открытому в редакторе. */
+  revealInOS(path: string): void;
 }
 
 /**
@@ -158,6 +160,16 @@ export function editorContextMenuPlan(info: EditorContextInfo, deps: EditorMenuD
       { label: 'Добавить в словарь', onSelect: () => deps.addToDictionary() },
       { label: 'Пропустить слово', onSelect: () => deps.ignoreSpelling() },
     );
+  }
+  // Показать файл в проводнике системы — рядом с закладками: обоим нужен путь,
+  // а не позиция в тексте.
+  const revealPath = info.path;
+  if (revealPath) {
+    items.push({
+      separator: true,
+      label: 'Показать в проводнике системы',
+      onSelect: () => deps.revealInOS(revealPath),
+    });
   }
   // Быстрые исправления: пункт есть там, где он что-то даст — с языковым сервером.
   if (info.path && deps.hasAction('editor.codeActions')) {
