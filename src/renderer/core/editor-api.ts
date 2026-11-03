@@ -31,6 +31,10 @@ export interface EditorApi {
   cursorPositions(): Record<string, CursorPosition>;
   /** Раздать позиции курсоров: панели подхватят их при открытии файла. */
   restoreCursorPositions(positions: Record<string, CursorPosition>): void;
+  /** Верхние строки открытых файлов (с 1) — их тоже берёт сессия проекта. */
+  scrollPositions(): Record<string, number>;
+  /** Раздать верхние строки: панель встанет туда при открытии файла. */
+  restoreScrollPositions(positions: Record<string, number>): void;
   /** Перейти к строке и столбцу, показывая это место. */
   reveal(path: string, line: number, column: number): void;
   /** Текст выделенного участка. Пустая строка, если выделения нет. */

@@ -48,18 +48,60 @@ const ask = (window, expression, timeoutMs = 20000) =>
     wait(timeoutMs).then(() => 'нет ответа'),
   ]);
 
-/** Открыть файл из дерева: папка раскрывается одним кликом, файл — двойным. */
+/**
+ * Открыть файл из дерева: папка раскрывается одним кликом, файл — двойным.
+ * Строки дерева приезжают асинхронно после открытия проекта, поэтому ждём их: без этого
+ * проба кликала по пустому дереву и молча ничего не проверяла.
+ */
 const openInTree = (window, name) =>
   ask(
     window,
-    `(() => {
-      const row = [...document.querySelectorAll('.tree-row')].find(
+    `(async () => {
+      const findRow = () => [...document.querySelectorAll('.tree-row')].find(
         (item) => item.querySelector('.tree-name')?.textContent === ${JSON.stringify(name)},
       );
-      if (!row) return 'нет узла';
+      const started = Date.now();
+      let row = findRow();
+      while (!row && Date.now() - started < 8000) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        row = findRow();
+      }
+      if (!row) {
+        const names = [...document.querySelectorAll('.tree-name')].map((node) => node.textContent).join(',');
+        return 'нет узла ' + ${JSON.stringify(name)} + '; видно: [' + names + ']';
+      }
       row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
       return 'кликнут';
+    })()`,
+  );
+
+/**
+ * Прокрутить редактор вниз: верх экрана — такая же часть места работы, как каретка,
+ * и проба должна проверять его отдельно.
+ */
+const scrollEditor = (window) =>
+  ask(
+    window,
+    `(() => {
+      const box = [...document.querySelectorAll('.own-editor *')].find(
+        (element) => element.scrollHeight > element.clientHeight + 200,
+      );
+      if (!box) return null;
+      box.scrollTop = 2000;
+      return box.scrollTop;
+    })()`,
+  );
+
+/** Верх экрана сейчас: после перезапуска он должен быть не в начале файла. */
+const editorScrollTop = (window) =>
+  ask(
+    window,
+    `(() => {
+      const box = [...document.querySelectorAll('.own-editor *')].find(
+        (element) => element.scrollHeight > element.clientHeight + 200,
+      );
+      return box ? box.scrollTop : null;
     })()`,
   );
 
@@ -124,16 +166,20 @@ app.whenReady().then(async () => {
     await openInTree(ide, 'src');
     await wait(1200);
     console.log(`[проба] открыть файл: ${JSON.stringify(await openInTree(ide, 'long.ts'))}`);
+    await wait(500);
+    console.log(`[проба] прокрутка: ${JSON.stringify(await scrollEditor(ide))}`);
     // Сессия пишется с задержкой: ждём, пока она осядет на диск.
-    await wait(3000);
+    await wait(4000);
     const saved = sessions.load(project);
-    console.log(`[проба] в сессии: ${JSON.stringify(saved.cursors ?? null)}`);
+    console.log(`[проба] курсоры в сессии: ${JSON.stringify(saved.cursors ?? null)}`);
+    console.log(`[проба] верх экрана в сессии: ${JSON.stringify(saved.scrollTops ?? null)}`);
     console.log(`[проба] ожидаем ключ: ${file}`);
   } else {
     console.log(`[проба] вкладка: ${JSON.stringify(await activeTab(ide))}`);
     await wait(2000);
     console.log(`[проба] курсор после перезапуска: ${JSON.stringify(await cursorText(ide))}`);
-    console.log(`[проба] ожидаем: ${TARGET_LINE}:${TARGET_COLUMN}`);
+    console.log(`[проба] верх экрана после перезапуска: ${JSON.stringify(await editorScrollTop(ide))}`);
+    console.log(`[проба] ожидаем: ${TARGET_LINE}:${TARGET_COLUMN} и верх экрана не в начале`);
   }
 
   terminals.dispose();

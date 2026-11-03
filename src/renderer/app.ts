@@ -864,6 +864,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     onPinsChange: () => session.scheduleSave(),
     // Избранное — наоборот, свойство IDE, а не проекта: список уходит в настройки.
     onFavoritesChange: () => void saveSettingsPatch({ workspace: { favorites: explorer.favorites() } }),
+    // Папка раскрыта или свернута — тоже часть рабочего места, но таких событий
+    // много: пишем после паузы (вместе с кареткой и прокруткой).
+    onExpandedChange: () => session.scheduleDeepSave(),
     // Метки файлов — тоже рабочее место проекта: сохраняем при изменении.
     onLabelsChange: () => session.scheduleSave(),
     // Пакеты монорепо: их список нужен дереву, чтобы показать проекты строками.
@@ -2410,6 +2413,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       debugOptions = options;
     },
   });
+
+  // Тихие изменения места — каретка, прокрутка — тоже часть рабочего места, но идут
+  // потоком: пишем только после паузы. Ждать закрытия окна нельзя: падение или `kill`
+  // оставили бы в сессии вчерашний вид, и файл открылся бы на первой строке.
+  editors.onCursorChange(session.scheduleDeepSave);
+  editors.onDidViewportChange(session.scheduleDeepSave);
 
   // Закладки: список ведёт модель, редактор по нему рисует значки, сессия хранит его.
   // Одна подписка на изменение — значков и сохранения хватает одного источника.

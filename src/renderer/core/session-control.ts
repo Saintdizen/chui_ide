@@ -85,6 +85,11 @@ export interface SessionControl {
   setRoot(root: string | null): void;
   restore(root: string): Promise<void>;
   scheduleSave(): void;
+  /**
+   * Записать после ДЛИННОЙ паузы: правка текста, каретка, прокрутка, раскрытая папка.
+   * Такие события идут потоком, а в записи лежит в том числе несохранённый текст.
+   */
+  scheduleDeepSave(): void;
   /** Сохранить немедленно, без отложенного таймера — на закрытии окна. */
   saveNow(): void;
 }
@@ -93,10 +98,11 @@ export interface SessionControl {
 const SAVE_DEBOUNCE_MS = 400;
 
 /**
- * Пауза перед записью несохранённых правок: текст меняется на каждое нажатие, а
- * сессия — файл целиком. Дольше, чем у вкладок, чтобы набор не тормозил записью.
+ * Пауза перед «глубокой» записью — с несохранённым текстом и тихими изменениями места
+ * (каретка, прокрутка, раскрытая папка). Такие события идут потоком: текст меняется на
+ * каждое нажатие, а сессия — файл целиком. Дольше, чем у вкладок, чтобы набор не тормозил.
  */
-const HOT_EXIT_DEBOUNCE_MS = 2000;
+const DEEP_SAVE_DEBOUNCE_MS = 2000;
 
 /**
  * Рабочее место проекта: что открыто, что раскрыто и какие точки останова стоят.
@@ -111,8 +117,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
   /** Пока идёт восстановление, сохранять нельзя — иначе затрём файл пустотой. */
   let restoring = false;
   let saveTimer = 0;
-  /** Свой таймер для несохранённого текста: он меняется чаще, чем состав вкладок. */
-  let hotExitTimer = 0;
+  /** Свой таймер для тихих изменений (текст, каретка, прокрутка) — они чаще состава вкладок. */
+  let deepTimer = 0;
 
   /** Точки останова в виде записей сессии: файл + строка + настройки. */
   const captureBreakpoints = (): BreakpointRecord[] => {
@@ -188,6 +194,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     const exceptions = debug.exceptionFilters();
     const options = deps.getDebugOptions();
     const cursors = editors.cursorPositions();
+    // Верхние строки — отдельно от каретки: см. `scrollPositions` редактора.
+    const scrollTops = editors.scrollPositions();
     // Несохранённые правки — часть рабочего места: без них перезапуск (и любое
     // закрытие окна) терял бы работу, которую человек ещё не записал.
     const unsaved = selectUnsavedBuffers(
@@ -221,6 +229,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       // Место работы в каждом файле — часть рабочего места: без него после
       // перезапуска вкладки те же, а курсор в начале файла.
       ...(Object.keys(cursors).length > 0 ? { cursors } : {}),
+      // Прокрутка — та же часть рабочего места: курсор в начале файла — не то, что ждёшь.
+      ...(Object.keys(scrollTops).length > 0 ? { scrollTops } : {}),
       ...(unsaved.length > 0 ? { unsaved } : {}),
       ...(macro.length > 0 ? { macro: [...macro] } : {}),
     };
@@ -234,16 +244,17 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
   };
 
   /**
-   * Записать сессию с несохранённым текстом. Задержка своя, и она длиннее: правка
-   * приходит на каждое нажатие, а писать файл сессии так часто ни к чему.
+   * Записать сессию после длинной паузы. Годится и для правок текста, и для тихих
+   * изменений места — каретка, прокрутка, раскрытая папка: они входят в ту же запись, а
+   * идут потоком, поэтому писать файл на каждое движение ни к чему.
    */
-  const scheduleHotExit = (): void => {
+  const scheduleDeepSave = (): void => {
     if (!root || restoring) return;
-    if (hotExitTimer) window.clearTimeout(hotExitTimer);
-    hotExitTimer = window.setTimeout(() => {
-      hotExitTimer = 0;
+    if (deepTimer) window.clearTimeout(deepTimer);
+    deepTimer = window.setTimeout(() => {
+      deepTimer = 0;
       persist();
-    }, HOT_EXIT_DEBOUNCE_MS);
+    }, DEEP_SAVE_DEBOUNCE_MS);
   };
 
   const scheduleSave = (): void => {
@@ -277,6 +288,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
 
       // Позиции курсоров ставим ДО открытия файлов: `open` подхватит их при показе.
       editors.restoreCursorPositions(state.cursors ?? {});
+      // Верхние строки — там же: `open` встанет на них тем же показом.
+      editors.restoreScrollPositions(state.scrollTops ?? {});
 
       for (const path of state.tabs) {
         try {
@@ -341,7 +354,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
 
   openEditors.onDidChange(scheduleSave);
   // Правка текста — тоже повод записать сессию: несохранённое должно пережить перезапуск.
-  documents.onDidChange(scheduleHotExit);
+  documents.onDidChange(scheduleDeepSave);
   dock.onVisibilityChange(scheduleSave);
   // Точки останова — тоже часть рабочего места: поставили или сняли — сохраняем.
   debug.onDidChangeBreakpoints(scheduleSave);
@@ -353,6 +366,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     },
     restore,
     scheduleSave,
+    scheduleDeepSave,
     saveNow: persist,
   };
 }

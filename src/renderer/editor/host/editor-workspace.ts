@@ -392,6 +392,13 @@ export class EditorWorkspace {
   private readonly cursorEmitter = new Emitter<CursorState>();
   readonly onCursorChange = this.cursorEmitter.event;
 
+  /**
+   * Верх экрана сдвинулся в одной из панелей — сессия пишет, какой строкой открыт файл.
+   * Без этого события верх записывался бы только при закрытии окна.
+   */
+  private readonly viewportEmitter = new Emitter<void>();
+  readonly onDidViewportChange = this.viewportEmitter.event;
+
   private readonly splitEmitter = new Emitter<boolean>();
   readonly onDidChangeSplit = this.splitEmitter.event;
 
@@ -602,6 +609,9 @@ export class EditorWorkspace {
     // Фокус решает, куда придёт следующий файл и чей курсор видит статус-бар.
     host.addEventListener('focusin', () => this.setActivePane(index));
 
+    // Верх экрана в любой панели: для сессии важен и той, что сейчас не в фокусе.
+    pane.onDidViewport(() => this.viewportEmitter.fire());
+
     // Курсор в статус-бар отдаёт только активная панель: у второй он не «текущий».
     pane.onDidCursor((state) => {
       if (this.activeIndex === index) this.cursorEmitter.fire(state);
@@ -735,6 +745,21 @@ export class EditorWorkspace {
   /** Раздать позиции курсоров всем панелям: каждая подхватит их при открытии файла. */
   restoreCursorPositions(positions: Record<string, CursorPosition>): void {
     for (const pane of this.panes) pane.restoreCursorPositions(positions);
+  }
+
+  /**
+   * Верхние строки открытых файлов — для сессии проекта. Как и курсоры, собираем со всех
+   * панелей: файл в пассивной панели тоже нужно вернуть на своё место.
+   */
+  scrollPositions(): Record<string, number> {
+    const result: Record<string, number> = {};
+    for (const pane of this.panes) Object.assign(result, pane.scrollPositions());
+    return result;
+  }
+
+  /** Раздать верхние строки всем панелям: каждая встанет туда при открытии файла. */
+  restoreScrollPositions(positions: Record<string, number>): void {
+    for (const pane of this.panes) pane.restoreScrollPositions(positions);
   }
 
   /** Перейти к строке и столбцу: в панель, где открыт файл, иначе — в активную. */

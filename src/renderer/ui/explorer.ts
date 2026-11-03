@@ -174,6 +174,11 @@ export interface ExplorerDeps {
   openRemoteFile?: (address: string) => void;
   /** Метка файла изменилась — рабочее место стоит сохранить (см. сессию). */
   onLabelsChange?: () => void;
+  /**
+   * Папка раскрыта или свёрнута — то же самое: без этого в сессии остался бы
+   * вчерашний набор раскрытых папок (всё пишется один раз, при закрытии окна).
+   */
+  onExpandedChange?: () => void;
   /** Пакеты проекта: по ним дерево в монорепо показывает проекты строками. */
   packages?: ProjectPackagesModel;
   /**
@@ -197,6 +202,16 @@ export interface ExplorerDeps {
 export function createExplorer(deps: ExplorerDeps): ExplorerView {
   const element = h('div', { class: 'explorer' });
   const expanded = new Set<string>();
+  /**
+   * Раскрыть или свернуть папку — единственное место, где меняется набор: там же и
+   * единственный повод сказать сессии, что рабочее место изменилось.
+   */
+  const setExpanded = (path: string, open: boolean): void => {
+    if (open === expanded.has(path)) return;
+    if (open) expanded.add(path);
+    else expanded.delete(path);
+    deps.onExpandedChange?.();
+  };
   const children = new Map<string, readonly DirEntry[]>();
   /** Пути, про которые git уже сказал: игнорируемые (по ответу) и спрошенные. */
   const ignored = new Set<string>();
@@ -700,7 +715,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     try {
       if (edit.entryKind === 'directory') {
         await deps.commands.execute('file.createFolder', target);
-        expanded.add(target);
+        setExpanded(target, true);
       } else {
         await deps.commands.execute('file.createFile', target);
       }
@@ -869,7 +884,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   };
 
   const startCreateIn = (parent: string, entryKind: 'file' | 'directory'): void => {
-    expanded.add(parent);
+    setExpanded(parent, true);
     inlineEdit = { kind: 'create', parent, entryKind };
     // Папку дочитываем до перерисовки: поле имени рисуется только у папки, чей
     // список детей уже есть (иначе на её месте строка «Читаю папку…», и поля нет),
@@ -1512,11 +1527,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   /** Раскрыть или свернуть каталог строкой пакета (как обычной папкой дерева). */
   const toggleDir = (dir: string): void => {
     if (expanded.has(dir)) {
-      expanded.delete(dir);
+      setExpanded(dir, false);
       render();
       return;
     }
-    expanded.add(dir);
+    setExpanded(dir, true);
     if (!children.has(dir)) void load(dir).then(render);
     render();
   };
@@ -1526,11 +1541,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // открывается. Битую ссылку не читаем: цель не найдена, открывать нечего.
     if (entryIsDirectory(entry)) {
       if (expanded.has(entry.path)) {
-        expanded.delete(entry.path);
+        setExpanded(entry.path, false);
         render();
         return;
       }
-      expanded.add(entry.path);
+      setExpanded(entry.path, true);
       if (!children.has(entry.path)) await load(entry.path);
       revealChildrenOf = entry.path;
       render();

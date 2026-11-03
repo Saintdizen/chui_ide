@@ -68,6 +68,23 @@ describe('отрисовка редактора', () => {
     expect(() => makeView('')).not.toThrow();
   });
 
+  it('верхнюю строку видно и можно поставить обратно — на этом стоит прокрутка в сессии', () => {
+    // Сессия помнит строку, а не пиксели: пиксели зависят от шрифта и переноса.
+    const text = Array.from({ length: 500 }, (_, index) => `line ${index + 1}`).join('\n');
+    const { view } = makeView(text);
+    view.scrollToLine(120);
+    expect(view.firstVisibleLine()).toBe(120);
+  });
+
+  it('прокрутка за конец файла притихает к последней строке', () => {
+    const text = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join('\n');
+    const { view } = makeView(text);
+    view.scrollToLine(9999);
+    expect(view.firstVisibleLine()).toBeLessThanOrEqual(40);
+    view.scrollToLine(-5);
+    expect(view.firstVisibleLine()).toBe(1);
+  });
+
   it('широкий знак занимает две клетки', () => {
     // Если считать иероглиф за одну клетку, каретка и выделение разъедутся с текстом.
     // Ширина считается раскладкой строки — она и есть правда о колонках.

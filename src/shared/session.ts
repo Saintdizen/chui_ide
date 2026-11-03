@@ -104,6 +104,8 @@ export function sanitizeSession(raw: unknown): SessionState {
   // Позиции курсоров — только для открытых файлов: у закрытого она мертва.
   const cursors = cursorPositions(value.cursors, tabs);
   if (Object.keys(cursors).length > 0) state.cursors = cursors;
+  const scrollTops = scrollTopsByFile(value.scrollTops, tabs);
+  if (Object.keys(scrollTops).length > 0) state.scrollTops = scrollTops;
   // Несохранённые правки («hot exit»): их возвращает редактор при следующем открытии.
   const unsaved = unsavedBuffers(value.unsaved);
   if (unsaved.length > 0) state.unsaved = unsaved;
@@ -170,6 +172,23 @@ function cursorPositions(raw: unknown, tabs: readonly string[]): Record<string, 
     if (!Number.isInteger(value.line) || (value.line as number) < 1) continue;
     if (!Number.isInteger(value.column) || (value.column as number) < 1) continue;
     result[path] = { line: value.line as number, column: value.column as number };
+  }
+  return result;
+}
+
+/**
+ * Верхние строки файлов из сессии. Как и курсоры — только для открытых файлов и только
+ * целые положительные числа: битый файл сессии не должен прокрутить редактор в никуда.
+ */
+function scrollTopsByFile(raw: unknown, tabs: readonly string[]): Record<string, number> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+  const open = new Set(tabs);
+  const result: Record<string, number> = {};
+  for (const [path, line] of Object.entries(raw as Record<string, unknown>)) {
+    if (Object.keys(result).length >= MAX_CURSORS) break;
+    if (!open.has(path)) continue;
+    if (!Number.isInteger(line) || (line as number) < 1) continue;
+    result[path] = line as number;
   }
   return result;
 }

@@ -531,7 +531,17 @@ export class EditorHost {
   private readonly documentColorSource: ((path: string) => Promise<readonly DocumentColor[]>) | undefined;
   /** Куда стоял курсор в каждом файле — восстанавливается при возврате к файлу. */
   private readonly cursors = new Map<string, CursorPosition>();
+  /** Какой строкой был открыт верх экрана в каждом файле — тоже на возврат. */
+  private readonly scrollTops = new Map<string, number>();
   private readonly cursorEmitter = new Emitter<CursorState>();
+  /**
+   * Видимое окно сдвинулось: прокрутка, прыжок к строке, смена файла. Отдельное событие
+   * для сессии: верх экрана входит в неё наравне с кареткой, и без него он записывался
+   * бы только при закрытии окна.
+   */
+  private readonly viewportEmitter = new Emitter<void>();
+  /** Верх экрана сменился — рабочее место стоит сохранить. */
+  readonly onDidViewport = this.viewportEmitter.event;
   private readonly unsubscribe: () => void;
   private readonly unsubscribeBuffer: () => void;
   private readonly changeTextEmitter = new Emitter<void>();
@@ -659,6 +669,7 @@ export class EditorHost {
     // места, и без перезапроса новая часть файла останется без них. С паузой — чтобы
     // не дёргать сервер на каждом колесе (см. `scheduleInlayHints`).
     this.view.onVisibleRangeChange(() => {
+      this.viewportEmitter.fire();
       this.scheduleInlayHints();
       // Подсветка тоже привязана к экрану: сервер, умеющий `semanticTokens/range`,
       // отвечает только про видимое, и без перезапроса новая часть файла осталась
@@ -902,7 +913,12 @@ export class EditorHost {
     const buffer = this.registry.resolve(document);
 
     // Покидая файл, запоминаем, где стоял курсор: вернувшись, человек ждёт то же место.
-    if (this.path && this.path !== document.path) this.cursors.set(this.path, this.cursorPosition());
+    if (this.path && this.path !== document.path) {
+      this.cursors.set(this.path, this.cursorPosition());
+      // Верх экрана — отдельно от каретки: человек часто уводит его от того места, где
+      // стоит курсор, и вернуться ждёт к тому же виду, а не к каретке в центре.
+      this.scrollTops.set(this.path, this.view.firstVisibleLine());
+    }
 
     const target = position ?? this.cursors.get(document.path);
     const selection: Selection = target ? selectionAt(buffer, target) : caret(0);
@@ -937,6 +953,12 @@ export class EditorHost {
       this.codeLenses.delete(document.path);
     }
     this.controller.setBuffer(buffer, selection);
+    // Место на экране из прошлого раза — но только когда файл открывают не ради
+    // конкретной строки: переход (ссылка, поиск, отладчик) важнее старой прокрутки.
+    if (!position) {
+      const top = this.scrollTops.get(document.path);
+      if (top !== undefined) this.view.scrollToLine(top);
+    }
     // Нарисовать украшения именно этого файла: у прежнего они свои (его полоски git,
     // его точки останова) и в новом показываться не должны.
     this.refreshDecorations(document.path);
@@ -1004,6 +1026,23 @@ export class EditorHost {
   restoreCursorPositions(positions: Record<string, CursorPosition>): void {
     this.cursors.clear();
     for (const [path, position] of Object.entries(positions)) this.cursors.set(path, position);
+  }
+
+  /**
+   * Верхние строки файлов (с 1) — их берёт сессия проекта. Активный файл читаем «живьём»:
+   * человек мог прокрутить его, ничего не открывая.
+   */
+  scrollPositions(): Record<string, number> {
+    const result: Record<string, number> = {};
+    for (const [path, line] of this.scrollTops) result[path] = line;
+    if (this.path) result[this.path] = this.view.firstVisibleLine();
+    return result;
+  }
+
+  /** Поставить верхние строки из сессии. Хозяин подхватит их при открытии файла. */
+  restoreScrollPositions(positions: Record<string, number>): void {
+    this.scrollTops.clear();
+    for (const [path, line] of Object.entries(positions)) this.scrollTops.set(path, line);
   }
 
   /** Перейти к строке и столбцу. Файл за кадром — лишь запоминаем позицию до открытия. */

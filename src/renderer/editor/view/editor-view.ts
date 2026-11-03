@@ -685,6 +685,24 @@ export class EditorView {
   }
 
   /**
+   * Строка (с 1), которой открыт верх экрана — то, что сессия помнит вместо пикселей:
+   * пиксели зависят от шрифта и переноса, а строка — нет.
+   */
+  firstVisibleLine(): number {
+    const row = lineAtY(this.viewport.scrollTop, this.metrics.lineHeight, this.rowCount());
+    // `rowInfo` отдаёт строку с единицы, как и весь буфер: прибавлять ещё одну нельзя —
+    // из-за этого верх файла считался строкой 2, и сессия запоминала её вместо первой.
+    return this.rowInfo(row).line;
+  }
+
+  /** Встать строкой `line` (с 1) в верх экрана. Без разгона: это возврат на место, а не переход. */
+  scrollToLine(line: number): void {
+    const clamped = Math.max(1, Math.min(line, this.buffer.lineCount));
+    // `rowOf` сам переводит номер строки (с единицы) в ряд — как и везде в этом файле.
+    this.setScrollTop(Math.max(0, this.rowOf(clamped) * this.metrics.lineHeight), false);
+  }
+
+  /**
    * Смещение под точкой экрана — перевод клика мышью в позицию в тексте. Работает
    * и за пределами строки: столбец прижимается к её концу, как при клике мимо текста.
    */

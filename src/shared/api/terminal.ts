@@ -57,6 +57,11 @@ export interface SessionState {
   labels?: FileLabelRecord[];
   /** Где стоял курсор в каждом открытом файле (1-based). */
   cursors?: Record<string, CursorPosition>;
+  /**
+   * Какой строкой файл был открыт на экране (1-based) — верх видимой части.
+   * Не то же, что курсор: человек читает одно место, а каретка осталась в другом.
+   */
+  scrollTops?: Record<string, number>;
   /** Записанный макрос: шаги записывает и разбирает редактор (`shared/macro.ts`). */
   macro?: unknown[];
   /**

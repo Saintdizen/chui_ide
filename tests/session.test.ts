@@ -68,6 +68,15 @@ describe('sanitizeSession', () => {
     expect(state.mru).toEqual(['/p/b.ts']);
   });
 
+  it('верхние строки файлов — только открытые и только целые положительные', () => {
+    const state = sanitizeSession({
+      tabs: ['/p/a.ts', '/p/b.ts'],
+      scrollTops: { '/p/a.ts': 120, '/p/gone.ts': 7, '/p/b.ts': 0.5 },
+    });
+    expect(state.scrollTops).toEqual({ '/p/a.ts': 120 });
+    expect(sanitizeSession({ tabs: [], scrollTops: 'мусор' }).scrollTops).toBeUndefined();
+  });
+
   it('битый список корней не ломает сессию', () => {
     expect(sanitizeSession({ roots: [1, null, '', '/a', '/b'] }).roots).toEqual(['/a', '/b']);
     expect(sanitizeSession({ roots: 'нет' }).roots).toBeUndefined();
