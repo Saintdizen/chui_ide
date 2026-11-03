@@ -14,7 +14,7 @@
  * подсветить, перейти, заменить — решает вызывающий.
  */
 
-import { findMatches, matchIndexAt, type FindMatch, type FindOptions } from './search';
+import { findMatches, matchIndexAt, type FindMatch, type FindOptions, type FindRange } from './search';
 
 /** Что нужно знать, чтобы искать: где взять строки и сколько их. */
 export interface SearchSource {
@@ -84,6 +84,27 @@ export class FindState {
     this.update(from);
   }
 
+  /**
+   * Границы поиска, заданные вызывающим, — для «искать только в выделении».
+   *
+   * Живут здесь, а не в `FindOptions`, потому что это МЕСТО, а не настройка: оно
+   * принадлежит одному поиску и меняется само, когда человек двигает выделение.
+   * Класть смещения в настройки значило бы, что панель не отличит «режим включён»
+   * от «выделение изменилось».
+   */
+  private range: FindRange | null = null;
+
+  /** Искать только внутри диапазона или снова по всему файлу. */
+  setRange(range: FindRange | null): void {
+    this.range = range;
+    this.update();
+  }
+
+  /** Режим «в выделении» включён и границы есть. */
+  get scoped(): boolean {
+    return this.range !== null;
+  }
+
   /** Пересчитать совпадения. Документ мог измениться — тогда зовите без аргумента. */
   update(from = 0): void {
     if (this.query.length === 0) {
@@ -93,7 +114,16 @@ export class FindState {
       this.truncated = false;
       return;
     }
-    const result = findMatches((line0) => this.source.getLine(line0), this.source.lineCount, this.query, this.options);
+    // Флаг и диапазон идут парой: включённый режим без границ — это весь файл,
+    // и молча искать целиком значило бы показать не то, чего человек просил.
+    const options: FindOptions = { ...this.options, inSelection: this.range !== null };
+    const result = findMatches(
+      (line0) => this.source.getLine(line0),
+      this.source.lineCount,
+      this.query,
+      options,
+      this.range ?? undefined,
+    );
     this.matches = result.matches;
     this.error = result.error;
     this.truncated = result.truncated;

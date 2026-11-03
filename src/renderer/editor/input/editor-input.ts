@@ -44,6 +44,8 @@ const CLIPBOARD_COMMANDS: ReadonlySet<EditCommand> = new Set(['copy', 'cut', 'pa
 /** Команды, которые ввод не выполняет сам, а передаёт наружу. */
 export type CommandName =
   | 'find'
+  /** Ctrl+Alt+F — искать только в выделенном. */
+  | 'findInSelection'
   | 'replace'
   | 'gotoLine'
   | 'palette'
@@ -617,6 +619,9 @@ export class EditorInputBinding {
       // только сообщает, кто их показывает — дело вызывающего.
       case 'find':
         this.onCommand?.('find');
+        break;
+      case 'findInSelection':
+        this.onCommand?.('findInSelection');
         break;
       case 'replace':
         this.onCommand?.('replace');

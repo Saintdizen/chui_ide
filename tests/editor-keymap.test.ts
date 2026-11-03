@@ -178,4 +178,32 @@ describe('ввод символов', () => {
   it('Alt+Enter не переводит строку (его слушает приложение)', () => {
     expect(resolveKey({ key: 'Enter', alt: true })).toBeNull();
   });
+
+  describe('Ctrl+Alt+F — искать в выделении', () => {
+    /**
+     * Найдено разбором: поиска «только в выделенном» не было вовсе — ни
+     * клавиши, ни режима. Ctrl+F занят обычным поиском, Ctrl+Shift+F — поиском
+     * по проекту, поэтому осталась третья ступень той же клавиши с Alt.
+     */
+    it('Ctrl+Alt+F — поиск в выделении', () => {
+      expect(resolveKey({ key: 'f', ctrl: true, alt: true })).toEqual({ kind: 'edit', edit: 'findInSelection' });
+    });
+
+    it('⌘+Alt+F — то же на маке', () => {
+      expect(resolveKey({ key: 'f', meta: true, alt: true })).toEqual({ kind: 'edit', edit: 'findInSelection' });
+    });
+
+    it('Ctrl+F по-прежнему обычный поиск', () => {
+      expect(resolveKey({ key: 'f', ctrl: true })).toEqual({ kind: 'edit', edit: 'find' });
+    });
+
+    it('Ctrl+Shift+F не перехвачен: это поиск по проекту', () => {
+      // Без проверки Shift сочетание ушло бы в поиск в файле.
+      expect(resolveKey({ key: 'f', ctrl: true, shift: true })).not.toEqual({ kind: 'edit', edit: 'find' });
+    });
+
+    it('Alt+F без Ctrl — не наша команда', () => {
+      expect(resolveKey({ key: 'f', alt: true })).toBeNull();
+    });
+  });
 });

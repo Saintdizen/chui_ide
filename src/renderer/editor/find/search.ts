@@ -29,6 +29,35 @@ export interface FindOptions {
   readonly wholeWord?: boolean;
   /** Считать запрос регулярным выражением. */
   readonly regex?: boolean;
+  /**
+   * Искать только в выделенном. Второй частью идёт диапазон (`FindRange`):
+   * флаг говорит ПОЧЕМУ, диапазон — ГДЕ. Вместе они и дают «в выделении».
+   */
+  readonly inSelection?: boolean;
+}
+
+/**
+ * Участок документа, в котором ищем — смещения в UTF-16, как везде здесь.
+ *
+ * Нужен для поиска в выделении. Диапазон, а не готовый текст: поиск построчный,
+ * и если бы мы складывали выделение в строку, смещения совпадений пришлось бы
+ * пересчитывать назад — а с ними работают и подсветка, и замена.
+ */
+export interface FindRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Границы выделения как диапазон поиска — или `null`, если выделения нет.
+ *
+ * Пустое выделение (просто курсор) — не область поиска: искать в нуле символов
+ * значит не найти ничего и объяснить это «не найдено», а не «вы ничего не
+ * выделили». Врать счётчиком хуже, чем не включать режим.
+ */
+export function rangeOfSelection(selection: { start: number; end: number }): FindRange | null {
+  if (selection.end <= selection.start) return null;
+  return { start: selection.start, end: selection.end };
 }
 
 /** Найденное совпадение: место в документе и номер строки для показа. */
@@ -163,6 +192,8 @@ export function findMatches(
   lineCount: number,
   query: string,
   options: FindOptions = {},
+  /** Границы поиска в смещениях документа. Не заданы — ищем по всему файлу. */
+  range?: FindRange,
 ): FindResult {
   if (query.length === 0) return EMPTY;
   const compiled = compileQuery(query, options);
@@ -170,12 +201,32 @@ export function findMatches(
     return { matches: [], error: regexError(query, options), truncated: false };
   }
 
+  // Границы — в смещениях документа, а ищем построчно. Граница, попавшая в
+  // середину строки, отрезает эту строку: иначе `ab` в `xabcy` нашлось бы по
+  // `abc`, а заменять его было бы нечем — оно же вне выделения.
+  const from = range ? Math.max(0, Math.min(range.start, range.end)) : 0;
+  const to = range ? Math.max(range.start, range.end) : Number.POSITIVE_INFINITY;
+
   const matches: FindMatch[] = [];
   let offset = 0;
   for (let line0 = 0; line0 < lineCount; line0 += 1) {
     const text = getLine(line0);
+    const lineEnd = offset + text.length;
+    // Строка кончилась раньше начала выделения — пропускаем, не разбирая.
+    if (lineEnd < from) {
+      offset += text.length + 1;
+      continue;
+    }
+    // Строка началась позже конца выделения — дальше искать некуда:
+    // смещения только растут.
+    if (offset > to) break;
+
     for (const found of lineMatches(text, compiled, options)) {
-      matches.push({ start: offset + found.start, end: offset + found.end, line: line0 + 1 });
+      const start = offset + found.start;
+      const end = offset + found.end;
+      // Совпадение берём, только если оно ЦЕЛИКОМ внутри границ.
+      if (start < from || end > to) continue;
+      matches.push({ start, end, line: line0 + 1 });
       if (matches.length >= MAX_MATCHES) return { matches, error: null, truncated: true };
     }
     // `lineText` не отдаёт перевод строки, поэтому прибавляем один знак — им и учтён.

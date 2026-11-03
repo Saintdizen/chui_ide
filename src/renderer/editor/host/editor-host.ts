@@ -2085,6 +2085,10 @@ export class EditorHost {
     else if (command === 'completeStatement') this.completeStatement();
     else if (command === 'fontSizeUp') this.zoomFont(1);
     else if (command === 'fontSizeDown') this.zoomFont(-1);
+    // Ctrl+Alt+F: искать только там, где уже выделено. Идёт отдельной веткой,
+    // а не в общем хвосте ниже: в хвосте `findInSelection` тихо стал бы
+    // обычным поиском — клавиша без своего режима.
+    else if (command === 'findInSelection') this.find.show('find', undefined, true);
     else this.find.show(command === 'replace' ? 'replace' : 'find');
   }
 

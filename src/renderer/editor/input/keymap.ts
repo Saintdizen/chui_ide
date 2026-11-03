@@ -80,6 +80,8 @@ export type EditCommand =
   | 'cut'
   | 'paste'
   | 'find'
+  /** Ctrl+Alt+F — искать только в выделенном. */
+  | 'findInSelection'
   | 'replace'
   | 'gotoLine'
   /** Ctrl+/ — закомментировать или расскомментировать строки. */
@@ -139,6 +141,7 @@ export type EditCommand =
 export function resolveKey(chord: KeyChord): KeyAction | null {
   const extend = chord.shift === true;
   const control = chord.ctrl === true || chord.meta === true;
+  const explicitAlt = chord.alt === true;
   const { key } = chord;
   // Для КОМАНД — физическое положение клавиши: раскладка не должна их отменять.
   // Для ВВОДА остаётся `key` (см. последнюю ветку) — там нужен символ раскладки.
@@ -225,6 +228,11 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     if (lower === 'c') return { kind: 'edit', edit: 'copy' };
     if (lower === 'x') return { kind: 'edit', edit: 'cut' };
     if (lower === 'v') return { kind: 'edit', edit: 'paste' };
+    // Ctrl+Alt+F — искать только в выделенном. Идёт ПЕРЕД Ctrl+F: без этого
+    // порядка Ctrl+F забирал бы сочетание себе и режим был бы недостижим.
+    // С Alt, потому что Ctrl+F занят обычным поиском, а Ctrl+Shift+F —
+    // поиском по проекту: осталась третья, «уточняющая» ступень.
+    if (lower === 'f' && explicitAlt) return { kind: 'edit', edit: 'findInSelection' };
     // Без Shift: Ctrl+Shift+F — поиск по проекту (акселератор меню), не поиск в файле.
     if (lower === 'f' && !extend) return { kind: 'edit', edit: 'find' };
     if (lower === 'h') return { kind: 'edit', edit: 'replace' };

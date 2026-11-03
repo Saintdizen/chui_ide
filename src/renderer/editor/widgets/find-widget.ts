@@ -19,8 +19,9 @@
 import type { TextBuffer } from '../core/text-buffer';
 import type { EditorController } from '../input/editor-controller';
 import type { EditorView } from '../view/editor-view';
+import { selectionEnd, selectionStart } from '../view/selection';
 import { FindState } from '../find/find-state';
-import { compileQuery, type FindMatch } from '../find/search';
+import { compileQuery, rangeOfSelection, type FindMatch } from '../find/search';
 import { replaceAll, replaceOne, type ReplaceEdit, type ReplaceSource } from '../find/replace';
 
 /** Пауза перед пересчётом поиска после нажатия клавиши. */
@@ -175,8 +176,13 @@ export class FindWidget {
     this.hide();
   }
 
-  /** Показать панель. `mode` задаёт, есть ли поле замены; `query` — с каким запросом. */
-  show(mode: FindMode, query?: string): void {
+  /**
+   * Показать панель. `mode` задаёт, есть ли поле замены; `query` — с каким запросом.
+   * `inSelection` — искать только в выделенном (Ctrl+Alt+F): границы снимаются
+   * СЕЙЧАС, потому что дальше выделение у нас заберут — курсор встанет на
+   * найденное совпадение, и прежние границы уже не прочитать.
+   */
+  show(mode: FindMode, query?: string, inSelection = false): void {
     this.visible = true;
     this.root.hidden = false;
     this.root.classList.toggle('is-replace', mode === 'replace');
@@ -185,6 +191,16 @@ export class FindWidget {
     const selected = this.controller.selectedText();
     const initial = query ?? (selected.includes('\n') ? '' : selected);
     if (initial.length > 0) this.input.value = initial;
+    // Снимаем границы ДО первого пересчёта: иначе он пойдёт по всему файлу
+    // и счётчик на миг покажет не то число.
+    this.state.setRange(
+      inSelection
+        ? rangeOfSelection({
+            start: selectionStart(this.controller.selection),
+            end: selectionEnd(this.controller.selection),
+          })
+        : null,
+    );
     this.refresh();
     this.input.focus();
     this.input.select();
@@ -203,6 +219,10 @@ export class FindWidget {
 
   hide(): void {
     this.visible = false;
+    // Границы выделения — про одну панель: закрыли и снова открыли обычным
+    // поиском, искать по всему файлу. Иначе прежнее выделение тайком
+    // подменяло бы область поиска.
+    this.state.setRange(null);
     this.root.hidden = true;
     this.view.element.classList.remove('own-editor-has-find');
     this.view.element.style.removeProperty('--own-editor-find-height');

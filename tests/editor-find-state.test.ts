@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FindState } from '../src/renderer/editor/find/find-state';
+import { rangeOfSelection } from '../src/renderer/editor/find/search';
 
 /** Источник строк для поиска: обычный массив. */
 function source(text: string) {
@@ -81,5 +82,77 @@ describe('FindState', () => {
     const state = new FindState(source('текст'));
     state.setQuery('zzz', {}, 0);
     expect(state.move(1)).toBeNull();
+  });
+
+  describe('поиск только в выделении', () => {
+    /**
+     * Найдено разбором: режима не было ни в одном слое, хотя TASKS называл его среди
+     * обязательных. Счётчик обязан честно говорить «1 из 2», а не показывать совпадения
+     * по всему файлу.
+     */
+    it('без границ ищет по всему файлу', () => {
+      const state = new FindState(source('cat\ncat\ncat'));
+      state.setQuery('cat', {}, 0);
+      expect(state.count).toBe(3);
+      expect(state.scoped).toBe(false);
+    });
+
+    it('с границами — только внутри', () => {
+      const state = new FindState(source('cat\ndog\ncat\ncat'));
+      // Вторая строка — смещения [4, 7).
+      state.setRange({ start: 4, end: 7 });
+      state.setQuery('cat', {}, 4);
+      expect(state.count).toBe(0);
+      expect(state.scoped).toBe(true);
+    });
+
+    it('совпадение внутри границ попадает', () => {
+      const state = new FindState(source('cat\ncat\ncat'));
+      state.setRange({ start: 4, end: 7 });
+      state.setQuery('cat', {}, 4);
+      expect(state.count).toBe(1);
+      expect(state.currentMatch?.line).toBe(2);
+    });
+
+    it('совпадение, вылезающее за границу, не попадает', () => {
+      const state = new FindState(source('cater\ncat'));
+      // Выделено [0, 3) — «cat», а совпадение «cater» кончается на 5.
+      state.setRange({ start: 0, end: 3 });
+      state.setQuery('cater', {}, 0);
+      expect(state.count).toBe(0);
+    });
+
+    it('снятие границ возвращает поиск по всему файлу', () => {
+      const state = new FindState(source('cat\ncat'));
+      state.setRange({ start: 0, end: 3 });
+      state.setQuery('cat', {}, 0);
+      expect(state.count).toBe(1);
+      state.setRange(null);
+      expect(state.count).toBe(2);
+      expect(state.scoped).toBe(false);
+    });
+
+    it('смена границ сама пересчитывает совпадения', () => {
+      // Иначе счётчик показывал бы старое число до следующего нажатия клавиши.
+      const state = new FindState(source('cat\ncat\ncat'));
+      state.setQuery('cat', {}, 0);
+      expect(state.count).toBe(3);
+      state.setRange({ start: 4, end: 7 });
+      expect(state.count).toBe(1);
+    });
+  });
+
+  describe('rangeOfSelection', () => {
+    it('выделение — это границы поиска', () => {
+      expect(rangeOfSelection({ start: 5, end: 9 })).toEqual({ start: 5, end: 9 });
+    });
+
+    it('пустое выделение границ не даёт: искать в ноле символов — врать счётчиком', () => {
+      expect(rangeOfSelection({ start: 5, end: 5 })).toBeNull();
+    });
+
+    it('перевёрнутое выделение тоже не границы', () => {
+      expect(rangeOfSelection({ start: 9, end: 5 })).toBeNull();
+    });
   });
 });
