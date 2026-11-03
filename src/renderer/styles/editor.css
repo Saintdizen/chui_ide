@@ -627,7 +627,10 @@
 
 .own-editor-find-input:focus {
   outline: none;
-  border-color: var(--accent_fill);
+  /* Рамка фокуса — тем же цветом, что у остальной оболочки, а не акцентом
+     редактора: иначе поле поиска в редакторе выглядит отмеченным иначе, чем
+     любое другое поле в IDE, и человек не узнаёт в нём фокус. */
+  border-color: var(--focus_ring_color);
 }
 
 .own-editor-find-counter {
