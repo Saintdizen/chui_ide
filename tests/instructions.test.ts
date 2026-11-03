@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatInstructionFile } from '../src/shared/instructions';
+import { describeBrokenLinks, findBrokenLinks, formatInstructionFile } from '../src/shared/instructions';
 
 /**
  * Правила проекта едут в КАЖДОМ запросе, поэтому у длинного файла есть выбор:
@@ -55,5 +55,60 @@ describe('правила проекта в промпте', () => {
     const out = formatInstructionFile('AGENTS.md', text, 8000);
     const mapLine = out.slice(out.indexOf('разделы:'), out.indexOf('. Нужное'));
     expect(mapLine.length).toBeLessThan(2_500);
+  });
+});
+
+/**
+ * Ссылки в правилах проверяются по путям проекта: правило с мёртвым адресом человек
+ * читает как действующее и идёт в пустоту, а модель получает тот же адрес в каждом
+ * запросе. Предупреждение говорим прямо и сам текст правил не переписываем.
+ */
+const paths = { files: ['src/app.ts', 'docs/api.md', 'tests/helpers/dom.ts'], dirs: ['src', 'docs', 'tests'] };
+
+describe('битые ссылки в правилах', () => {
+  it('живые ссылки молчат', () => {
+    expect(findBrokenLinks('Смотри `src/app.ts` и `docs/api.md`.', paths)).toEqual([]);
+  });
+
+  it('мёртвая ссылка находится', () => {
+    expect(findBrokenLinks('Смотри `src/gone.ts`.', paths)).toEqual(['src/gone.ts']);
+  });
+
+  it('добавляет источник правды из пути теста', () => {
+    expect(findBrokenLinks('Файл tests/helpers/nope.ts отсутствует.', paths)).toEqual(['tests/helpers/nope.ts']);
+  });
+
+  it('каталог в ссылке не считается битым', () => {
+    expect(findBrokenLinks('Правила в docs/ лежат рядом.', paths)).toEqual([]);
+  });
+
+  it('одна и та же ссылка не повторяется', () => {
+    expect(findBrokenLinks('gone.ts и снова gone.ts', paths)).toEqual(['gone.ts']);
+  });
+
+  it('слова и адреса не краснеют', () => {
+    // Ложная тревога дороже пропуска: на ней люди перестают верить предупреждению.
+    const text = 'Читай `read`, ходи на example.com, версия v1.2.3, шаблон {name}/{id}.ts';
+    expect(findBrokenLinks(text, paths)).toEqual([]);
+  });
+
+  it('ссылка за пределы проекта не проверяется', () => {
+    expect(findBrokenLinks('Лежит ../outside/file.ts там.', paths)).toEqual([]);
+  });
+
+  it('без списка путей молчим: пустой список — не «в проекте пусто»', () => {
+    expect(findBrokenLinks('src/gone.ts', { files: [] })).toEqual([]);
+  });
+
+  it('предупреждение называет файл правил и сами ссылки', () => {
+    const out = describeBrokenLinks('AGENTS.md', ['src/gone.ts']);
+    expect(out).toContain('AGENTS.md');
+    expect(out).toContain('src/gone.ts');
+    // Модель должна знать, что выдумывать содержимое нельзя.
+    expect(out).toContain('Не выдумывай');
+  });
+
+  it('битых нет — предупреждения нет', () => {
+    expect(describeBrokenLinks('AGENTS.md', [])).toBe('');
   });
 });

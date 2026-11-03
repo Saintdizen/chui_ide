@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { formatInstructionFile } from '../../shared/instructions';
+import { describeBrokenLinks, findBrokenLinks, formatInstructionFile } from '../../shared/instructions';
 import { formatMemory } from '../../shared/memory';
 import { formatShortMap } from '../../shared/project-map';
 import { scanProject } from '../project/scan';
+import { listProjectFiles } from '../project/scan';
 import type { WorkspaceService } from '../workspace/workspace';
 import { readStamp } from '../../shared/read-coverage';
 import type { ProjectMemory } from './project-memory';
@@ -48,6 +49,26 @@ export class WorkspaceContext {
    * `project_map`, который сканирует на каждый вызов.
    */
   private mapCache: { root: string; text: string } | null = null;
+
+  /**
+   * Пути проекта для сверки ссылок из правил — вместе с картой: оба берутся из одного
+   * обхода. `null` в `files` — обход не удался или путей нет: тогда ссылки не сверяем,
+   * а не объявляем их битыми (§ «неполный список = подсказка врёт»).
+   */
+  private pathsCache: { root: string; files: string[] } | null = null;
+
+  /** Файлы проекта относительно корня: для проверки ссылок в правилах. */
+  async projectFiles(root: string): Promise<string[]> {
+    if (this.pathsCache?.root === root) return this.pathsCache.files;
+    try {
+      const { files } = await listProjectFiles(root);
+      this.pathsCache = { root, files };
+      return files;
+    } catch {
+      this.pathsCache = { root, files: [] };
+      return [];
+    }
+  }
 
   /**
    * Карта проекта для промпта: устройство проекта по именам файлов. Пустая
@@ -97,6 +118,10 @@ export class WorkspaceContext {
     const globalMemory = formatMemory(await this.memory.list(root, 'global'), 'global');
     if (globalMemory) parts.push(globalMemory);
     let spent = 0;
+    // Пути проекта — один раз на все файлы правил: сверка ссылок нужна в каждом,
+    // а обход дерева — один. Список путей ещё пригодится карте выше — так что берём
+    // его здесь, а не до цикла: карта может быть выключена.
+    let projectFiles: string[] | null = null;
     for (const name of INSTRUCTION_FILES) {
       if (spent >= MAX_INSTRUCTIONS_TOTAL_BYTES) break;
       try {
@@ -109,6 +134,13 @@ export class WorkspaceContext {
         const room = Math.min(MAX_INSTRUCTIONS_BYTES, MAX_INSTRUCTIONS_TOTAL_BYTES - spent);
         parts.push(formatInstructionFile(name, text, room));
         spent += Math.min(text.length, room);
+
+        // Битые ссылки ищем по ВСЕМУ файлу, а не по показанной голове: в отброшенный
+        // хвост модель всё равно ходит через `read`, и мёртвый адрес там так же врёт.
+        projectFiles ??= await this.projectFiles(root);
+        const broken = findBrokenLinks(text, { files: projectFiles });
+        const warning = describeBrokenLinks(name, broken);
+        if (warning) parts.push(warning);
       } catch {
         // файла нет — это нормально
       }
