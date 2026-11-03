@@ -979,6 +979,88 @@
   outline: 1px solid var(--focus_ring_color);
 }
 
+/* Сообщение, в котором стоит текущее совпадение: обводка держит место, когда
+   само совпадение короткое и его легко потерять среди текста. */
+.msg.is-find-current .msg-body {
+  outline: 1px solid var(--focus_ring_color, currentColor);
+  outline-offset: var(--radius_2xs);
+  border-radius: var(--radius_sm);
+}
+
+/* Поиск по ленте (`Ctrl+F`): полоса между лентой и футером. */
+.chat-find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--separator_color);
+  background: var(--panel_background);
+}
+
+.chat-find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: inherit;
+  font: inherit;
+  font-size: var(--font_small_size);
+}
+
+.chat-find-input:focus {
+  outline: 1px solid var(--focus_ring_color);
+  outline-offset: -1px;
+}
+
+.chat-find-counter {
+  flex: 0 0 auto;
+  min-width: 3.5em;
+  text-align: right;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  /* Цифры одной ширины: без этого счётчик дёргается на каждом переходе. */
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-find-counter.is-empty {
+  color: var(--text_color_error);
+}
+
+.chat-find-button {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: transparent;
+  color: var(--text_color_secondary);
+  cursor: pointer;
+}
+
+.chat-find-button:hover {
+  background: var(--element_background_hover);
+  color: inherit;
+}
+
+/* Само совпадение внутри текста — здесь, а не в найденном сообщении: их много. */
+.find-mark {
+  padding: 0 1px;
+  border-radius: var(--radius_2xs);
+  background: var(--search_match_background, rgba(255, 213, 0, 0.35));
+  color: inherit;
+}
+
+.find-mark.is-current {
+  background: var(--focus_ring_color);
+  color: var(--editor_background);
+}
+
 /* Ответ оборван по лимиту токенов: строка-предупреждение с продолжением. */
 .finish-note {
   display: flex;

@@ -68,6 +68,8 @@ import { createChatTabs, type ChatSearchHit } from './chat-tabs';
 import { createRunInspector } from './run-inspector';
 import { createChatPersistence, newChatUid } from './chat-persistence';
 import { chatExportFileName, chatToMarkdown } from '../../shared/chat-export';
+import { segmentsOf } from '../../shared/chat-find';
+import { createChatFindBar } from './chat-find-bar';
 import { showContextMenu } from './context-menu';
 import { isPopupOpen } from './popup-menu';
 import { showToast } from './toast';
@@ -606,6 +608,95 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       if (searchHitTimer) clearTimeout(searchHitTimer);
       searchHitTimer = window.setTimeout(() => node.classList.remove('is-search-hit'), 2500);
     });
+  }
+
+  /**
+   * Отметки совпадений внутри ленты — отдельно от `.is-search-hit` хита из
+   * вкладок: у них разная жизнь. Здесь отметок много (все совпадения сразу),
+   * и живут они до смены запроса, а там — одна и по таймеру.
+   */
+  const findMarks: HTMLElement[] = [];
+
+  function clearFindMarks(): void {
+    // Обводку снимаем здесь же: это единственное место, которое знает и о
+    // закрытии поиска, и о смене запроса.
+    for (const session of sessions) {
+      for (const marked of session.thread.querySelectorAll('.is-find-current')) {
+        marked.classList.remove('is-find-current');
+      }
+    }
+    // Разметку снимаем по одной: `replaceChild` перестраивает узел,
+    // и живые ссылки на текст после первой замены указывали бы уже в никуда.
+    for (const mark of findMarks.splice(0)) {
+      const parent = mark.parentNode;
+      if (!parent) continue;
+      parent.replaceChild(document.createTextNode(mark.textContent ?? ''), mark);
+      parent.normalize();
+    }
+  }
+
+  /**
+   * Прокрутить к совпадению и обвести его.
+   *
+   * `block: 'center'` — потому что поиск часто попадает в длинное сообщение:
+   * у верхнего края видно только его начало и непонятно, что нашлось.
+   * `behavior: 'auto'` намеренно: плавная прокрутка трёхсот сообщений занимает
+   * секунды, и человек успевает нажать Enter ещё пять раз.
+   */
+  function revealFindMatch(target: { text: string; element: HTMLElement }, query: string, index: number): void {
+    target.element.scrollIntoView({ block: 'center', behavior: 'auto' });
+    markFindMatches(target.element, query, index);
+    // Обводка — ПОСЛЕ разметки: `markFindMatches` первым делом снимает прежние
+    // пометки вместе с обводкой, и поставленная до неё не дожила бы до экрана.
+    // Таймером её не гасим: Esc должен снимать обводку сразу, а таймер о
+    // закрытии полосы не знает и оставлял бы сообщение обведённым.
+    target.element.classList.add('is-find-current');
+  }
+
+  /**
+   * Обвести ВСЕ совпадения в сообщении и особенно сильно — текущее.
+   *
+   * Сначала снимаем прежние пометки: `textContent` сообщения меняется при этом
+   * обратно на исходный, иначе следующая разметка вставляла бы `<mark>` внутрь
+   * `<mark>`, а поиск внутри разметки нашёл бы куски, которых в тексте нет.
+   */
+  function markFindMatches(element: HTMLElement, query: string, current: number): void {
+    clearFindMarks();
+    if (query.length === 0) return;
+    // Только текстовые узлы: не трогаем обработчики кнопок «копировать» и
+    // подсветку кода внутри ответа — пересборка их бы убила.
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const texts: Text[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      texts.push(node as Text);
+    }
+
+    let seen = 0;
+    for (const textNode of texts) {
+      const value = textNode.nodeValue ?? '';
+      const pieces = segmentsOf(value, query);
+      if (!pieces.some((piece) => piece.match)) continue;
+
+      const fragment = document.createDocumentFragment();
+      for (const piece of pieces) {
+        if (!piece.match) {
+          fragment.appendChild(document.createTextNode(piece.text));
+          continue;
+        }
+        const mark = document.createElement('mark');
+        mark.className = seen === current ? 'find-mark is-current' : 'find-mark';
+        mark.textContent = piece.text;
+        fragment.appendChild(mark);
+        findMarks.push(mark);
+        seen += 1;
+      }
+      textNode.parentNode?.replaceChild(fragment, textNode);
+    }
+
+    // Текущее совпадение может оказаться за пределами окна по вертикали даже
+    // внутри центрированного сообщения — доводим до него.
+    const active = findMarks[current];
+    if (active) active.scrollIntoView({ block: 'center', behavior: 'auto' });
   }
 
   function renderTabs(): void {
@@ -1587,7 +1678,47 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // Порядок стопки — сверху вниз: план, изменения, чипы.
   composer.extras.append(goalPanel.element, planPanel.element, changesPanel.element, attachments.element);
 
-  const element = h('div', { class: 'chat' }, tabs.element, tabs.searchBar, body, footer);
+  // Поиск по ленте. Полоса стоит между лентой и футером, а не поверх: она не
+  // закрывает найденное сообщение, когда к нему прыгаешь.
+  const findBar = createChatFindBar({
+    targets: () =>
+      [...active().thread.querySelectorAll('.msg')].map((node) => ({
+        text: node.textContent ?? '',
+        element: node as HTMLElement,
+      })),
+    reveal: (target, query, index) => revealFindMatch(target, query, index),
+    clearHighlight: () => {
+      for (const session of sessions) {
+        for (const marked of session.thread.querySelectorAll('.is-search-hit')) {
+          marked.classList.remove('is-search-hit');
+        }
+      }
+      clearFindMarks();
+    },
+    // Вернуть фокус тому, кто открывал поиск: без этого он улетал в `body`, и
+    // следующий символ, набранный «в никуда», терялся.
+    onClose: () => input.focus(),
+  });
+
+  const element = h('div', { class: 'chat' }, tabs.element, tabs.searchBar, body, findBar.element, footer);
+
+  /**
+   * `Ctrl+F` — поиск по ленте открытой беседы.
+   *
+   * Висит на корне панели, а не на `document`: иначе перехватывал бы `Ctrl+F`
+   * у редактора и у встроенного браузера, где он ищет по файлу и по странице.
+   * Панель ловит событие только когда фокус внутри неё.
+   *
+   * В поле ввода композера `Ctrl+F` НЕ перехватываем: там он ищет по набранному
+   * тексту и не должен переключать внимание на ленту.
+   */
+  element.addEventListener('keydown', (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+    if (event.key !== 'f' && event.key !== 'F') return;
+    if (event.target === input) return;
+    event.preventDefault();
+    findBar.open();
+  });
 
   // Перетаскивание изображения на панель чата — тот же путь, что вставка из буфера.
   // Слушатели на корне: файл можно бросить в любое место панели, не только в поле.

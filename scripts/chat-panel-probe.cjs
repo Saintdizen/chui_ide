@@ -1257,6 +1257,114 @@ app.whenReady().then(async () => {
   check('утверждение плана вернулось в main', approved?.approved === true, approved);
   const afterApprove = await modeState();
   check('утверждение переключило композер в «Агента»', afterApprove.агент === true, afterApprove);
+  /* ── поиск по ленте (`Ctrl+F`) ─────────────────────────────────── */
+
+  // Главное, что здесь проверяется — ЧТО ищется и КУДА прыгает. Отдельный
+  // повод для проверки в живом окне: фокус на панели зависит от того, кто
+  // сейчас в фокусе, а `is-find-current` живёт на обводке соседнего узла.
+  await ask(
+    second,
+    `(async () => {
+      const panel = document.querySelector('.chat');
+      panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true }));
+      await new Promise((r) => setTimeout(r, 200));
+      return true;
+    })()`,
+  );
+  const findOpen = await ask(
+    second,
+    `(() => {
+      const bar = document.querySelector('.chat-find');
+      return { видна: !!bar && !bar.hidden, поле: !!document.querySelector('.chat-find-input') };
+    })()`,
+  );
+  check('Ctrl+F открывает полосу поиска', findOpen.видна === true, findOpen);
+  check('в полосе есть поле ввода', findOpen.поле === true, findOpen);
+
+  // Ищем букву, которая в ленте заведомо есть в НЕСКОЛЬКИХ сообщениях: привязываться
+  // к словам посева нельзя — их текст меняют, и проверка ломается вместе с ним.
+  // Счётчик должен сказать «из N», а переход вперёд — поменять номер, не меняя N.
+  const firstAfter = await ask(
+    second,
+    `(async () => {
+      const input = document.querySelector('.chat-find-input');
+      input.value = 'е';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 200));
+      return {
+        классы: [...document.querySelectorAll('.msg')].map((n) => n.className),
+        обводок: document.querySelectorAll('.msg.is-find-current').length,
+        меток: document.querySelectorAll('.find-mark').length,
+        счётчик: document.querySelector('.chat-find-counter')?.textContent ?? '',
+        классСтиля: getComputedStyle(document.querySelector('.chat-find') ?? document.body).display,
+      };
+    })()`,
+  );
+  console.log('  ПОСЛЕ ВВОДА:', JSON.stringify(firstAfter));
+  const firstFind = await ask(
+    second,
+    `(() => ({
+      счётчик: document.querySelector('.chat-find-counter')?.textContent ?? '',
+      совпадений: document.querySelectorAll('.find-mark').length,
+      обведено: document.querySelectorAll('.msg.is-find-current').length,
+    }))()`,
+  );
+  check('счётчик нашёл совпадения в нескольких сообщениях', /^1 из (?:[2-9]|[1-9]\d+)$/.test(firstFind.счётчик), firstFind.счётчик);
+  check('совпадения подсвечены метками', firstFind.совпадений >= 2, firstFind.совпадений);
+  check('текущее сообщение обведено', firstFind.обведено === 1, firstFind.обведено);
+
+  await ask(
+    second,
+    `(async () => {
+      const input = document.querySelector('.chat-find-input');
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 150));
+      return true;
+    })()`,
+  );
+  const secondFind = await ask(
+    second,
+    `(() => ({
+      счётчик: document.querySelector('.chat-find-counter')?.textContent ?? '',
+      обведено: document.querySelectorAll('.msg.is-find-current').length,
+    }))()`,
+  );
+  check('Enter перешёл к другому совпадению', secondFind.счётчик.startsWith('2 из'), secondFind.счётчик);
+  check('обводка при переходе не раздвоилась', secondFind.обведено === 1, secondFind.обведено);
+
+  // Запрос, которого нет: счётчик говорит «нет», а не «0 из 0».
+  await ask(
+    second,
+    `(async () => {
+      const input = document.querySelector('.chat-find-input');
+      input.value = 'яблоко-которого-нет';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 150));
+      return true;
+    })()`,
+  );
+  const emptyFind = await ask(second, `document.querySelector('.chat-find-counter')?.textContent ?? ''`);
+  check('на пустой запрос счётчик говорит «нет»', emptyFind === 'нет', emptyFind);
+
+  await ask(
+    second,
+    `(async () => {
+      const input = document.querySelector('.chat-find-input');
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 150));
+      return true;
+    })()`,
+  );
+  const findClosed = await ask(
+    second,
+    `(() => ({
+      видна: !document.querySelector('.chat-find')?.hidden,
+      метки: document.querySelectorAll('.find-mark').length,
+      обводка: document.querySelectorAll('.msg.is-find-current').length,
+    }))()`,
+  );
+  check('Esc закрывает полосу', findClosed.видна === false, findClosed);
+  check('закрытие снимает подсветку', findClosed.метки === 0 && findClosed.обводка === 0, findClosed);
 
   console.log(`\n[проба] снимок: ${shotFile}`);
 
