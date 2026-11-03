@@ -183,6 +183,49 @@ describe('выделение вхождений', () => {
   });
 });
 
+describe('Ctrl+U — шаг назад по мультикурсору', () => {
+  it('снимает по одной каретке, возвращаясь к набору до размножения', () => {
+    const { controller } = make('foo foo foo');
+    controller.setSelection({ anchor: 0, active: 3 }, false);
+    expect(controller.selectNextOccurrence()).toBe(true);
+    expect(controller.selectAllOccurrences()).toBe(true);
+    expect(controller.selections).toHaveLength(3);
+
+    // Назад по шагам: все вхождения -> два -> одно.
+    expect(controller.selectCursorUndo()).toBe(true);
+    expect(controller.selections).toHaveLength(2);
+    expect(controller.selectCursorUndo()).toBe(true);
+    expect(controller.selections).toHaveLength(1);
+    // История кончилась — клавиша свободна.
+    expect(controller.selectCursorUndo()).toBe(false);
+  });
+
+  it('без размножения откатывать нечего', () => {
+    const { controller } = make('abc');
+    expect(controller.selectCursorUndo()).toBe(false);
+  });
+
+  it('откат кареток не трогает текст, уже набранный во всех местах', () => {
+    const { controller, buffer } = make('foo foo');
+    controller.setSelection({ anchor: 0, active: 3 }, false);
+    controller.selectAllOccurrences();
+    controller.type('bar');
+    expect(buffer.text).toBe('bar bar');
+    // Ctrl+U — это откат кареток, а не правок: текст остаётся, как он есть.
+    expect(controller.selectCursorUndo()).toBe(true);
+    expect(buffer.text).toBe('bar bar');
+    expect(controller.selections).toHaveLength(1);
+  });
+
+  it('смена документа забывает историю кареток', () => {
+    const { controller } = make('foo foo');
+    controller.setSelection({ anchor: 0, active: 3 }, false);
+    controller.selectAllOccurrences();
+    controller.setBuffer(new TextBuffer('bar bar'));
+    expect(controller.selectCursorUndo()).toBe(false);
+  });
+});
+
 describe('сброс мультикурсора', () => {
   it('Escape оставляет только главный курсор', () => {
     const { controller } = make('abcdef');

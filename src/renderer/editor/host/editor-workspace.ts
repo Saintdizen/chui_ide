@@ -810,6 +810,7 @@ export class EditorWorkspace {
       addCursorAbove: () => this.pane.addCursorAbove(),
       addCursorBelow: () => this.pane.addCursorBelow(),
       collapseSelections: () => void this.pane.collapseSelections(),
+      selectCursorUndo: () => void this.pane.selectCursorUndo(),
     };
     const formatCode = this.formatCode;
     if (formatCode) context.formatCode = () => path && formatCode(path);

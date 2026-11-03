@@ -108,7 +108,9 @@ export interface EditorCommandContext {
   selectAllOccurrences(): void;
   addCursorAbove(): void;
   addCursorBelow(): void;
+  /** Escape — оставить только главную каретку; Ctrl+U — шаг назад по набору кареток. */
   collapseSelections(): void;
+  selectCursorUndo(): void;
 }
 
 /** Что команда требует от контекста сверх обязательного. */
@@ -483,6 +485,14 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     keybinding: 'Escape',
     category: 'Мультикурсор',
     run: (context) => context.collapseSelections(),
+  },
+  {
+    id: 'editor.selectCursorUndo',
+    label: 'Шаг назад по мультикурсору',
+    alias: 'selectCursorUndo',
+    keybinding: 'Ctrl+U',
+    category: 'Мультикурсор',
+    run: (context) => context.selectCursorUndo(),
   },
   {
     id: 'editor.fold',

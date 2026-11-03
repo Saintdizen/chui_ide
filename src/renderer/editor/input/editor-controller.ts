@@ -133,6 +133,11 @@ export class EditorController {
    * держатся одинаковыми. `null` — связи нет.
    */
   private linked: { start: number; end: number }[] | null = null;
+  /**
+   * Стек для Ctrl+U: наборы кареток ДО каждого размножения. Откат кареток, а не текста —
+   * правки остаются в документе.
+   */
+  private readonly cursorHistory: Selection[][] = [];
 
   constructor(buffer: TextBuffer, options: EditorControllerOptions = {}) {
     this.buffer = buffer;
@@ -220,6 +225,7 @@ export class EditorController {
 
   /** Добавить курсор (Alt+клик, Ctrl+Alt+↑/↓, Ctrl+D). Новый становится главным. */
   addCursor(selection: Selection): void {
+    this.rememberCursors();
     this.setSelections([...this.selections, selection]);
   }
 
@@ -254,11 +260,38 @@ export class EditorController {
   selectAllOccurrences(): boolean {
     const occurrences = findOccurrences(this.buffer, this.selection);
     if (occurrences.length === 0) return false;
+    this.rememberCursors();
     this.setSelections(occurrences.map((range) => ({ anchor: range.start, active: range.end })));
     return true;
   }
 
-  /** Оставить только главный курсор: Escape после мультикурсора. */
+  /**
+   * Ctrl+U: шаг назад по истории кареток — последнее добавление курсора отменяется.
+   * Это НЕ отмена текста: правки остаются, снимается только размножение кареток.
+   * `false` — добавлять было нечего, клавишу съедать незачем.
+   */
+  selectCursorUndo(): boolean {
+    const previous = this.cursorHistory.pop();
+    if (!previous) return false;
+    this.restoreCursors(previous);
+    this.emit('selection', this.caret);
+    return true;
+  }
+
+  /**
+   * Запомнить, сколько кареток было до размножения. Повторное добавление при том же
+   * наборе не плодит снимков: возврат по Ctrl+U пойдёт по шагам, а не по каждому вхождению.
+   */
+  private rememberCursors(): void {
+    const snapshot = [...this.selections];
+    const last = this.cursorHistory[this.cursorHistory.length - 1];
+    if (last && sameSelections(last, snapshot)) return;
+    this.cursorHistory.push(snapshot);
+    // Глубже стека не запоминаем: удержание Ctrl+D на тысячном файле иначе копит всё.
+    if (this.cursorHistory.length > CURSOR_HISTORY_LIMIT) this.cursorHistory.shift();
+  }
+
+  /** Оставить только главный курсор (Escape); шаг стека кареток возвращает Ctrl+U. */
   collapseToPrimary(): void {
     this.setSelections([this.selection]);
   }
@@ -306,8 +339,10 @@ export class EditorController {
     this.buffer = buffer;
     this.linked = null;
     this.restoreCursors([selection]);
+    // Новая смена документа — новая история: и правки, и каретки сбрасываются.
     this.history.clear();
     this.ledger.clear();
+    this.cursorHistory.length = 0;
     this.emit('selection', this.caret);
   }
 
@@ -988,4 +1023,13 @@ function earliestStart(changes: readonly { start: number }[]): number {
   let from = Number.POSITIVE_INFINITY;
   for (const change of changes) from = Math.min(from, change.start);
   return Number.isFinite(from) ? from : 0;
+}
+
+/** Глубже не запоминаем: удержание Ctrl+D на большом файле иначе копит всё подряд. */
+const CURSOR_HISTORY_LIMIT = 100;
+
+/** Два набора кареток совпадают — повторно в стек не пишем. */
+function sameSelections(a: readonly Selection[], b: readonly Selection[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((sel, i) => sel.anchor === b[i]!.anchor && sel.active === b[i]!.active);
 }

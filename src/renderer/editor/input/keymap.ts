@@ -109,6 +109,8 @@ export type EditCommand =
   | 'addCursorBelow'
   /** Escape — оставить только главную каретку после мультикурсора. */
   | 'collapseSelections'
+  /** Ctrl+U — шаг назад по мультикурсору: снять последнюю добавленную каретку. */
+  | 'selectCursorUndo'
   /** Ctrl+Shift+[ и Ctrl+Shift+] — свернуть и развернуть блок у курсора. */
   | 'fold'
   | 'unfold'
@@ -228,8 +230,9 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     if (lower === 'h') return { kind: 'edit', edit: 'replace' };
     // Без Shift: Ctrl+Shift+G — панель «Изменения» (сочетание renderer), не переход к строке.
     if (lower === 'g' && !extend) return { kind: 'edit', edit: 'gotoLine' };
-    // Ctrl+D — следующее вхождение слова, Ctrl+Shift+L — все вхождения сразу.
+    // Ctrl+D — следующее вхождение слова, Ctrl+Shift+L — все вхождения, Ctrl+U — шаг назад.
     if (lower === 'd') return { kind: 'edit', edit: 'selectNextOccurrence' };
+    if (lower === 'u') return { kind: 'edit', edit: 'selectCursorUndo' };
     if (lower === 'l' && extend) return { kind: 'edit', edit: 'selectAllOccurrences' };
     // Ctrl+Shift+K — удалить строку; Ctrl+Shift+J — соединить строки в одну.
     if (lower === 'k' && extend) return { kind: 'edit', edit: 'deleteLine' };

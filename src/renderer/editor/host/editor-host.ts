@@ -2228,6 +2228,14 @@ export class EditorHost {
     return many;
   }
 
+  /**
+   * Шаг назад по мультикурсору (Ctrl+U): снять каретки, добавленные последними.
+   * Откатывается только набор кареток — уже введённый текст остаётся в файле.
+   */
+  selectCursorUndo(): boolean {
+    return this.controller.selectCursorUndo();
+  }
+
   unfoldAll(): void {
     this.view.unfoldAll();
   }

@@ -693,6 +693,10 @@ export class EditorInputBinding {
       case 'collapseSelections':
         this.controller.collapseToPrimary();
         break;
+      // Ctrl+U: шаг назад по мультикурсору — текст не трогаем, снимаем каретку.
+      case 'selectCursorUndo':
+        this.controller.selectCursorUndo();
+        break;
       // Свернуть и развернуть блок у курсора — это состояние вида, вызывающий не нужен.
       case 'fold':
         this.view.foldAt(this.controller.caret);
