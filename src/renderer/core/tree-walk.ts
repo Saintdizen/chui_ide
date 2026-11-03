@@ -22,13 +22,24 @@ export interface WalkRow {
   readonly expanded: boolean;
 }
 
-export type WalkKey = 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End' | 'Enter';
+export type WalkKey =
+  | 'ArrowUp'
+  | 'ArrowDown'
+  | 'ArrowLeft'
+  | 'ArrowRight'
+  | 'Home'
+  | 'End'
+  | 'PageUp'
+  | 'PageDown'
+  | 'Enter'
+  | 'Star';
 
 export type WalkAction =
   | { readonly kind: 'move'; readonly path: string }
   | { readonly kind: 'expand'; readonly path: string }
   | { readonly kind: 'collapse'; readonly path: string }
-  | { readonly kind: 'open'; readonly path: string };
+  | { readonly kind: 'open'; readonly path: string }
+  | { readonly kind: 'expandAll'; readonly paths: readonly string[] };
 
 /**
  * Куда ведёт нажатие.
@@ -65,6 +76,22 @@ export function walkTree(rows: readonly WalkRow[], current: string | null, key: 
       return at === rows.length - 1 ? null : move(rows, rows.length - 1);
     case 'Enter':
       return { kind: 'open', path: row.path };
+    case 'Star': {
+      // Раскрыть всех папок-соседей одного уровня (договор APG для «*»).
+      // Файлы и уже раскрытые в набор не попадают: вызывающему незачем их трогать.
+      const parent = parentOf(rows, at);
+      const paths: string[] = [];
+      for (let index = 0; index < rows.length; index += 1) {
+        const other = rows[index]!;
+        if (other.depth !== row.depth || parentOf(rows, index) !== parent) continue;
+        if (other.directory && !other.expanded) paths.push(other.path);
+      }
+      return paths.length > 0 ? { kind: 'expandAll', paths } : null;
+    }
+    case 'PageUp':
+      return at > 0 ? move(rows, Math.max(0, at - PAGE)) : null;
+    case 'PageDown':
+      return at < rows.length - 1 ? move(rows, Math.min(rows.length - 1, at + PAGE)) : null;
     case 'ArrowRight': {
       if (!row.directory) return null;
       if (!row.expanded) return { kind: 'expand', path: row.path };
@@ -83,6 +110,24 @@ export function walkTree(rows: readonly WalkRow[], current: string | null, key: 
       return null;
     }
   }
+}
+
+/**
+ * Сколько строк прыгает `PageUp`/`PageDown`.
+ *
+ * Число не по высоте окна: высота у проводника меняется, а прыжок на «страницу»
+ * в 15 строк читается одинаково и на минимуме, и на полном экране. Реального
+ * размера окна чистый модуль не знает — и знать не должен.
+ */
+const PAGE = 15;
+
+/** Индекс родителя строки: ближайшая выше с меньшей глубиной (`-1` — корень). */
+function parentOf(rows: readonly WalkRow[], index: number): number {
+  const depth = rows[index]!.depth;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (rows[cursor]!.depth < depth) return cursor;
+  }
+  return -1;
 }
 
 function move(rows: readonly WalkRow[], index: number): WalkAction | null {

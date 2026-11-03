@@ -263,7 +263,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // Ход по дереву стрелками: до этого их не было вовсе — до файла можно было
     // добраться только мышью. Строки знают свою глубину и раскрыты ли они, поэтому
     // правило живёт в `core/tree-walk.ts`, а здесь только применение.
-    const walkKey = event.key;
+    // «*» приходит как `event.key === '*'` и на русской раскладке тоже (там это
+    // та же клавиша): сверяем по `key`, а не по коду, — так же, как остальные.
+    const walkKey = event.key === '*' ? 'Star' : event.key;
     if (WALK_KEYS.has(walkKey)) {
       const action = walkTree(walkRows(), selected, walkKey as WalkKey);
       if (action) {
@@ -2003,7 +2005,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     'ArrowRight',
     'Home',
     'End',
+    'PageUp',
+    'PageDown',
     'Enter',
+    'Star',
   ]);
 
   /**
@@ -2065,6 +2070,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         if (entry) void onClick(entry);
         return;
       }
+      case 'expandAll':
+        // Всем папкам на одном уровне с текущей — раскрыться («*» по APG).
+        for (const path of action.paths) if (!expanded.has(path)) setExpanded(path, true);
+        render();
+        return;
     }
   };
 
