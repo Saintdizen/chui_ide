@@ -7,17 +7,27 @@ import type { DefineCommand } from '../src/renderer/core/command-args';
  * построчный экран. Ещё они обязаны молчать на кривых аргументах, а не открывать
  * сравнение файла с самим собой.
  */
-function setup(options: { picked?: string | null } = {}) {
+function setup(
+  options: { picked?: string | null; current?: string | null; draft?: string | null; saved?: string } = {},
+) {
   const commands = new Map<string, (...args: unknown[]) => unknown>();
   const define: DefineCommand = (descriptor, handler) => commands.set(descriptor.id, handler);
-  const opened: { kind: 'diff' | 'folder'; left: string; right: string }[] = [];
+  const opened: { kind: 'diff' | 'folder' | 'unsaved'; left?: string; right?: string }[] = [];
+  const unsaved: { path: string; saved: string; edited: string }[] = [];
   const picked: string[] = [];
   const deps = {
     diffView: {
       openFiles: async (left: string, right: string) => {
         opened.push({ kind: 'diff', left, right });
       },
+      openUnsaved: async (path: string, saved: string, edited: string) => {
+        opened.push({ kind: 'unsaved', left: path });
+        unsaved.push({ path, saved, edited });
+      },
     },
+    currentPath: () => options.current ?? null,
+    textOf: () => (options.draft === undefined ? null : options.draft),
+    readText: async () => options.saved ?? '',
     folderCompare: {
       open: async (left: string, right: string) => {
         opened.push({ kind: 'folder', left, right });
@@ -31,18 +41,53 @@ function setup(options: { picked?: string | null } = {}) {
     },
   } as unknown as CompareDeps;
   registerCompareCommands(define, deps);
-  return { commands, opened, picked };
+  return { commands, opened, picked, unsaved };
 }
 
 describe('registerCompareCommands', () => {
-  it('регистрирует четыре команды сравнения', () => {
+  it('регистрирует пять команд сравнения', () => {
+    // Пятая — `file.compareWithSaved` (F7): сверка несохранённого с диском.
     const { commands } = setup();
     expect([...commands.keys()].sort()).toEqual([
       'diff.compareFiles',
       'file.compareSelection',
       'file.compareWith',
+      'file.compareWithSaved',
       'folder.compare',
     ]);
+  });
+
+  describe('сверить с сохранённым (F7)', () => {
+    /**
+     * Найдено разбором: сравнить можно было только два файла НА ДИСКЕ. Сверить
+     * черновик с тем, что сохранено, было нечем — а это и есть рабочее
+     * применение: посмотреть, что наменял, ДО записи.
+     */
+    it('берёт текущую вкладку, когда путь не назван', async () => {
+      const { commands, unsaved } = setup({ current: '/a.ts', draft: 'новое', saved: 'старое' });
+      await commands.get('file.compareWithSaved')!(undefined);
+      expect(unsaved).toEqual([{ path: '/a.ts', saved: 'старое', edited: 'новое' }]);
+    });
+
+    it('слева сохранённое, справа черновик', async () => {
+      // Стороны важно не перепутать: иначе «что убрал» и «что добавил» меняются
+      // местами, и правка читается наоборот.
+      const { commands, unsaved } = setup({ draft: 'НЕСОХРАНЁННОЕ', saved: 'НА ДИСКЕ' });
+      await commands.get('file.compareWithSaved')!('/a.ts');
+      expect(unsaved[0]).toEqual({ path: '/a.ts', saved: 'НА ДИСКЕ', edited: 'НЕСОХРАНЁННОЕ' });
+    });
+
+    it('нет открытого файла — молчит', async () => {
+      const { commands, opened } = setup({ current: null });
+      await commands.get('file.compareWithSaved')!(undefined);
+      expect(opened).toEqual([]);
+    });
+
+    it('файла нет в реестре — молчит, а не сверяет с пустотой', async () => {
+      const { commands, opened } = setup({ current: '/a.ts', draft: null });
+      await commands.get('file.compareWithSaved')!('/a.ts');
+      expect(opened).toEqual([]);
+    });
   });
 
   it('две папки открывает списком различий, а не построчным экраном', async () => {

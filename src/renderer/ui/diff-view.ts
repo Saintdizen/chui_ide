@@ -37,6 +37,11 @@ export interface DiffView {
    * индексировать нечего, поэтому блоки без кнопок.
    */
   openFiles(left: string, right: string): Promise<void>;
+  /**
+   * Сверить несохранённое с сохранённым (F7). `file.compareWithSaved` без пути —
+   * по текущей вкладке.
+   */
+  openUnsaved(path: string, saved: string, edited: string): Promise<void>;
   /** Показать ленту замечаний (кнопка в шапке и команда палитры). */
   showComments(): void;
   close(): void;
@@ -53,6 +58,15 @@ interface DiffTarget {
   refs?: { base: string; head: string };
   /** Сравнение двух файлов из дерева: слева `filePair.left`, справа `filePair.right`. */
   filePair?: { left: string; right: string };
+  /**
+   * Сверка черновика с тем, что на диске: слева сохранённое, справа то, что в
+   * редакторе прямо сейчас.
+   *
+   * `saved` передаётся содержимым, а не путём: файл на диске — это и есть
+   * сохранённое, но перечитывать его по пути значило бы сверять с тем, что
+   * могло измениться за миг до нажатия, а не с тем, что человек помнит.
+   */
+  unsaved?: { path: string; saved: string; draft: string };
 }
 
 /** Новое замечание, которое человек ещё набирает. */
@@ -506,10 +520,13 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
   });
 
   const render = async (target: DiffTarget): Promise<void> => {
-    const { path, staged, commit, refs, filePair } = target;
+    const { path, staged, commit, refs, filePair, unsaved } = target;
     let diff: GitDiff;
     try {
-      if (filePair) {
+      if (unsaved) {
+        // Обе стороны уже в руках: слева сохранённое, справа черновик.
+        diff = { original: unsaved.saved, modified: unsaved.draft, hunks: [] };
+      } else if (filePair) {
         // Два файла читаем сразу: сравнение — это их тексты, без git.
         const [original, modified] = await Promise.all([deps.readText(filePair.left), deps.readText(filePair.right)]);
         diff = { original, modified, hunks: [] };
@@ -579,6 +596,15 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
     },
     async openFiles(left, right) {
       current = { path: right, staged: false, filePair: { left, right } };
+      open = true;
+      element.hidden = false;
+      activeThread = null;
+      draft = null;
+      await render(current);
+    },
+    async openUnsaved(path, saved, edited) {
+      // `edited`, а не `draft`: `draft` — уже занятое имя черновика замечания.
+      current = { path, staged: false, unsaved: { path, saved, draft: edited } };
       open = true;
       element.hidden = false;
       activeThread = null;

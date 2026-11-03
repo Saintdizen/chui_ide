@@ -46,6 +46,7 @@ import {
 } from './editing';
 import { toggleBlockComment, toggleLineComment } from './comments';
 import { reindentPasted } from './reindent';
+import { cleanPastedText } from '../../../shared/paste-clean';
 import { wrapSelection, type SurroundOption } from './surround';
 import type { CaseStyle } from './case-convert';
 import {
@@ -862,6 +863,9 @@ export class EditorController {
    * строки, и прибавка отступа уехала бы по тексту.
    */
   paste(text: string): void {
+    // Чужие невидимые знаки и `\r` из буфера — в файл не пускаем: глаза их не
+    // видят, а компилятор и поиск — очень (см. `shared/paste-clean.ts`).
+    text = cleanPastedText(text);
     if (!text.includes('\n')) {
       this.type(text);
       return;

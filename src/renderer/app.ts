@@ -427,6 +427,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Смена режима Vim обновляет значок в строке состояния.
     onVimModeChange: () => refreshStatus(),
     emacsMode: settings.editor.emacsMode,
+    tabMovesFocus: settings.editor.tabMovesFocus,
     ligatures: settings.editor.fontLigatures,
     // Ctrl+колесо: размер шрифта живёт в настройках, поэтому редактор только просит шаг.
     onZoomFont: (step) => zoomFontByWheel(step),
@@ -3346,7 +3347,16 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   /* ── команды, вынесенные из сборки ─────────────────────────────────────── */
 
   // Сравнение (папки, файлы, выделенное) — `core/compare-commands.ts`.
-  registerCompareCommands(define, { quickOpen, folderCompare: folderCompareModal, diffView });
+  registerCompareCommands(define, {
+    quickOpen,
+    folderCompare: folderCompareModal,
+    diffView,
+    currentPath: () => editors.currentPath,
+    textOf: (path) => editors.currentText(path),
+    // Сохранённое — С ДИСКА, мимо реестра документов: в реестре лежит черновик,
+    // и сверить его с самим собой значило бы показать «различий нет» всегда.
+    readText: async (path) => (await rpc.request('workspace.readFile', { path })).text,
+  });
 
   // Поиск по проекту, TODO-пометки и замена по структуре — `core/search-commands.ts`.
   registerSearchCommands(define, { dock, searchView, structuralSearch });
@@ -3546,6 +3556,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       smoothScroll: next.editor.smoothScroll,
       vimMode: next.editor.vimMode,
       emacsMode: next.editor.emacsMode,
+      tabMovesFocus: next.editor.tabMovesFocus,
       ligatures: next.editor.fontLigatures,
       spellcheck: next.editor.spellcheck,
     });

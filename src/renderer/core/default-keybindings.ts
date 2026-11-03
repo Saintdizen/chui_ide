@@ -38,6 +38,9 @@ export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { combo: 'Shift+Alt+O', command: 'editor.organizeImports' },
   // Рефакторинг — Ctrl+Shift+R открывает список действий раздела `refactor`.
   { combo: 'Ctrl+Shift+R', command: 'editor.refactor' },
+  // Сверка с сохранённым — F7, как в прочих редакторах: посмотреть, что
+  // наменял, ДО записи на диск.
+  { combo: 'F7', command: 'file.compareWithSaved' },
   // Отладка — привычные сочетания: F5 пуск/продолжить, Shift+F5 стоп,
   // F9 точка останова, F10/F11 шаги.
   { combo: 'F5', command: 'debug.continue' },

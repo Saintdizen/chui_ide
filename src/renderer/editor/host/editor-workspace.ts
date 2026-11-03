@@ -87,6 +87,8 @@ export interface EditorWorkspaceOptions {
   tabSize?: number;
   /** Отступ пробелами (иначе табами). Запасной ответ, когда файл ничего не подсказал. */
   insertSpaces?: boolean;
+  /** Tab уводит фокус из редактора (настройка `editor.tabMovesFocus`). */
+  tabMovesFocus?: boolean;
   /** Кегль текста в редакторе, px. */
   fontSize?: number;
   /** Высота строки, px; `0` — «по шрифту». */
@@ -1107,6 +1109,7 @@ export class EditorWorkspace {
   applyOptions(options: {
     tabSize?: number;
     insertSpaces?: boolean;
+    tabMovesFocus?: boolean;
     fontSize?: number;
     lineHeight?: number;
     cursorStyle?: CursorStyle;

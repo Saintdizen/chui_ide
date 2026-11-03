@@ -94,6 +94,13 @@ export interface EditorInputOptions {
   onPasted?: (range: { start: number; end: number }) => void;
   /** Vim-режим включён при создании (настройка `editor.vimMode`). */
   vimMode?: boolean;
+  /**
+   * Tab уводит фокус из редактора, а не вставляет отступ.
+   *
+   * Режим для тех, кому клавиатура — путь ко всему остальному интерфейсу: в
+   * тексте без Tab не обходятся, но из редактора иначе не выйти.
+   */
+  tabMovesFocus?: boolean;
   /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
   onVimModeChange?: (mode: VimMode) => void;
   /**
@@ -111,6 +118,8 @@ export class EditorInputBinding {
   private readonly input: HTMLTextAreaElement;
   private readonly viewport: HTMLElement | null;
   private readonly onCommand: ((command: CommandName) => void) | undefined;
+  /** Tab уводит фокус — см. одноимённую опцию. */
+  private tabMovesFocus: boolean;
   private readonly interceptors: readonly KeyInterceptor[];
   private readonly language: (() => string | null) | undefined;
   /** Начатая приставка сочетания (`Ctrl+K`), ждущая вторую клавишу. `null` — не начата. */
@@ -134,6 +143,7 @@ export class EditorInputBinding {
     this.view = view;
     this.controller = controller;
     this.onCommand = options.onCommand;
+    this.tabMovesFocus = options.tabMovesFocus === true;
     this.interceptors = options.interceptors ?? [];
     this.language = options.language;
     this.onPasted = options.onPasted;
@@ -243,6 +253,11 @@ export class EditorInputBinding {
   }
 
   /** Поставить фокус в редактор — ввод идёт в скрытое поле. */
+  /** Переключить режим «Tab уводит фокус». */
+  setTabMovesFocus(on: boolean): void {
+    this.tabMovesFocus = on;
+  }
+
   focus(): void {
     this.input.focus();
   }
@@ -297,6 +312,7 @@ export class EditorInputBinding {
       ctrl: event.ctrlKey,
       meta: event.metaKey,
       alt: event.altKey,
+      tabMovesFocus: this.tabMovesFocus,
     };
 
     // Сначала попапы: при видимом списке подсказок стрелки и Enter принадлежат ему,
@@ -355,6 +371,13 @@ export class EditorInputBinding {
       this.runMotion(action.motion, action.extend);
       return;
     }
+    // Увод фокуса: Tab выводит из редактора, Shift+Tab — обратно внутрь.
+    // Своего обработчика нет — браузер сделает это сам, но нам надо знать,
+    // что это не отступ: иначе Tab молча съедался бы и выйти было нельзя.
+    if (action.kind === 'focus') {
+      this.moveFocusOutside(action.back);
+      return;
+    }
     // Копирование, вырезание и вставку делают события буфера обмена — не мешаем им.
     if (CLIPBOARD_COMMANDS.has(action.edit)) return;
 
@@ -362,6 +385,32 @@ export class EditorInputBinding {
     if (recordsCommand(action.edit)) this.macro.push({ kind: 'edit', command: action.edit });
     this.runEdit(action.edit);
   };
+
+  /**
+   * Увести фокус из редактора — по порядку обхода страницы.
+   *
+   * Свой поиск, а не `event.preventDefault()` с надеждой на браузер: у нас
+   * настоящий фокус стоит на скрытом поле ввода, и обход браузера вынес бы его
+   * в соседнюю пустоту. Идём по странице от поля ввода и берём первый элемент,
+   * который умеет принимать фокус.
+   */
+  private moveFocusOutside(back: boolean): void {
+    const focusable = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((node) => node !== this.input && !node.hasAttribute('disabled') && node.offsetParent !== null);
+    if (focusable.length === 0) {
+      this.input.blur();
+      return;
+    }
+    // От поля ввода — вперёд или назад по списку. Поле ввода в списке может и
+    // не быть (у него свой tabindex), тогда идём с края.
+    const at = focusable.indexOf(this.input as unknown as HTMLElement);
+    const index =
+      at === -1 ? (back ? focusable.length - 1 : 0) : (at + (back ? -1 : 1) + focusable.length) % focusable.length;
+    focusable[index]?.focus();
+  }
 
   private readonly onBeforeInput = (event: InputEvent): void => {
     // Vim-режим вне вставки: клавиши там — команды, и текста в поле быть не должно.

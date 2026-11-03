@@ -1182,6 +1182,12 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         { class: 'field-hint' },
         'Модальное управление клавишами, как в Vim: нормальный и визуальный режимы, операторы (d/c/y), счётчики. Выход из вставки — Escape.',
       ),
+      switchRow('Tab уводит фокус из редактора', editor.tabMovesFocus, (value) => editable({ tabMovesFocus: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Выключено: Tab делает отступ. Включено: Tab переводит фокус на следующую кнопку интерфейса, Shift+Tab — обратно. Для тех, кто ходит по интерфейсу с клавиатуры и не хочет брать мышь, чтобы выбраться из текста.',
+      ),
       switchRow('Emacs-режим', editor.emacsMode, (value) => editable({ emacsMode: value })),
       h(
         'div',

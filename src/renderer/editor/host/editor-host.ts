@@ -187,6 +187,8 @@ export interface EditorHostOptions {
   smoothScroll?: boolean;
   /** Vim-режим: модальное управление клавишами (настройка `editor.vimMode`). */
   vimMode?: boolean;
+  /** Tab уводит фокус из редактора (настройка `editor.tabMovesFocus`). */
+  tabMovesFocus?: boolean;
   /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
   onVimModeChange?: (mode: VimMode) => void;
   /** Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода (настройка `editor.emacsMode`). */
@@ -936,6 +938,8 @@ export class EditorHost {
       // Вставили кусок — говорим приложению, где он лёг: оно решает, форматировать ли
       // (настройка `editor.formatOnPaste`) и умеет ли это сервер для языка файла.
       onPasted: (range) => this.afterPaste(range),
+      // Tab — отступ или выход из редактора: настройка `editor.tabMovesFocus`.
+      tabMovesFocus: options.tabMovesFocus,
       // Vim-режим: модальный разбор клавиш снаружи обычной раскладки.
       vimMode: options.vimMode,
       onVimModeChange: options.onVimModeChange,
@@ -1228,10 +1232,16 @@ export class EditorHost {
     this.input.setEmacsMode(on);
   }
 
+  /** Tab — отступ или выход из редактора (настройка `editor.tabMovesFocus`). */
+  setTabMovesFocus(on: boolean): void {
+    this.input.setTabMovesFocus(on);
+  }
+
   /** Настройки редактора, влияющие на вид: отступ (Tab), кегль, высота строки и каретка. */
   applyOptions(options: {
     tabSize?: number;
     insertSpaces?: boolean;
+    tabMovesFocus?: boolean;
     fontSize?: number;
     lineHeight?: number;
     cursorStyle?: CursorStyle;
@@ -1253,6 +1263,7 @@ export class EditorHost {
       this.controller.setTabSize(options.tabSize);
       this.view.setTabSize(options.tabSize);
     }
+    if (options.tabMovesFocus !== undefined) this.setTabMovesFocus(options.tabMovesFocus);
     if (options.insertSpaces !== undefined) {
       this.defaultIndent = { ...this.defaultIndent, insertSpaces: options.insertSpaces };
       // Пока файл не открыт — применить некуда: отступ считается по содержимому

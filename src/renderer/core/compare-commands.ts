@@ -11,6 +11,8 @@ import { pairFromSelection } from './file-compare';
 /** Экран различий двух файлов (из дерева, из git, из сравнения). */
 export interface CompareDiffView {
   openFiles(left: string, right: string): Promise<unknown>;
+  /** Сверить несохранённое со сохранённым (F7). */
+  openUnsaved(path: string, saved: string, edited: string): Promise<void>;
 }
 
 /** Список различий двух папок. */
@@ -25,6 +27,12 @@ export interface CompareQuickOpen {
 
 export interface CompareDeps {
   diffView: CompareDiffView;
+  /** Путь текущей вкладки — для команды без аргумента. */
+  currentPath(): string | null;
+  /** Текст, который сейчас в редакторе (черновик, включая несохранённое). */
+  textOf(path: string): string | null;
+  /** Текст файла на диске — «сохранённое». */
+  readText(path: string): Promise<string>;
   folderCompare: CompareFolderModal;
   quickOpen: CompareQuickOpen;
 }
@@ -40,6 +48,24 @@ export function registerCompareCommands(define: DefineCommand, deps: CompareDeps
 
   // Сравнение двух файлов — из дерева, тем же экраном, что показывает git-различия.
   // Это просмотр: блоки без кнопок индексации.
+  /**
+   * F7 — сверить несохранённое с сохранённым.
+   *
+   * Сверка нужна ДО сохранения, а не после: посмотреть, что изменил, вернуться
+   * к части правок и только потом записать. Это и есть рабочее применение
+   * сравнения — а не просмотр истории, где всё уже записано.
+   */
+  define({ id: 'file.compareWithSaved', title: 'Сверить с сохранённым', category: 'Файл' }, async (path) => {
+    const target = typeof path === 'string' ? path : deps.currentPath();
+    if (!target) return;
+    const draft = deps.textOf(target);
+    if (draft === null) return;
+    // Сохранённое читаем с диска: в памяти лежит только черновик.
+    const saved = await deps.readText(target).catch(() => null);
+    if (saved === null) return;
+    await diffView.openUnsaved(target, saved, draft);
+  });
+
   define({ id: 'diff.compareFiles', title: 'Сравнить два файла', category: 'Навигация' }, async (left, right) => {
     if (typeof left !== 'string' || typeof right !== 'string') return;
     await diffView.openFiles(left, right);

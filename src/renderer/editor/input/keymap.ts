@@ -35,6 +35,14 @@ export interface KeyChord {
   readonly ctrl?: boolean;
   readonly meta?: boolean;
   readonly alt?: boolean;
+  /**
+   * Настройка «Tab уводит фокус из редактора».
+   *
+   * Живёт в сочетании, а не в глобальном состоянии модуля: разбор клавиши —
+   * чистая функция, и её ответ должен зависеть только от входа. Иначе два
+   * редактора на экране делили бы одну настройку.
+   */
+  readonly tabMovesFocus?: boolean;
 }
 
 /** Что делать с нажатием. `null` — клавиша нас не касается, пусть решает браузер. */
@@ -42,6 +50,8 @@ export type KeyAction =
   | { readonly kind: 'move'; readonly motion: Motion; readonly extend: boolean }
   | { readonly kind: 'edit'; readonly edit: EditCommand }
   | { readonly kind: 'insert'; readonly text: string }
+  /** Увести фокус из редактора: Tab — вперёд, Shift+Tab — назад. */
+  | { readonly kind: 'focus'; readonly back: boolean }
   /** Обработано нами, но реакции нет: например, Ctrl без смысла — гасим, чтобы не прилетело в textarea. */
   | { readonly kind: 'swallow' };
 
@@ -165,6 +175,9 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   }
   if (key === 'Tab') {
     // Shift+Tab снимает отступ со строки (один таб или до `tabSize` пробелов).
+    // При включённом «Tab уводит фокус» ведём фокус наружу: внутрь, по Shift —
+    // назад. Без Shift иначе не выйти из редактора клавиатурой вовсе.
+    if (chord.tabMovesFocus === true) return { kind: 'focus', back: extend };
     return { kind: 'edit', edit: extend ? 'outdent' : 'indent' };
   }
   // F1 — палитра команд: своему редактору нужна своя обработка.
