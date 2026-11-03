@@ -50,7 +50,7 @@ import { createChangesPanel } from './chat-changes';
 import { archivePlan, createPlanPanel } from './chat-plan';
 import { createGoalPanel } from './chat-goal';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
-import { contextIndexOf, scrollTargetFor } from './chat-session';
+import { contextIndexOf, findThreadIndex, scrollTargetFor } from './chat-session';
 import type { ChatSession } from './chat-session';
 import type { CodebasePlace } from '../../shared/meaning-search';
 import { hunkAtLine } from '../../shared/hunk-lines';
@@ -937,7 +937,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       }
     });
     // Сжатая беседа: отметка после переписки — видно, что модель работает по резюме.
-    if (session.compacted) appendCompactedNote(session);
+    if (session.compacted) appendCompactedNote(session, session.thread);
     // Очередь — последней: она всегда под историей, а не внутри неё.
     renderQueue(session);
     scrollToEnd(session);
@@ -1189,6 +1189,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    * прочитанное человек вправе перечитать и скопировать.
    */
   function renderCompacted(session: ChatSession, before: number, summary: string): void {
+    // Отметка живёт ВНУТРИ хода, а не отдельным ребёнком ленты. Причина не
+    // косметическая: `currentTurn` заводит новый `.chat-turn` для любого
+    // сообщения, кроме приветствия, — следующий вопрос человека встал бы ниже
+    // отметки, — а `clearTurn` снимает
+    // ответ и перерисовывает ход заново. Отдельный ребёнок ленты пережигал
+    // сжатие в первом из этих мест и терялся бы во втором.
     const note = h(
       'details',
       { class: 'thread-summary', open: true },
@@ -1205,29 +1211,41 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         h('div', { class: 'thread-summary-body' }, summary),
       ),
     );
-    session.thread.appendChild(note);
+    currentTurn(session).appendChild(note);
     session.compacted = true;
     // Прокручиваем к отметке: новый вопрос встанет ниже неё. Прыжка в начало
     // ленты (как было) нет — человек продолжает читать с того же места.
     if (session.id === activeId) note.scrollIntoView({ block: 'nearest' });
   }
 
-  /** Отметка о сжатии для восстановленной беседы: резюме берём из её контекста. */
-  function appendCompactedNote(session: ChatSession): void {
+  /**
+   * Отметка о сжатии для восстановленной беседы.
+   *
+   * Ставится перед ПЕРВЫМ последним ходом, а не в начало ленты: отметка
+   * относится к последнему сжатию, а лента растёт вниз. Раньше её вешали
+   * в конец при восстановлении (`appendCompactedNote`), и на границе
+   * «восстановлено из файла → сжали снова» в ленте оказывалось две отметки в
+   * двух разных местах — одна у конца, другая там, где сжали на самом деле.
+   * `tail` — лента после первого кадра `renderHistory`: тот очищает `thread`.
+   */
+  function appendCompactedNote(session: ChatSession, tail: HTMLElement | null = null): void {
     const summary = session.history[0]?.content ?? '';
-    session.thread.appendChild(
+    const note = h(
+      'details',
+      { class: 'thread-summary' },
+      h('summary', { class: 'thread-summary-head' }, svgIcon('collapse', 12), 'Контекст беседы сжат'),
       h(
-        'details',
-        { class: 'thread-summary' },
-        h('summary', { class: 'thread-summary-head' }, svgIcon('collapse', 12), 'Контекст беседы сжат'),
-        h(
-          'div',
-          { class: 'thread-summary-text' },
-          'Выше — вся переписка, её можно перечитать. Модель дальше получает только это резюме:',
-          h('div', { class: 'thread-summary-body' }, summary),
-        ),
+        'div',
+        { class: 'thread-summary-text' },
+        'Выше — вся переписка, её можно перечитать. Модель дальше получает только это резюме:',
+        h('div', { class: 'thread-summary-body' }, summary),
       ),
     );
+    // Последний ход ленты — тот, с которого беседа продолжается. Нет ходов
+    // (сжали сразу после сводки) — отметке место в ленте.
+    const last = tail?.lastElementChild instanceof HTMLElement ? tail.lastElementChild : null;
+    const host = last?.classList.contains('chat-turn') ? last : tail ?? session.thread;
+    host.appendChild(note);
   }
 
   /** Подпись кнопки модели — «Провайдер - Модель»: где и чем спрашиваем, видно сразу. */
@@ -1969,6 +1987,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
 
     session.history = session.history.slice(0, lastUser + 1);
+    // Ленту — тоже. Раньше резался только контекст, и лента показывала прошлый
+    // ответ рядом с новым: два ответа на один вопрос, и человек не понимал, какой
+    // из них настоящий. Номер ищем по содержимому (`contextIndexOf`): индексы
+    // истории и ленты расходятся после сжатия, да и просто не совпадают.
+    const asked = session.history[lastUser]!;
+    const fromEnd = findThreadIndex(session, asked, lastUser);
+    if (fromEnd >= 0) session.transcript = session.transcript.slice(0, fromEnd + 1);
     session.usage = undefined;
     session.usageFresh = false;
     session.turnsSinceCompact = turnsSinceCompact(session.history);

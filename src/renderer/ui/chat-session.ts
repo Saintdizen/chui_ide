@@ -224,3 +224,40 @@ export function contextIndexOf(
   }
   return -1;
 }
+
+/**
+ * Где в ленте (`transcript`) стоит вопрос, лежащий в контексте (`history`) на
+ * позиции `index`. `-1` — этого вопроса в ленте нет.
+ *
+ * Обратная задача к `contextIndexOf`, и нужна она для «Повторить»: контекст
+ * режется номером вопроса, а лента должна резаться по тому ЖЕ вопросу.
+ *
+ * Где именно режутся массивы, важно. Лента длиннее контекста (она хранит то,
+ * что сжатие уже свёрнуто в резюме), поэтому вопрос из начала контекста может
+ * встречаться в ленте несколько раз, а вопрос из конца — ровно один.
+ *
+ * Берём ПОСЛЕДНЕЕ совпадение: повтор идёт от последнего вопроса, а «Повторить»
+ * нажимают, чтобы переделать именно его. Первое совпадение отрезало бы ленту по
+ * старому такому же вопросу — человек нажал бы «повтори», а лента схлопнулась
+ * бы до середины переписки.
+ */
+export function findThreadIndex(
+  session: Pick<ChatSession, 'transcript' | 'history'>,
+  asked: ChatMessage,
+  index: number,
+): number {
+  // Страховка от рассинхрона: если по номеру в контексте лежит ДРУГОЙ вопрос
+  // (лента и контекст разъехались), искать по нему бессмысленно.
+  if (index < 0 || session.history[index] !== asked) return -1;
+
+  const sameAs = (message: ChatMessage): boolean =>
+    message.role === 'user' &&
+    message.content === asked.content &&
+    (message.images?.length ?? 0) === (asked.images?.length ?? 0) &&
+    (message.images ?? []).every((image, at) => image === asked.images?.[at]);
+
+  for (let i = session.transcript.length - 1; i >= 0; i -= 1) {
+    if (sameAs(session.transcript[i]!)) return i;
+  }
+  return -1;
+}
