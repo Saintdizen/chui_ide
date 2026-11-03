@@ -39,7 +39,9 @@ export function deleteManyPrompt(count: number, plural: (n: number) => string): 
  * «в корзине: 0» человеку ничего не говорит.
  */
 export function trashedNotice(count: number, plural: (n: number) => string): string | null {
-  return count > 0 ? `В корзине: ${count} ${plural(count)}` : null;
+  // Не только «сколько», но и «что дальше»: удалённое НЕ теряется, его вернут из
+  // корзины системы. Без этой половины человек ищет файл и не знает, где.
+  return count > 0 ? `В корзине: ${count} ${plural(count)} — вернуть можно из корзины системы` : null;
 }
 
 /**
