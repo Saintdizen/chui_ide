@@ -299,6 +299,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
     if (event.key === 'F2') {
       event.preventDefault();
+      // При группе переименовывается строка под курсором. Сказать об этом нечем —
+      // у проводника нет канала тостов, — поэтому группа в этот момент просто не
+      // ждёт «переименовать всё»: поле открывается на ОДНОЙ строке, и это видно.
+      // В меню подпись честная: `Переименовать… (только <имя>)`.
       startRename(selected);
       return;
     }
@@ -805,7 +809,16 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           { label: 'Новый файл…', onSelect: () => startCreateIn(parent, 'file') },
           { label: 'Новая папка…', onSelect: () => startCreateIn(parent, 'directory') },
           { separator: true as const },
-          { label: 'Переименовать…', hint: 'F2', onSelect: () => startRename(entry.path) },
+          // Переименование — над ОДНОЙ строкой (у папки при этом переедет и
+          // содержимое). На группе честнее сказать словами, чем переименовать
+          // первую молча: человек ждал другого.
+          effective.length > 1
+            ? {
+                label: `Переименовать… (только ${entry.name})`,
+                hint: 'F2',
+                onSelect: () => startRename(entry.path),
+              }
+            : { label: 'Переименовать…', hint: 'F2', onSelect: () => startRename(entry.path) },
           {
             label: effective.length > 1 ? `Удалить (${effective.length})` : 'Удалить',
             hint: 'Del',
