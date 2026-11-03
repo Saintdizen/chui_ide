@@ -108,7 +108,15 @@ export class RpcRouter {
       signal: controller.signal,
       sender,
       emit: (name, payload) => {
-        if (sender.isDestroyed()) return;
+        // Окно умерло — это не «некому отправить», а «получателя больше нет»:
+        // дальше вызов шёл бы вслепую, правя файлы без единого глаза на
+        // результат. Молча выбрасывая события, мы теряли ровно тот момент,
+        // когда остановиться ещё можно было. Гасим прогон, а не притворяемся,
+        // что всё хорошо.
+        if (sender.isDestroyed()) {
+          controller.abort();
+          return;
+        }
         const message: RpcEventMessage = { id: call.id, event: name, payload };
         sender.send(RPC_EVENT_CHANNEL, message);
       },

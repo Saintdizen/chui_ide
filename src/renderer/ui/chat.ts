@@ -15,6 +15,7 @@ import { sanitizeToolPreset, toolPresetSpec, type ToolPresetId } from '../../sha
 import type { ApplyFailure, FileEdit } from '../../shared/edits';
 import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectCommand } from '../../shared/commands';
 import { sessionAttachment } from '../../shared/session-context';
+import { leaveQuestion, type RunLeaving } from '../../shared/run-keep';
 import { isAutoTitle } from '../../shared/chat-title';
 import { resolvePatches } from '../../shared/patch';
 import { turnsSinceCompact } from './compact-turns';
@@ -830,6 +831,45 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     input.focus({ preventScroll: true });
   }
 
+  /**
+   * Вкладка уже спросила про прогон и получила «да»: второй раз не спрашиваем.
+   * `closeSession` синхронный, а вопрос — нет, и делать асинхронным весь путь
+   * закрытия (с вкладками, черновиками и перерисовкой) ради одного вопроса —
+   * цена больше пользы. Поэтому ответ ловится в `.then`, а закрытие
+   * повторяется уже без вопроса.
+   */
+  let skipLeaveAsk = false;
+
+  /**
+   * Спросить, можно ли бросать прогон в закрываемой вкладке. `true` — можно.
+   */
+  function safelyLeaveRun(session: ChatSession): boolean {
+    if (skipLeaveAsk) return true;
+    const files = session.activeCheckpoint?.files.size ?? 0;
+    const steps = session.run?.steps.length ?? 0;
+    const state: RunLeaving = files > 0 ? 'wrote' : steps > 0 ? 'read' : 'idle';
+    const message = leaveQuestion(state, files, steps);
+    if (!message) return true;
+
+    void deps
+      .confirm({
+        title: 'Закрыть вкладку с идущим ответом?',
+        message,
+        detail: 'Прогон оборвётся. Файлы, которые агент уже изменил, останутся как есть.',
+        confirmLabel: 'Закрыть',
+      })
+      .then((confirmed) => {
+        if (!confirmed) return;
+        skipLeaveAsk = true;
+        try {
+          closeSession(session.id);
+        } finally {
+          skipLeaveAsk = false;
+        }
+      });
+    return false;
+  }
+
   /** Закрытие вкладки. Последнюю не закрываем — вместо неё появляется пустая. */
   function closeSession(id: number): void {
     // Черновик уходящей вкладки забираем ДО всего остального. Поле ввода одно на
@@ -844,6 +884,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     const index = sessions.findIndex((session) => session.id === id);
     if (index < 0) return;
+
+    // Прогон в закрываемой вкладке мог уже править файлы. Прежде он обрывался
+    // молча (`cancelActive()` подряд), и сделанное терялось без единого слова.
+    // Спрашиваем только там, где есть что терять; чтение и бездействие
+    // обрываются молча — вопрос, на который всегда жмут «да», перестаёт
+    // читаться, и в тот раз, когда он важен, его прожмут так же.
+    const leavingRun = sessions[index]!;
+    if (leavingRun.id === streamingSession?.id && !safelyLeaveRun(leavingRun)) return;
+
     const [removed] = sessions.splice(index, 1);
     removed?.thread.remove();
     if (removed?.id === streamingSession?.id) deps.rpc.cancelActive();

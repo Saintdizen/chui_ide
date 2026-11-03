@@ -303,3 +303,61 @@ describe('RpcRouter.cancel: отмена по id', () => {
     await second;
   });
 });
+
+describe('RpcRouter.dispatch: окно закрылось посреди вызова', () => {
+  /**
+   * Найдено разбором пункта «прогон не теряется, но и не живёт без спроса».
+   *
+   * `ctx.emit` молча выбрасывал события, когда окно уже уничтожено, — и дальше
+   * прогон продолжался ВСЛЕПУЮ: агент правил файлы, а результата никто не видел
+   * и остановить его было некому. Уничтоженный `sender` — это не «некому
+   * отправить», это «получателя больше нет», и вызов обязан умереть вместе с ним.
+   */
+  it('вызов получает отмену, а не продолжается вслепую', async () => {
+    const router = new RpcRouter();
+    const { sender, destroy } = fakeSender();
+    let abortedOnEmit = false;
+    router.register('shell.openExternal', async (_params, ctx) => {
+      destroy();
+      // Сигнал уже отменён СРАЗУ после emit: отменяем в момент, когда узнали,
+      // что отправлять некуда, а не когда до этого дойдёт следующий шаг.
+      ctx.emit('tick', { n: 1 });
+      abortedOnEmit = ctx.signal.aborted;
+      return { ok: true };
+    });
+    await router.dispatch(sender, call('c1', 'shell.openExternal', { url: 'https://x' }, true));
+    expect(abortedOnEmit).toBe(true);
+  });
+
+  it('уже отменённый прогон не отправляет события мёртвому окну', async () => {
+    const router = new RpcRouter();
+    const { sender, sent, destroy } = fakeSender();
+    router.register('shell.openExternal', async (_params, ctx) => {
+      ctx.emit('first', { n: 1 });
+      destroy();
+      ctx.emit('second', { n: 2 });
+      return { ok: true };
+    });
+    await router.dispatch(sender, call('c1', 'shell.openExternal', { url: 'https://x' }, true));
+    // Первое событие живо до окна, второе — уже нет: после смерти окна ни одно
+    // событие не должно уходить в никуда даже если прогон ещё не завершился.
+    expect(sent.filter((item) => item.channel === 'chui:rpc:event')).toHaveLength(1);
+  });
+
+  it('живое окно отмену не получает', async () => {
+    const router = new RpcRouter();
+    const { sender } = fakeSender();
+    let aborted = false;
+    router.register('shell.openExternal', async (_params, ctx) => {
+      ctx.emit('tick', { n: 1 });
+      expect(ctx.signal.aborted).toBe(false);
+      ctx.signal.addEventListener('abort', () => {
+        aborted = true;
+      });
+      return { ok: true };
+    });
+    const result = await router.dispatch(sender, call('c1', 'shell.openExternal', { url: 'https://x' }, true));
+    expect(result.ok).toBe(true);
+    expect(aborted).toBe(false);
+  });
+});
