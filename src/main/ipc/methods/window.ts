@@ -24,6 +24,9 @@ export function registerWindowMethods(router: RpcRouter, deps: RpcServices): voi
   router.register('terminal.kill', (params) => {
     deps.terminals.kill(params.id);
   });
+  // Порт отдаём вместе с id терминала: панель сразу показывает, откуда он
+  // взялся, а не только номер и имя процесса.
+  router.register('terminal.ports', () => deps.ports.list(deps.terminals.pids()));
 
   router.register('window.getState', (_params, ctx) => windowState(senderWindow(ctx)));
   router.register('window.minimize', (_params, ctx) => {

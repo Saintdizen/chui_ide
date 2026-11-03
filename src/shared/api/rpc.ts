@@ -5,6 +5,7 @@ import type { ApplyResult, FileEdit, TextEdit } from '../edits';
 import type { BlameLine } from '../git-blame';
 import type { PatchFile } from '../patch';
 import type { ProjectScan } from '../project-scan';
+import type { PortEntry } from '../port-forward';
 import type { ProjectAnalysis } from '../project-analysis';
 import type { ProjectSettings } from '../project-config';
 import type { ReviewThread } from '../review';
@@ -708,6 +709,11 @@ export interface ChuiMethods {
   'terminal.write': { params: { id: string; data: string }; result: void };
   'terminal.resize': { params: { id: string; cols: number; rows: number }; result: void };
   'terminal.kill': { params: { id: string }; result: void };
+  /**
+   * Слушающие порты машины — те, что открыли процессы (в том числе из наших
+   * терминалов). Опрос по требованию: нет открытой панели — нет запусков.
+   */
+  'terminal.ports': { params: void; result: PortEntry[] };
 
   'window.getState': { params: void; result: WindowState };
   'window.minimize': { params: void; result: void };

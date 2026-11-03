@@ -14,6 +14,7 @@ import type { ReviewStore } from '../project/review-store';
 import type { HistoryStore } from '../project/history-store';
 import type { TelemetryStore } from '../ai/telemetry';
 import type { TerminalService } from '../terminal/terminal';
+import type { PortService } from '../terminal/ports';
 import type { WorkspaceService } from '../workspace/workspace';
 import type { HostClient } from './host';
 import type { RpcContext } from './router';
@@ -26,6 +27,8 @@ export interface AppDependencies {
   workspace: WorkspaceService;
   ai: AiService;
   terminals: TerminalService;
+  /** Слушающие порты машины: привязка к сессиям терминала по дереву процессов. */
+  ports: PortService;
   git: GitService;
   /** Обратные вызовы main → renderer (правки в документной модели). */
   host: HostClient;

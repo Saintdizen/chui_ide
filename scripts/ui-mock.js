@@ -1109,6 +1109,12 @@ module.exports = [
       sessions.delete(params.id);
       push('terminal:exit', { id: params.id, exitCode: 0 });
     },
+    // Мок без сети: два порта-пустышки, один «из терминала» — чтобы было видно
+    // разницу в панели, но с живой машиной это не связано никак.
+    'terminal.ports': () => [
+      { port: 5173, pid: 4242, command: 'node', terminalId: [...sessions.keys()][0], url: 'http://127.0.0.1:5173/' },
+      { port: 8080, pid: 5151, command: 'nginx', url: 'http://127.0.0.1:8080/' },
+    ],
     'shell.revealInOS': () => ({ ok: true }),
     'shell.openTerminal': () => ({ ok: true, command: 'gnome-terminal' }),
     'shell.openPath': () => ({ ok: true }),

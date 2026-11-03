@@ -184,6 +184,7 @@ import type { SectionId, SettingsModalView } from './ui/settings-modal';
 import { createRecentFiles } from './core/recent-files';
 import { createTabs, type PagesTabSource } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
+import { createPortsPanel } from './ui/ports-panel';
 import { createDebugPanel } from './ui/debug-panel';
 import { createTestPanel } from './ui/test-panel';
 import { createTodoPanel } from './ui/todo-panel';
@@ -1367,6 +1368,21 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     title: 'Терминал',
     element: terminalPanel.element,
     onShow: () => void terminalPanel.open(),
+  });
+  // Порты опрашиваем только на видимой вкладке: `onShow` запускает таймер.
+  const portsPanel = createPortsPanel({
+    list: () => rpc.request('terminal.ports'),
+    open: (url) => void rpc.request('shell.openExternal', { url }).catch(() => undefined),
+    // Отдельного «показать эту сессию» в API панели нет — открываем вкладку
+    // терминала: человек видит живой вывод и понимает, чей это порт.
+    revealTerminal: () => dock.show('terminal'),
+  });
+  dock.register({ id: 'ports', title: 'Порты', element: portsPanel.element, onShow: () => portsPanel.open() });
+  // Док показывает вкладку только через `onShow`, а скрывает без обратного
+  // вызова: уход с вкладки ловим по смене видимости и активности.
+  dock.onVisibilityChange(() => {
+    const onPorts = dock.visible && dock.activeId === 'ports';
+    if (!onPorts) portsPanel.close();
   });
   dock.register({ id: 'search', title: 'Поиск', element: searchView.element, onShow: () => searchView.focus() });
   dock.register({

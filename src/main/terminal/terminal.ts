@@ -63,6 +63,18 @@ export class TerminalService {
   }
 
   /**
+   * pid живых сессий → id терминала. Нужно пробросу портов: порт слушает не
+   * сам шелл, а его потомки, поэтому шаг от порта к сессии начинается здесь.
+   */
+  pids(): Map<number, string> {
+    const map = new Map<number, string>();
+    for (const session of this.sessions.values()) {
+      if (!session.exited) map.set(session.process.pid, session.id);
+    }
+    return map;
+  }
+
+  /**
    * Прочитать вывод сессии, начиная с абсолютного смещения `from`.
    * Смещение возвращается вместе с данными: следующий вызов передаёт его как `from`,
    * поэтому агент видит только НОВЫЙ вывод, а не всё заново.

@@ -37,6 +37,7 @@ import { SettingsStore } from './settings';
 import { SymbolIndexer } from './symbols/indexer';
 import { SymbolStore } from './symbols/store';
 import { TerminalService } from './terminal/terminal';
+import { PortService } from './terminal/ports';
 import { WorkspaceService } from './workspace/workspace';
 import { getIdeWindow, isWaylandSession, openWelcomeWindow } from './window';
 
@@ -210,6 +211,9 @@ if (!app.requestSingleInstanceLock()) {
       // перезапуск IDE ради новой переменной — лишний.
       () => projectEnv(workspace.rootPath()),
     );
+    // Слушающие порты: опрос — только пока панель открыта, поэтому кэш короткий
+    // и свой таймер не нужен (см. `PortService.refresh`).
+    const ports = new PortService();
     // Git ничего не хранит сам: корень берётся у рабочей папки. Статус обновляем
     // по потоку изменений рабочей папки (см. `refreshGitSoon`) и по своим git-операциям.
     // Каталог шаблонов git может отсутствовать (первый запуск): git прощает
@@ -426,6 +430,7 @@ if (!app.requestSingleInstanceLock()) {
       workspace,
       ai,
       terminals,
+      ports,
       git,
       lsp,
       index: symbolIndex,
