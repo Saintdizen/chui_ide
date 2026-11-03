@@ -45,6 +45,34 @@ export function dropQueuedPrompt(session: ChatSession, index: number): boolean {
   return true;
 }
 
+/**
+ * Переставить вопрос на `delta` мест: -1 вверх (раньше), +1 вниз (позже).
+ *
+ * Зачем `delta`, а не пара индексов: в ленте на строку одна кнопка, и она знает своё
+ * направление. Заодно вся арифметика остаётся здесь, а не в виде.
+ *
+ * `false` — двигать некуда: очередь короче двух или ход за край. Сессию при отказе
+ * НЕ трогаем (не переприсваиваем `queue`): `false` значит «ничего не было», и по нему
+ * вызывающий не перерисовывает список — фокус остаётся на нажатой кнопке.
+ *
+ * Вложения едут с вопросом: это его части, а не позиции в списке.
+ */
+export function moveQueuedPrompt(session: ChatSession, index: number, delta: number): boolean {
+  const queued = session.queue ?? [];
+  const to = index + delta;
+  if (delta === 0) return false;
+  if (index < 0 || index >= queued.length) return false;
+  if (to < 0 || to >= queued.length) return false;
+  const next = [...queued];
+  // `splice` отдаёт `undefined` при пустом массиве — отсекаем это одним guard'ом,
+  // чтобы `next.splice(...)` не получил `QueuedPrompt | undefined`.
+  const [item] = next.splice(index, 1);
+  if (!item) return false;
+  next.splice(to, 0, item);
+  session.queue = next;
+  return true;
+}
+
 /** Снять все вопросы: вложения возвращаются в порядке очереди. */
 export function clearQueuedPrompts(session: ChatSession): boolean {
   const queued = session.queue ?? [];

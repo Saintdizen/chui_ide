@@ -39,7 +39,7 @@ import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createAttachments } from './chat-attachments';
-import { clearQueuedPrompts, dropQueuedPrompt, enqueuePrompt, takeNextPrompt } from './chat-queue';
+import { clearQueuedPrompts, dropQueuedPrompt, enqueuePrompt, moveQueuedPrompt, takeNextPrompt } from './chat-queue';
 import { addCheckpointFile, beginCheckpoint, hasCheckpoint, revertPlan, truncateCheckpoints } from './chat-checkpoints';
 import { MAX_RUN_ARTIFACTS, type RunArtifacts } from '../core/artifacts';
 import { createToolFeed, type ToolCardView } from './chat-tools';
@@ -1655,6 +1655,26 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           h('span', { class: 'queue-index' }, String(index + 1)),
           h('span', { class: 'queue-text' }, text),
           h('button', {
+            class: 'queue-move',
+            type: 'button',
+            title: 'Выше',
+            'aria-label': `Переставить вопрос ${index + 1} выше`,
+            // Край серый, а не спрятан: пропавшая кнопка ломает навигацию с экрана,
+            // а серая говорит, что ход есть, но отсюда нельзя.
+            disabled: index === 0,
+            'aria-disabled': String(index === 0),
+            onClick: () => moveQueued(session, index, -1),
+          }),
+          h('button', {
+            class: 'queue-move',
+            type: 'button',
+            title: 'Ниже',
+            'aria-label': `Переставить вопрос ${index + 1} ниже`,
+            disabled: index === queued.length - 1,
+            'aria-disabled': String(index === queued.length - 1),
+            onClick: () => moveQueued(session, index, 1),
+          }),
+          h('button', {
             class: 'queue-drop',
             type: 'button',
             title: 'Снять с очереди',
@@ -1686,6 +1706,27 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // закрытой они не нужны, и перерисовка не вредит.
     if (dropQueuedPrompt(session, index) && session.id === activeId) attachments.render();
     renderQueue(session);
+  }
+
+  /**
+   * Переставить отложенный вопрос и вернуть фокус на ту же кнопку.
+   *
+   * `renderQueue` перерисовывает список целиком, поэтому головы строки после
+   * перестановки уже нет в документе — фокус упал бы в `body` (в начало ленты для
+   * того, кто идёт с клавиатуры). Поэтому ищем новую строку по номеру и ставим
+   * фокус на кнопку того же направления.
+   *
+   * `scrollToEnd` тут не нужен (и `renderQueue` его зовёт только для активной
+   * беседы): порядок в ЛЕНТЕ не изменился, двигается только очередь.
+   */
+  function moveQueued(session: ChatSession, index: number, delta: number): void {
+    if (!moveQueuedPrompt(session, index, delta)) return;
+    renderQueue(session);
+    const node = session.queueNode;
+    if (!node || session.id !== activeId) return;
+    const row = node.querySelectorAll('.queue-item')[index + delta];
+    const button = row?.querySelectorAll('.queue-move')[delta < 0 ? 0 : 1];
+    (button as HTMLElement | undefined)?.focus({ preventScroll: true });
   }
 
   function clearQueue(session: ChatSession): void {
