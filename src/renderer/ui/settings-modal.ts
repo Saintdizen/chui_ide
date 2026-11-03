@@ -53,6 +53,7 @@ import { serializeThemeFile } from '../../shared/theme-file';
 import { normalizeFileAssociations, fileAssociationsToText } from '../../shared/associations';
 import { normalizeRulers, rulersToText } from '../../shared/rulers';
 import type { AgentHookConfig } from '../../shared/agent-hooks';
+import type { AutomationConfig } from '../../shared/automations';
 import { PULL_MODES, pullModeLabel } from '../../shared/git-pull';
 import { uiScaleOptions } from '../../shared/ui-scale';
 import type { WebSearchProvider } from '../../shared/web-search';
@@ -129,7 +130,7 @@ const SECTIONS: ReadonlyArray<{
   { id: 'appearance', title: 'Внешний вид', icon: 'sun' },
   { id: 'lsp', title: 'Языки (LSP)', icon: 'command' },
   { id: 'mcp', title: 'Внешние инструменты (MCP)', icon: 'sparkle' },
-  { id: 'hooks', title: 'Хуки агента', icon: 'command' },
+  { id: 'hooks', title: 'Хуки и автоматизации', icon: 'command' },
   { id: 'project', title: 'Проект', icon: 'panel' },
 ];
 
@@ -1899,6 +1900,18 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       }
     });
 
+    const automations = h('textarea', { class: 'field-input', rows: 8, spellcheck: false });
+    automations.value = JSON.stringify(settings!.ai.automations, null, 2);
+    automations.addEventListener('change', () => {
+      try {
+        const parsed = JSON.parse(automations.value) as unknown;
+        if (!Array.isArray(parsed)) throw new Error('ожидался массив автоматизаций');
+        void patch({ ai: { automations: parsed as AutomationConfig[] } }, true);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Некорректный JSON', 'error');
+      }
+    });
+
     const example = JSON.stringify(
       [
         {
@@ -1931,6 +1944,15 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'у самого хука, сколько у вашей оболочки — запускайте только то, что написали сами.',
       ),
       h('div', { class: 'field-hint' }, `Пример: ${example}`),
+      field('Автоматизации (JSON)', automations),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Автоматизация — готовое задание и повод его показать: сохранение файла по маске (on.save) ' +
+          'или раз в N минут (on.everyMinutes). Запрос не отправляется сам — он ложится в поле ввода ' +
+          'новой беседы, и прогон начинает ваш Enter: токенов без человека никто не тратит. Потолок — ' +
+          'не чаще раза в пять минут и четыре раза в час.',
+      ),
     ];
   }
 

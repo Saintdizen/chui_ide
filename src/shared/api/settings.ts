@@ -9,6 +9,7 @@ import type { PullMode } from '../git-pull';
 import type { ThemeFile } from '../theme-file';
 import type { McpServerConfig } from '../mcp';
 import type { AgentHookConfig } from '../agent-hooks';
+import type { AutomationConfig } from '../automations';
 import type { AiSandboxSettings } from '../sandbox';
 import type { WhitespaceMode } from '../whitespace';
 import type { AiBrowserSettings, AiWebFetchSettings, AiWebSearchSettings } from './debug';
@@ -140,6 +141,8 @@ export interface AiSettings {
    * прежнее, ни один скрипт не запускается.
    */
   hooks: AgentHookConfig[];
+  /** Автоматизации: триггер и готовый запрос. Токенов не тратят — кладут в поле ввода. */
+  automations: AutomationConfig[];
   /**
    * Набор инструментов по умолчанию (см. `shared/tool-presets.ts`). Схемы
    * инструментов едут в каждом запросе, поэтому набор собирается под задачу:

@@ -84,6 +84,8 @@ export interface ChatView {
    */
   statusElement: HTMLElement;
   newChat(): void;
+  /** Положить запрос в поле ввода новой беседы, не отправляя (автоматизации). */
+  draftPrompt(text: string): void;
   stop(): void;
   /**
    * Дописать историю бесед немедленно, не дожидаясь паузы в 400 мс.
@@ -1806,6 +1808,20 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     });
   }
 
+  /**
+   * Готовый запрос в поле ввода новой беседы — без отправки.
+   *
+   * Так приходит автоматизация: она будит человека, но прогон начинает его Enter.
+   */
+  function draftPrompt(text: string): void {
+    newChat();
+    const session = active();
+    input.value = text;
+    session.draft = text;
+    input.focus();
+    scheduleSave();
+  }
+
   async function askAboutSelection(mode: 'explain' | 'fix'): Promise<void> {
     const selection = deps.editors.selectedText();
     if (!selection.trim()) {
@@ -2169,6 +2185,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     element,
     statusElement,
     newChat,
+    draftPrompt,
     stop,
     flushHistory,
     currentToolPreset,

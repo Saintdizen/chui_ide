@@ -122,6 +122,7 @@ import { WorkspaceModel } from './core/workspace-model';
 import { showContextMenu } from './ui/context-menu';
 import { createBreadcrumbs } from './ui/breadcrumbs';
 import { createChatPanel, type ChatView } from './ui/chat';
+import { createAutomations } from './core/automations';
 import { createDock } from './ui/dock';
 import { createConflictView, toastKindFor } from './ui/conflict-view';
 import { createDiffView } from './ui/diff-view';
@@ -1725,6 +1726,17 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     openFile: async (path: string, position?: { line?: number; column?: number }) => {
       await openPath(path);
       revealAt(path, position);
+    },
+  });
+  // Автоматизации: событие только будит человека — запрос ложится в новую беседу,
+  // а прогон начинается его `Enter`. Токенов без человека никто не тратит.
+  createAutomations({
+    documents,
+    root: () => workspace.root ?? '',
+    settings: () => settings.ai.automations,
+    onDue: (item, reason) => {
+      chat.draftPrompt(item.prompt);
+      showToast(reason === 'save' ? `Автоматизация «${item.name}»: запрос в чате` : `Пора: «${item.name}»`);
     },
   });
   layout.rightBody.appendChild(chat.element);

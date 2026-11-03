@@ -24,6 +24,7 @@ import { normalizeFavorites } from '../shared/favorites';
 import { parseFsAddress, formatFsAddress } from '../shared/fs-address';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { normalizeAgentHooks, type AgentHookConfig } from '../shared/agent-hooks';
+import { normalizeAutomations, type AutomationConfig } from '../shared/automations';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { normalizeSnippets } from '../shared/snippets';
 import { normalizeRulers } from '../shared/rulers';
@@ -140,6 +141,8 @@ interface StoredSettings {
     };
     /** Хуки проекта: скрипты поверх правил инструментов (см. `shared/agent-hooks.ts`). */
     hooks: AgentHookConfig[];
+    /** Автоматизации: триггер (сохранение или часы) и готовый запрос. */
+    automations: AutomationConfig[];
     /** Песочница: команды агента выполняются в контейнере. */
     sandbox: AiSandboxSettings;
     /** Серверы внешних инструментов (MCP): их процессы запускает IDE. */
@@ -221,6 +224,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     browser: { enabled: false, executable: '', headless: true, integrated: true },
     // Хуков по умолчанию нет: скрипт запускается только по воле человека.
     hooks: [],
+    // Автоматизаций по умолчанию нет: каждая — это чьё-то задание, его пишет человек.
+    automations: [],
     // Песочница выключена: команды агента идут на хосте, как раньше. Включив её,
     // человек сам выбирает образ — в нём должны быть инструменты проекта.
     sandbox: { ...DEFAULT_SANDBOX },
@@ -496,6 +501,7 @@ export class SettingsStore {
         })),
         // Копия: снимок настроек не должен меняться вслед за правкой.
         hooks: ai.hooks.map((hook) => ({ ...hook, match: [...(hook.match ?? [])] })),
+        automations: ai.automations.map((item) => ({ ...item, on: { ...item.on } })),
         // Копия: снимок настроек не должен меняться вслед за правкой.
         inlineCompletion: { ...ai.inlineCompletion },
       },
@@ -828,6 +834,9 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
   if (patch.hooks !== undefined) {
     target.hooks = normalizeAgentHooks(patch.hooks);
   }
+  if (patch.automations !== undefined) {
+    target.automations = normalizeAutomations(patch.automations);
+  }
 
   // Автодополнение: включатель и задержка. Задержку держим в разумных рамках —
   // ноль означал бы запрос на каждую нажатую клавишу.
@@ -941,6 +950,7 @@ function loadSettings(filePath: string): StoredSettings {
   const storedWindow = Math.round(Number(storedAi.contextWindow));
   // Хуки из файла — теми же правилами, что и из интерфейса: файл ничем не надёжнее.
   ai.hooks = normalizeAgentHooks(storedAi.hooks);
+  ai.automations = normalizeAutomations(storedAi.automations);
   if (Number.isFinite(storedWindow) && storedWindow > 0) ai.contextWindow = storedWindow;
   else delete ai.contextWindow;
   // Промт мог остаться прежним встроенным текстом — его не выбирали, а получили
