@@ -97,3 +97,29 @@ describe('extensionOf', () => {
     expect(extensionOf('makefile')).toBe('');
   });
 });
+
+describe('числа по-людски и регистр', () => {
+  const opts = { foldersFirst: false, sort: 'name' as const };
+  const names = (list: readonly string[]): string[] =>
+    sortTree(
+      list.map((name) => ({ name, path: `/p/${name}`, kind: 'file' }) as unknown as DirEntry),
+      opts,
+    ).map((entry) => entry.name);
+
+  it('file10 идёт ПОСЛЕ file9, а не перед ним', () => {
+    // `localeCompare('ru')` — не natural sort: сравнивает посимвольно и ставит
+    // 'file10' перед 'file9'. Для проводника это главная претензия: папка с
+    // кадрами или версиями выстраивается не по порядку.
+    expect(names(['file10', 'file9', 'file1'])).toEqual(['file1', 'file9', 'file10']);
+  });
+
+  it('регистр не решает порядок', () => {
+    // На диске `File2` и `file1` соседствуют часто (копии из Windows). Сортировка
+    // по коду символа поставила бы все заглавные раньше — это выглядит поломкой.
+    expect(names(['file1', 'File2'])).toEqual(['file1', 'File2']);
+  });
+
+  it('точки и подчёркивания не ломают числовой порядок', () => {
+    expect(names(['a_10.md', 'a_9.md'])).toEqual(['a_9.md', 'a_10.md']);
+  });
+});

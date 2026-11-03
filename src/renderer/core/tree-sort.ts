@@ -27,8 +27,25 @@ export function extensionOf(name: string): string {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
 }
 
-/** Сравнение по имени — в конце любого режима: порядок должен быть устойчивым. */
-const byName = (a: DirEntry, b: DirEntry): number => a.name.localeCompare(b.name, 'ru');
+/**
+ * Сравнение имён «по-людски»: числа как числа, регистр не решает.
+ *
+ * `localeCompare('ru')` этого не даёт: он сравнивает посимвольно и ставит
+ * `file10` ПЕРЕД `file9` — а в проводнике папка кадров или версий должна идти по
+ * порядку. Регистр тоже не должен решать: `File2` и `file1` рядом — обычное
+ * дело, и «сначала все заглавные» выглядит поломкой.
+ *
+ * `numeric: true` решает числа, `sensitivity: 'base'` — регистр. При полном
+ * совпадении без учёта регистра (`a` и `A`) решает исходное написание, иначе
+ * порядок зависел бы от порядка на диске и прыгал между перерисовками.
+ */
+export const compareNames = (a: string, b: string): number => {
+  const folded = a.localeCompare(b, 'ru', { numeric: true, sensitivity: 'base' });
+  return folded !== 0 ? folded : a.localeCompare(b, 'ru');
+};
+
+/** Сравнение записей по имени — в конце любого режима: порядок должен быть устойчивым. */
+const byName = (a: DirEntry, b: DirEntry): number => compareNames(a.name, b.name);
 
 /**
  * Отсортировать записи одной папки. Возвращаем новый массив: исходный порядок
