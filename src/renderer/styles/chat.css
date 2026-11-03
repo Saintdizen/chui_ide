@@ -2033,6 +2033,47 @@
   overflow: auto;
 }
 
+/* Раскрытый файл: строка со стрелкой и, под ней, его блоки. */
+.changes-row-caret {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.changes-hunks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 4px 18px;
+}
+
+/* Блок — одна правка против HEAD: строки, счётчик и действие в строку. */
+.changes-hunk {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.changes-hunk-label {
+  flex: 0 0 auto;
+  color: var(--text_color_secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.changes-hunk .btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.changes-hunks-note {
+  padding: 2px 0 4px 18px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

@@ -49,6 +49,7 @@ import { createGoalPanel } from './chat-goal';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
 import type { CodebasePlace } from '../../shared/meaning-search';
+import { hunkAtLine } from '../../shared/hunk-lines';
 import {
   approvalReviewNote,
   createAskPrompt,
@@ -324,12 +325,42 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     deps.revealAt?.(path, position);
   };
 
+  /**
+   * Проиндексировать блок, который начинается на строке `line`. Панель знает
+   * границы блока, а `git` — только номер в diff: между ними общая `hunkAtLine`.
+   * Номера берём свежие: пока панель была открыта, файл мог измениться.
+   */
+  async function stageHunkByLine(path: string, line: number): Promise<void> {
+    if (!deps.git) return;
+    const { unstaged } = await deps.git.fileHunks(path);
+    const index = hunkAtLine(unstaged, line);
+    if (index === null || index < 0) return;
+    await deps.git.stageHunk(path, index);
+    const current = active();
+    changesPanel.render({ touched: current.touched, files: current.files, unsaved: 0 });
+  }
+
+  /** Вернуть файл к `HEAD`: без подтверждения — вызывающий сам решает цену. */
+  async function discardFile(path: string): Promise<void> {
+    if (!deps.git) return;
+    await deps.git.discard([path]);
+  }
+
   // Панель изменений и план агента — отдельные модули: они только рисуют по
   // состоянию беседы, а работа с документами и редактором остаётся здесь.
   const changesPanel = createChangesPanel({
     reveal: (path, line, column) => void revealFile(path, line, column),
     onRevert: () => void revertTouched(),
     onSave: () => void saveTouched(),
+    // Блоки — из того же git, что у панели источника изменений: индекс читает
+    // main, а здесь нужен лишь номер блока в diff файла.
+    ...(deps.git
+      ? {
+          hunks: async (path: string) => (await deps.git!.fileHunks(path)).unstaged,
+          onStageHunk: (path: string, hunk: { newStart: number }) => void stageHunkByLine(path, hunk.newStart),
+          onDiscardFile: (path: string) => void discardFile(path),
+        }
+      : {}),
   });
   const planPanel = createPlanPanel();
   /**

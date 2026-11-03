@@ -325,10 +325,21 @@ export function installMiniDom(): { root: MiniNode; document: any; window: any }
     devicePixelRatio: 1,
     matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
   };
+  // `MutationObserver` нужен виджетам, следящим за атрибутами (шапка попапа
+  // изменений разъезжается, если `hidden` сменился без их ведома). В тесте
+  // наблюдатели не срабатывают: виджет и так перерисовывается явно.
+  class MiniMutationObserver {
+    observe(): void {}
+    disconnect(): void {}
+    takeRecords(): unknown[] {
+      return [];
+    }
+  }
   // Глобальные имена, которые код берёт без `window.` (браузер отдаёт их так же).
   Object.assign(globalThis, {
     document,
     window,
+    MutationObserver: MiniMutationObserver,
     requestAnimationFrame: window.requestAnimationFrame,
     cancelAnimationFrame: window.cancelAnimationFrame,
     getComputedStyle: window.getComputedStyle,

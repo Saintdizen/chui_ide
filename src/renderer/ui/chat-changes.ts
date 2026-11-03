@@ -1,4 +1,5 @@
-import type { ToolFileChange } from '../../shared/api';
+import type { GitDiffHunk, ToolFileChange } from '../../shared/api';
+import { hunkLineRange } from '../../shared/hunk-lines';
 import { changeKindLabel } from '../../shared/tool-files';
 import { fileWord } from './chat-text';
 import { basename, clear, h, svgIcon } from './dom';
@@ -41,6 +42,16 @@ export interface ChangesPanelDeps {
   onRevert(): void;
   /** Записать правки агента на диск — кнопка «Сохранить». */
   onSave(): void;
+  /**
+   * Блоки изменений файла против `HEAD`, по требованию: попап открыт и файл
+   * развёрнут. Без этого действия с блоками не показываются: пустой список и
+   * ошибка не должны выглядеть как «блоков нет».
+   */
+  hunks?(path: string): Promise<readonly GitDiffHunk[]>;
+  /** Отправить в индекс один блок файла. */
+  onStageHunk?(path: string, hunk: GitDiffHunk): void;
+  /** Вернуть файл к `HEAD` целиком — рядом с блоками, чтобы видеть цену блока. */
+  onDiscardFile?(path: string): void;
 }
 
 export interface ChangesPanelView {
@@ -52,6 +63,15 @@ export interface ChangesPanelView {
 export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
   const summary = h('span', { class: 'changes-summary' });
   const stat = h('span', { class: 'changes-stat' });
+  // Файл, развёрнутый до блоков. Хранится отдельно от списка: список
+  // перерисовывается при каждой правке беседы, а разворот не должен схлопываться.
+  let expanded: string | null = null;
+  // Блоки получены: `null` — ещё не спрошены, ошибку показываем текстом.
+  let hunks: readonly GitDiffHunk[] | null = null;
+  let hunksError = false;
+  // Последнее отрисованное состояние: разворот блоков асинхронный и перерисовывает
+  // список сам, уже без нового вызова `render` от беседы.
+  let lastSource: ChangesSource = { touched: new Map(), files: [] };
   // Файлы показываем списком в попапе: чипы в строке ломались переносом и при
   // десятке правок занимали пол-композера.
   const list = h('div', { class: 'changes-list' });
@@ -142,8 +162,14 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
         type: 'button',
         title,
         onClick: () => {
-          popover.close();
-          deps.reveal(target, 1, 1);
+          // Блоки умеем показать — раскрываем строку на месте: человек и так
+          // в панели, открывать файл в редакторе ради одного блока — лишний шаг.
+          if (!deps.hunks) {
+            popover.close();
+            deps.reveal(target, 1, 1);
+            return;
+          }
+          void toggleHunks(target);
         },
       },
       fileIcon(target, 14),
@@ -153,7 +179,110 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
     );
   }
 
+  /**
+   * Развернуть/свернуть блоки файла. Список перерисовывается и приходит новый,
+   * поэтому состояние живёт в `expanded`, а не в самом DOM.
+   */
+  async function toggleHunks(target: string): Promise<void> {
+    if (expanded === target) {
+      expanded = null;
+      hunks = null;
+      hunksError = false;
+      render(lastSource);
+      return;
+    }
+    expanded = target;
+    hunks = null;
+    hunksError = false;
+    render(lastSource);
+    try {
+      hunks = (await deps.hunks?.(target)) ?? [];
+    } catch {
+      hunksError = true;
+      hunks = [];
+    }
+    render(lastSource);
+  }
+
+  /** Строки блока — так, как человек видит их в редакторе (новые номера). */
+  function hunkLabel(hunk: GitDiffHunk): string {
+    const { from, to } = hunkLineRange(hunk);
+    if (from === to) return `стр. ${from}`;
+    return `стр. ${from}–${to}`;
+  }
+
+  /** Блоки под развёрнутой строкой: к каждому — индексация, на файл — откат. */
+  function hunkRows(target: string): HTMLElement {
+    if (hunksError) {
+      return h('div', { class: 'changes-hunks-note' }, 'Не удалось получить блоки');
+    }
+    if (hunks === null) {
+      return h('div', { class: 'changes-hunks-note' }, 'Считаем блоки…');
+    }
+    // Сужение типа не переносится внутрь замыкания `map` — берём длину заранее.
+    const count = hunks.length;
+    const rows: Node[] = hunks.map((hunk, index) =>
+      h(
+        'div',
+        { class: 'changes-hunk' },
+        h(
+          'span',
+          {
+            class: 'changes-hunk-label',
+            title: `${hunk.oldStart},${hunk.oldCount} → ${hunk.newStart},${hunk.newCount}`,
+          },
+          hunkLabel(hunk),
+        ),
+        h(
+          'button',
+          {
+            class: 'btn btn-small changes-hunk-btn',
+            type: 'button',
+            onClick: () => {
+              popover.close();
+              deps.onStageHunk?.(target, hunk);
+            },
+          },
+          'В индекс',
+        ),
+        h(
+          'button',
+          {
+            class: 'btn btn-small changes-hunk-btn',
+            type: 'button',
+            title: `Развернуть в редакторе на строке ${hunkLineRange(hunk).from}`,
+            onClick: () => {
+              popover.close();
+              deps.reveal(target, hunkLineRange(hunk).from, 1);
+            },
+          },
+          'Показать',
+        ),
+        index === count - 1
+          ? h(
+              'button',
+              {
+                class: 'btn btn-small changes-hunk-btn',
+                type: 'button',
+                title: 'Вернуть файл к HEAD целиком',
+                onClick: () => {
+                  popover.close();
+                  deps.onDiscardFile?.(target);
+                },
+              },
+              'Откатить файл',
+            )
+          : null,
+      ),
+    );
+    if (rows.length === 0) {
+      rows.push(h('div', { class: 'changes-hunks-note' }, 'Блоков нет: файл не отличается от HEAD'));
+    }
+    return h('div', { class: 'changes-hunks' }, ...rows);
+  }
+
   function render(source: ChangesSource): void {
+    lastSource = source;
     const total = source.touched.size + source.files.length;
     if (total === 0) {
       element.hidden = true;
@@ -188,7 +317,8 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
 
     clear(list);
     for (const [target, entry] of source.touched) {
-      list.appendChild(
+      const box = h('div', { class: 'changes-file' });
+      box.appendChild(
         row(
           target,
           h(
@@ -196,9 +326,12 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
             { class: 'chip-stat' },
             h('span', { class: 'stat-add' }, `+${entry.added}`),
             h('span', { class: 'stat-del' }, `−${entry.removed}`),
+            deps.hunks ? h('span', { class: 'changes-row-caret' }, expanded === target ? '▾' : '▸') : null,
           ),
         ),
       );
+      if (expanded === target) box.appendChild(hunkRows(target));
+      list.appendChild(box);
     }
 
     // Файловые операции: они уже на диске, но человеку важно видеть и их.
