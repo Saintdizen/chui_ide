@@ -2122,17 +2122,31 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const segments = splitPath(pathAfter(info.root, target));
     segments.pop();
     let current = info.root;
+    // Есть ли среди папок пути непрочитанная: тогда строка появится только
+    // ПОСЛЕ ответа main. Раньше просьба о прокрутке ставилась до этой загрузки —
+    // первая перерисовка искала строку, не находила её и просьбу НЕ снимала,
+    // но `scrollIntoView` ниже уже ничего не мог, а `render` из `.then` просьбу
+    // не уточнял. Открытый из поиска файл в свёрнутой ветке подсвечивался, но
+    // оставался за краем экрана.
+    let loading = false;
     for (const segment of segments) {
       current = joinPath(current, segment);
       expanded.add(current);
-      if (!children.has(current)) void load(current).then(render);
+      if (!children.has(current)) {
+        loading = true;
+        void load(current).then(render);
+      }
     }
     selected = target;
     selection = { paths: [target], anchor: target };
     // Прокрутку заказываем номером строки: если она вне окна, в DOM её ещё нет.
     revealTarget = target;
     render();
-    element.querySelector<HTMLElement>(`[data-path="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'nearest' });
+    // Строка уже нарисована — прокручиваем сразу. Папки ещё читаются — прокрутку
+    // доведёт та перерисовка (`revealTarget` живёт до первой удачной).
+    if (!loading) {
+      element.querySelector<HTMLElement>(`[data-path="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'nearest' });
+    }
   };
 
   deps.workspace.onDidChange(() => {

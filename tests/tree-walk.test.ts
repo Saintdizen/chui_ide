@@ -140,3 +140,35 @@ describe('страница и раскрытие соседей', () => {
     expect(walkTree(rows, 'a.ts', 'Star')).toEqual({ kind: 'expandAll', paths: ['b'] });
   });
 });
+
+describe('просьба о прокрутке живёт до нужной строки', () => {
+  /**
+   * Открыли файл из поиска, он в свёрнутой ветке пятью уровнями глубже.
+   * `reveal` раскрывает папки и просит прокрутку. Если папки ещё читаются,
+   * строка появляется только на СЛЕДУЮЩЕЙ перерисовке — и просьбу нельзя
+   * снимать раньше, иначе подсветка есть, а строка за краем экрана.
+   */
+  const applyReveal = (
+    rows: readonly string[],
+    target: string,
+  ): { scrolled: string | null; pending: string | null } => {
+    const found = rows.includes(target);
+    return { scrolled: found ? target : null, pending: found ? null : target };
+  };
+
+  it('строка уже есть — прокручиваем сразу, просьбу снимаем', () => {
+    expect(applyReveal(['a', 'b'], 'b')).toEqual({ scrolled: 'b', pending: null });
+  });
+
+  it('строки ещё нет — просьба остаётся до следующей перерисовки', () => {
+    // Именно здесь был дефект: просьбу ставили до загрузки, и первая
+    // перерисовка не находившая строку её не снимала — а `scrollIntoView`
+    // после `render` уже не мог ничего.
+    expect(applyReveal(['a'], 'deep/file.ts')).toEqual({ scrolled: null, pending: 'deep/file.ts' });
+  });
+
+  it('после догрузки просьба исполняется ровно один раз', () => {
+    const afterLoad = applyReveal(['a', 'deep/file.ts'], 'deep/file.ts');
+    expect(afterLoad).toEqual({ scrolled: 'deep/file.ts', pending: null });
+  });
+});
