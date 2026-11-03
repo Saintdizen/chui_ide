@@ -1,4 +1,5 @@
 import { h, svgIcon } from './dom';
+import { focusOwner, returnFocus } from './focus-return';
 import { countMatches, stepIndex } from '../../shared/chat-find';
 
 /**
@@ -176,7 +177,15 @@ export function createChatFindBar(deps: ChatFindDeps): ChatFindBar {
     counter.classList.remove('is-empty');
     input.value = '';
     deps.onClose();
+    // Закрыли поиск — фокус уходил в `<body>`, и `Tab` начинал обход с самого
+    // верха приложения. Возвращаем тому, кто открыл (`Ctrl+F` из ленты или из
+    // поля ввода). `Escape` уже сделан `preventDefault` выше, так что без
+    // возврата фокус терялся бы безвозвратно.
+    returnFocus(owner);
   }
+
+  /** Кто держал фокус до открытия — туда и вернём. */
+  let owner: HTMLElement | null = null;
 
   input.addEventListener('input', () => search());
   input.addEventListener('keydown', (event) => {
@@ -205,6 +214,7 @@ export function createChatFindBar(deps: ChatFindDeps): ChatFindBar {
         return;
       }
       isOpen = true;
+      owner = focusOwner();
       element.hidden = false;
       input.focus();
       input.select();

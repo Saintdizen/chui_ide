@@ -83,3 +83,29 @@ describe('returnFocus', () => {
     expect(() => returnFocus(null)).not.toThrow();
   });
 });
+
+describe('поиск в чате возвращает фокус открывшему', () => {
+  /**
+   * Найдено разбором: `chat-find-bar.ts` закрывался, не возвращая фокус —
+   * он падал в `<body>`, и `Tab` начинал обход с самого верха приложения.
+   * Модалка, палитра, popup-menu, quick-open это уже делали через
+   * `focus-return`, а поиск в чате — нет.
+   */
+  it('при закрытии фокус возвращается владельцу', async () => {
+    const { readFileSync } = await import('node:fs');
+    const text = readFileSync(new URL('../src/renderer/ui/chat-find-bar.ts', import.meta.url), 'utf8');
+    // Запомнили при открытии...
+    expect(text).toMatch(/owner = focusOwner\(\)/);
+    // ...и вернули при закрытии.
+    expect(text).toMatch(/returnFocus\(owner\)/);
+  });
+
+  it('владелец запоминается ДО того, как фокус уйдёт в поле поиска', async () => {
+    const { readFileSync } = await import('node:fs');
+    const text = readFileSync(new URL('../src/renderer/ui/chat-find-bar.ts', import.meta.url), 'utf8');
+    const open = text.slice(text.indexOf('owner = focusOwner()'));
+    // `input.focus()` стоит ПОСЛЕ запоминания: иначе владельцем стало бы само
+    // поле поиска, и возвращать было бы некуда.
+    expect(open.indexOf('input.focus()')).toBeGreaterThan(0);
+  });
+});
