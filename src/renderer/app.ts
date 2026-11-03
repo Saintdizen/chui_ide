@@ -1679,6 +1679,22 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   let chatUnseen = false;
   /** Прогон упал — тогда метка не «есть новое», а «есть беда», и цвет другой. */
   let chatUnseenFailed = false;
+  /**
+   * Чем агент занят прямо сейчас («правит agent-edit.ts»).
+   *
+   * Живёт здесь, потому что читают его снаружи ленты — подпись кнопки AI.
+   * При свёрнутой панели это единственное место, где видно, что прогон идёт,
+   * и смотреть на него приходится из чужого файла.
+   */
+  let chatBusyHint: string | null = null;
+
+  function setChatBusyHint(hint: string | null): void {
+    if (chatBusyHint === hint) return;
+    chatBusyHint = hint;
+    // Только кнопка: лента в этот момент перерисовывается сама, а звать её
+    // целиком на каждый вызов инструмента значило бы дёргать весь экран на шаг.
+    syncViewButtons();
+  }
 
   function markChatUnseen(failed: boolean): void {
     chatUnseen = true;
@@ -1739,7 +1755,13 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       // текст жил бы до первого чиха и всё равно был бы затёрт.
       // Видимый след — метка на кнопке AI; словами её говорит `aria-label`.
       markChatUnseen(how === 'failed');
+      // Работа кончилась — подпись про неё больше не правда (её снимет и `seal`).
+      setChatBusyHint(null);
     },
+    // Чем агент занят — словами в подписи кнопки AI. Прогон может идти при
+    // свёрнутой панели, и это единственное место, откуда видно, ЧТО происходит,
+    // а не просто «что-то идёт».
+    onBusyHint: setChatBusyHint,
     // Страница встроенного браузера: адрес открытой вкладки — для `#web`.
     browserUrl: () => browserView.url,
     // `#codebase`: места проекта по смыслу — те же два источника, что у палитры.
@@ -2040,10 +2062,15 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       );
       aiButton.setAttribute(
         'aria-label',
-        chatUnseen && !layout.rightVisible
-          ? 'AI Assistant (Ctrl+Shift+A) — есть новый ответ'
-          : 'AI Assistant (Ctrl+Shift+A)',
+        aiEnabled() && chatBusyHint && !layout.rightVisible
+          ? `AI Assistant (Ctrl+Shift+A) — сейчас: ${chatBusyHint}`
+          : chatUnseen && !layout.rightVisible
+            ? 'AI Assistant (Ctrl+Shift+A) — есть новый ответ'
+            : 'AI Assistant (Ctrl+Shift+A)',
       );
+      // Работа идёт — на кнопке пульсирующая точка, даже если человек ничего не
+      // пропустил: ответа ждать ещй, и это видно без раскрытия панели.
+      aiButton.classList.toggle('is-busy', aiEnabled() && chatBusyHint !== null);
     }
   };
 

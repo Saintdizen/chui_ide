@@ -181,6 +181,12 @@ export interface ChatDeps {
    */
   onRunEnd?(how: RunEnd, title: string): void;
   /**
+   * Чем агент занят сейчас — для шапки панели и дока («сейчас: правит x.ts»).
+   * `null` — работа кончилась. Зовётся на каждом вызове инструмента, поэтому
+   * в UI обновлять надо ДЕШЕВО: без перерисовки ленты.
+   */
+  onBusyHint?(hint: string | null): void;
+  /**
    * Видит ли человек ленту ПРЯМО СЕЙЧАС — панель раскрыта, окно не свёрнуто.
    *
    * Нужен отдельно от `document.hasFocus()`: свёрнутая правая колонка фокус не
@@ -2793,6 +2799,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     },
     setBusy,
     setPaused,
+    busyHint: (hint) => {
+      // Запоминаем в сессии, а не только в UI: прогон мог идти в фоновой вкладке,
+      // и при переключении туда шапка должна сразу показать работу, а не ждать
+      // следующего вызова инструмента — его может и не быть.
+      const session = streamingSession;
+      if (session) session.busyHint = hint ?? undefined;
+      if (session && session.id !== activeId) return;
+      deps.onBusyHint?.(hint);
+    },
     closeApprovals,
     setStreaming: (session) => {
       streamingSession = session;

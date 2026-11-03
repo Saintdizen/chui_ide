@@ -145,6 +145,11 @@ app.whenReady().then(async () => {
     // обязана это переживать: иначе карточка остаётся крутиться, а ответ
     // обрывается. Стережёт tests/rpc-stream-end.test.ts.
     emit('tool_start', { id: 'call_probe', name: 'read_file', args: JSON.stringify({ path: '/tmp/probe.txt' }) });
+    // Держим вызов открытым: пока он идёт, шапка обязана говорить, ЧТО именно
+    // происходит, — а ответ, приди он сразу, закрыл бы окно в тот же такт.
+    // Время берём КОРОТКОЕ: полный holdMs тут растянул бы прогон вдвое и увёл
+    // бы заголовок беседы в обрезок вопроса (проверка выше это и ловит).
+    if (holdMs > 0) await wait(Math.min(holdMs, 400));
     emit('tool_result', {
       id: 'call_probe',
       name: 'read_file',
@@ -983,7 +988,7 @@ app.whenReady().then(async () => {
       // момент, когда строка появилась, зависит от того, когда main прислал событие.
       const начали = Date.now();
       while (Date.now() - начали < 1000) {
-        const метка = [...document.querySelectorAll('.msg-activity-step')].find((е) => !е.hidden);
+        const метка = [...document.querySelectorAll('.msg-activity-step')].find((el) => !el.hidden);
         if (метка) {
           шаг.текст = метка.textContent;
           шаг.действие = метка.closest('.msg-activity')?.querySelector('.msg-activity-label')?.textContent ?? null;
@@ -1017,10 +1022,46 @@ app.whenReady().then(async () => {
         кнопка().click();
         пауза.снята = await дождаться(() => (кнопка()?.getAttribute('title') ?? '').startsWith('Пауза'));
       }
+      // Живой статус «издалека»: что именно делает агент, видно без раскрытия
+      // панели. Подпись кнопки AI — единственное место, откуда это читается,
+      // когда панель свёрнута; класс is-busy — точка, что работа идёт.
+      // Кнопки шапки класса вида не носят; у кнопки AI опознаётся подпись.
+      const aiButton = [...document.querySelectorAll('button.icon-btn')].find((el) =>
+        (el.getAttribute('aria-label') ?? '').startsWith('AI Assistant'),
+      );
+      const подпись = () => aiButton?.getAttribute('aria-label') ?? '';
+      const статус = {
+        точка: aiButton?.classList.contains('is-busy') ?? null,
+        подпись: подпись(),
+        ждал: false,
+        // Панель раскрыта — значит подпись по замыслу молчит, и проверять её
+        // надо при СВЁРНУТОЙ. Запоминаем, в каком виде застали.
+        панель: (document.querySelector('.right-panel')?.getBoundingClientRect().width ?? 0) === 0 ? 'скрыта' : 'раскрыта',
+        // Группа инструментов вообще была? Без этого «точки нет» читается как
+        // «не дошло», хотя агент в этом месте мог просто ничего не вызывать.
+        групп: document.querySelectorAll('.tool-group').length,
+        ход: document.querySelectorAll('.msg-assistant').length,
+      };
+      // Вызов отвечает и гаснет в тот же такт, поэтому «подождать и посмотреть»
+      // не годится: ловим миг, пока инструмент ЕЩЁ идёт. Панель не трогаем —
+      // свёртывание посреди прогона обрывает ленту и валит проверки ниже.
+      const стартЛова = Date.now();
+      while (Date.now() - стартЛова < 3000) {
+        if (aiButton?.classList.contains('is-busy')) {
+          статус.точка = true;
+          // Подпись при раскрытой панели нарочно без строки — но класс
+          // is-busy говорит «работа идёт». Строку со «сейчас:» смотрим
+          // отдельной проверкой ниже.
+          статус.подпись = подпись();
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 15));
+      }
       await new Promise((resolve) => setTimeout(resolve, 1200));
       return {
         шаг,
         пауза,
+        статус,
         было: before,
         стало: document.querySelector('.chat-tab.is-active .tab-label')?.textContent ?? null,
         ответ: [...document.querySelectorAll('.chat-thread .msg-assistant')]
@@ -1063,7 +1104,15 @@ app.whenReady().then(async () => {
   check('номер шага в паузе не теряется', (renamed.пауза?.шаг ?? '').startsWith('шаг '), renamed.пауза);
   check('«продолжить» возвращает работу', renamed.пауза?.снята === true, renamed.пауза);
 
+  /* ── живой статус одной строкой ────────────────────────────────────────── */
 
+  // Из чужого файла видно только «что-то идёт» — до этого пункта. Строка живёт
+  // в подписи кнопки AI: прогон может идти при свёрнутой панели, и это
+  // единственное место, откуда узнать, ЧТО происходит.
+  check('на кнопке AI горит точка, пока идёт работа', renamed.статус?.точка === true, renamed.статус);
+  // Подпись проверяется отдельно и ПОСЛЕ прогона: она живёт только при свёрнутой
+  // панели, а свернуть её посреди прогона значит оборвать ленту и сломать всё
+  // ниже (навигация, метки). Здесь прогон уже кончился — можно.
   /* ── инспектор вызова: аргументы и результат ───────────────────────────── */
 
   // В строке карточки видно только подпись (путь, запрос, команда). Раскрытая
@@ -1693,6 +1742,76 @@ app.whenReady().then(async () => {
   check('и подпись вернулась к обычной', !после.aria.includes('новый ответ'), после.aria);
 
   console.log(`\n[проба] снимок: ${shotFile}`);
+
+  /* ── живой статус издалека (свёрнутая панель) ──────────────────────────── */
+
+  // ЗДЕСЬ, а не рядом с прогоном: проверка сворачивает панель, а лента после
+  // этого обрывается — навигация, метки и переоткрытие бесед, идущие ниже,
+  // перестают видеть DOM. Поэтому в самом конце, когда читать уже нечего.
+  stepDemo.holdMs = 1500;
+  const издалека = await ask(
+    second,
+    `(async () => {
+      const кнопка = [...document.querySelectorAll('button.icon-btn')].find((el) =>
+        (el.getAttribute('aria-label') ?? '').startsWith('AI Assistant'),
+      );
+      if (!кнопка) return { нет: 'кнопки' };
+      const ждать = async (условие, мс = 3000) => {
+        const старт = Date.now();
+        while (Date.now() - старт < мс) {
+          if (условие()) return true;
+          await new Promise((r) => setTimeout(r, 15));
+        }
+        return false;
+      };
+      // Сначала СВЕРНУТЬ, потом слать: подпись собирается в тот же миг, когда
+      // панель скрылась, и при раскрытой её нарочно нет. Клик — переключатель,
+      // поэтому исходное состояние проверяем, иначе клик откроет обратно.
+      // Скрытость живёт классом is-right-hidden на КОРНЕ раскладки, а не на body:
+      // его ставит apply() в layout.ts. Раньше проверка искала несуществующий
+      // класс и «не видела», что панель уже свёрнута.
+      // Признак — ШИРИНА панели, а не класс корня: угаданный селектор цепляет
+      // первый main в документе (это не раскладка), и проверка молча врала.
+      const панель = () => document.querySelector('.right-panel');
+      const скрытоЛи = () => (панель()?.getBoundingClientRect().width ?? 0) === 0;
+      const скрыть = async () => {
+        if (!скрытоЛи()) кнопка.click();
+        return ждать(скрытоЛи);
+      };
+      const скрыта = await скрыть();
+      // Поле ввода остаётся в DOM и при свёрнутой панели — шлём напрямую.
+      const input = document.querySelector('.chat-input');
+      input.value = 'Что ты сейчас делаешь';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+      // Подпись ловим, пока инструмент идёт: он отвечает и гаснет быстро.
+      const стартЛова = Date.now();
+      let подпись = '';
+      let пошёл = false;
+      while (Date.now() - стартЛова < 4000) {
+        if (кнопка.classList.contains('is-busy')) {
+          пошёл = true;
+          подпись = кнопка.getAttribute('aria-label') ?? '';
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 15));
+      }
+      if (!подпись) подпись = кнопка.getAttribute('aria-label') ?? '';
+      return { пошёл, скрыта, подпись };
+    })()`,
+  );
+  check('прогон пошёл, кнопка отметила работу', издалека.пошёл === true, издалека);
+  check('панель свернулась для проверки подписи', издалека.скрыта === true, издалека);
+  check(
+    'свёрнутая панель говорит в подписи, ЧЕМ занят агент',
+    /сейчас: /.test(издалека.подпись ?? ''),
+    издалека,
+  );
+  check(
+    'в подписи назван инструмент, а не общее слово',
+    !/сейчас: (думает|работает)/.test(издалека.подпись ?? ''),
+    издалека,
+  );
 
   terminals.dispose();
   workspace.dispose();

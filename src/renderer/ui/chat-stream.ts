@@ -79,6 +79,8 @@ export interface StreamHost {
    * показывает карточку, а панель артефактов — постоянный список.
    */
   presentArtifacts(items: NonNullable<ChatToolResultPayload['presented']>, session: ChatSession): void;
+  /** Чем агент занят прямо сейчас (`null` — работа кончилась). */
+  busyHint(hint: string | null): void;
   /** Переключить «занято»: панель по этому гасит ввод и меняет кнопку. */
   setBusy(value: boolean, session: ChatSession): void;
   /** Прогон встал на паузу или снялся с неё (кнопка в композере и строка статуса). */
@@ -204,12 +206,20 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     liveActivity = activity;
     messageEl.appendChild(activity.element);
     activity.state('думает…');
+    // Сессия прогона — ДО ленты вызовов: первый же `tool_start` зовёт
+    // `host.busyHint`, а тот ищет её в `streamingSession`. Ниже (строка 235)
+    // `setStreaming` стоит уже после создания `tools`, и подсказка о первом
+    // инструменте терялась бы или уходила не в ту вкладку.
+    host.setStreaming(session);
     // Подряд идущие вызовы инструментов живут одной группой — см. createToolFeed.
     const tools = createToolFeed(
       messageEl,
       activity.element,
       () => host.scrollToEnd(session),
       (path, position) => host.openFile(path, position),
+      // «Что именно идёт» — наружу, в шапку панели и док: свёрнутую группу
+      // видит только тот, кто смотрит на ленту.
+      (hint) => host.busyHint(hint),
     );
     /** Размышления текущего шага: строка живёт в той же ленте, что и вызовы. */
     let reasoningView: ReasoningRowView | null = null;
@@ -227,7 +237,6 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     buffer = '';
     host.hidePlan(session);
     host.scrollToEnd(session);
-    host.setStreaming(session);
     // Ждём первого куска текста: ожидание человека видно в замерax.
     perf.begin('chat:first-token');
     let firstTokenSeen = false;

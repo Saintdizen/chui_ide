@@ -342,11 +342,30 @@ interface ToolGroupView {
  */
 type OpenFileHandler = (path: string, position?: { line?: number; column?: number }) => Promise<void>;
 
+/**
+ * Чем занят агент прямо сейчас — одной строкой («правит agent-edit.ts»).
+ *
+ * Наружу это нужно потому, что свёрнутая группа в ленте видна только тем, кто
+ * на ленту смотрит. Из другого файла видно лишь «что-то идёт» — и не понять,
+ * правит он или читает. `null` — работа кончилась.
+ */
+type BusyHintHandler = (hint: string | null) => void;
+
+/** Строка для шапки и дока: что делает вызов. Файл — из аргументов, пока они на руках. */
+function busyHintFor(call: ChatToolStartPayload): string {
+  const label = toolLabel(call.name, call.args);
+  const file = toolFilePath(call.name, call.args);
+  if (!file) return label;
+  return `${label} ${file.split(/[\\/]/).pop() ?? file}`;
+}
+
 function createToolGroup(
   container: HTMLElement,
   anchor: Node | null,
   onUpdate: (() => void) | undefined,
   onOpenFile: OpenFileHandler | undefined,
+  /** Чем группа занята сейчас — одной строкой, для шапки панели и дока. */
+  onBusyHint: BusyHintHandler | undefined,
 ): ToolGroupView {
   let count = 0;
   let pending = 0;
@@ -539,6 +558,10 @@ function createToolGroup(
     pending += 1;
     const label = toolLabel(call.name, call.args);
     if (!names.includes(label)) names.push(label);
+    // Наружу — что именно правит агент, а не просто «что-то идёт». Файл берём
+    // из аргументов вызова, пока он на руках: в DOM его пришлось бы потом
+    // выковыривать обратно.
+    onBusyHint?.(busyHintFor(call));
 
     /**
      * Файлы-результаты («вот что я сделал»). Это не раздел внутри раскрытия: если
@@ -711,13 +734,16 @@ export function createToolFeed(
   onUpdate?: () => void,
   /** Чем открыть файл-результат: см. `OpenFileHandler`. */
   onOpenFile?: OpenFileHandler,
+  /** Чем агент занят сейчас — для шапки панели и дока, не только для ленты. */
+  onBusyHint?: BusyHintHandler,
 ): {
   add(call: ChatToolStartPayload): ToolCardView;
   reasoning(): ReasoningRowView;
   seal(): void;
 } {
   let current: ToolGroupView | null = null;
-  const ensure = (): ToolGroupView => (current ??= createToolGroup(container, anchor, onUpdate, onOpenFile));
+  const ensure = (): ToolGroupView =>
+    (current ??= createToolGroup(container, anchor, onUpdate, onOpenFile, onBusyHint));
 
   return {
     add: (call) => ensure().add(call),
@@ -727,6 +753,8 @@ export function createToolFeed(
     seal: () => {
       current?.seal();
       current = null;
+      // Работы больше нет: шапка не должна продолжать говорить «правит файл».
+      onBusyHint?.(null);
     },
   };
 }
