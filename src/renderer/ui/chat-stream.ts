@@ -4,6 +4,7 @@ import {
   type ChatDeltaPayload,
   type ChatGoalPayload,
   type ChatMessage,
+  type ChatPausedPayload,
   type ChatPlanPayload,
   type ChatReasoningPayload,
   type ChatStreamDone,
@@ -79,6 +80,8 @@ export interface StreamHost {
   presentArtifacts(items: NonNullable<ChatToolResultPayload['presented']>, session: ChatSession): void;
   /** Переключить «занято»: панель по этому гасит ввод и меняет кнопку. */
   setBusy(value: boolean, session: ChatSession): void;
+  /** Прогон встал на паузу или снялся с неё (кнопка в композере и строка статуса). */
+  setPaused(value: boolean, session: ChatSession): void;
   /** Закрыть открытые ожидания подтверждений (ревью правок, команда). */
   closeApprovals(): void;
   /** Сессия, которая сейчас стримит; `null` — стрим закончился. */
@@ -263,6 +266,13 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
                 messageEl.insertBefore(segment, activity.element);
                 host.scrollToEnd(session);
               }
+              return;
+            }
+            if (event === ChatStreamEvent.Paused) {
+              const { paused } = payload as ChatPausedPayload;
+              host.setPaused(paused, session);
+              // Строка статуса — рядом с «выполняю…»: видно, на чём именно встали.
+              activity.state(paused ? 'пауза · продолжить — кнопка внизу' : 'думает…');
               return;
             }
             if (event === ChatStreamEvent.Delta) {

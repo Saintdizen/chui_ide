@@ -148,6 +148,8 @@ const NOT_MOCKED: Record<string, string[]> = {
     'ai.setWebSearchKey',
     'ai.clearWebSearchKey',
     'ai.setPermission',
+    // Пауза живёт в цикле шагов (main): в моке прогона нет, снимать нечего.
+    'ai.setPaused',
   ],
   'счёт провайдера — сетевой запрос к его API, в моке некому отвечать': ['ai.balance'],
   'встроенный браузер держит main: вложение — слой окна, а не элемент страницы': [

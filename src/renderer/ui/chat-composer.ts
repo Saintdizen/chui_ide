@@ -74,6 +74,11 @@ export interface ChatComposerView {
   setMode(mode: ChatMode): void;
   /** Идёт генерация: кнопка отправки превращается в «стоп», поле гаснет. */
   setBusy(busy: boolean): void;
+  /**
+   * Состояние паузы пришло из main (событие `paused`): кнопка показывает его,
+   * а не своё представление о том, что мы нажали.
+   */
+  setPaused(paused: boolean): void;
   /** Подпись кнопки модели — «Провайдер - Модель». */
   setModel(providerLabel: string, model: string): void;
   /** Доступность усилия размышления — по возможностям выбранной модели. */
@@ -92,6 +97,8 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
   // Набор инструментов: по умолчанию полный — как и в настройках.
   let toolPreset: ToolPresetId = DEFAULT_TOOL_PRESET;
   let busy = false;
+  // Пауза живёт в main: там же, где цикл шагов. Здесь — только отображение.
+  let paused = false;
 
   const input = h('textarea', {
     class: 'chat-input',
@@ -110,8 +117,31 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
   });
 
   /**
+   * Пауза — отдельная кнопка, а не вторая роль «стопа»: стоп рвёт прогон, пауза
+   * доводит текущий шаг и ждёт. Стоит рядом: во время работы видно обе.
+   */
+  const pauseButton = h('button', {
+    class: 'icon-btn composer-pause',
+    type: 'button',
+    onClick: () => {
+      // Отправляем в main, а состояние придёт обратно событием: если шаг сейчас
+      // не границе (идёт терминал), встанет не сразу — и врать нажатием нельзя.
+      void deps.rpc.request('ai.setPaused', { paused: !paused }).catch(() => undefined);
+    },
+  });
+
+  /** Пауза имеет смысл только во время прогона: до и после кнопки нет. */
+  function syncPauseButton(): void {
+    pauseButton.hidden = !busy;
+    clear(pauseButton);
+    pauseButton.appendChild(svgIcon(paused ? 'play' : 'pause', 16));
+    pauseButton.title = paused ? 'Продолжить (следующий шаг)' : 'Пауза после текущего шага (не обрывает действие)';
+    pauseButton.classList.toggle('is-active', paused);
+  }
+
+  /**
    * Отправка и остановка — одна кнопка: во время генерации она превращается
-   * в «стоп». Двух кнопок рядом не бывает: нажимать их одновременно нельзя.
+   * в «стоп».
    */
   function syncActionButton(): void {
     clear(actionButton);
@@ -121,6 +151,12 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     actionButton.title = busy ? 'Остановить генерацию' : 'Отправить (Enter)';
     actionButton.classList.toggle('composer-action-send', !busy);
     actionButton.classList.toggle('composer-action-stop', busy);
+    syncPauseButton();
+  }
+
+  function setPaused(value: boolean): void {
+    paused = value;
+    syncPauseButton();
   }
 
   const modeSelect = createSelect({
@@ -368,7 +404,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     presetSelect.element,
     modelButton,
     effortField,
-    h('div', { class: 'composer-actions' }, contextButton, actionButton),
+    h('div', { class: 'composer-actions' }, contextButton, pauseButton, actionButton),
   );
 
   syncMode();
@@ -385,6 +421,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     modes: () => ({ mode, useTools, planMode, permission, toolPreset }),
     setMode,
     setBusy,
+    setPaused,
     setModel,
     setEffort,
     setToolPreset,

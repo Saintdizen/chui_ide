@@ -362,10 +362,17 @@ export const ChatStreamEvent = {
   ToolResult: 'tool_result',
   Plan: 'plan',
   Goal: 'goal',
+  /** Прогон встал на границе шага или пошёл дальше (пауза, `ai.setPaused`). */
+  Paused: 'paused',
 } as const;
 
 export interface ChatDeltaPayload {
   text: string;
+}
+
+/** Прогон встал на паузу или снялся с неё. */
+export interface ChatPausedPayload {
+  paused: boolean;
 }
 
 /** Цель поставлена, закрыта или прогон пошёл на новый круг ради неё. */

@@ -59,6 +59,10 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
   router.register('ai.setPermission', (params) => {
     deps.ai.setPermission(params.permission);
   });
+  // Пауза, а не стоп: прогон не рвётся, следующий шаг ждёт «продолжить».
+  router.register('ai.setPaused', (params) => {
+    deps.ai.setPaused(params.paused);
+  });
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));
   // Проверка серверов MCP из настроек: поднимаем их и показываем инструменты.
   // Без этого кнопка в настройках была бы слепой — об ошибке знал бы только stderr.

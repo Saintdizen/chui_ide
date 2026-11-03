@@ -981,6 +981,11 @@ export interface ChuiMethods {
    * main перечитывает их перед каждым действием, а не только в начале прогона.
    */
   'ai.setPermission': { params: { permission: PermissionPreset }; result: void };
+  /**
+   * Пауза на границе шага. Не то же, что обрыв стрима (стоп): прогон жив, текущий
+   * вызов дорабатывает, следующий шаг ждёт снятия паузы — человека, а не удачи.
+   */
+  'ai.setPaused': { params: { paused: boolean }; result: void };
   /** История бесед рабочей папки: renderer восстанавливает вкладки после запуска. */
   'ai.chats.load': { params: { root: string }; result: ChatHistory };
   /** Сохранение бесед: renderer — источник истины, main только пишет на диск. */

@@ -1774,6 +1774,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // один). Поэтому блокируем поле разом для всех вкладок: композер ставит
     // `disabled` на общее поле и меняет кнопку отправки на «стоп».
     composer.setBusy(value);
+    // Конец прогона — конец и паузе: кнопка не должна остаться в «продолжить».
+    if (!value) composer.setPaused(false);
+  }
+
+  /**
+   * Пауза пришла из main — там цикл шагов, здесь только вид.
+   * Кнопка паузы живёт в композере, поэтому нить короткая.
+   */
+  function setPaused(value: boolean, _session: ChatSession = active()): void {
+    composer.setPaused(value);
   }
 
   function stop(): void {
@@ -1781,6 +1791,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       showToast('Сейчас ничего не генерируется');
       return;
     }
+    // Пауза, поставленная перед стопом, осталась бы в main и ждала неведомо кого.
+    // Снимаем её тем же способом, каким ставили.
+    void deps.rpc.request('ai.setPaused', { paused: false }).catch(() => undefined);
     deps.rpc.cancelActive();
   }
 
@@ -2093,6 +2106,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       if (session.id === activeId) deps.artifacts?.set(session.artifacts ?? []);
     },
     setBusy,
+    setPaused,
     closeApprovals,
     setStreaming: (session) => {
       streamingSession = session;

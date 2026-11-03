@@ -2424,6 +2424,22 @@
   color: var(--text_color);
 }
 
+/* Пауза — тихая кнопка рядом со «стопом»: не спорит за внимание, но видна.
+   Снятая пауза подсвечивается заливкой: на экране видно, что прогон стоит. */
+.chat-footer .composer-actions .composer-pause {
+  background: transparent;
+  color: var(--text_color_secondary);
+}
+
+.chat-footer .composer-actions .composer-pause:hover {
+  color: var(--text_color);
+}
+
+.chat-footer .composer-actions .composer-pause.is-active {
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+}
+
 /* Строка статуса ассистента — режим и заполнение контекста. Живёт в общей
    полосе окна (статус-баре), а не в композере, поэтому своей подложки и
    собственного размера не несёт: наследует цвет и кегль полосы. */

@@ -108,6 +108,7 @@ import {
 import { pricingAt } from '../../shared/providers';
 import { repairToolPairs } from '../../shared/chat-sanitize';
 import { ProjectMemory } from './project-memory';
+import { PauseGate } from './pause';
 import { WorkspaceContext } from './workspace-context';
 import type { TelemetryStore } from './telemetry';
 import { createJobRegistry, type JobRegistry } from './jobs';
@@ -302,6 +303,11 @@ export class AiService {
    * Сервис один на окно, а активный агентский прогон в окне один — этого хватает.
    */
   private livePermission: PermissionPreset = 'ask';
+  /**
+   * Пауза на границе шага (`ai.setPaused`). Живёт рядом с правами и по той же
+   * причине: renderer меняет её во время прогона, а прогон в окне один.
+   */
+  private readonly pause = new PauseGate();
 
   /**
    * Поправка к оценке токенов, выученная по `usage` провайдера: сколько наши
@@ -446,6 +452,33 @@ export class AiService {
    */
   setPermission(preset: PermissionPreset): void {
     this.livePermission = sanitizePermission(preset);
+  }
+
+  /**
+   * Пауза на границе шага. Не то же, что «стоп»: стоп рвёт прогон и теряет
+   * недосказанное, пауза даёт текущему вызову доработать и держит следующий
+   * шаг, пока человек не решит — продолжать, менять курс или всё-таки встать.
+   */
+  setPaused(value: boolean): void {
+    this.pause.set(value);
+  }
+
+  /** Снять паузу в начале прогона: она принадлежит прошлому, а не этому. */
+  private clearPause(): void {
+    if (!this.pause.isPaused) return;
+    this.pause.set(false);
+  }
+
+  /**
+   * Стоять на границе шага, пока стоит пауза. Событие уходит в ленту, чтобы
+   * человек видел «на паузе», а не «зависло»; прерывание (стоп, закрытие вкладки)
+   * будит ожидание так же, как «продолжить».
+   */
+  private async waitWhilePaused(emit: (event: string, payload: unknown) => void, signal: AbortSignal): Promise<void> {
+    if (!this.pause.isPaused || signal.aborted) return;
+    emit(ChatStreamEvent.Paused, { paused: true });
+    await this.pause.wait(signal);
+    if (!signal.aborted) emit(ChatStreamEvent.Paused, { paused: false });
   }
 
   /**
@@ -631,6 +664,8 @@ export class AiService {
     const requestGoal = sanitizeGoal(request.goal);
     // Текущие права запоминаем на сервисе: дальше их можно менять на лету.
     this.livePermission = permission;
+    // Пауза ушла вместе с прошлым прогоном: новый начинается с работы.
+    this.clearPause();
 
     const messages: ChatMessage[] = [];
     const systemPrompt = request.systemPrompt ?? settings.ai.systemPrompt;
@@ -1067,6 +1102,11 @@ export class AiService {
     let pathsHinted = false;
 
     for (let step = 0; step < steps; step += 1) {
+      if (signal.aborted) break;
+      // Пауза — только здесь: посередине шага не встаём, иначе оборвём вызов
+      // инструмента или модель на полуслове. Стоп проверяется снова: пока стояли,
+      // человек мог нажать «стоп» вместо «продолжить».
+      await this.waitWhilePaused(emit, signal);
       if (signal.aborted) break;
 
       // Шаг трассы: время, текст модели и её вызовы. `commit` один на шаг —
