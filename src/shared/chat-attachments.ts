@@ -24,6 +24,18 @@ export function takeSent(session: { attachments: ChatAttachment[] }): ChatAttach
   return sent;
 }
 
+/**
+ * Вернуть вложения отложенного вопроса: он уходит уже без человека.
+ *
+ * ВАЖНО: кладём ПЕРВЫМИ. Приложенное к следующему печатаемому вопросу уже стоит в
+ * поле — перенос его в конец потерял бы, заодно и порядок «сначала контекст, потом
+ * дописанное» совпадает с тем, как оно шло бы при обычной отправке.
+ */
+export function restoreSent(session: { attachments: ChatAttachment[] }, sent: readonly ChatAttachment[]): void {
+  if (sent.length === 0) return;
+  session.attachments = [...sent, ...session.attachments];
+}
+
 /** Снять вложение ещё до отправки: если оно было отложенным, убрать и там. */
 export function dropAttachment(session: { kept?: ChatAttachment[] }, label: string): void {
   if (!session.kept) return;

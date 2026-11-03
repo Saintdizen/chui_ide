@@ -18,7 +18,7 @@ import { sessionAttachment } from '../../shared/session-context';
 import { isAutoTitle } from '../../shared/chat-title';
 import { resolvePatches } from '../../shared/patch';
 import { turnsSinceCompact } from './compact-turns';
-import { keptContextMessage } from '../../shared/chat-attachments';
+import { keptContextMessage, restoreSent } from '../../shared/chat-attachments';
 import {
   answerReserve,
   compactionBudgetChars,
@@ -39,6 +39,7 @@ import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createAttachments } from './chat-attachments';
+import { clearQueuedPrompts, dropQueuedPrompt, enqueuePrompt, takeNextPrompt } from './chat-queue';
 import { MAX_RUN_ARTIFACTS, type RunArtifacts } from '../core/artifacts';
 import { createToolFeed, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
@@ -580,6 +581,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     for (const session of sessions) session.thread.hidden = session.id !== id;
     const next = active();
     input.value = next.draft;
+    // Очередь живёт в ленте своей беседы: при возврате на вкладку она должна быть
+    // на месте, иначе спрятанные вопросы человеку не видны и не снимаются.
+    renderQueue(next);
     attachments.render();
     renderChanges();
     // Артефакты — тоже свойство беседы: у соседней вкладки свои файлы.
@@ -808,8 +812,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   function renderHistory(session: ChatSession): void {
     clear(session.thread);
+    // `clear` сносит и строку очереди: без перерисовки она исчезла бы из ленты
+    // при любом восстановлении истории, хотя вопросы в ней остались.
+    session.queueNode = undefined;
     if (session.transcript.length === 0) {
       renderIntro(session);
+      renderQueue(session);
       return;
     }
 
@@ -876,6 +884,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     });
     // Сжатая беседа: отметка после переписки — видно, что модель работает по резюме.
     if (session.compacted) appendCompactedNote(session);
+    // Очередь — последней: она всегда под историей, а не внутри неё.
+    renderQueue(session);
     scrollToEnd(session);
   }
 
@@ -1535,6 +1545,66 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return content;
   }
 
+  /**
+   * Очередь вопросов в ленте, в самом низу.
+   *
+   * Рисуем отдельно от истории и перерисовываем целиком при каждом изменении: так
+   * проще всего не расходиться с `session.queue`, а строк в ней мало (человек
+   * пишет во время ответа несколько, а не сотни).
+   */
+  function renderQueue(session: ChatSession): void {
+    session.queueNode?.remove();
+    session.queueNode = undefined;
+    const queued = session.queue ?? [];
+    if (queued.length === 0) return;
+    const list = h('ol', { class: 'queue-list' });
+    queued.forEach((item, index) => {
+      const text = item.text.length > 120 ? `${item.text.slice(0, 119)}…` : item.text;
+      list.appendChild(
+        h(
+          'li',
+          { class: 'queue-item' },
+          h('span', { class: 'queue-index' }, String(index + 1)),
+          h('span', { class: 'queue-text' }, text),
+          h('button', {
+            class: 'queue-drop',
+            type: 'button',
+            title: 'Снять с очереди',
+            'aria-label': `Снять с очереди вопрос ${index + 1}`,
+            onClick: () => dropQueued(session, index),
+          }),
+        ),
+      );
+    });
+    session.queueNode = h(
+      'div',
+      { class: 'chat-queue' },
+      h(
+        'div',
+        { class: 'chat-queue-head' },
+        `В очереди: ${queued.length}`,
+        h('button', { class: 'chat-queue-clear', type: 'button', onClick: () => clearQueue(session) }, 'Снять все'),
+      ),
+      list,
+    );
+    session.thread.appendChild(session.queueNode);
+    // Лента скроллится снаружи: очередь дописана снизу, и без протяжки её не видно.
+    if (session.id === activeId) scrollToEnd(session);
+  }
+
+  /** Убрать один отложенный вопрос: вложения возвращаются в поле, чтобы не пропали. */
+  function dropQueued(session: ChatSession, index: number): void {
+    // Вложения возвращаются всегда, а поле чипов показывает только открытая беседа —
+    // закрытой они не нужны, и перерисовка не вредит.
+    if (dropQueuedPrompt(session, index) && session.id === activeId) attachments.render();
+    renderQueue(session);
+  }
+
+  function clearQueue(session: ChatSession): void {
+    if (clearQueuedPrompts(session) && session.id === activeId) attachments.render();
+    renderQueue(session);
+  }
+
   function renderIntro(session: ChatSession): void {
     clear(session.thread);
     session.thread.appendChild(
@@ -1711,7 +1781,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   async function send(raw: string): Promise<PromptRun> {
     const written = raw.trim();
-    if (!written || busy) return 'busy';
+    if (!written) return 'busy';
+    // Идёт ответ — вопрос не теряем: встаём в очередь и уйдём сами, когда прогон
+    // закончится. Тихо проглоченный Enter — худшее из поведений: человек уверен,
+    // что написал, а спросить не спросил.
+    if (busy) return enqueue(written);
     // `/имя хвост` — это команда проекта, а не вопрос модели: подставляем её текст.
     const text = await expandProjectCommand(written);
 
@@ -1762,7 +1836,46 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Название — после ответа и не в очередь отправки: человек не должен ждать
     // лишний запрос, чтобы увидеть ответ.
     void maybeNameSession(session);
+    void drainQueue(session);
     return outcome === 'done' ? 'started' : outcome;
+  }
+
+  /**
+   * Вопрос во время ответа — в очередь этой беседы.
+   *
+   * Поле чистим и вложения забираем сейчас же: иначе следующий вопрос унёс бы
+   * контекст прошлого (а `takeForSend` чистит всё разом — вернуть его потом нечем).
+   */
+  function enqueue(text: string): PromptRun {
+    const session = active();
+    enqueuePrompt(session, { text, attachments: attachments.takeForSend() });
+    input.value = '';
+    session.draft = '';
+    renderQueue(session);
+    showToast('Вопрос в очереди — уйдёт после ответа');
+    return 'busy';
+  }
+
+  /**
+   * Достать из очереди следующее — после прогона.
+   *
+   * Отправляем по одному и именно этим же путём (`send`), а не напрямую в поток:
+   * так сохраняются проверки влезания контекста, разбор `/команд` и правила ленты.
+   * Один ход за раз, по той же причине, по какой в окне один активный стрим.
+   */
+  async function drainQueue(session: ChatSession): Promise<void> {
+    // Вложения отложенного вопроса отправляем только если он из открытой беседы.
+    // Иначе они попали бы в чужое поле — человек видит чипы другой вкладки и тыкает
+    // в них, а на деле добавляет контекст к вопросу из этой.
+    if (session.id !== activeId) return;
+    const next = takeNextPrompt(session);
+    if (!next) return;
+    renderQueue(session);
+    // Очередь идёт тем же путём, что и обычная отправка: одна дорога для картинок,
+    // одна проверка влезания контекста, один разбор `/команд`.
+    restoreSent(session, next.attachments);
+    attachments.render();
+    await send(next.text);
   }
 
   function setBusy(value: boolean, _session: ChatSession = active()): void {

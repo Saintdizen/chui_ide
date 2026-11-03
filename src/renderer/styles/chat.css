@@ -370,6 +370,79 @@
   display: none;
 }
 
+/* Очередь вопросов: то, что человек написал во время ответа. Стоит под лентой,
+   приглушена и занимает мало места — это не часть беседы, а «ещё не отправлено». */
+.chat-queue {
+  border: 1px dashed var(--border_color);
+  border-radius: var(--radius_sm);
+  padding: 6px 8px;
+  font-size: var(--font_small_size);
+  color: var(--text_color_tertiary);
+  background: var(--sunken_background);
+}
+
+.chat-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.chat-queue-clear,
+.queue-drop {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: var(--radius_xs);
+}
+
+.chat-queue-clear:hover,
+.queue-drop:hover {
+  color: var(--text_color);
+  background: var(--element_background_hover);
+}
+
+/* Крестик снятия: тот же вид, что у прочих мелких кнопок в ленте. */
+.queue-drop::before {
+  content: '×';
+  font-size: var(--font_small_size);
+  line-height: 1;
+}
+
+.queue-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.queue-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.queue-index {
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text_color);
+}
+
 /* Ход беседы: вопрос и ответы на него. Обёртка держит их вместе, чтобы вопрос
    не отрывался от своего ответа при разметке ленты. */
 .chat-turn {
