@@ -50,6 +50,7 @@ import { createChangesPanel } from './chat-changes';
 import { archivePlan, createPlanPanel } from './chat-plan';
 import { createGoalPanel } from './chat-goal';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
+import { scrollTargetFor } from './chat-session';
 import type { ChatSession } from './chat-session';
 import type { CodebasePlace } from '../../shared/meaning-search';
 import { hunkAtLine } from '../../shared/hunk-lines';
@@ -234,15 +235,26 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       class: 'chat-jump',
       type: 'button',
       title: 'К последнему сообщению',
-      onClick: () => {
-        autoScroll = true;
-        jumpButton.hidden = true;
-        body.scrollTop = body.scrollHeight;
-      },
+      onClick: () => stickToEnd(),
     },
     svgIcon('chevronDown', 16),
   );
   jumpButton.hidden = true;
+
+  /**
+   * Прокрутить ленту вниз БЕЗ сброса «слежу за низом».
+   *
+   * `scrollTop = scrollHeight` — это тоже программа: `scroll` придёт асинхронно и
+   * пересчитает `autoScroll` по фактической позиции. Пока разметка не уложена
+   * (только что вставлена, шрифты не пришли), `scrollHeight` меньше правды, и привязка
+   * к низу слетала бы на ровном месте. Ставим флаг явно — прокрутка либо догонит низ,
+   * либо `scroll` сделает то же самое.
+   */
+  function stickToEnd(): void {
+    autoScroll = true;
+    jumpButton.hidden = true;
+    body.scrollTop = body.scrollHeight;
+  }
 
   // Низ ленты — это «следить за ответом»; верх — «читать и не мешать».
   body.addEventListener('scroll', () => {
@@ -573,6 +585,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       artifacts: [],
       attachments: [],
       draft: '',
+      // `undefined` = беседа ещё ни разу не показывалась: только ей ставим конец.
+      scrollTop: undefined,
     };
     nextId += 1;
     sessions.push(session);
@@ -587,6 +601,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (current.id === id) return;
 
     current.draft = input.value;
+    // Позиция прежней беседы — ДО скрытия: у `hidden` ленты браузер отдаёт 0.
+    current.scrollTop = body.scrollTop;
     closeApprovals();
     menu.hide();
     activeId = id;
@@ -612,10 +628,20 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     // Занятость общая: прогон в окне один, поэтому и поле одно на все вкладки.
     input.disabled = busy;
-    requestAnimationFrame(() => {
-      body.scrollTop = body.scrollHeight;
-      input.focus();
-    });
+    // К низу — только на первом показе. Дальше позиция у каждой беседы своя
+    // (полоса одна на всех): возврат восстанавливает её, а не ставит конец.
+    const target = scrollTargetFor(next);
+    if (target === 'end') {
+      next.scrollTop = undefined;
+      stickToEnd();
+    } else {
+      body.scrollTop = target;
+      // Браузер обрежет до реального низа, пока высота не устоялась: флаг считаем
+      // по факту, а не верим сохранённому числу.
+      autoScroll = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+      jumpButton.hidden = autoScroll;
+    }
+    input.focus({ preventScroll: true });
   }
 
   /** Закрытие вкладки. Последнюю не закрываем — вместо неё появляется пустая. */
@@ -2109,6 +2135,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     sessionInfo.hide();
     scheduleSave();
     requestAnimationFrame(() => {
+      // Новая беседа — низ тоже не «слежение» в смысле флага: лента пустая, а
+      // `scroll` за ним никто не пришлёт. Иначе флаг остался бы от старой беседы
+      // и первый же ответ «полистал» бы ленту без спроса.
+      autoScroll = true;
+      jumpButton.hidden = true;
       body.scrollTop = 0;
       input.focus();
     });
