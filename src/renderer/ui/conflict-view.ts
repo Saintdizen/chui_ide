@@ -5,7 +5,9 @@ import {
   hasConflicts,
   parseConflicts,
 } from '../../shared/conflicts';
+import type { GitConflictParts } from '../../shared/api/git';
 import type { TextEdit } from '../../shared/edits';
+import { diffAgainstBase, type AnnotatedLine } from '../../shared/merge-diff';
 import type { OwnDiffHandle } from '../core/diff-handle';
 import type { GitModel } from '../core/git-model';
 import { languageFromPath } from '../core/languages';
@@ -146,8 +148,43 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
     }
   }
 
+  /**
+   * Разметка стороны по базе — своя для КАЖДОГО блока.
+   *
+   * Сверяем блок отдельно: жадный проход по всему файлу легко цепляет одинаковую
+   * строку из соседнего блока, и тогда подсказка уезжает на чужое место. Внутри
+   * блока такой ошибки быть не может — там всего одна спорная правка.
+   */
+  function annotationFor(
+    parts: GitConflictParts | null,
+    block: ConflictBlock,
+  ): { ours: AnnotatedLine[]; theirs: AnnotatedLine[] } {
+    if (!parts || !parts.base) return { ours: [], theirs: [] };
+    const [hunk] = diffAgainstBase(block.ours, block.theirs, parts.base);
+    return hunk ?? { ours: [], theirs: [] };
+  }
+
+  /**
+   * Сторона блока: `<pre>` из строк, где вытеснавшие базу строки помечены.
+   *
+   * Без разметки — тот же `<pre>` одним куском: пустой `pre` на месте пустой
+   * стороны читается как поломка, поэтому пишем «(пусто)», как и раньше.
+   */
+  function sidePres(lines: readonly AnnotatedLine[], text: string): HTMLElement {
+    const pre = h('pre', { class: 'conflict-side-text' });
+    if (lines.length === 0) {
+      pre.textContent = text || '(пусто)';
+      return pre;
+    }
+    for (const line of lines) {
+      pre.appendChild(h('span', { class: `conflict-line is-${line.state}` }, line.text || ' '));
+      pre.appendChild(h('span', { class: 'conflict-eol' }, '\n'));
+    }
+    return pre;
+  }
+
   /** Список блоков: у каждого — обе стороны и три кнопки выбора. */
-  function renderBlocks(text: string): void {
+  function renderBlocks(text: string, parts: GitConflictParts | null): void {
     clear(blocksHost);
     if (blocks.length === 0) {
       blocksHost.appendChild(
@@ -198,13 +235,13 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
           'div',
           { class: 'conflict-side' },
           h('span', { class: 'conflict-side-label' }, oursLabel),
-          h('pre', { class: 'conflict-side-text' }, block.ours || '(пусто)'),
+          sidePres(annotationFor(parts, block).ours, block.ours),
         ),
         h(
           'div',
           { class: 'conflict-side' },
           h('span', { class: 'conflict-side-label' }, theirsLabel),
-          h('pre', { class: 'conflict-side-text' }, block.theirs || '(пусто)'),
+          sidePres(annotationFor(parts, block).theirs, block.theirs),
         ),
       );
       blocksHost.appendChild(row);
@@ -233,7 +270,7 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
       handle.set({ language: languageFromPath(next), original: parts.ours, modified: parts.theirs });
     }
 
-    renderBlocks(text);
+    renderBlocks(text, parts);
     // «Применить» нужно, только когда есть что применять; «Отметить решённым» —
     // когда маркеров не осталось (иначе в индекс ушёл бы файл с маркерами).
     applyButton.disabled = choices.size === 0;

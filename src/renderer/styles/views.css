@@ -630,6 +630,25 @@
   white-space: pre-wrap;
 }
 
+/*
+ * Строки, вытеснившие строку общего предка, помечены левым краем, а не фоном:
+ * фон рядом с двумя соседними блоками уже означает «эта сторона выбрана».
+ * Нетронутые строки показываются как есть — их видно по отсутствию края.
+ */
+.conflict-line {
+  display: block;
+  padding-left: 6px;
+  border-left: 2px solid transparent;
+}
+
+.conflict-line.is-changed {
+  border-left-color: var(--color_warning, #d7ba7d);
+}
+
+.conflict-eol {
+  display: none;
+}
+
 .conflict-footer {
   flex: 0 0 auto;
   display: flex;

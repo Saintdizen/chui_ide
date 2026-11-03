@@ -119,6 +119,12 @@ export async function blame(
  * Три версии конфликтного файла из индекса: общий предок и обе стороны.
  * Нет объекта в индексе (файл добавлен только одной стороной) — пустая строка:
  * для интерфейса это «сравнивать не с чем», а не ошибка.
+ *
+ * Стадий в индексе может уже не быть — файл отметили решённым (`git add`), а экран
+ * всё ещё открыт. Это не ошибка: тогда стороны берём из HEAD и из сливаемой ветки
+ * (MERGE_HEAD / REBASE_HEAD / CHERRY_PICK_HEAD). Без этого запасного хода после
+ * отметки экран показывал бы пустоту вместо «что в итоге получилось».
+ * `conflicted: false` говорит интерфейсу, что перед ним уже не две стороны слияния.
  */
 export async function conflictParts(ctx: HistoryContext, filePath: string): Promise<GitConflictParts> {
   const repoRoot = await ctx.repositoryRoot();
@@ -130,7 +136,43 @@ export async function conflictParts(ctx: HistoryContext, filePath: string): Prom
     fromRef(repoRoot, `:2:${relative}`),
     fromRef(repoRoot, `:3:${relative}`),
   ]);
-  return { base, ours, theirs };
+  const style = await conflictStyle(repoRoot);
+
+  // Непустая база или наша сторона — стадии в индексе есть, файл не слит.
+  if (base !== '' || ours !== '') return { base, ours, theirs, style, conflicted: true };
+
+  const incoming = await incomingHead(repoRoot);
+  if (!incoming) return { base, ours, theirs, style, conflicted: false };
+  const [head, other] = await Promise.all([
+    showFile(`HEAD:${relative}`, repoRoot),
+    showFile(`${incoming}:${relative}`, repoRoot),
+  ]);
+  return { base, ours: head, theirs: other, style, conflicted: false };
+}
+
+/**
+ * Стиль маркеров из `git config merge.conflictStyle`.
+ * Не задан — git пишет `merge`; ошибку молча превращаем в `merge`, чтобы не ломать
+ * экран из-за настройки.
+ */
+async function conflictStyle(repoRoot: string): Promise<'merge' | 'diff3' | 'zdiff3'> {
+  const result = await execGit(['config', '--get', 'merge.conflictStyle'], repoRoot, { allowFailure: true });
+  const value = result.ok ? result.stdout.trim() : '';
+  return value === 'diff3' || value === 'zdiff3' ? value : 'merge';
+}
+
+/**
+ * Что сливается прямо сейчас: имя ссылки, из которой пришли изменения.
+ *
+ * `REBASE_HEAD` важнее merge: при перебазировании `MERGE_HEAD` не бывает, а
+ * ребейз и черри-пик тоже оставляют маркеры в файле и требуют того же разбора.
+ */
+async function incomingHead(repoRoot: string): Promise<string | null> {
+  for (const ref of ['MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD']) {
+    const result = await execGit(['rev-parse', '--verify', '--quiet', ref], repoRoot, { allowFailure: true });
+    if (result.ok && result.stdout.trim() !== '') return ref;
+  }
+  return null;
 }
 
 export async function logGraph(ctx: HistoryContext, limit = 100): Promise<string> {
