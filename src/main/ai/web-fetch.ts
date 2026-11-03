@@ -1,3 +1,4 @@
+import { redirectForUrl } from '../../shared/tool-router';
 import {
   clampPageText,
   extractLinks,
@@ -46,7 +47,12 @@ export interface FetchPageOptions {
 
 export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}): Promise<FetchedPage> {
   const problem = fetchUrlProblem(rawUrl);
-  if (problem) throw new Error(problem);
+  if (problem) {
+    // Отказ говорит, куда идти: `file:` — это не запрещённый адрес, а другой
+    // инструмент, и модель, прочитавшая «нельзя», повторит тот же вызов.
+    const redirect = redirectForUrl(rawUrl);
+    throw new Error(redirect ? `${problem}. Здесь работает ${redirect.tool}: ${redirect.why}` : problem);
+  }
   const url = normalizeFetchUrl(rawUrl);
 
   const timeout = AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS);
@@ -85,9 +91,12 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
     );
   }
   if (!textual) {
+    const redirect = redirectForUrl(url);
     throw new Error(
       `По адресу лежит файл (${kind}), а не страница: чтение страниц берёт только текст. ` +
-        'Файл скачивается терминалом (curl) или смотрится браузером.',
+        (redirect
+          ? `Скачать — ${redirect.tool}: ${redirect.why}.`
+          : 'Файл скачивается терминалом (curl) или смотрится браузером.'),
     );
   }
 
