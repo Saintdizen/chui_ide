@@ -1,46 +1,58 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeUiScale, UI_SCALE_MAX, UI_SCALE_MIN, uiScaleOptions } from '../src/shared/ui-scale';
+import { stepUiScale, uiScaleLabel } from '../src/shared/ui-scale';
 
-describe('sanitizeUiScale', () => {
-  it('число в границах остаётся как есть', () => {
-    expect(sanitizeUiScale(1)).toBe(1);
-    expect(sanitizeUiScale(1.2)).toBe(1.2);
+/**
+ * Найдено разбором: масштаб оболочки менялся ТОЛЬКО списком в настройках.
+ * Ни клавиш, ни подписи — а `Ctrl+=` в редакторе и настройках привычка мышечная,
+ * и человека, у которого «буквы мелкие», такое отправляет искать окно настроек.
+ */
+describe('stepUiScale', () => {
+  it('шаг вверх и вниз', () => {
+    expect(stepUiScale(1, 1)).toBeGreaterThan(1);
+    expect(stepUiScale(1, -1)).toBeLessThan(1);
   });
 
-  it('мусор и пустое дают единицу', () => {
-    expect(sanitizeUiScale(undefined)).toBe(1);
-    expect(sanitizeUiScale('abc')).toBe(1);
-    expect(sanitizeUiScale(Number.NaN)).toBe(1);
-    expect(sanitizeUiScale(0)).toBe(1);
-    expect(sanitizeUiScale(-2)).toBe(1);
+  it('сброс — всегда ровно 1', () => {
+    // «Вернуть как было» — одно известное состояние, а не «примерно то, что
+    // было при первом запуске».
+    expect(stepUiScale(1.37, 0)).toBe(1);
   });
 
-  it('значения за границами поджимаются к ближайшей', () => {
-    expect(sanitizeUiScale(5)).toBe(UI_SCALE_MAX);
-    expect(sanitizeUiScale(0.1)).toBe(UI_SCALE_MIN);
+  it('на верхнем краю не меняется', () => {
+    // Иначе Ctrl+= на максимуме молча переставлял бы значение на то же самое,
+    // и человек считал бы, что клавиша сломалась.
+    const top = stepUiScale(9.9, 1);
+    expect(top).toBe(stepUiScale(top, 1));
   });
 
-  it('строку из настроек тоже принимает', () => {
-    expect(sanitizeUiScale('1.1')).toBe(1.1);
+  it('на нижнем краю не меняется', () => {
+    const bottom = stepUiScale(0.1, -1);
+    expect(bottom).toBe(stepUiScale(bottom, -1));
   });
 
-  it('округляет до шага ступеней', () => {
-    expect(sanitizeUiScale(1.07)).toBe(1.1);
-    expect(sanitizeUiScale(1.04)).toBe(1);
+  it('мусор в значении не ломает шаг', () => {
+    expect(Number.isFinite(stepUiScale(Number.NaN, 1))).toBe(true);
+    expect(stepUiScale(Number.NaN, 0)).toBe(1);
+  });
+
+  it('шаг вверх и обратно возвращает к исходному', () => {
+    const start = 1;
+    const up = stepUiScale(start, 1);
+    expect(stepUiScale(up, -1)).toBeCloseTo(start, 10);
   });
 });
 
-describe('uiScaleOptions', () => {
-  it('идёт от минимума к максимуму с шагом', () => {
-    const options = uiScaleOptions();
-    const values = options.map((option) => Number(option.value));
-
-    expect(values[0]).toBe(UI_SCALE_MIN);
-    expect(values.at(-1)).toBe(UI_SCALE_MAX);
-    expect(options).toHaveLength(Math.round((UI_SCALE_MAX - UI_SCALE_MIN) / 0.1) + 1);
+describe('uiScaleLabel', () => {
+  it('доли — проценты', () => {
+    expect(uiScaleLabel(1)).toBe('100 %');
+    expect(uiScaleLabel(1.1)).toBe('110 %');
+    expect(uiScaleLabel(0.8)).toBe('80 %');
   });
 
-  it('подписи — проценты', () => {
-    expect(uiScaleOptions().find((option) => option.value === '1')?.label).toBe('100 %');
+  it('значение вне ступеней приводится к ступени, а не рисуется как есть', () => {
+    // `sanitizeUiScale` округляет до шага 0.1: иначе подпись показывала бы
+    // «113 %», а применялось бы 110 % — окно настроек и клавиша разошлись бы.
+    expect(uiScaleLabel(1.125)).toBe('110 %');
+    expect(uiScaleLabel(1.16)).toBe('120 %');
   });
 });

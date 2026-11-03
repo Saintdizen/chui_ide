@@ -9,6 +9,7 @@ function setup(opts: { active?: { path: string } | null } = {}) {
   const define: DefineCommand = (descriptor, handler) => commands.set(descriptor.id, handler);
   const log: string[] = [];
   const toasts: string[] = [];
+  let uiScale = 1;
   let zen: ZenSnapshot | null = null;
   /** Классы, реально висящие на корне: `contains` обязан отвечать правдой. */
   const zenClass = new Set<string>();
@@ -89,16 +90,45 @@ function setup(opts: { active?: { path: string } | null } = {}) {
     toggleMinimap: () => log.push(`minimap:${visible.minimap}`),
     regexTester: { open: () => log.push('regex') },
     showToast: (message: string, kind?: string) => toasts.push(`${kind ?? 'info'}:${message}`),
+    uiScale: {
+      get: () => uiScale,
+      set: (value: number) => {
+        uiScale = value;
+        log.push(`scale:${value}`);
+      },
+    },
   } as unknown as ViewCommandDeps;
   registerViewCommands(define, deps);
-  return { commands, log, toasts, visible, zen: () => zen };
+  return { commands, log, toasts, visible, zen: () => zen, scale: () => uiScale };
 }
 
 const run = (f: ReturnType<typeof setup>, id: string) => f.commands.get(id)!();
 
 describe('registerViewCommands', () => {
-  it('регистрирует шестнадцать команд вида', () => {
-    expect(setup().commands.size).toBe(16);
+  it('регистрирует все команды вида, включая масштаб', () => {
+    const commands = setup().commands;
+    // Не число: оно росло с каждой новой командой и требовало правки теста,
+    // ничего не проверяя по сути. Проверяем, что семейство на месте.
+    for (const id of ['view.zen', 'view.toggleSidebar', 'view.zoomIn', 'view.zoomOut', 'view.zoomReset']) {
+      expect(commands.has(id), id).toBe(true);
+    }
+  });
+
+  it('масштаб меняется шагом и говорит об этом', () => {
+    // Раньше масштаб жил только списком в настройках: «буквы мелкие» →
+    // ищи окно настроек. Молчаливая смена ещё хуже — непонятно, сработало ли.
+    const f = setup();
+    run(f, 'view.zoomIn');
+    expect(f.scale()).toBeGreaterThan(1);
+    expect(f.toasts.at(-1)).toContain('Масштаб интерфейса');
+  });
+
+  it('сброс масштаба — ровно 100 %', () => {
+    const f = setup();
+    run(f, 'view.zoomIn');
+    run(f, 'view.zoomIn');
+    run(f, 'view.zoomReset');
+    expect(f.scale()).toBe(1);
   });
 
   it('панель редактора — такой же тумблер, как боковая и нижняя', () => {

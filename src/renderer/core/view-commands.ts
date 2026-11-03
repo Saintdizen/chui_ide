@@ -1,3 +1,4 @@
+import { stepUiScale, uiScaleLabel } from '../../shared/ui-scale';
 import type { ToastKind, ToastOptions } from '../ui/toast';
 import type { DefineCommand } from './command-args';
 
@@ -60,6 +61,11 @@ export interface ViewCommandDeps {
   toggleMinimap(): void;
   regexTester: { open(): void };
   showToast(message: string, kind?: ToastKind, options?: ToastOptions): void;
+  /** Масштаб оболочки: читаем текущий и ставим новый (`appearance.uiScale`). */
+  uiScale: {
+    get(): number;
+    set(scale: number): void;
+  };
 }
 
 /**
@@ -152,6 +158,30 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
       return;
     }
     deps.toggleMinimap();
+  });
+
+  // Масштаб оболочки. Меняется тем же путём, что и список в настройках, — так
+  // клавиша и окно настроек не расходятся: значение одно, в `settings.json`.
+  const zoom = (direction: -1 | 0 | 1): void => {
+    const before = deps.uiScale.get();
+    const after = stepUiScale(before, direction);
+    if (after === before) return;
+    deps.uiScale.set(after);
+    // Подпись обязательна: без неё Ctrl+= на максимуме выглядит как «клавиша не работает».
+    deps.showToast(`Масштаб интерфейса: ${uiScaleLabel(after)}`);
+  };
+  // БЕЗ `keybinding`. Эти сочетания уже заняты пунктами меню с ролью Electron
+  // (`role: 'zoomIn'`) — и они РАБОТАЮТ: меняют масштаб всего окна. Своё
+  // сочетание здесь отняло бы у них клавишу и сделало бы две правки масштаба,
+  // которые не знают друг о друге (см. ниже).
+  define({ id: 'view.zoomIn', title: 'Крупнее', category: 'Вид' }, () => {
+    zoom(1);
+  });
+  define({ id: 'view.zoomOut', title: 'Мельче', category: 'Вид' }, () => {
+    zoom(-1);
+  });
+  define({ id: 'view.zoomReset', title: 'Масштаб 100 %', category: 'Вид' }, () => {
+    zoom(0);
   });
 
   define({ id: 'view.notebooks', title: 'Ячейки ноутбука', category: 'Вид' }, () => {

@@ -37,3 +37,24 @@ export function uiScaleOptions(): Array<{ value: string; label: string }> {
   }
   return options;
 }
+
+/**
+ * Следующая ступень масштаба: `direction` — +1 крупнее, -1 мельче, 0 — сброс.
+ *
+ * Сброс идёт в 1, а не к ближайшей ступени: «вернуть как было» — это всегда
+ * одно известное состояние, а не «примерно то же, что при первом запуске».
+ * За границей масштаб не меняется вовсе — иначе `Ctrl+=` на максимуме молча
+ * переставлял бы значение в то же самое «с точностью до округления».
+ */
+export function stepUiScale(current: number, direction: -1 | 0 | 1): number {
+  const base = sanitizeUiScale(current);
+  if (direction === 0) return 1;
+  const next = Number((base + direction * UI_SCALE_STEP).toFixed(2));
+  if (next < UI_SCALE_MIN || next > UI_SCALE_MAX) return base;
+  return next;
+}
+
+/** Подпись масштаба для тоста и подсказки: 1.1 → «110 %». */
+export function uiScaleLabel(scale: number): string {
+  return `${Math.round(sanitizeUiScale(scale) * 100)} %`;
+}

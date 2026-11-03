@@ -3033,6 +3033,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     toggleMinimap,
     regexTester,
     showToast,
+    uiScale: {
+      get: () => settings.appearance.uiScale,
+      // Тем же путём, что и список в настройках: значение одно и живёт в
+      // `settings.json`. Иначе команда показала бы одно, а окно настроек — другое.
+      set: (scale) => void saveSettingsPatch({ appearance: { uiScale: scale } }),
+    },
   });
 
   // Флаг режима: чтение и запись одним местом. Запись обновляет и локальные
