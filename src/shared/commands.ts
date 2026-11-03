@@ -8,7 +8,8 @@
  *
  * Файл команды лежит в `.chui/commands/<имя>.md` проекта (уезжает в репозиторий)
  * или в `~/.chui/commands/` домашнего каталога (общие для всех проектов). Имя
- * команды — имя файла, поэтому набирается после `/`.
+ * команды — имя файла, поэтому набирается после `/`. Файл можно назвать
+ * `<имя>.prompt.md` — пометка `.prompt` для человека и в имя не входит.
  *
  * Тело файла — текст запроса. Хвост, набранный после имени команды, подставляется
  * на место `$ARGUMENTS` (коротко — `$ARG`); если места в тексте нет, хвост
@@ -40,10 +41,21 @@ export interface ProjectCommand {
   description: string;
   /** Тело файла — текст запроса (с `$ARGUMENTS`, если ждёт хвост). */
   prompt: string;
+  /**
+   * Контекст, который команда прикладывает вместе с заданием (`context: diff, codebase`).
+   * Без него заготовка — только текст, а «посмотри дифф» требует ещё и прицепки.
+   */
+  context?: readonly CommandContextKind[];
   /** Абсолютный путь к файлу: по нему видно, откуда команда пришла. */
   path: string;
   scope: SkillScope;
 }
+
+/**
+ * Что может приложить заготовка: те же прицепки, что и `#` в композере.
+ * Список живёт здесь, а не в renderer — его читает и main при разборе шапки.
+ */
+export type CommandContextKind = 'selection' | 'file' | 'problems' | 'diff' | 'codebase' | 'web';
 
 /** Имя длиннее — это уже заголовок: после `/` его не набрать. */
 export const MAX_COMMAND_NAME = 48;
@@ -57,6 +69,20 @@ export const MAX_COMMAND_PROMPT_CHARS = 8_000;
 /** Место подстановки хвоста. Короткая запись — чтобы не набирать длинное слово. */
 export const ARGUMENTS_TOKEN = '$ARGUMENTS';
 export const ARGUMENTS_SHORT_TOKEN = '$ARG';
+/** Тот же хвост в записи `${input}`: заготовка чаще пишется из шаблона, чем из git-хука. */
+export const INPUT_TOKEN = '${input}';
+/**
+ * Что можно приложить из шапки: имена — те же, что у `#` в композере. Чужое
+ * имя — опечатка, а не прицепка: молча приложить «не то» хуже, чем не приложить.
+ */
+export const COMMAND_CONTEXT_KINDS: readonly CommandContextKind[] = [
+  'selection',
+  'file',
+  'problems',
+  'diff',
+  'codebase',
+  'web',
+];
 
 /**
  * Привести имя к виду, в котором его набирают после `/`: нижний регистр,
@@ -155,7 +181,20 @@ export function parseCommandFile(
   const description = (described || firstParagraph(body)).slice(0, MAX_COMMAND_DESCRIPTION);
   if (!description) return null;
 
-  return { name, description, prompt, path: options.path, scope: options.scope };
+  return { name, description, prompt, path: options.path, scope: options.scope, ...contextField(fields) };
+}
+
+/**
+ * `context:` из шапки — прицепки через запятую. Имена проверяются по списку:
+ * опечатка в шапке не должна тянуть за собой «приложить непонятно что».
+ */
+function contextField(fields: Map<string, string>): { context?: readonly CommandContextKind[] } {
+  const raw = fields.get('context') ?? fields.get('контекст') ?? '';
+  const kinds = raw
+    .split(/[,;\s]+/)
+    .map((item) => item.trim().toLowerCase())
+    .filter((item): item is CommandContextKind => COMMAND_CONTEXT_KINDS.includes(item as CommandContextKind));
+  return kinds.length > 0 ? { context: [...new Set(kinds)] } : {};
 }
 
 /** Команда по имени: без учёта регистра и с той же нормализацией, что при разборе. */
@@ -187,10 +226,16 @@ export function parseCommandInvocation(value: string): { name: string; tail: str
  */
 export function expandCommandPrompt(command: ProjectCommand, tail = ''): string {
   const argument = tail.trim();
-  const hasPlaceholder = command.prompt.includes(ARGUMENTS_TOKEN) || command.prompt.includes(ARGUMENTS_SHORT_TOKEN);
+  const hasPlaceholder =
+    command.prompt.includes(ARGUMENTS_TOKEN) ||
+    command.prompt.includes(ARGUMENTS_SHORT_TOKEN) ||
+    command.prompt.includes(INPUT_TOKEN);
   if (!hasPlaceholder) return argument ? `${command.prompt}\n\n${argument}` : command.prompt;
 
-  const filled = command.prompt.replaceAll(ARGUMENTS_TOKEN, argument).replaceAll(ARGUMENTS_SHORT_TOKEN, argument);
+  const filled = command.prompt
+    .replaceAll(ARGUMENTS_TOKEN, argument)
+    .replaceAll(ARGUMENTS_SHORT_TOKEN, argument)
+    .replaceAll(INPUT_TOKEN, argument);
   return argument ? filled : tidyBlankLines(filled);
 }
 

@@ -90,6 +90,26 @@ describe('parseCommandFile', () => {
     ).toBeNull();
   });
 
+  it('шапка прикладывает контекст, а ${input} — тот же хвост', () => {
+    const command = parseCommandFile(
+      ['---', 'description: Ревью диффа', 'context: diff, codebase', '---', 'Смотри ${input}'].join('\n'),
+      { fallbackName: 'review', path: '/p/.chui/commands/review.prompt.md', scope: 'workspace' },
+    );
+
+    expect(command?.context).toEqual(['diff', 'codebase']);
+    expect(command ? expandCommandPrompt(command, 'правку в db/') : '').toBe('Смотри правку в db/');
+  });
+
+  it('чужое имя в context — опечатка, а не прицепка', () => {
+    const command = parseCommandFile(['---', 'context: diff, календарь', '---', 'Смотри дифф'].join('\n'), {
+      fallbackName: 'review',
+      path: '/p/.chui/commands/review.md',
+      scope: 'workspace',
+    });
+
+    expect(command?.context).toEqual(['diff']);
+  });
+
   it('имя приводится к виду, который набирается после слэша', () => {
     const command = parseCommandFile('---\nname: Release Notes\n---\nТекст', {
       fallbackName: 'x',
@@ -166,6 +186,18 @@ describe('loadCommands', () => {
       'commit:global',
     ]);
     expect(commands[0]?.prompt).toContain('Проверь проект');
+  });
+
+  it('файл *.prompt.md даёт имя без пометки', async () => {
+    const home = tempDir();
+    const root = tempDir();
+    const own = path.join(root, '.chui', 'commands');
+    fs.mkdirSync(own, { recursive: true });
+    fs.writeFileSync(path.join(own, 'review.prompt.md'), 'Проверь ${input}');
+
+    const commands = await loadCommands(root, home);
+
+    expect(commands.map((command) => command.name)).toEqual(['review']);
   });
 
   it('без проекта остаются только общие', async () => {

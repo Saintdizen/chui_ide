@@ -64,7 +64,10 @@ async function scanDir(dir: string, scope: ProjectCommandScope): Promise<Project
   for (const item of items) {
     if (item.name.startsWith('.')) continue;
     if (!item.isFile() || !item.name.toLowerCase().endsWith('.md')) continue;
-    const entry = await readEntry(path.join(dir, item.name), item.name.slice(0, -3), scope);
+    // `*.prompt.md` — заготовка со своим именем в файле: `.prompt` — это пометка
+    // для человека, а не часть имени команды.
+    const base = item.name.slice(0, -3).replace(/\.prompt$/i, '');
+    const entry = await readEntry(path.join(dir, item.name), base, scope);
     if (entry) found.push(entry);
   }
   return found.sort((left, right) => left.name.localeCompare(right.name));

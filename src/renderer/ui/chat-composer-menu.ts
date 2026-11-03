@@ -220,6 +220,9 @@ export function createComposerMenu(deps: ComposerMenuDeps): ComposerMenuView {
           hint: command.scope === 'global' ? 'команда — общая' : 'команда проекта',
           run: () => {
             deps.input.value = expandCommandPrompt(command);
+            // Заготовка прикладывает и прицепки из своей шапки: «посмотри дифф»
+            // без диффа — это текст ни о чём.
+            for (const kind of command.context ?? []) deps.onContext(kind);
             deps.onAttachBest();
             sync();
             deps.input.focus();

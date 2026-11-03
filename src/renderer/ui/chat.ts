@@ -310,7 +310,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (!invocation) return written;
     if (projectCommandList.length === 0) await loadProjectCommands();
     const command = findCommand(projectCommandList, invocation.name);
-    return command ? expandCommandPrompt(command, invocation.tail) : written;
+    if (!command) return written;
+    // Прицепки из шапки прикладываются и при отправке набранной руками команды,
+    // а не только при выборе из меню: путь один — иначе они разойдутся.
+    for (const kind of command.context ?? []) attachments.attachFrom(kind);
+    return expandCommandPrompt(command, invocation.tail);
   }
 
   /* ── панель изменений, план агента и контекст к вопросу ──────────────────── */
