@@ -69,6 +69,38 @@ describe('semanticFoldRanges: многострочные конструкции'
     const text = ['const html = `', '  <div>', '`;'].join('\n');
     expect(folds(text, 'javascript')).toEqual([{ startLine: 1, endLine: 3 }]);
   });
+
+  it('скобка внутри многострочного шаблона не режет блок', () => {
+    // Шаблон с `}` внутри — обычное дело в `css`: он тянется на строки, и
+    // скобка в нём — текст. Блок должен закрыться своей `}`, а не той.
+    const text = ['function f() {', '  const css = `', '    .a { color: red }', '  `;', '}'].join('\n');
+    expect(folds(text, 'javascript')).toEqual([
+      { startLine: 1, endLine: 5 },
+      { startLine: 2, endLine: 4 },
+    ]);
+  });
+
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: текст подстановки — это и есть проверяемый случай
+  it('шаблонная строка с ${} не закрывает блок раньше времени', () => {
+    // В `${…}` скобки — снова код. Но `}` подстановки не должна закрыть блок
+    // функции: для грамматики это та же строка, пока не встретится обратная кавычка.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: образец кода, а не шаблон в тесте
+    const text = ['function f() {', '  const s = `', '    ${a + b}', '  `;', '}'].join('\n');
+    expect(folds(text, 'javascript')).toEqual([
+      { startLine: 1, endLine: 5 },
+      { startLine: 2, endLine: 4 },
+    ]);
+  });
+
+  it('многострочный литерал делит блок на части, а не склеивает их', () => {
+    // Граница многострочной конструкции — отдельный диапазон: иначе на длинном
+    // файле с шаблонами всё слилось бы в один свёрток на весь файл.
+    const text = ['const a = `', 'one', '`;', 'const b = `', 'two', '`;'].join('\n');
+    expect(folds(text, 'javascript')).toEqual([
+      { startLine: 1, endLine: 3 },
+      { startLine: 4, endLine: 6 },
+    ]);
+  });
 });
 
 describe('semanticFoldRanges: пределы и отсутствие грамматики', () => {
