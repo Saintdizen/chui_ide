@@ -981,6 +981,12 @@
 
 /* Сообщение, в котором стоит текущее совпадение: обводка держит место, когда
    само совпадение короткое и его легко потерять среди текста. */
+.msg.is-prompt-current .msg-body {
+  outline: 1px solid var(--focus_ring_color, currentColor);
+  outline-offset: var(--radius_2xs);
+  border-radius: var(--radius_sm);
+}
+
 .msg.is-find-current .msg-body {
   outline: 1px solid var(--focus_ring_color, currentColor);
   outline-offset: var(--radius_2xs);

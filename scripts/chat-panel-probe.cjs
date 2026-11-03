@@ -1366,6 +1366,84 @@ app.whenReady().then(async () => {
   check('Esc закрывает полосу', findClosed.видна === false, findClosed);
   check('закрытие снимает подсветку', findClosed.метки === 0 && findClosed.обводка === 0, findClosed);
 
+  /* ── переход по своим вопросам (Alt+↑/↓) ──────────────────────── */
+
+  // Проверяем не «прокрутилось ли», а ЧТО стало текущим: прокрутка сработала бы
+  // и от обычного колеса.
+  const navStart = await ask(
+    second,
+    `(() => {
+      const thread = document.querySelector('.chat-body');
+      thread.scrollTop = thread.scrollHeight;
+      return { вопросов: document.querySelectorAll('.msg.msg-user').length };
+    })()`,
+  );
+  check('в беседе есть куда прыгать', navStart.вопросов >= 2, navStart.вопросов);
+
+  // Сперва — от НИЗА ленты, где виден последний ответ: «вверх» обязан прыгнуть
+  // к последнему ВОПРОСУ, а не к последнему сообщению (им обычно как раз ответ).
+  await ask(
+    second,
+    `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true })), true`,
+  );
+  const navUp = await ask(
+    second,
+    `(() => {
+      const marked = document.querySelectorAll('.msg.is-prompt-current');
+      return {
+        обведено: marked.length,
+        это_вопрос: marked[0]?.classList.contains('msg-user') ?? false,
+        текст: (marked[0]?.textContent ?? '').slice(0, 30),
+      };
+    })()`,
+  );
+  check('Alt+↑ обвёл ровно один вопрос', navUp.обведено === 1, navUp);
+  check('Alt+↑ из низа ленты попал в ВОПРОС, а не в ответ', navUp.это_вопрос === true, navUp);
+  check('Alt+↑ выбрал последний вопрос', navUp.текст.startsWith('Составь план'), navUp.текст);
+
+  await ask(
+    second,
+    `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true })), true`,
+  );
+  const navUp2 = await ask(
+    second,
+    `(() => document.querySelectorAll('.msg.is-prompt-current')[0]?.textContent.slice(0, 30) ?? '')()`,
+  );
+  check('второй Alt+↑ перешёл на предыдущий вопрос', navUp2.startsWith('Проверь'), { было: navUp.текст, стало: navUp2 });
+
+  // Это и есть проверка «не замыкается»: на первом вопросе «вверх» молчит.
+  // Без неё навигация по кругу улетала бы в конец беседы с первого же нажатия.
+  await ask(
+    second,
+    `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true })), true`,
+  );
+  const navTop = await ask(
+    second,
+    `(() => document.querySelectorAll('.msg.is-prompt-current')[0]?.textContent.slice(0, 30) ?? '')()`,
+  );
+  check('Alt+↑ на первом вопросе не замыкается в конец беседы', navTop.startsWith('Проверь'), navTop);
+
+  await ask(
+    second,
+    `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true })), true`,
+  );
+  const navDown = await ask(
+    second,
+    `(() => document.querySelectorAll('.msg.is-prompt-current')[0]?.textContent.slice(0, 30) ?? '')()`,
+  );
+  check('Alt+↓ перешёл на следующий вопрос', navDown.startsWith('Составь план'), { navTop, navDown });
+
+  // Alt без стрелки и стрелка без Alt — чужая территория, класс ставиться не должен.
+  await ask(
+    second,
+    `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })), true`,
+  );
+  const navUnchanged = await ask(
+    second,
+    `(() => document.querySelectorAll('.msg.is-prompt-current')[0]?.textContent.slice(0, 30) ?? '')()`,
+  );
+  check('стрелка без Alt ничего не переключает', navUnchanged.startsWith('Составь план'), navUnchanged);
+
   console.log(`\n[проба] снимок: ${shotFile}`);
 
   terminals.dispose();

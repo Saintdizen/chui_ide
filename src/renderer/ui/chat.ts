@@ -69,6 +69,7 @@ import { createRunInspector } from './run-inspector';
 import { createChatPersistence, newChatUid } from './chat-persistence';
 import { chatExportFileName, chatToMarkdown } from '../../shared/chat-export';
 import { segmentsOf } from '../../shared/chat-find';
+import { promptNeighbour } from '../../shared/chat-nav';
 import { createChatFindBar } from './chat-find-bar';
 import { showContextMenu } from './context-menu';
 import { isPopupOpen } from './popup-menu';
@@ -1718,6 +1719,61 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (event.target === input) return;
     event.preventDefault();
     findBar.open();
+  });
+
+  /**
+   * `Alt+↑/↓` — переход по СВОИМ вопросам.
+   *
+   * Где сейчас стоим, помним явно (`promptCursor`), а не выводим из прокрутки.
+   * Выводить казалось честнее, но в короткой ленте прокручивать нечего —
+   * `scrollIntoView` ничего не сдвигает, `current` остаётся тем же, и второе
+   * нажатие топчется на месте. Прокрутка нужна только чтобы ПОКАЗАТЬ вопрос.
+   *
+   * Курсор — индекс в ленте; -1 значит «не выбрано».
+   */
+  let promptCursor = -1;
+
+  function jumpToPrompt(delta: number): void {
+    const session = active();
+    const nodes = [...session.thread.querySelectorAll<HTMLElement>('.msg')];
+    if (nodes.length === 0) return;
+    const roles = nodes.map((node) => ({ role: node.classList.contains('msg-user') ? 'user' : 'assistant' }));
+
+    // Курсор мог остаться от прошлой ленты (беседа перерисована) — тогда его
+    // нет: `promptNeighbour` сам начнёт с края в нужную сторону.
+    const from = promptCursor >= 0 && promptCursor < nodes.length ? promptCursor : -1;
+    const target = promptNeighbour(roles, from, delta);
+    if (target < 0) return;
+
+    promptCursor = target;
+    const node = nodes[target]!;
+    node.scrollIntoView({ block: 'start', behavior: 'auto' });
+    for (const other of session.thread.querySelectorAll('.is-prompt-current')) {
+      other.classList.remove('is-prompt-current');
+    }
+    node.classList.add('is-prompt-current');
+
+    // Проговорить для скринридера: обводка — единственный признак, что прыжок
+    // состоялся, а её не видят.
+    const index = roles.slice(0, target + 1).filter((message) => message.role === 'user').length;
+    const total = roles.filter((message) => message.role === 'user').length;
+    node.setAttribute('aria-label', `Вопрос ${index} из ${total}`);
+  }
+
+  /**
+   * На `document`, а не на корне панели: прыгать хочется и когда фокус в поле
+   * ввода — человек только что отправил вопрос и хочет вернуться к прошлому.
+   *
+   * Чужое `Alt+↑/↓` не трогаем: панель и редактор делят один документ, поэтому
+   * проверяем, что панель вообще видна. Курсор сбрасывается при смене беседы —
+   * индексы другой ленты означают совсем другие сообщения.
+   */
+  document.addEventListener('keydown', (event) => {
+    if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    if (!element.isConnected || element.offsetParent === null) return;
+    event.preventDefault();
+    jumpToPrompt(event.key === 'ArrowUp' ? -1 : 1);
   });
 
   // Перетаскивание изображения на панель чата — тот же путь, что вставка из буфера.
