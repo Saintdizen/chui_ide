@@ -28,7 +28,7 @@ export interface ExplorerCommandDeps {
   editors: { readonly currentPath: string | null };
   rpc: RpcClient;
   commands: { execute(id: string, ...args: unknown[]): unknown };
-  showToast(message: string, kind?: 'error'): void;
+  showToast(message: string, kind?: 'info' | 'error' | 'success'): void;
   applySettings(settings: Settings): void;
   basename(path: string): string;
 }
@@ -65,6 +65,40 @@ export function registerExplorerCommands(define: DefineCommand, deps: ExplorerCo
   define({ id: 'workspace.revealPath', title: 'Показать в проводнике', category: 'Навигация' }, (path) => {
     if (typeof path === 'string') explorer.reveal(path);
   });
+
+  // Скопировать адрес файла. Нужно постоянно — в чат, в терминал, в чужой
+  // разговор — и до этого приходилось открывать файл и тянуть путь глазами.
+  // Две формы, потому что нужны обе: полная — для терминала и буфера между
+  // проектами, относительная — для сообщения коллеге и для диффа.
+  const resolveTarget = (path: unknown): string | null => {
+    if (typeof path === 'string' && path.length > 0) return path;
+    // Из палитры аргумента нет: берём активный файл — самый частый случай.
+    return editors.currentPath ?? null;
+  };
+
+  // Аргумент ВАЖЕН: из меню вкладки приходит именно её путь, и скопировать
+  // вместо него активный файл — самая обидная ошибка (не заметишь, пока не
+  // вставишь не туда).
+  const copyPath = (absolute: boolean, path?: unknown): void => {
+    const target = resolveTarget(path);
+    if (!target) {
+      showToast('Нет открытого файла — скопировать нечего', 'info');
+      return;
+    }
+    const text = absolute ? target : workspace.relative(target);
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => showToast(`Скопировано: ${text}`, 'success'))
+      .catch(() => showToast('Буфер обмена недоступен', 'error'));
+  };
+
+  define({ id: 'workspace.copyPath', title: 'Копировать полный путь', category: 'Навигация' }, (path) =>
+    copyPath(true, path),
+  );
+  define(
+    { id: 'workspace.copyRelativePath', title: 'Копировать путь от корня проекта', category: 'Навигация' },
+    (path) => copyPath(false, path),
+  );
 
   // Набор значков дерева из файла: правила приносит человек или сторонний набор.
   define({ id: 'explorer.importBadges', title: 'Набор значков дерева из файла…', category: 'Вид' }, async () => {

@@ -243,6 +243,16 @@ export function createTabs(deps: TabsDeps): Tabs {
               label: 'Показать в проводнике',
               onSelect: () => void deps.commands.execute('workspace.revealPath', path),
             },
+            // Путь нужен постоянно (чат, терминал, письмо), а из вкладки его
+            // раньше можно было получить, только открыв файл.
+            {
+              label: 'Копировать путь',
+              onSelect: () => void deps.commands.execute('workspace.copyPath', path),
+            },
+            {
+              label: 'Копировать путь от корня',
+              onSelect: () => void deps.commands.execute('workspace.copyRelativePath', path),
+            },
             { separator: true },
             { label: 'Закрыть', hint: 'Ctrl+W', onSelect: () => void deps.commands.execute('file.close', path) },
             { label: 'Закрыть другие', onSelect: () => void deps.commands.execute('file.closeOthers', path) },
