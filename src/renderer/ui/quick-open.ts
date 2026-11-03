@@ -2,6 +2,7 @@ import type { RpcClient } from '../core/rpc';
 import { rankFiles } from '../core/quick-open-rank';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { clear, h, svgIcon } from './dom';
+import { focusOwner, returnFocus } from './focus-return';
 import { showToast } from './toast';
 
 export interface QuickOpenView {
@@ -54,6 +55,8 @@ export function createQuickOpen(deps: {
   let cursor = 0;
   /** Режим выбора: пока задан, `run` возвращает путь сюда, а не открывает файл. */
   let picking: ((path: string | null) => void) | null = null;
+  /** Чей был фокус до открытия: к нему и вернём при закрытии. */
+  let owner: HTMLElement | null = null;
 
   /**
    * Недавние проекта — на момент отрисовки: список мог измениться мимо палитры.
@@ -171,6 +174,10 @@ export function createQuickOpen(deps: {
 
   function close(): void {
     overlay.hidden = true;
+    // Возвращаем фокус тому, кто открыл: иначе после Escape клавиатура
+    // начинает обход страницы с начала.
+    returnFocus(owner);
+    owner = null;
     // Отмена выбора: обещание надо разрешить, иначе вызывающий ждёт вечно.
     if (picking) {
       const resolve = picking;
@@ -182,6 +189,8 @@ export function createQuickOpen(deps: {
   return {
     element: overlay,
     async open(initialQuery = '') {
+      // Владельца берём ДО того, как фокус уйдёт в поле запроса.
+      owner = focusOwner();
       overlay.hidden = false;
       input.value = initialQuery;
       cursor = 0;

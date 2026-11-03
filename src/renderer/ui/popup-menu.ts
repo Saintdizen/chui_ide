@@ -1,4 +1,5 @@
 import { h, svgIcon } from './dom';
+import { focusOwner, returnFocus } from './focus-return';
 
 /**
  * Выпадающие панели: контекстное меню и меню приложения — один движок.
@@ -61,6 +62,8 @@ const itemOf = new WeakMap<HTMLElement, PopupMenuItem>();
 const levels: Level[] = [];
 let detach: (() => void) | null = null;
 let closed: (() => void) | null = null;
+/** Чей был фокус до открытия меню. */
+let owner: HTMLElement | null = null;
 
 export function isPopupOpen(): boolean {
   return levels.length > 0;
@@ -233,6 +236,7 @@ function activateHighlighted(levelIndex: number): void {
 export function showPopupMenu(items: readonly PopupMenuItem[], x: number, y: number, options: PopupOptions = {}): void {
   closePopupMenu();
   closed = options.onClose ?? null;
+  owner = focusOwner();
 
   const anchor = options.anchor;
   if (anchor) {
@@ -326,7 +330,12 @@ function firstSelectable(levelIndex: number): number {
 export function closePopupMenu(): void {
   detach?.();
   detach = null;
+  const to = owner;
+  owner = null;
   while (levels.length > 0) levels.pop()?.menu.remove();
+  // Меню не забирает фокус (фокус остаётся на кнопке-якоре), но если его
+  // открыли иначе — вернуть всё равно надо: узел мог быть удалён из DOM.
+  returnFocus(to);
 
   const notify = closed;
   closed = null;

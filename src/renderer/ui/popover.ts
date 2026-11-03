@@ -1,5 +1,6 @@
 import { placePopup } from '../core/popup-placement';
 import { h } from './dom';
+import { focusOwner, returnFocus } from './focus-return';
 
 export interface PopoverView {
   /** Контейнер слоя: живёт в body, чтобы не обрезаться панелями с overflow. */
@@ -28,6 +29,8 @@ export function createPopover(
 
   let detach: (() => void) | null = null;
   let anchor: HTMLElement | null = null;
+  /** Чей был фокус до открытия: к нему и вернём. */
+  let owner: HTMLElement | null = null;
 
   const place = (target: HTMLElement): void => {
     const { left, top } = placePopup({
@@ -44,6 +47,8 @@ export function createPopover(
   };
 
   const open = (target: HTMLElement): void => {
+    // Владельца запоминаем ДО того, как попап заберёт фокус.
+    owner = focusOwner();
     // Повторное открытие у другого якоря: снимаем прошлые слушатели и observer,
     // иначе они копятся и попап начинает закрываться не один раз.
     detach?.();
@@ -95,8 +100,13 @@ export function createPopover(
     if (element.hidden) return;
     detach?.();
     detach = null;
+    const to = owner;
+    owner = null;
     anchor = null;
     element.hidden = true;
+    // Попап мог забрать фокус. Возвращаем его туда, откуда пришли: следующий
+    // Tab пойдёт от того места, где человек был, а не с верха страницы.
+    returnFocus(to);
   };
 
   return {

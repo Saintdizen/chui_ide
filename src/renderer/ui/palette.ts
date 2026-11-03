@@ -1,6 +1,8 @@
 import type { CommandDescriptor, CommandRegistry } from '../core/commands';
+import { rankCommands } from '../core/palette-rank';
 import { orderByRecent } from '../core/recent-commands';
 import { clear, h } from './dom';
+import { focusOwner, returnFocus } from './focus-return';
 
 export interface PaletteView {
   element: HTMLElement;
@@ -52,18 +54,14 @@ export function createPalette(deps: {
 
   const render = (): void => {
     clear(list);
-    const query = input.value.trim().toLowerCase();
-    // Недавние — сверху, но только когда не ищут: при наборе порядок задаёт совпадение,
-    // иначе редкая команда с хорошим совпадением пряталась бы под двадцатью привычными.
-    const source = query ? deps.commands.list() : orderByRecent(deps.commands.list(), deps.recent?.ids() ?? []);
-    matches = source
-      .filter((descriptor) => {
-        if (!query) return true;
-        const haystack =
-          `${descriptor.title} ${descriptor.category} ${descriptor.id} ${(descriptor.keywords ?? []).join(' ')}`.toLowerCase();
-        return haystack.includes(query);
-      })
-      .slice(0, MAX_ITEMS);
+    const query = input.value.trim();
+    const recent = deps.recent?.ids() ?? [];
+    // Без запроса ищем по истории: человек, живущий в двух командах, не должен
+    // каждый раз искать их заново. С запросом порядок задаёт совпадение —
+    // иначе редкая команда с точным совпадением пряталась бы под привычными.
+    matches =
+      rankCommands(deps.commands.list(), query, recent, MAX_ITEMS) ??
+      orderByRecent(deps.commands.list(), recent).slice(0, MAX_ITEMS);
 
     cursor = Math.min(cursor, Math.max(matches.length - 1, 0));
 
@@ -122,10 +120,14 @@ export function createPalette(deps: {
     if (event.target === overlay) close();
   });
 
+  // Чей был фокус до открытия: берём ДО того, как он уйдёт в поле запроса.
+  let owner: HTMLElement | null = null;
+
   function open(): void {
     // Сначала повод приложению (сохранить историю, обновить настройки), потом список:
     // иначе палитра покажет устаревший порядок на один запуск.
     deps.onBeforeShow?.();
+    owner = focusOwner();
     overlay.hidden = false;
     input.value = '';
     cursor = 0;
@@ -134,7 +136,11 @@ export function createPalette(deps: {
   }
 
   function close(): void {
+    // Пока попап открыт, фокус в его поле. Вернуть его тому, кто открыл палитру, —
+    // иначе после Escape клавиатура начинает обход с верха страницы.
     overlay.hidden = true;
+    returnFocus(owner);
+    owner = null;
   }
 
   render();

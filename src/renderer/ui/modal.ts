@@ -28,6 +28,7 @@
  */
 
 import { h, svgIcon, type IconName } from './dom';
+import { focusOwner, returnFocus } from './focus-return';
 
 export interface ModalOptions {
   /** Класс окна: за ним модалка цепляет свои стили (`.stash-modal` и т. п.). */
@@ -175,7 +176,7 @@ export function createModal(options: ModalOptions = {}): ModalView {
     // Фокус возвращаем тому, у кого его забрали: элемент мог исчезнуть из DOM.
     const target = restoreFocus;
     restoreFocus = null;
-    if (target?.isConnected) target.focus();
+    returnFocus(target);
   }
 
   closeButton.addEventListener('click', () => close());
@@ -195,7 +196,7 @@ export function createModal(options: ModalOptions = {}): ModalView {
     },
     open(focus?: HTMLElement | null) {
       if (!element.hidden) return;
-      restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      restoreFocus = focusOwner();
       element.hidden = false;
       openModals += 1;
       setBackgroundHidden(true);

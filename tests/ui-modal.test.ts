@@ -76,8 +76,11 @@ describe('каркас модальных окон', () => {
   });
 
   it('фокус возвращается туда, откуда его забрали', () => {
-    expect(MODAL_SHELL).toMatch(/restoreFocus = document\.activeElement/);
-    expect(MODAL_SHELL).toMatch(/target\.focus\(\)/);
+    // Механика вынесена в `ui/focus-return.ts`: её делят окна и попапы.
+    // Проверяем ЗОВ, а не строку `document.activeElement` — иначе тест
+    // сторожит текст, а не поведение, и падает от любого переезда.
+    expect(MODAL_SHELL).toMatch(/restoreFocus = focusOwner\(\)/);
+    expect(MODAL_SHELL).toMatch(/returnFocus\(target\)/);
   });
 
   it('фон помечается `aria-hidden`, пока окно открыто', () => {
