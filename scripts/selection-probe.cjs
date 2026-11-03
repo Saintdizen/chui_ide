@@ -77,8 +77,7 @@ const markRows = (window) =>
   );
 
 /** Сколько помеченных строк осталось: ноль — дерево перерисовалось целиком. */
-const marksLeft = (window) =>
-  ask(window, `document.querySelectorAll('.tree-row[data-probe-mark]').length`);
+const marksLeft = (window) => ask(window, `document.querySelectorAll('.tree-row[data-probe-mark]').length`);
 
 /** Три файла рядом: для выбора этого хватает. */
 async function makeProject(project) {

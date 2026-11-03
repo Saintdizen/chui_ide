@@ -129,6 +129,7 @@ import { createEmptyState } from './ui/empty-state';
 import { createImageView } from './ui/image-view';
 import { createBrowserView } from './ui/browser-view';
 import { createExplorer } from './ui/explorer';
+import { createOpenEditorsBlock } from './ui/open-editors-block';
 import { mountProjectSelect } from './ui/project-select';
 import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
@@ -887,6 +888,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Перетаскивание извне: почему не взяли — сказать вслух.
     notify: (message, kind) => showToast(message, kind),
   });
+  // Список открытых файлов над деревом: по нему видно, что открыто и что не сохранено,
+  // не глядя на полосу вкладок наверху. Как в VS Code — первым в боковой панели.
+  layout.sidebarBody.appendChild(createOpenEditorsBlock({ openEditors, documents, commands }).element);
   layout.sidebarBody.appendChild(explorer.element);
 
   const sourceControl = createSourceControl({
