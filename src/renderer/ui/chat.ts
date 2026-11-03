@@ -577,7 +577,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       id: nextId,
       uid,
       title: `Беседа ${nextId}`,
-      thread: h('div', { class: 'chat-thread' }),
+      // `role="log"` — лента читается диктором: новое сообщение объявляется само,
+      // не только когда в него ткнут мышью. `polite` — не перебивать набор в поле.
+      thread: h('div', { class: 'chat-thread', role: 'log', 'aria-live': 'polite', 'aria-relevant': 'additions' }),
       history: [],
       transcript: [],
       touched: new Map(),
