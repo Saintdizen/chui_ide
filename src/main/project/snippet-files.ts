@@ -9,15 +9,18 @@ import { readdir, readFile } from 'node:fs/promises';
  * человека остальных.
  */
 export async function readProjectSnippets(root: string): Promise<{ name: string; text: string }[]> {
-  const dir = `${root}/.vscode`;
+  // Нет `.vscode` — обычное дело, а не ошибка: вернётся пусто.
+  return readSnippetDir(`${root}/.vscode`);
+}
+
+/** Все `.code-snippets` из папки; непрочитанный файл не отменяет остальные. */
+async function readSnippetDir(dir: string): Promise<{ name: string; text: string }[]> {
   let names: string[];
   try {
     names = await readdir(dir);
   } catch {
-    // Нет `.vscode` — обычное дело, а не ошибка.
     return [];
   }
-
   const files: { name: string; text: string }[] = [];
   for (const name of names.sort()) {
     if (!name.endsWith('.code-snippets')) continue;
@@ -28,4 +31,15 @@ export async function readProjectSnippets(root: string): Promise<{ name: string;
     }
   }
   return files;
+}
+
+/**
+ * Свои сниппеты пользователя: `<userData>/snippets/*.code-snippets`.
+ *
+ * Формат тот же, что у проекта, — чтобы набор, принесённый из VS Code, можно было
+ * просто положить в папку. Отдельно от проектных: они нужны во всех проектах,
+ * а проектные — только в своём.
+ */
+export async function readUserSnippets(dir: string): Promise<{ name: string; text: string }[]> {
+  return readSnippetDir(dir);
 }

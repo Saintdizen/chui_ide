@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { launchConfigs } from '../../../shared/launch-json';
 import { projectAliases } from '../../project/local-imports';
-import { readProjectSnippets } from '../../project/snippet-files';
+import { readProjectSnippets, readUserSnippets } from '../../project/snippet-files';
 import type { RpcServices } from '../context';
 import type { RpcRouter } from '../router';
 
@@ -32,7 +32,13 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
   // что заранее не известно, сколько файлов и как они называются.
   router.register('workspace.snippetFiles', async () => {
     const root = deps.workspace.rootPath();
-    return { files: root ? await readProjectSnippets(root) : [] };
+    // Проектные и пользовательские врозь: пользовательские нужны во всех
+    // проектах, и различать их по происхождению нужно вызывающему.
+    const [files, userFiles] = await Promise.all([
+      root ? readProjectSnippets(root) : [],
+      deps.snippetsDir ? readUserSnippets(deps.snippetsDir()) : [],
+    ]);
+    return { files, userFiles };
   });
   // Конфигурации отладки чужого проекта. Читаем здесь же: путь к файлу известен
   // только корню, а разбор путей `${workspaceFolder}` требует его в руках.

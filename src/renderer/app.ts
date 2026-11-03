@@ -791,8 +791,13 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   let snippetsCache: Snippet[] = [];
   const projectSnippets = (): readonly Snippet[] => snippetsCache;
   const loadProjectSnippets = async (): Promise<void> => {
-    const { files } = await rpc.request('workspace.snippetFiles').catch(() => ({ files: [] }));
-    snippetsCache = files.flatMap((file) => snippetsFromCodeSnippets(file.text, languageOfSnippetFile(file.name)));
+    const { files, userFiles } = await rpc
+      .request('workspace.snippetFiles')
+      .catch(() => ({ files: [], userFiles: [] }));
+    const parse = (list: readonly { name: string; text: string }[]) =>
+      list.flatMap((file) => snippetsFromCodeSnippets(file.text, languageOfSnippetFile(file.name)));
+    // Проектные первыми: они написаны под этот проект, значит важнее общих.
+    snippetsCache = [...parse(files), ...parse(userFiles)];
   };
 
   let settingsView: SettingsModalView | null = null;

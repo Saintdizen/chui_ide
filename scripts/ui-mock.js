@@ -843,7 +843,7 @@ module.exports = [
     'workspace.current': () => ({ root: currentRoot }),
 
     // Сниппеты чужого проекта: в моке их нет — пусто, а не отказ.
-    'workspace.snippetFiles': () => ({ files: [] }),
+    'workspace.snippetFiles': () => ({ files: [], userFiles: [] }),
 
     // Конфигурации отладки: в моке нет .vscode/launch.json.
     'workspace.launchConfigs': () => ({ configs: [] }),

@@ -441,6 +441,9 @@ if (!app.requestSingleInstanceLock()) {
       history,
       mcp,
       telemetry,
+      // Свои сниппеты пользователя — тот же формат, что у проекта; отдельно от него,
+      // потому что нужны во всех проектах.
+      snippetsDir: () => path.join(app.getPath('userData'), 'snippets'),
       browserPanel,
       host: new HostClient(),
     };

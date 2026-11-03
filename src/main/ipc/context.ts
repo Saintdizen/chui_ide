@@ -54,6 +54,8 @@ export interface AppDependencies {
   history?: HistoryStore;
   /** Журнал прогонов (userData/telemetry). Необязательно: пробникам он не нужен. */
   telemetry?: TelemetryStore;
+  /** Папка пользовательских сниппетов (`userData/snippets`). Необязательно для пробников. */
+  snippetsDir?: () => string;
 }
 
 /**

@@ -337,7 +337,10 @@ export interface ChuiMethods {
    * Отдаём как есть, разбор — в renderer (`shared/code-snippets.ts`): язык лежит
    * в имени файла, а формат JSONC разбирается одним правилом для обоих.
    */
-  'workspace.snippetFiles': { params: void; result: { files: { name: string; text: string }[] } };
+  'workspace.snippetFiles': {
+    params: void;
+    result: { files: { name: string; text: string }[]; userFiles: { name: string; text: string }[] };
+  };
   /**
    * Конфигурации отладки из `.vscode/launch.json`, приведённые к `debug.start`.
    *
