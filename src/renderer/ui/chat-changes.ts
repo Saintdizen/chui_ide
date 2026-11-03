@@ -52,7 +52,9 @@ export interface ChangesPanelDeps {
   onStageHunk?(path: string, hunk: GitDiffHunk): void;
   /** Вернуть файл к `HEAD` целиком — рядом с блоками, чтобы видеть цену блока. */
   onDiscardFile?(path: string): void;
-  /** Показать файл в экране различий против `HEAD` — следующий шаг после блоков. */
+  /** Подсказки панели: путь в буфер и прочие мелочи без своей кнопки. */
+  notify?(message: string, kind?: 'info' | 'error'): void;
+  /** Открыть файл в сравнении с `HEAD` — следующий шаг после блоков. */
   openDiff?(path: string): void;
 }
 
@@ -154,30 +156,79 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
     return { name, dir };
   }
 
+  /**
+   * Положить текст в буфер и сказать об этом тостом.
+   *
+   * Один хелпер на все кнопки панели: буфер — системный API, и провал там не
+   * редкость (окно без фокуса, политика буфера). Молча проглоченный отказ из
+   * кнопки «Копировать» — худший из возможных: человек уверен, что скопировал.
+   */
+  function copyText(text: string, what: string): void {
+    void navigator.clipboard.writeText(text).then(
+      () => deps.notify?.(`Скопировано: ${what}`),
+      () => deps.notify?.('Не удалось скопировать', 'error'),
+    );
+  }
+
+  /**
+   * Кнопка «Копировать путь» в строке файла.
+   *
+   * Путь был только в `title` строки, а подсказка — это не действие: на тач-экране
+   * её нет вовсе, и выделить путь из подсказки нельзя. `stopPropagation` обязателен:
+   * клик всплыл бы в строку и заодно раскрыл блоки файла.
+   */
+  function rowActions(target: string): HTMLElement {
+    return h(
+      'span',
+      { class: 'changes-row-actions' },
+      h(
+        'button',
+        {
+          class: 'icon-btn',
+          type: 'button',
+          title: 'Копировать путь',
+          'aria-label': `Копировать путь: ${target}`,
+          onClick: (event: Event) => {
+            event.stopPropagation();
+            copyText(target, 'путь');
+          },
+        },
+        svgIcon('copy', 12),
+      ),
+    );
+  }
+
   /** Строка списка: значок, имя, папка и хвост — счётчик правок или вид операции. */
   function row(target: string, tail: Node, title = target): HTMLElement {
     const { name, dir } = shortPath(target);
     return h(
-      'button',
-      {
-        class: 'changes-row',
-        type: 'button',
-        title,
-        onClick: () => {
-          // Блоки умеем показать — раскрываем строку на месте: человек и так
-          // в панели, открывать файл в редакторе ради одного блока — лишний шаг.
-          if (!deps.hunks) {
-            popover.close();
-            deps.reveal(target, 1, 1);
-            return;
-          }
-          void toggleHunks(target);
+      'div',
+      { class: 'changes-row', role: 'group', title },
+      h(
+        'button',
+        {
+          class: 'changes-row-main',
+          type: 'button',
+          onClick: () => {
+            // Блоки умеем показать — раскрываем строку на месте: человек и так
+            // в панели, открывать файл в редакторе ради одного блока — лишний шаг.
+            if (!deps.hunks) {
+              popover.close();
+              deps.reveal(target, 1, 1);
+              return;
+            }
+            void toggleHunks(target);
+          },
         },
-      },
-      fileIcon(target, 14),
-      h('span', { class: 'changes-row-name' }, name),
-      dir ? h('span', { class: 'changes-row-dir' }, dir) : null,
-      tail,
+        fileIcon(target, 14),
+        h('span', { class: 'changes-row-name' }, name),
+        dir ? h('span', { class: 'changes-row-dir' }, dir) : null,
+        tail,
+      ),
+      // Кнопка — рядом с областью клика, а не внутри: `<button>` в `<button>`
+      // браузер разворачивает в два соседних, и раскрытие файла начинает
+      // срабатывать на копирование пути.
+      rowActions(target),
     );
   }
 

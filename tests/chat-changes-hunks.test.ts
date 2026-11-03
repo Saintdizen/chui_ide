@@ -29,13 +29,17 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 /**
  * Список живёт в попапе: панель сама его не содержит, но строкам это не мешает.
  * Ищем по документу — так тест повторяет то, что видит человек.
+ *
+ * Кликаем по `.changes-row-main`, а не по строке: строка — обёртка с кнопкой
+ * «Копировать путь» рядом, и клик по самой обёртке не раскрывает файл (нельзя
+ * класть `<button>` в `<button>` — браузер разворачивает).
  */
 const rowsIn = (panel: ReturnType<typeof createChangesPanel>): HTMLElement[] => {
-  const found = [...document.querySelectorAll('.changes-row')];
+  const found = [...document.querySelectorAll('.changes-row-main')];
   if (found.length > 0) return found as HTMLElement[];
   // Мини-DOM начинает поиск с `body`: панель могла быть вставлена корнем.
   document.body.appendChild(panel.element);
-  return [...document.querySelectorAll('.changes-row')] as HTMLElement[];
+  return [...document.querySelectorAll('.changes-row-main')] as HTMLElement[];
 };
 
 describe('createChangesPanel — блоки изменений', () => {

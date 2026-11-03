@@ -390,6 +390,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // Панель изменений и план агента — отдельные модули: они только рисуют по
   // состоянию беседы, а работа с документами и редактором остаётся здесь.
   const changesPanel = createChangesPanel({
+    // Копирование пути отвечает тостом: буфер может отказать молча (окно без
+    // фокуса), а молчащий отказ в «Копировать» — худший из возможных.
+    notify: (message, kind) => showToast(message, kind),
     reveal: (path, line, column) => void revealFile(path, line, column),
     onRevert: () => void revertTouched(),
     onSave: () => void saveTouched(),

@@ -2123,7 +2123,9 @@
   min-width: 0;
 }
 
-/* Строка списка — кнопка: клик открывает файл в редакторе. */
+/* Строка списка: область клика (`-main`) открывает файл, рядом — «Копировать путь».
+   Строка — `div`, а не `button`: вложенная кнопка внутри кнопки невалидна, браузер
+   разворачивает такую разметку и теряет вложенный элемент. */
 .changes-row {
   display: flex;
   align-items: center;
@@ -2131,12 +2133,48 @@
   width: 100%;
   padding: 4px 6px;
   border-radius: var(--radius_sm);
-  background: none;
   color: var(--text_color_secondary);
   font-family: var(--font_mono);
   font-size: var(--font_small_size);
   text-align: left;
+}
+
+/* Клик — только по области файла: иначе нажатие на «Копировать путь» заодно
+   раскрывало бы блоки. Курсор нужен именно здесь, у самого поля клика. */
+.changes-row-main {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
+}
+
+/* Кнопка действия показывается по наведению на строку: постоянно светящийся
+   значок в каждой строке — шум, но с тач-экрана (нет `hover`) он остаётся
+   видимым, иначе действие недоступно совсем. */
+.changes-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  opacity: 0;
+}
+
+.changes-row:hover .changes-row-actions,
+.changes-row:focus-within .changes-row-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .changes-row-actions {
+    opacity: 1;
+  }
 }
 
 .changes-row:hover {
