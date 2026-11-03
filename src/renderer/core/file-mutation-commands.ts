@@ -4,8 +4,10 @@ import type { ToastKind, ToastOptions } from '../ui/toast';
 import type { DefineCommand } from './command-args';
 import { copiedToTrash, trackMoves, undoableAfterTrash, undoMoves, type MoveTrack } from './file-actions';
 import { deleteManyPrompt, deletePrompt, movedNotice, trashedNotice } from './file-notices';
+import type { TextDocument } from './document';
 import type { OpenEditors } from './open-editors';
 import type { RpcClient } from './rpc';
+import { movedPaths } from './moved-paths';
 import { copyPlan, movePlan } from './tree-move';
 import type { WorkspaceModel } from './workspace-model';
 
@@ -24,6 +26,15 @@ export interface FileMutationDeps {
   explorer: { scheduleRefresh(): void };
   /** Нужен ровно один флаг: спрашивать ли подтверждение перед удалением. */
   settings: { explorer: { confirmDelete: boolean } };
+  /**
+   * Буфер по пути и его запись на диск.
+   *
+   * Нужны ровно для одного: не потерять несохранённую правку при переносе.
+   * Несохранённое ищется по `document.dirty`, а пишется тем же `saveDocument`,
+   * что и Ctrl+S, — иначе пометка вкладки «сохранено» разошлась бы с диском.
+   */
+  document(path: string): TextDocument | undefined;
+  saveDocument(document: TextDocument): Promise<boolean>;
   workspace: WorkspaceModel;
   showToast(message: string, kind?: ToastKind, options?: ToastOptions): void;
   openPath(path: string): Promise<void>;
@@ -31,6 +42,17 @@ export interface FileMutationDeps {
 
 export function registerFileMutationCommands(define: DefineCommand, deps: FileMutationDeps): void {
   const { rpc, openEditors, explorer, settings, showToast, workspace } = deps;
+
+  // Несохранённое к переносу не теряется: сохраняем буфер ДО переименования.
+  // Иначе старый путь закрывается в памяти, новый читается с диска — и правка
+  // исчезает без единого слова. Отказ записи не отменяет весь перенос: остальное
+  // человек ждёт, а терять целый файл из-за чужой ошибки диска хуже.
+  const saveUnsaved = async (paths: readonly string[]): Promise<void> => {
+    for (const path of paths) {
+      const document = deps.document(path);
+      if (document) await deps.saveDocument(document).catch(() => false);
+    }
+  };
 
   define({ id: 'file.delete', title: 'Удалить в корзину', category: 'Файл' }, async (path) => {
     if (typeof path !== 'string') return;
@@ -112,6 +134,13 @@ export function registerFileMutationCommands(define: DefineCommand, deps: FileMu
     // пути. Активную возвращаем на экран — иначе перенос выглядел бы как закрытие.
     // Снимок активности — ДО первого переезда: потом активной станет соседняя вкладка,
     // и «был ли на экране» уже не ответить (core/file-actions.ts).
+    const plan = movedPaths(
+      steps.map((step) => step.from),
+      targetDir,
+      (path) => deps.document(path)?.dirty === true,
+    );
+    await saveUnsaved(plan.unsaved);
+
     const tracks = trackMoves(steps, openEditors.active?.path ?? null);
     const moved: MoveTrack[] = [];
     for (const track of tracks) {

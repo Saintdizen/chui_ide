@@ -7,6 +7,14 @@ import type { HostReply, HostRequest, PushMessage, RpcCall, RpcEventMessage, Rpc
 export interface ChuiBridge {
   readonly platform: string;
   readonly versions: { electron: string; chrome: string; node: string };
+  /**
+   * Путь файла, брошенного из окна браузера.
+   *
+   * В renderer пути у `File` нет (это песочница): `path` пустой, а `File.path` в
+   * новых Electron убран. Путь знает только preload — он и отдаёт его сюда.
+   * В тестах и в не-Electron среде функции нет: вызывающий обязан проверить.
+   */
+  pathForFile?(file: File): string | null;
   /** Отправить запрос и дождаться результата. Идентификатор задаёт вызывающий: он нужен для отмены и стрима. */
   call(call: RpcCall): Promise<RpcResult>;
   /** Прервать выполняющийся вызов по его идентификатору. */

@@ -4,7 +4,7 @@ import { registerFileMutationCommands, type FileMutationDeps } from '../src/rend
 
 type Run = (...args: unknown[]) => unknown;
 
-function setup(opts: { confirmDelete?: boolean; confirmed?: boolean; active?: string | null } = {}) {
+function setup(opts: { confirmDelete?: boolean; confirmed?: boolean; active?: string | null; dirty?: string[] } = {}) {
   const commands = new Map<string, Run>();
   const define: DefineCommand = (descriptor, handler) => commands.set(descriptor.id, handler);
   const log: string[] = [];
@@ -29,6 +29,12 @@ function setup(opts: { confirmDelete?: boolean; confirmed?: boolean; active?: st
     showToast: (text: string, kind?: string, options?: { action?: { run(): unknown } }) =>
       toasts.push({ text, kind, action: options?.action?.run }),
     openPath: async (path: string) => log.push(`open:${path}`),
+    // Буферы в тесте: `dirty` задаётся опцией, запись пишет строку в журнал.
+    document: (path: string) => (opts.dirty?.includes(path) ? { path, dirty: true } : undefined),
+    saveDocument: async (document: { path: string }) => {
+      log.push(`save:${document.path}`);
+      return true;
+    },
   } as unknown as FileMutationDeps;
   registerFileMutationCommands(define, deps);
   return { commands, log, toasts };
@@ -95,5 +101,37 @@ describe('registerFileMutationCommands', () => {
     await f.toasts.at(-1)!.action!();
     expect(f.log).toContain('workspace.trash:/p/sub/a.ts');
     expect(f.log).not.toContain('workspace.trash:/p/a.ts');
+  });
+});
+
+/**
+ * Несохранённое при переносе. Перенос закрывает старый путь и открывает новый,
+ * а открытие читает с диска. Буфер, не записанный заранее, исчез бы молча — и это
+ * самая дорогая потеря: человек не нажимал «не сохранять».
+ */
+describe('перенос и несохранённые правки', () => {
+  it('буфер сохраняется ДО переименования', async () => {
+    const f = setup({ active: '/p/a.ts', dirty: ['/p/a.ts'] });
+    await run(f, 'file.moveInto', ['/p/a.ts'], '/p/sub');
+
+    const save = f.log.indexOf('save:/p/a.ts');
+    const rename = f.log.findIndex((l) => l.startsWith('workspace.rename'));
+    expect(save).toBeGreaterThanOrEqual(0);
+    expect(save).toBeLessThan(rename);
+  });
+
+  it('чистый буфер не пишется лишний раз', async () => {
+    const f = setup({ active: '/p/a.ts' });
+    await run(f, 'file.moveInto', ['/p/a.ts'], '/p/sub');
+    expect(f.log.some((l) => l.startsWith('save:'))).toBe(false);
+  });
+
+  it('сохраняется каждый грязный файл из группы', async () => {
+    const f = setup({ dirty: ['/p/a.ts', '/p/b.ts'] });
+    await run(f, 'file.moveInto', ['/p/a.ts', '/p/b.ts', '/p/c.ts'], '/p/sub');
+
+    expect(f.log).toContain('save:/p/a.ts');
+    expect(f.log).toContain('save:/p/b.ts');
+    expect(f.log).not.toContain('save:/p/c.ts');
   });
 });

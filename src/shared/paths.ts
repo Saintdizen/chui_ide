@@ -59,10 +59,17 @@ export function withSeparator(target: string, sep: string): string {
   return lead + splitPath(target).join(sep);
 }
 
-/** Путь лежит внутри папки. Сравниваем по границе сегмента, а не по подстроке. */
+/**
+ * Путь лежит внутри папки. Сравниваем по границе сегмента, а не по подстроке.
+ *
+ * Разделитель приписываем сами: `joinPath(folder, '')` дописывает его только к
+ * папке, у которой он уже есть (`/p` → `/p`, но `/p/` → `/p/`), и граница
+ * съезжала. Лучше чинить здесь: этой функции верят и перенос файлов, и поиск.
+ */
 export function isInsidePath(folder: string, target: string): boolean {
   if (target === folder) return true;
-  return target.startsWith(joinPath(folder, ''));
+  const prefix = `${folder.replace(/[/\\]+$/, '')}${separatorOf(folder)}`;
+  return folder === '' || target.startsWith(prefix);
 }
 
 /** Оставшаяся от корня часть пути; сам корень — пустая строка, чужой путь — как есть. */

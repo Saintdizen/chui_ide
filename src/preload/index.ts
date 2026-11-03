@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import {
   HOST_REPLY_CHANNEL,
   HOST_REQUEST_CHANNEL,
@@ -47,6 +47,14 @@ const bridge: ChuiBridge = {
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     node: process.versions.node,
+  },
+  // Перетаскивание извне: у `File` в renderer пути нет, знает его только preload.
+  pathForFile(file: File): string | null {
+    try {
+      return webUtils.getPathForFile(file) || null;
+    } catch {
+      return null;
+    }
   },
   call(call: RpcCall): Promise<RpcResult> {
     return ipcRenderer.invoke(RPC_CALL_CHANNEL, call) as Promise<RpcResult>;

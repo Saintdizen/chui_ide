@@ -3,6 +3,14 @@ import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { submoduleStateLabel, type GitSubmodule } from '../../shared/git-submodules';
 import { maskToRegExp } from '../../shared/glob';
 import { isInsidePath, joinPath, nameOf, parentOf, pathAfter, separatorOf, splitPath } from '../../shared/paths';
+import {
+  alreadyThereNotice,
+  dropKind,
+  dropTargetDir,
+  dropVerdict,
+  movedTo,
+  skippedSource,
+} from '../../shared/drop-guard';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
 import type { GitInsideChange, GitModel } from '../core/git-model';
@@ -177,6 +185,8 @@ export interface ExplorerDeps {
    * в дереве, и до ввода редактора событие не дойдёт. Не задано — копия клавиш не берёт.
    */
   peekKey?: (event: KeyboardEvent) => boolean;
+  /** Сказать человеку, почему перетаскивание не сработало. Не задано — молчим. */
+  notify?: (message: string, kind?: 'info' | 'error') => void;
 }
 
 /**
@@ -1130,7 +1140,17 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // Куда встанет перенос: на папку — внутрь неё, на файл — рядом с ним.
     const dropDir = isDirectory ? entry.path : parentOf(entry.path);
     row.addEventListener('dragover', (event) => {
-      if (dragging.length === 0 || movePlan(dragging, dropDir).length === 0) return;
+      // Внешний перенос: берём то, что бросили из окна, а не наши строки.
+      if (dragging.length === 0) {
+        const types = [...(event.dataTransfer?.types ?? [])];
+        if (!dropVerdict((event.dataTransfer?.files.length ?? 0) > 0, types).accept) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = copyDrag(event) ? 'copy' : 'move';
+        row.classList.add('is-drop-target');
+        return;
+      }
+      if (movePlan(dragging, dropDir).length === 0) return;
       event.preventDefault();
       event.stopPropagation();
       if (event.dataTransfer) event.dataTransfer.dropEffect = copyDrag(event) ? 'copy' : 'move';
@@ -1143,10 +1163,62 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       row.classList.remove('is-drop-target');
       const moving = dragging;
       dragging = [];
-      if (moving.length === 0) return;
+      if (moving.length === 0) {
+        void acceptExternal(event, entry.path, isDirectory);
+        return;
+      }
       void deps.commands.execute(copyDrag(event) ? 'file.copyInto' : 'file.moveInto', moving, dropDir);
     });
     return row;
+  };
+
+  /**
+   * Файлы, брошенные в окно извне (проводник ОС, другая программа).
+   *
+   * Путь у `File` в renderer пустой — его знает только preload (`pathForFile`).
+   * Без моста (тесты, браузер) путей нет, и перетаскивание честно не срабатывает.
+   */
+  const externalPaths = (event: DragEvent): string[] => {
+    const pathForFile = window.chui?.pathForFile;
+    if (!pathForFile) return [];
+    const paths: string[] = [];
+    for (const file of [...(event.dataTransfer?.files ?? [])]) {
+      const path = pathForFile(file);
+      if (path) paths.push(path);
+    }
+    return paths;
+  };
+
+  /** Внешний перенос в папку: проверяем, копируем или переносим, говорим, что мешает. */
+  const acceptExternal = async (event: DragEvent, path: string, isDirectory: boolean): Promise<void> => {
+    const sources = externalPaths(event);
+    const types = [...(event.dataTransfer?.types ?? [])];
+    const verdict = dropVerdict(sources.length > 0, types);
+    if (!verdict.accept) {
+      if (verdict.reason) deps.notify?.(verdict.reason, 'info');
+      return;
+    }
+    const dir = dropTargetDir(path, isDirectory);
+    const kind = dropKind(true, types, copyDrag(event));
+    const moving: string[] = [];
+    for (const source of sources) {
+      const skip = skippedSource(source, dir);
+      if (skip === 'inside-itself') {
+        // Молчать нельзя: человек увидел бы, что перетаскивание «не сработало».
+        deps.notify?.(`«${nameOf(source)}» нельзя положить в свою папку`, 'error');
+        continue;
+      }
+      if (skip === 'same-dir') continue;
+      // Занятое имя не перезаписываем: две копии с одним именем исчезли бы без следа.
+      const taken = await deps.rpc.request('workspace.stat', { path: movedTo(source, dir) }).catch(() => null);
+      if (taken) {
+        deps.notify?.(alreadyThereNotice(movedTo(source, dir)), 'error');
+        continue;
+      }
+      moving.push(source);
+    }
+    if (moving.length === 0) return;
+    await deps.commands.execute(kind === 'copy' ? 'file.copyInto' : 'file.moveInto', moving, dir);
   };
 
   /**
@@ -1757,7 +1829,15 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // Сброс мимо строк — в корень области: так файл уезжает «наверх», к проекту.
     tree.addEventListener('dragover', (event) => {
       const root = deps.workspace.root;
-      if (!root || dragging.length === 0 || event.target !== tree) return;
+      if (!root || event.target !== tree) return;
+      if (dragging.length === 0) {
+        // Извне — в корень области, как и свои строки.
+        const types = [...(event.dataTransfer?.types ?? [])];
+        if (!dropVerdict((event.dataTransfer?.files.length ?? 0) > 0, types).accept) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = copyDrag(event) ? 'copy' : 'move';
+        return;
+      }
       if (movePlan(dragging, root).length === 0) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = copyDrag(event) ? 'copy' : 'move';
@@ -1768,7 +1848,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       event.preventDefault();
       const moving = dragging;
       dragging = [];
-      if (moving.length > 0 && movePlan(moving, root).length > 0) {
+      if (moving.length === 0) {
+        void acceptExternal(event, root, true);
+        return;
+      }
+      if (movePlan(moving, root).length > 0) {
         void deps.commands.execute(copyDrag(event) ? 'file.copyInto' : 'file.moveInto', moving, root);
       }
     });

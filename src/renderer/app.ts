@@ -855,6 +855,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     },
     // Пока копия показана, её клавиши (Esc, Enter, стрелки) забирает она сама.
     peekKey: (event) => editors.handlePeekKey(event),
+    // Перетаскивание извне: почему не взяли — сказать вслух.
+    notify: (message, kind) => showToast(message, kind),
   });
   layout.sidebarBody.appendChild(explorer.element);
 
@@ -2909,6 +2911,10 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     workspace,
     showToast,
     openPath,
+    // Несохранённая правка при переносе: буфер — тот же, что у вкладки, а запись —
+    // тем же путём, что Ctrl+S (иначе пометка «сохранено» разойдётся с диском).
+    document: (path) => documents.get(path),
+    saveDocument: (document) => fileWrite.saveDocument(document),
   });
 
   /* ── git ───────────────────────────────────────────────────────────────── */
