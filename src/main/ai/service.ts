@@ -9,6 +9,7 @@ import {
   type ChatMessage,
   type ChatRequest,
   type ChatRunTrace,
+  type ChatInterjectPayload,
   type ChatStepPayload,
   type ChatStreamDone,
   type ChatUsage,
@@ -110,6 +111,7 @@ import { pricingAt } from '../../shared/providers';
 import { repairToolPairs } from '../../shared/chat-sanitize';
 import { ProjectMemory } from './project-memory';
 import { PauseGate } from './pause';
+import { InterjectQueue } from './interject';
 import { WorkspaceContext } from './workspace-context';
 import type { TelemetryStore } from './telemetry';
 import { createJobRegistry, type JobRegistry } from './jobs';
@@ -311,6 +313,13 @@ export class AiService {
   private readonly pause = new PauseGate();
 
   /**
+   * Сказанное на ходу (`ai.interject`): вопрос, который человек вставляет в идущий
+   * прогон. Живёт рядом с паузой и по той же причине — прогон в окне один, а
+   * renderer пишет в него, пока шаг уже идёт.
+   */
+  private readonly interject = new InterjectQueue();
+
+  /**
    * Поправка к оценке токенов, выученная по `usage` провайдера: сколько наши
    * символы на токен врут для конкретной модели. Ключ — провайдер и модель.
    * См. `TokenCalibration` и `streamStep`.
@@ -464,8 +473,42 @@ export class AiService {
     this.pause.set(value);
   }
 
+  /**
+   * Сказать агенту что-то на ходу (`ai.interject`).
+   *
+   * В отличие от очереди renderer'а («после ответа»), это доедет до модели на
+   * ближайшей границе шага: текущий вызов инструмента доработает, а следующий
+   * запрос уже будет с этой репликой. Вклинивает её цикл шагов — здесь только
+   * хранение, потому что прогон в окне один и пишут в него снаружи.
+   *
+   * Возвращает `false` на пустой текст и на прогон без слушателя: событие в ленту
+   * посылается только когда реплику действительно приняли.
+   */
+  interjectSaid(text: string): boolean {
+    return this.interject.push(text);
+  }
+
+  /** Сколько сказанного на ходу ждёт границы шага. */
+  get interjectPending(): number {
+    return this.interject.size;
+  }
+
+  /**
+   * Прогон кончился: сказанное ему больше не адресовано.
+   *
+   * Зовётся из обёртки `ai.chat` по любому исходу, включая ошибку провайдера:
+   * иначе реплика, не дождавшаяся границы шага, прозвучала бы в следующем
+   * прогоне — как будто человек говорил её там.
+   */
+  closeInterject(): void {
+    this.interject.close();
+  }
+
   /** Снять паузу в начале прогона: она принадлежит прошлому, а не этому. */
   private clearPause(): void {
+    // Сказанное на ходу тоже принадлежит прошлому прогону: оно адресовано
+    // тому разговору, который уже кончился, и в новом прозвучит из ниоткуда.
+    this.interject.close();
     if (!this.pause.isPaused) return;
     this.pause.set(false);
   }
@@ -667,6 +710,9 @@ export class AiService {
     this.livePermission = permission;
     // Пауза ушла вместе с прошлым прогоном: новый начинается с работы.
     this.clearPause();
+    // Теперь есть кому говорить: сказанное на ходу доедет до модели на границе
+    // ближайшего шага. До этой строки такие слова отвергаются с ответом `false`.
+    this.interject.open();
 
     const messages: ChatMessage[] = [];
     const systemPrompt = request.systemPrompt ?? settings.ai.systemPrompt;
@@ -1109,6 +1155,17 @@ export class AiService {
       // человек мог нажать «стоп» вместо «продолжить».
       await this.waitWhilePaused(emit, signal);
       if (signal.aborted) break;
+
+      // Сказанное на ходу вклинивается в историю ЗДЕСЬ — на той же границе, где
+      // стоит пауза: текущий вызов инструмента уже доработал, следующий запрос
+      // к модели ещё не ушёл, и реплика человека попадает ровно между ними.
+      // Не после прогона (это уже сделала очередь renderer'а), а внутрь него.
+      for (const said of this.interject.takeAll()) {
+        // Пометка в тексте, а не в отдельном поле: провайдеры ролей-меток не знают,
+        // а модель должна отличать поправку на ходу от вопроса, заданного заранее.
+        messages.push({ role: 'user', content: `[сказано на ходу, шаг ${step + 1}] ${said}` });
+        emit(ChatStreamEvent.Interject, { text: said, step: step + 1 } satisfies ChatInterjectPayload);
+      }
 
       // Шаг трассы: время, текст модели и её вызовы. `commit` один на шаг —
       // вызывается на каждом выходе из итерации, повторный вызов ничего не делает.

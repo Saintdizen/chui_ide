@@ -4,6 +4,7 @@ import {
   type ChatDeltaPayload,
   type ChatGoalPayload,
   type ChatMessage,
+  type ChatInterjectPayload,
   type ChatPausedPayload,
   type ChatPlanPayload,
   type ChatReasoningPayload,
@@ -319,6 +320,14 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
               host.setPaused(paused, session);
               // Строка статуса — рядом с «выполняю…»: видно, на чём именно встали.
               activity.state(paused ? 'пауза · продолжить — кнопка внизу' : 'думает…');
+              return;
+            }
+            if (event === ChatStreamEvent.Interject) {
+              // main уже вставил реплику в историю и отдал её модели — здесь только
+              // показываем, что услышали. Своей карточки не рисуем: её уже нарисовал
+              // `interject` в панели в момент Enter, иначе в ленте была бы пара.
+              const { step } = payload as ChatInterjectPayload;
+              activity.state(`поправка принята · шаг ${step}`);
               return;
             }
             if (event === ChatStreamEvent.Delta) {

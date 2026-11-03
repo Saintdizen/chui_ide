@@ -68,6 +68,13 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
     // паузу, не знает, приняли ли нажатие. Шлём факт «main услышал».
     pushToRenderers(PushTopic.AiPaused, { paused: params.paused });
   });
+  // Сказанное на ходу: человек правит курс агента, пока тот ещё работает.
+  // Проверку «идёт ли прогон» делает сервис — здесь только ответ.
+  router.register('ai.interject', (params) => {
+    const text = params.text.trim();
+    if (!text) return { accepted: false };
+    return { accepted: deps.ai.interjectSaid(text) };
+  });
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));
   // Проверка серверов MCP из настроек: поднимаем их и показываем инструменты.
   // Без этого кнопка в настройках была бы слепой — об ошибке знал бы только stderr.
@@ -131,7 +138,10 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
         openFile: (path, line, column) =>
           deps.host.request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal).then((result) => result.ok),
       },
-    );
+    // Что бы ни случилось — выход по стопу, ошибка провайдера, лимит шагов, —
+    // сказанное на ходу этому прогону больше не адресовано. Без закрытия реплика
+    // висела бы и прозвучала бы в следующем прогоне, где её никто не говорил.
+    ).finally(() => deps.ai.closeInterject());
   });
 
   // Inline-автодополнение: короткий запрос без истории и инструментов.

@@ -2384,6 +2384,42 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /**
+   * Сказать в идущий прогон (Alt+Enter).
+   *
+   * В отличие от `enqueue` это не «подожди конца»: main вставляет реплику в
+   * историю на границе ближайшего шага, и агент узнаёт о поправке, пока ещё
+   * работает. Поэтому и в ленту она попадает сразу, с меткой «на ходу» — человек
+   * должен видеть, что его услышали, не дожидаясь ответа.
+   *
+   * Отказ (`accepted: false`) — прогон уже кончился, пока человек печатал.
+   * Тогда не теряем набранное, а отдаём его в очередь: обычный путь.
+   */
+  async function interject(raw: string): Promise<void> {
+    const written = raw.trim();
+    if (!written) return;
+    input.value = '';
+    const session = active();
+    session.draft = '';
+    const answer = await deps.rpc
+      .request('ai.interject', { text: written })
+      .catch(() => ({ accepted: false }));
+    if (!answer.accepted) {
+      // Прогон кончился между Enter и вызовом: сказанное стало обычным вопросом.
+      enqueue(written);
+      return;
+    }
+    // Вложения тут не переносим: прогон уже идёт со своим набором картинок, а
+    // подмешать их в историю задним числом — значит поменять смысл прошлых шагов.
+    session.history.push({ role: 'user', content: written });
+    // В ленту — тем же путём, что и обычный вопрос: своя карточка, свои кнопки.
+    // Править её задним числом нельзя (`editUserMessage` переписал бы историю,
+    // которую агент уже видел), поэтому четвёртый аргумент — пусто.
+    appendMessage(session, 'user', written, () => undefined);
+    session.transcript.push({ role: 'user', content: written });
+    showToast('Сказано на ходу — агент узнает на следующем шаге');
+  }
+
+  /**
    * Достать из очереди следующее — после прогона.
    *
    * Отправляем по одному и именно этим же путём (`send`), а не напрямую в поток:
@@ -2858,6 +2894,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     if (event.key !== 'Enter' || event.shiftKey) return;
     event.preventDefault();
+    // Alt+Enter — сказать это в ИДУЩИЙ прогон, а не после него. Обычный Enter
+    // остаётся очередью: там слова ждут, здесь — меняют курс агента на лету.
+    if (event.altKey && busy) {
+      void interject(input.value);
+      return;
+    }
     void send(input.value);
   });
 

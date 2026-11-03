@@ -374,6 +374,8 @@ export const ChatStreamEvent = {
   Paused: 'paused',
   /** Начался новый шаг прогона: номер и сколько всего разрешено. */
   Step: 'step',
+  /** Сказанное на ходу вклеено в историю и ушло к модели. */
+  Interject: 'interject',
 } as const;
 
 export interface ChatDeltaPayload {
@@ -383,6 +385,19 @@ export interface ChatDeltaPayload {
 /** Прогон встал на паузу или снялся с неё. */
 export interface ChatPausedPayload {
   paused: boolean;
+}
+
+/**
+ * Человек сказал что-то в идущий прогон, и это приняли.
+ *
+ * Событие нужно ленте: реплику родил не ответ модели, а человек посреди работы.
+ * Без метки она легла бы в историю как обычный вопрос — и после перезагрузки
+ * выглядела бы так, будто её задали с самого начала.
+ */
+export interface ChatInterjectPayload {
+  text: string;
+  /** На какой шаг прогона попало вмешательство (с единицы). */
+  step: number;
 }
 
 /**
