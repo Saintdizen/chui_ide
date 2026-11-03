@@ -2406,9 +2406,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     input.value = '';
     const session = active();
     session.draft = '';
-    const answer = await deps.rpc
-      .request('ai.interject', { text: written })
-      .catch(() => ({ accepted: false }));
+    const answer = await deps.rpc.request('ai.interject', { text: written }).catch(() => ({ accepted: false }));
     if (!answer.accepted) {
       // Прогон кончился между Enter и вызовом: сказанное стало обычным вопросом.
       enqueue(written);

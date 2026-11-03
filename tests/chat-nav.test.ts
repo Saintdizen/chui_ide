@@ -10,11 +10,11 @@ import { messageAtScroll, promptIndexes, promptNeighbour } from '../src/shared/c
  */
 
 const беседа = [
-  { role: 'user' },      // 0
+  { role: 'user' }, // 0
   { role: 'assistant' }, // 1
-  { role: 'user' },      // 2
+  { role: 'user' }, // 2
   { role: 'assistant' }, // 3
-  { role: 'user' },      // 4
+  { role: 'user' }, // 4
 ];
 
 describe('promptIndexes', () => {

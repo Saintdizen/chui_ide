@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { clearQueuedPrompts, dropQueuedPrompt, enqueuePrompt, moveQueuedPrompt, takeNextPrompt } from '../src/renderer/ui/chat-queue';
+import {
+  clearQueuedPrompts,
+  dropQueuedPrompt,
+  enqueuePrompt,
+  moveQueuedPrompt,
+  takeNextPrompt,
+} from '../src/renderer/ui/chat-queue';
 import type { ChatSession } from '../src/renderer/ui/chat-session';
 import type { ChatAttachment } from '../src/shared/api';
 

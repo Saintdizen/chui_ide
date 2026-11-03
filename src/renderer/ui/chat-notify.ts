@@ -67,7 +67,10 @@ export function announceMessage(how: RunEnd, chatTitle: string, tail: string, se
  * пишет (он успел начать следующий вопрос), и из раскрытого меню: переход сбросил бы
  * его выбор. Окно без фокуса — тоже «нет»: там фокус никому не виден.
  */
-export function shouldRefocus(how: RunEnd, context: { typed: boolean; menuOpen: boolean; windowFocused: boolean }): boolean {
+export function shouldRefocus(
+  how: RunEnd,
+  context: { typed: boolean; menuOpen: boolean; windowFocused: boolean },
+): boolean {
   if (context.typed) return false;
   if (context.menuOpen) return false;
   if (!context.windowFocused) return false;

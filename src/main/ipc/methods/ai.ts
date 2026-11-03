@@ -91,57 +91,61 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
 
   router.register('ai.chat', (request: ChatRequest, ctx) => {
     requireAiEnabled();
-    return deps.ai.chat(
-      request,
-      (event, payload) => ctx.emit(event, payload),
-      ctx.signal,
-      // Правки и подтверждения живут в renderer: там документная модель, undo и интерфейс.
-      {
-        applyEdits: (edits, autoApprove) =>
-          deps.host.request(ctx.sender, 'ai.applyEdits', { edits, autoApprove }, ctx.signal),
-        applyPatches: (patches, autoApprove) =>
-          deps.host.request(ctx.sender, 'ai.applyPatches', { patches, autoApprove }, ctx.signal),
-        // Команду сперва смотрит модель (если человек включил проверку), и только
-        // если она не решилась — спрашиваем человека. Необратимые команды идут к
-        // человеку сразу: `rm -rf` — не тот случай, где модель судья.
-        confirmCommand: async (command) => {
-          const verdict = await reviewCommand(command, deps.workspace.rootPath(), ctx.signal);
-          if (verdict?.decision === 'allow') {
-            // Молча выполненное действие всё равно должно быть видно: строка в ленте
-            // говорит, что команду разрешила проверка и почему.
-            pushToRenderers(PushTopic.ApprovalReview, { command, reason: verdict.reason });
-            return true;
-          }
-          // Проверка не решилась — её причина едет в карточку подсказкой: человеку
-          // полезно знать, что именно смутило модель.
-          const decision = await deps.host.request(
-            ctx.sender,
-            'ai.confirmCommand',
-            { command, review: verdict ?? undefined },
-            ctx.signal,
-          );
-          return decision.allowed;
+    return deps.ai
+      .chat(
+        request,
+        (event, payload) => ctx.emit(event, payload),
+        ctx.signal,
+        // Правки и подтверждения живут в renderer: там документная модель, undo и интерфейс.
+        {
+          applyEdits: (edits, autoApprove) =>
+            deps.host.request(ctx.sender, 'ai.applyEdits', { edits, autoApprove }, ctx.signal),
+          applyPatches: (patches, autoApprove) =>
+            deps.host.request(ctx.sender, 'ai.applyPatches', { patches, autoApprove }, ctx.signal),
+          // Команду сперва смотрит модель (если человек включил проверку), и только
+          // если она не решилась — спрашиваем человека. Необратимые команды идут к
+          // человеку сразу: `rm -rf` — не тот случай, где модель судья.
+          confirmCommand: async (command) => {
+            const verdict = await reviewCommand(command, deps.workspace.rootPath(), ctx.signal);
+            if (verdict?.decision === 'allow') {
+              // Молча выполненное действие всё равно должно быть видно: строка в ленте
+              // говорит, что команду разрешила проверка и почему.
+              pushToRenderers(PushTopic.ApprovalReview, { command, reason: verdict.reason });
+              return true;
+            }
+            // Проверка не решилась — её причина едет в карточку подсказкой: человеку
+            // полезно знать, что именно смутило модель.
+            const decision = await deps.host.request(
+              ctx.sender,
+              'ai.confirmCommand',
+              { command, review: verdict ?? undefined },
+              ctx.signal,
+            );
+            return decision.allowed;
+          },
+          confirmBrowser: (action) =>
+            deps.host
+              .request(ctx.sender, 'ai.confirmBrowser', { action }, ctx.signal)
+              .then((decision) => decision.allowed),
+          ask: (question, options) =>
+            deps.host.request(ctx.sender, 'ai.ask', { question, options }, ctx.signal).then((result) => result.answer),
+          // Утверждение плана: решение принимает renderer (он же переключает режим), а
+          // сюда оно возвращается уже проверенным — «да» только при явном `approved`.
+          exitPlan: (plan) =>
+            deps.host
+              .request(ctx.sender, 'ai.exitPlan', { plan }, ctx.signal)
+              .then((result) => sanitizePlanExitDecision(result)),
+          getDiagnostics: (path) => deps.host.request(ctx.sender, 'ai.getDiagnostics', { path }, ctx.signal),
+          openFile: (path, line, column) =>
+            deps.host
+              .request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal)
+              .then((result) => result.ok),
         },
-        confirmBrowser: (action) =>
-          deps.host
-            .request(ctx.sender, 'ai.confirmBrowser', { action }, ctx.signal)
-            .then((decision) => decision.allowed),
-        ask: (question, options) =>
-          deps.host.request(ctx.sender, 'ai.ask', { question, options }, ctx.signal).then((result) => result.answer),
-        // Утверждение плана: решение принимает renderer (он же переключает режим), а
-        // сюда оно возвращается уже проверенным — «да» только при явном `approved`.
-        exitPlan: (plan) =>
-          deps.host
-            .request(ctx.sender, 'ai.exitPlan', { plan }, ctx.signal)
-            .then((result) => sanitizePlanExitDecision(result)),
-        getDiagnostics: (path) => deps.host.request(ctx.sender, 'ai.getDiagnostics', { path }, ctx.signal),
-        openFile: (path, line, column) =>
-          deps.host.request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal).then((result) => result.ok),
-      },
-    // Что бы ни случилось — выход по стопу, ошибка провайдера, лимит шагов, —
-    // сказанное на ходу этому прогону больше не адресовано. Без закрытия реплика
-    // висела бы и прозвучала бы в следующем прогоне, где её никто не говорил.
-    ).finally(() => deps.ai.closeInterject());
+        // Что бы ни случилось — выход по стопу, ошибка провайдера, лимит шагов, —
+        // сказанное на ходу этому прогону больше не адресовано. Без закрытия реплика
+        // висела бы и прозвучала бы в следующем прогоне, где её никто не говорил.
+      )
+      .finally(() => deps.ai.closeInterject());
   });
 
   // Inline-автодополнение: короткий запрос без истории и инструментов.

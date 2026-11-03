@@ -46,10 +46,7 @@ describe('digestRuns', () => {
   });
 
   it('сводка идёт от свежего к старому', () => {
-    const digests = digestRuns([
-      record({ conversation: 'old', at: 1 }),
-      record({ conversation: 'new', at: 9 }),
-    ]);
+    const digests = digestRuns([record({ conversation: 'old', at: 1 }), record({ conversation: 'new', at: 9 })]);
     expect(digests.map((d) => d.conversation)).toEqual(['new', 'old']);
   });
 

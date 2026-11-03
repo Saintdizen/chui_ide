@@ -121,7 +121,10 @@ export function createTelemetryModal(deps: TelemetryModalDeps): TelemetryModalVi
             digest.failures.length > 0
               ? h(
                   'span',
-                  { class: 'telemetry-digest-why', title: digest.failures.map((f) => `${f.tool}: ${f.why}`).join('\n') },
+                  {
+                    class: 'telemetry-digest-why',
+                    title: digest.failures.map((f) => `${f.tool}: ${f.why}`).join('\n'),
+                  },
                   digest.failures
                     .slice(0, 3)
                     .map((f) => `${f.tool}: ${f.why}${f.count > 1 ? ` ×${f.count}` : ''}`)

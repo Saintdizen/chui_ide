@@ -81,7 +81,11 @@ export function commandConsequence(command: string): CommandConsequence {
   for (const pattern of WRITES) {
     if (pattern.test(oneLine)) return { level: 'writes', note: 'изменит файлы или зависимости' };
   }
-  if (/^\s*(ls|cat|head|tail|grep|rg|find|git\s+(status|log|diff|show|branch)|npm\s+test|npm\s+run|pwd|echo|wc|cd|which|type)\b/.test(oneLine)) {
+  if (
+    /^\s*(ls|cat|head|tail|grep|rg|find|git\s+(status|log|diff|show|branch)|npm\s+test|npm\s+run|pwd|echo|wc|cd|which|type)\b/.test(
+      oneLine,
+    )
+  ) {
     return { level: 'safe', note: null };
   }
   // Не знаем — говорим так и говорим. Молчание читается как «всё в порядке».

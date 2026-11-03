@@ -38,11 +38,7 @@ export function promptIndexes(messages: readonly NavMessage[]): number[] {
  *
  * Возвращает индекс сообщения или -1, если идти некуда.
  */
-export function promptNeighbour(
-  messages: readonly NavMessage[],
-  current: number,
-  delta: number,
-): number {
+export function promptNeighbour(messages: readonly NavMessage[], current: number, delta: number): number {
   const prompts = promptIndexes(messages);
   if (prompts.length === 0) return -1;
 

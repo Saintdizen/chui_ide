@@ -54,7 +54,11 @@ describe('segmentsOf', () => {
 
   it('склейка кусков даёт исходную строку — без потерь и дублей', () => {
     const text = 'сборка через npm run build';
-    expect(segmentsOf(text, 'build').map((s) => s.text).join('')).toBe(text);
+    expect(
+      segmentsOf(text, 'build')
+        .map((s) => s.text)
+        .join(''),
+    ).toBe(text);
   });
 
   it('совпадение целиком — один кусок, без пустых соседей', () => {
