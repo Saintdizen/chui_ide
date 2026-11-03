@@ -84,3 +84,30 @@ describe('chainDepth', () => {
     expect(chainDepth({ label: 'a', parts: ['a'], path: '/p/a' })).toBe(1);
   });
 });
+
+describe('крайние случаи цепочки', () => {
+  it('полностью раскрытая середина — звенья всё равно склеены', () => {
+    // a/b/c, где a и b раскрыты: цепочка `a/b` не должна распасться на две
+    // строки только потому, что человек раскрыл середину. Иначе подпись прыгала
+    // бы при каждом щелчке.
+    const children = new Map<string, readonly DirEntry[]>([
+      ['/p/a', [dir('/p/a/b')]],
+      ['/p/a/b', [dir('/p/a/b/c')]],
+      ['/p/a/b/c', [file('/p/a/b/c/x.ts')]],
+    ]);
+    expect(folderChain(dir('/p/a'), children).label).toBe('a/b/c');
+  });
+
+  it('цепочке не важен разделитель при сборке подписи', () => {
+    const children = new Map<string, readonly DirEntry[]>([['/p/a', [dir('/p/a/b')]]]);
+    expect(folderChain(dir('/p/a'), children, ' › ').label).toBe('a › b');
+  });
+
+  it('глубина совпадает с числом звеньев, а не с длиной пути', () => {
+    // Имя с разделителями не должно считаться за несколько звеньев: иначе
+    // отступ содержимого съедет.
+    const children = new Map<string, readonly DirEntry[]>([['/p/a', [dir('/p/a/b')]]]);
+    const chain = folderChain(dir('/p/a'), children);
+    expect(chainDepth(chain)).toBe(2);
+  });
+});
