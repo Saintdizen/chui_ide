@@ -23,6 +23,7 @@ import {
   TokenCalibration,
   splitTranscript,
   trimMessagesToFit,
+  estimateContextPrice,
 } from '../src/shared/context-fit';
 
 /**
@@ -589,6 +590,30 @@ describe('вес схем инструментов считается по со�
   it('на латинице обе оценки совпадают', () => {
     const latin = 'read file with line numbers';
     expect(estimateTextTokens(latin)).toBe(estimateTokens(latin.length));
+  });
+});
+
+/**
+ * Цена пункта `#` в меню контекста. Смысл — сравнение: пункт с цифрой рядом с
+ * остальными показывает, какой ценой приложится. Ноль символов — ноль токенов,
+ * а не минимальная единица: иначе пустой вид выглядел бы платным.
+ */
+describe('estimateContextPrice', () => {
+  it('без содержимого бесплатно', () => {
+    expect(estimateContextPrice({})).toBe(0);
+    expect(estimateContextPrice({ chars: 0 })).toBe(0);
+  });
+
+  it('больше символов — дороже', () => {
+    expect(estimateContextPrice({ chars: 40_000 })).toBeGreaterThan(estimateContextPrice({ chars: 4_000 }));
+  });
+
+  it('отрицательная длина не делает цену отрицательной', () => {
+    expect(estimateContextPrice({ chars: -100 })).toBe(0);
+  });
+
+  it('постоянная часть прибавляется без содержимого', () => {
+    expect(estimateContextPrice({ fixed: 1_000 })).toBe(1_000);
   });
 });
 

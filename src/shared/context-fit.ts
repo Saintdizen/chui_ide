@@ -186,7 +186,26 @@ export function estimateContextParts(input: ContextPartsInput): ContextParts {
   };
 }
 
-/** Сколько контекста занято: итог — реальный, если провайдер его сообщил. */ export interface ContextUsage {
+/**
+ * Цена вида контекста до того, как его приложили. Вес считается по тому же
+ * снимку, что увидит сборка вложения (см. `AttachmentsDeps.snapshot`), — но не
+ * по настоящему тексту, а по его длине: тянуть содержимое файла ради цифры в
+ * меню дороже, чем ошибиться в ней.
+ */
+export interface ContextPriceInput {
+  /** Сколько символов даст вид, если его приложить сейчас. */
+  chars?: number;
+  /** Часть цены, которая от содержимого не зависит (картинка, шапка блока). */
+  fixed?: number;
+}
+
+/** Цена пункта `#` в токенах — оценка того, насколько вырастет запрос. */
+export function estimateContextPrice(input: ContextPriceInput): number {
+  return estimateTextTokens('x'.repeat(Math.max(0, input.chars ?? 0))) + (input.fixed ?? 0);
+}
+
+/** Сколько контекста занято: итог — реальный, если провайдер его сообщил. */
+export interface ContextUsage {
   used: number;
   limit: number;
   percent: number;

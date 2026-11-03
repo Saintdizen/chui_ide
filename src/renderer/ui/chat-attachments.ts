@@ -6,6 +6,7 @@ import {
   type PickedImage,
 } from '../../shared/api';
 import { entryIsDirectory } from '../../shared/entry-kind';
+import { estimateAttachmentTokens, estimateContextPrice } from '../../shared/context-fit';
 import { dropAttachment, keepLatest, takeSent } from '../../shared/chat-attachments';
 import type { DocumentStore } from '../core/document-store';
 import type { EditorApi } from '../core/editor-api';
@@ -43,6 +44,10 @@ const MAX_DIFF_FILES = 10;
 const MENTION_SKIP = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
 const MAX_MENTIONS = 4000;
 
+/** Служебные константы оценки: шапка блока и строка адреса в промпте. */
+const WEB_LINE_CHARS = 120;
+const PROBLEM_LINE_CHARS = 32;
+
 /** Место проекта по смыслу: строка кода и где она лежит. Для `#codebase`. */
 export interface CodebasePlace {
   path: string;
@@ -72,9 +77,14 @@ export interface AttachmentsDeps {
   browserUrl?(): string;
   /** Активная беседа: у каждой вкладки свои вложения. */
   session(): ChatSession;
+  /** Сколько токенов стоит вид `#` прямо сейчас, до прикладывания. */
+  contextCost?(kind: ContextNoArg): number | null;
   /** Вернуть фокус в поле ввода после прикладывания контекста. */
   focus(): void;
 }
+
+/** Виды контекста, у которых есть пункт `#` (без изображений и буфера). */
+export type ContextNoArg = 'selection' | 'file' | 'problems' | 'diff' | 'codebase' | 'web';
 
 export interface AttachmentsView {
   /** Полоса чипов: приложенный к вопросу контекст. */
@@ -86,7 +96,14 @@ export interface AttachmentsView {
   /** Приложить то, что открыто в редакторе: выделение, а если его нет — файл. */
   attachBest(): void;
   /** Приложить контекст вида `#`: выделение, файл, пометки языка, правки или места проекта. */
-  attachFrom(kind: 'selection' | 'file' | 'problems' | 'diff' | 'codebase' | 'web'): void;
+  attachFrom(kind: ContextNoArg): void;
+  /**
+   * Цена вида `#` в токенах — до прикладывания. `null` — посчитать нечем (нет
+   * файла, выделения, вкладки); `diff`/`codebase` строит main, и цену им не назвать.
+   */
+  contextPrice(kind: ContextNoArg): number | null;
+  /** Сколько токенов уже приложено к вопросу (текст чипов, картинки — по счётчику). */
+  attachedTokens(): number;
   /** Выбор изображений системным диалогом. */
   attachImagesFromDialog(): Promise<void>;
   /** Приложить готовое изображение (data-URL): снимок страницы из встроенного браузера. */
@@ -590,37 +607,77 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     return sent;
   }
 
+  /** Сколько токенов уже приложено к вопросу: все чипы разом. */
+  function attachedTokens(): number {
+    return deps.session().attachments.reduce((sum, item) => sum + estimateAttachmentTokens(item), 0);
+  }
+
+  /** Приложить контекст вида `#`. */
+  function attachFrom(kind: ContextNoArg): void {
+    // Страница браузера — только адрес: вкладку открывает человек, а не мы.
+    if (kind === 'web') {
+      const url = deps.browserUrl?.() ?? '';
+      if (!url) {
+        showToast('В браузере не открыта страница');
+        return;
+      }
+      addAttachment({
+        kind: 'web',
+        label: basename(url),
+        title: `Страница ${url}`,
+        text: `Человек смотрит страницу: ${url}\nЕё содержимое можно прочитать инструментом \`web\`.`,
+      });
+      return;
+    }
+    // Остальное асинхронно: `git status` знает только модель, а чтение файлов и
+    // поиск по смыслу идут через RPC.
+    if (kind === 'diff' || kind === 'codebase') {
+      void (kind === 'diff' ? attachmentFromDiff() : attachmentFromCodebase()).then((item) => {
+        if (item) addAttachment(item);
+      });
+      return;
+    }
+    addAttachment(attachmentFrom(kind));
+  }
+
+  /**
+   * Цена вида `#` в токенах — до того, как его приложили. Считаем по длине
+   * источника, а не по готовому тексту: тянуть содержимое файла ради цифры в меню
+   * дороже, чем ошибиться в ней (тот же принцип — `estimateContextPrice`).
+   * `null` — посчитать нечего: пункт покажется без цифры, а не соврёт нулём.
+   */
+  function contextPrice(kind: ContextNoArg): number | null {
+    if (kind === 'web') {
+      const url = deps.browserUrl?.() ?? '';
+      return url ? estimateContextPrice({ chars: url.length + WEB_LINE_CHARS }) : null;
+    }
+    const path = deps.editors.currentPath;
+    if (kind === 'problems') {
+      const items = deps.editors.markers(path ?? undefined);
+      return estimateContextPrice({ chars: items.length * PROBLEM_LINE_CHARS });
+    }
+    if (kind === 'selection') {
+      const text = deps.editors.selectedText();
+      if (text.trim().length === 0) return null;
+      return estimateContextPrice({ chars: Math.min(text.length, MAX_ATTACHMENT_CHARS) });
+    }
+    if (kind === 'file') {
+      const doc = path ? deps.documents.get(path) : undefined;
+      if (!doc) return null;
+      return estimateContextPrice({ chars: Math.min(doc.value.length, MAX_ATTACHMENT_CHARS) });
+    }
+    // `#diff` и `#codebase` строятся запросом к модели — на глаз цену не назвать.
+    return null;
+  }
+
   return {
     element,
     render,
     takeForSend,
     attachBest,
-    attachFrom: (kind) => {
-      // Страница браузера — только адрес: вкладку открывает человек, а не мы.
-      if (kind === 'web') {
-        const url = deps.browserUrl?.() ?? '';
-        if (!url) {
-          showToast('В браузере не открыта страница');
-          return;
-        }
-        addAttachment({
-          kind: 'web',
-          label: basename(url),
-          title: `Страница ${url}`,
-          text: `Человек смотрит страницу: ${url}\nЕё содержимое можно прочитать инструментом \`web\`.`,
-        });
-        return;
-      }
-      // Остальное асинхронно: `git status` знает только модель, а чтение файлов и
-      // поиск по смыслу идут через RPC.
-      if (kind === 'diff' || kind === 'codebase') {
-        void (kind === 'diff' ? attachmentFromDiff() : attachmentFromCodebase()).then((item) => {
-          if (item) addAttachment(item);
-        });
-        return;
-      }
-      addAttachment(attachmentFrom(kind));
-    },
+    attachFrom,
+    contextPrice,
+    attachedTokens,
     attachImagesFromDialog,
     attachImage: (image) => addImage(image),
     attachContext: (item) => addAttachment(item),

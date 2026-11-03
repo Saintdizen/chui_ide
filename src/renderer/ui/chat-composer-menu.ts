@@ -21,6 +21,13 @@ export interface ComposerItem {
   run(): void;
 }
 
+/** Тысячи — округлённо: в меню цифра нужна на глаз, а не до токена. */
+function formatTokens(tokens: number): string {
+  if (tokens < 1000) return String(tokens);
+  const thousands = tokens / 1000;
+  return `${thousands < 10 ? thousands.toFixed(1) : Math.round(thousands)}k`;
+}
+
 /** Беседа в `@`-подсказке: подпись и uid, по которому её приложат. */
 export interface MentionSession {
   uid: string;
@@ -78,10 +85,17 @@ export interface ComposerMenuDeps {
   input: HTMLTextAreaElement;
   /** Приложить контекст указанного вида (пункт `#`). */
   onContext(kind: ContextKind): void;
-  /** Приложить лучшее из доступного (слэш-команда). */
-  onAttachBest(): void;
-  /** Открыть диалог выбора изображения. */
+  /**
+   * Сколько токенов уже приложено и сколько их стоит указанный вид. Меню не
+   * считает само: вес берётся из одного расчёта (`shared/context-fit`), иначе
+   * цифра в меню разошлась бы с кольцом заполнения. `null` — посчитать нечем:
+   * тогда пункты показываются без цифр, как раньше.
+   */
+  contextCost?(kind: ContextKind): { attached: number; item: number } | null;
+  /** Открыть выбор изображения. */
   onPickImage(): void;
+  /** Приложить то, что открыто в редакторе (`selection` или `file`). */
+  onAttachBest(): void;
   /** Приложить файл или папку проекта по пути от корня (`@`). */
   onMention(path: string): void;
   /** Пути проекта для `@`; null — список ещё не собирали. */
@@ -160,12 +174,24 @@ export function createComposerMenu(deps: ComposerMenuDeps): ComposerMenuView {
     item?.run();
   }
 
+  /**
+   * Хвост к подсказке пункта: цена вида и сумма по уже приложенному. Молчит,
+   * пока цена неизвестна: пустая скобка хуже её отсутствия.
+   */
+  function costHint(kind: ContextKind, hint: string): string {
+    const cost = deps.contextCost?.(kind) ?? null;
+    if (!cost) return hint;
+    const item = formatTokens(cost.item);
+    // Сумма по приложенному важнее цены пункта: именно она растёт с каждым выбором.
+    return cost.attached > 0 ? `${hint} · ${item}, всего ${formatTokens(cost.attached)}` : `${hint} · ≈${item}`;
+  }
+
   /** Контекст одним списком: пункты `#` и выбор изображения из файла. */
   function contextItems(): ComposerItem[] {
     return [
       ...CONTEXT_COMMANDS.map((item) => ({
         title: item.title,
-        hint: item.hint,
+        hint: costHint(item.kind, item.hint),
         run: () => {
           deps.onContext(item.kind);
           deps.input.focus();
@@ -221,7 +247,7 @@ export function createComposerMenu(deps: ComposerMenuDeps): ComposerMenuView {
       show(
         CONTEXT_COMMANDS.filter((item) => item.id.slice(1).startsWith(query)).map((item) => ({
           title: `${item.id} — ${item.title}`,
-          hint: item.hint,
+          hint: costHint(item.kind, item.hint),
           run: () => {
             // Убираем набранный `#…`: он был только способом открыть список.
             deps.input.value = `${value.slice(0, hash).trimEnd()} `.trimStart();

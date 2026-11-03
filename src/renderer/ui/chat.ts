@@ -419,6 +419,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const menu = createComposerMenu({
     input,
     onContext: (kind) => attachments.attachFrom(kind),
+    // Цена вида и уже набранное — из того же расчёта, что и кольцо (`syncSessionInfo`):
+    // иначе цифра в меню разошлась бы с заполнением контекста.
+    contextCost: (kind) => {
+      const item = attachments.contextPrice(kind);
+      if (item === null) return null;
+      return { attached: attachments.attachedTokens(), item };
+    },
     onAttachBest: () => attachments.attachBest(),
     onPickImage: () => void attachments.attachImagesFromDialog(),
     onMention: (path) => attachments.attachMention(path),
