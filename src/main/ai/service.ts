@@ -116,7 +116,9 @@ import { RpcFailure } from '../ipc/router';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
 import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
+import { normalizeAgentHooks } from '../../shared/agent-hooks';
 import { runTool } from './agent-tools';
+import { createAgentHooks } from './agent-hooks';
 import { stepOutputChars } from './output-budget';
 import { failureText } from './tool-rules';
 import type {
@@ -763,6 +765,12 @@ export class AiService {
       notes: (scope) => this.memory.list(this.workspace.rootPath(), scope),
     };
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
+    // Хуки проекта читаются на каждый прогон: человек мог включить их или дописать
+    // скрипт посреди работы, и следующее действие должно это увидеть.
+    const hooks = normalizeAgentHooks(settings.ai.hooks);
+    if (hooks.length > 0) {
+      toolContext.hooks = createAgentHooks({ hooks, cwd: this.workspace.rootPath() ?? '', signal });
+    }
     // Картинки для модели: чтение и уменьшение файлов живут в main, инструмент
     // только просит. Права не спрашиваем — это чтение внутри проекта.
     toolContext.readImage = createReadImageRunner(this.workspace);

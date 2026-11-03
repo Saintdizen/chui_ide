@@ -31,6 +31,7 @@ import type { SessionSearchReport } from '../../shared/session-search';
 import type { FetchedPage } from '../../shared/web-fetch';
 import type { WebSearchHit } from '../../shared/web-search';
 import type { WorkspaceService } from '../workspace/workspace';
+import type { AgentHooks } from './agent-hooks';
 import type { JobRegistry } from './jobs';
 import type { CommandResult, RunOptions } from './run-command';
 
@@ -377,6 +378,11 @@ export interface ToolContext {
   mcp?: McpRunner;
   /** Браузер: подключён только при включённой настройке. */
   browser?: BrowserTools;
+  /**
+   * Хуки проекта (см. `ai/agent-hooks.ts`): проверка до вызова и приписка после.
+   * Нет хуков — поля нет, и `runTool` ничего не спрашивает.
+   */
+  hooks?: AgentHooks;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
   confirmBrowser?(action: string): Promise<boolean>;
   /** Песочница: подключена только при включённой настройке. */

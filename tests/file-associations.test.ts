@@ -66,9 +66,7 @@ describe('fileAssociationsToText', () => {
 
 describe('ассоциации в реестре языков', () => {
   it('своё правило сильнее таблицы, и оно снимается', async () => {
-    const { languageFromPath, languageInfoForPath, setFileAssociations } = await import(
-      '../src/shared/languages'
-    );
+    const { languageFromPath, languageInfoForPath, setFileAssociations } = await import('../src/shared/languages');
     const own = normalizeFileAssociations('*.proto = proto\nJakefile = make');
     setFileAssociations(own);
     expect(languageFromPath('/p/api.proto')).toBe('proto');

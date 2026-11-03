@@ -52,6 +52,7 @@ import { CURSOR_STYLES, CURSOR_STYLE_LABELS, MAX_LINE_HEIGHT, normalizeCursorSty
 import { serializeThemeFile } from '../../shared/theme-file';
 import { normalizeFileAssociations, fileAssociationsToText } from '../../shared/associations';
 import { normalizeRulers, rulersToText } from '../../shared/rulers';
+import type { AgentHookConfig } from '../../shared/agent-hooks';
 import { PULL_MODES, pullModeLabel } from '../../shared/git-pull';
 import { uiScaleOptions } from '../../shared/ui-scale';
 import type { WebSearchProvider } from '../../shared/web-search';
@@ -111,7 +112,8 @@ export type SectionId =
   | 'appearance'
   | 'project'
   | 'lsp'
-  | 'mcp';
+  | 'mcp'
+  | 'hooks';
 
 const SECTIONS: ReadonlyArray<{
   id: SectionId;
@@ -127,6 +129,7 @@ const SECTIONS: ReadonlyArray<{
   { id: 'appearance', title: 'Внешний вид', icon: 'sun' },
   { id: 'lsp', title: 'Языки (LSP)', icon: 'command' },
   { id: 'mcp', title: 'Внешние инструменты (MCP)', icon: 'sparkle' },
+  { id: 'hooks', title: 'Хуки агента', icon: 'command' },
   { id: 'project', title: 'Проект', icon: 'panel' },
 ];
 
@@ -1878,6 +1881,59 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     ];
   }
 
+  /**
+   * Хуки проекта: JSON-ом, как и серверы MCP — их может быть несколько, а
+   * формат (событие, маска инструментов, команда) в одной строке не уложить.
+   * Скрипты запускаются в рабочей папке проекта и говорят с IDE JSON-ом.
+   */
+  function renderHooks(): Child[] {
+    const hooks = h('textarea', { class: 'field-input', rows: 8, spellcheck: false });
+    hooks.value = JSON.stringify(settings!.ai.hooks, null, 2);
+    hooks.addEventListener('change', () => {
+      try {
+        const parsed = JSON.parse(hooks.value) as unknown;
+        if (!Array.isArray(parsed)) throw new Error('ожидался массив хуков');
+        void patch({ ai: { hooks: parsed as AgentHookConfig[] } }, true);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Некорректный JSON', 'error');
+      }
+    });
+
+    const example = JSON.stringify(
+      [
+        {
+          name: 'без push',
+          event: 'before-tool',
+          match: ['terminal'],
+          command: 'node .chui/hooks/no-push.mjs',
+          timeoutMs: 2000,
+        },
+      ],
+      null,
+      2,
+    );
+
+    return [
+      field('Хуки проекта (JSON)', hooks),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Хук — скрипт из вашего проекта. До вызова он получает JSON с полями tool, args и cwd и решает, ' +
+          'пускать ли: код выхода 0 — да. Не 0 — запрет, а причина из stdout уйдёт модели вместо ' +
+          'результата. После вызова хук получает ещё и outcome — он может дописать одну строку к ' +
+          'результату (поле note).',
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'match — маски имён инструментов (можно *); пусто — все. Упавший или промолчавший скрипт — это ' +
+          '«мнения нет»: вызов идёт дальше, работа не встаёт из-за опечатки в хуке. Столько же прав ' +
+          'у самого хука, сколько у вашей оболочки — запускайте только то, что написали сами.',
+      ),
+      h('div', { class: 'field-hint' }, `Пример: ${example}`),
+    ];
+  }
+
   function renderLsp(): Child[] {
     const lsp = settings!.lsp;
     // Показываем серверы только языков этого проекта; остальные не теряем —
@@ -2100,6 +2156,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     if (id === 'appearance') return renderAppearance();
     if (id === 'lsp') return renderLsp();
     if (id === 'mcp') return renderMcp();
+    if (id === 'hooks') return renderHooks();
     return renderProject();
   }
 

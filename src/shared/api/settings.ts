@@ -8,6 +8,7 @@ import type { ToolPresetId } from '../tool-presets';
 import type { PullMode } from '../git-pull';
 import type { ThemeFile } from '../theme-file';
 import type { McpServerConfig } from '../mcp';
+import type { AgentHookConfig } from '../agent-hooks';
 import type { AiSandboxSettings } from '../sandbox';
 import type { WhitespaceMode } from '../whitespace';
 import type { AiBrowserSettings, AiWebFetchSettings, AiWebSearchSettings } from './debug';
@@ -133,6 +134,12 @@ export interface AiSettings {
   webFetch: AiWebFetchSettings;
   /** Браузерная автоматизация: выключена по умолчанию, как и веб-поиск. */
   browser: AiBrowserSettings;
+  /**
+   * Хуки проекта (см. `shared/agent-hooks.ts`): скрипты, которые решают, пускать
+   * ли вызов инструмента, и дописывают строку к результату. Пусто — поведение
+   * прежнее, ни один скрипт не запускается.
+   */
+  hooks: AgentHookConfig[];
   /**
    * Набор инструментов по умолчанию (см. `shared/tool-presets.ts`). Схемы
    * инструментов едут в каждом запросе, поэтому набор собирается под задачу:

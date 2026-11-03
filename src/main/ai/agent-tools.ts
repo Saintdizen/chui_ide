@@ -21,6 +21,7 @@ import {
   wrongArguments,
 } from '../../shared/tool-schema';
 import { canonicalCall } from '../../shared/tool-aliases';
+import type { AgentHookNote } from './agent-hooks';
 import { MAX_OUTPUT_CHARS, MAX_OUTPUT_TOKENS, MIN_OUTPUT_CHARS, toolOutputChars } from './output-budget';
 import { spill } from './output-trim';
 import { spillHint } from './spill';
@@ -199,7 +200,31 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       }
     : undefined;
   if (ctx.stepBudget) ctx.stepBudget.exhausted = false;
-  return clipOutcome(ctx, name, await dispatchTool(ctx, name, parsed.value), before);
+  // Хуки проекта: до вызова — пускать ли (решает скрипт из репозитория), после —
+  // что дописать к результату. Пункт за пунктом: отказ не запускает инструмент
+  // вовсе, а приписка ложится в `detail`, — то есть уходит модели, а не карточке.
+  const verdict = await ctx.hooks?.before({ tool: name, args: parsed.value });
+  if (verdict?.deny) {
+    return { ok: false, summary: `Хук проекта не пустил «${name}»: ${verdict.deny}` };
+  }
+  const outcome = await clipOutcome(ctx, name, await dispatchTool(ctx, name, parsed.value), before);
+  const notes = await ctx.hooks?.after(
+    { tool: name, args: parsed.value },
+    { ok: outcome.ok, summary: outcome.summary },
+  );
+  return withHookNotes(outcome, notes);
+}
+
+/**
+ * Приписка хука — в конец `detail`: модели, а не карточке.
+ *
+ * Режем до усечения ( `clipOutcome` зовётся раньше), поэтому длина ограничена
+ * самим хуком: `MAX_HOOK_TEXT_CHARS` на хук — см. `shared/agent-hooks.ts`.
+ */
+function withHookNotes(outcome: ToolOutcome, notes: readonly AgentHookNote[] | undefined): ToolOutcome {
+  if (!notes || notes.length === 0) return outcome;
+  const text = notes.map((note) => `[хук ${note.hook}] ${note.text}`).join('\n');
+  return { ...outcome, detail: outcome.detail ? `${outcome.detail}\n\n${text}` : text };
 }
 
 /**

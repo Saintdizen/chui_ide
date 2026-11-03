@@ -23,6 +23,7 @@ import { COMPACT_AT_TOKENS, COMPACT_EVERY_TURNS } from '../shared/context-fit';
 import { normalizeFavorites } from '../shared/favorites';
 import { parseFsAddress, formatFsAddress } from '../shared/fs-address';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
+import { normalizeAgentHooks, type AgentHookConfig } from '../shared/agent-hooks';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { normalizeSnippets } from '../shared/snippets';
 import { normalizeRulers } from '../shared/rulers';
@@ -137,6 +138,8 @@ interface StoredSettings {
       /** Работать во встроенном браузере (вкладка в IDE), а не отдельным Chromium. */
       integrated: boolean;
     };
+    /** Хуки проекта: скрипты поверх правил инструментов (см. `shared/agent-hooks.ts`). */
+    hooks: AgentHookConfig[];
     /** Песочница: команды агента выполняются в контейнере. */
     sandbox: AiSandboxSettings;
     /** Серверы внешних инструментов (MCP): их процессы запускает IDE. */
@@ -216,6 +219,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Браузер выключен: агент ходил бы по чужим страницам и нажимал там кнопки.
     // Включается осознанно — вместе с ним включаются и подтверждения действий.
     browser: { enabled: false, executable: '', headless: true, integrated: true },
+    // Хуков по умолчанию нет: скрипт запускается только по воле человека.
+    hooks: [],
     // Песочница выключена: команды агента идут на хосте, как раньше. Включив её,
     // человек сам выбирает образ — в нём должны быть инструменты проекта.
     sandbox: { ...DEFAULT_SANDBOX },
@@ -489,6 +494,8 @@ export class SettingsStore {
           args: [...server.args],
           ...(server.env ? { env: { ...server.env } } : {}),
         })),
+        // Копия: снимок настроек не должен меняться вслед за правкой.
+        hooks: ai.hooks.map((hook) => ({ ...hook, match: [...(hook.match ?? [])] })),
         // Копия: снимок настроек не должен меняться вслед за правкой.
         inlineCompletion: { ...ai.inlineCompletion },
       },
@@ -816,6 +823,12 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     target.mcpServers = normalizeMcpServers(patch.mcpServers) as McpServerConfig[];
   }
 
+  // Хуки: список заменяется целиком, как и серверы MCP, — и проверяется той же
+  // функцией, что и при чтении файла.
+  if (patch.hooks !== undefined) {
+    target.hooks = normalizeAgentHooks(patch.hooks);
+  }
+
   // Автодополнение: включатель и задержка. Задержку держим в разумных рамках —
   // ноль означал бы запрос на каждую нажатую клавишу.
   if (patch.inlineCompletion !== undefined) {
@@ -926,6 +939,8 @@ function loadSettings(filePath: string): StoredSettings {
   const activeAfterRename = ai.activeModel ? LEGACY_MODEL_NAMES[ai.activeModel] : undefined;
   if (activeAfterRename) ai.activeModel = activeAfterRename;
   const storedWindow = Math.round(Number(storedAi.contextWindow));
+  // Хуки из файла — теми же правилами, что и из интерфейса: файл ничем не надёжнее.
+  ai.hooks = normalizeAgentHooks(storedAi.hooks);
   if (Number.isFinite(storedWindow) && storedWindow > 0) ai.contextWindow = storedWindow;
   else delete ai.contextWindow;
   // Промт мог остаться прежним встроенным текстом — его не выбирали, а получили

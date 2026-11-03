@@ -1,6 +1,7 @@
 import type { AccountBalance } from '../balance';
 import type { ToolPresetId } from '../tool-presets';
 import type { McpServerConfig } from '../mcp';
+import type { AgentHookConfig } from '../agent-hooks';
 import type { WebSearchProvider } from '../web-search';
 import type { KeybindingSettings } from '../keybindings';
 import type {
@@ -238,6 +239,8 @@ export interface AiSettingsPatch {
   sandbox?: { enabled?: boolean; image?: string; workdir?: string; network?: boolean };
   /** Список серверов MCP заменяется целиком: так его проще править из интерфейса. */
   mcpServers?: McpServerConfig[];
+  /** Список хуков тоже заменяется целиком и проверяется теми же правилами, что и файл. */
+  hooks?: AgentHookConfig[];
   /** Настройка inline-автодополнения: включение и задержка. */
   inlineCompletion?: Partial<AiInlineCompletionSettings>;
   /** Журнал прогонов в файл: включение и выключение. */
