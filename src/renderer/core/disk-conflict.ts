@@ -2,6 +2,7 @@ import { isImagePath } from '../../shared/images';
 import { isOfficePath } from '../../shared/office';
 import { fileName } from '../../shared/tool-files';
 import type { showToast } from '../ui/toast';
+import { describeFileError } from './file-errors';
 import type { TextDocument } from './document';
 
 /** Опция «Перечитать» в тосте: тот же вызов, что и везде в панелях. */
@@ -85,8 +86,13 @@ export function createDiskConflict(ports: DiskConflictPorts): DiskConflict {
       // текст снял бы «грязность» (см. `reloadFromDisk`).
       if (!document.dirty || warned.has(path)) return;
       warned.add(path);
+      // Ключ — по файлу, а не общий: `git checkout .` меняет двадцать файлов
+      // разом, и двадцать тостов поверх ленты — это не предупреждение, а шум.
+      // Повтор по ОДНОМУ файлу склеивается счётчиком, разные файлы — разными
+      // ключами и видны каждый.
       showToast(`Файл «${fileName(path)}» изменился на диске: ваши правки в редакторе целы`, 'info', {
         action: { label: 'Перечитать', run: () => void diskConflict.revertFilesToDisk([path]) },
+        key: `disk-changed:${path}`,
       });
     },
 
@@ -111,8 +117,13 @@ export function createDiskConflict(ports: DiskConflictPorts): DiskConflict {
         try {
           await revertToDisk(target);
           reverted.push(target);
-        } catch {
-          showToast(`Не удалось прочитать файл: ${fileName(target)}`, 'error');
+        } catch (error) {
+          // Причина — словами: та же ошибка, что глоталась в переносе файлов.
+          showToast(
+            `Не удалось прочитать файл: ${fileName(target)} — ${describeFileError(error, 'файл') ?? 'неизвестная причина'}`,
+            'error',
+            { key: 'disk-revert-failed' },
+          );
         }
       }
       if (reverted.length === 0) return;

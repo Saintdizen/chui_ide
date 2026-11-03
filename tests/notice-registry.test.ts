@@ -118,3 +118,38 @@ describe('NoticeRegistry', () => {
     expect(registry.history()[0]?.count).toBe(5);
   });
 });
+
+describe('тосты идут через реестр', () => {
+  it('вызов с ключом спрашивает реестр: повтор поднимает, а не плодит', () => {
+    // Это тот шов, ради которого реестр подключался: `showToast` с ключом
+    // пропускает сообщение через реестр, поэтому `git checkout .` на двадцати
+    // файлах даёт один тост со счётчиком, а не двадцать поверх ленты.
+    const clock = 0;
+    const registry = new NoticeRegistry(() => clock);
+    const first = registry.push({ key: 'disk-changed:/p/a.ts', text: 'изменился', kind: 'info' });
+    const second = registry.push({ key: 'disk-changed:/p/a.ts', text: 'изменился', kind: 'info' });
+    expect(first.toast).toBe(true);
+    expect(second.repeat).toBe(true);
+    expect(second.notice.count).toBe(2);
+  });
+
+  it('разные файлы — разные тосты, один файл — один', () => {
+    // Ключ по пути, а не общий: иначе двадцатка файлов слилась бы в «×20»,
+    // и человек не узнал бы, ЧТО именно поменялось.
+    const clock = 0;
+    const registry = new NoticeRegistry(() => clock);
+    registry.push({ key: 'disk-changed:/p/a.ts', text: 'a', kind: 'info' });
+    registry.push({ key: 'disk-changed:/p/b.ts', text: 'b', kind: 'info' });
+    expect(registry.history().length).toBe(2);
+  });
+
+  it('приглушённая группа не всплывает, но остаётся в истории', () => {
+    const clock = 0;
+    const registry = new NoticeRegistry(() => clock);
+    registry.mute('lsp');
+    const outcome = registry.push({ key: 'lsp:no-server', text: 'нет сервера', kind: 'error' });
+    expect(outcome.toast).toBe(false);
+    // История — для панели «Уведомления»: приглушить показ не значит забыть.
+    expect(registry.history().some((notice) => notice.key === 'lsp:no-server')).toBe(true);
+  });
+});
