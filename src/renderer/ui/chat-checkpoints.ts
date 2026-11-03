@@ -1,0 +1,120 @@
+import type { ChatMessage } from '../../shared/api';
+import type { ChatSession } from './chat-session';
+
+/**
+ * Чекпойнт — «как было до этого вопроса».
+ *
+ * Отмена правки (`chat-changes`) откатывает ОДИН файл. Агентная работа — это шаг
+ * за шагом: пять файлов, каждый правлен по разу, и «верни всё, как было до этого
+ * вопроса» из меню правки одного файла не собирается. Здесь — снимок содержимого
+ * файлов на момент начала хода; откат возвращает их разом.
+ *
+ * Отличие от `ToggledFile.original`: там исходный текст ПЕРВОЙ правки (по нему
+ * считается добавленное/убранное), и накопление (`+=`) его портит. Здесь — полный
+ * снимок СВОЕГО хода, положенный перед первым изменением и не трогаемый больше.
+ */
+export interface CheckpointFile {
+  /** Было ли что откатывать — файл мог быть создан агентом, тогда его надо удалить. */
+  existed: boolean;
+  text: string;
+}
+
+/** Один ход: что человек спросил и какими файлы были в тот момент. */
+export interface Checkpoint {
+  /** Номер сообщения вопроса в `history` — по нему видно, к какому ходу откат. */
+  messageIndex: number;
+  /** Короткий заголовок для меню: первые слова вопроса. */
+  title: string;
+  files: Map<string, CheckpointFile>;
+}
+
+/**
+ * Глубина истории чекпойнтов.
+ *
+ * Живёт в памяти беседы и держит полные тексты файлов: без потолка длинная
+ * сессия на большом проекте съела бы память целиком. Старое отваливается первым.
+ */
+export const CHECKPOINT_LIMIT = 20;
+
+/** Заголовок для меню: одна строка, коротко. */
+export function checkpointTitle(question: string): string {
+  const flat = question.replace(/\s+/g, ' ').trim();
+  return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat;
+}
+
+/**
+ * Начать чекпойнт хода. Файлы добавляются по мере правки (`addCheckpointFile`).
+ *
+ * Возвращает undefined на пустом вопросе: пустой ход (приветствие, отмена)
+ * откатывать нечего, и мусорный пункт в меню только мешает.
+ */
+export function beginCheckpoint(session: ChatSession, messageIndex: number, question: string): Checkpoint | undefined {
+  const title = checkpointTitle(question);
+  if (!title) return;
+  const checkpoint: Checkpoint = { messageIndex, title, files: new Map() };
+  // Стек, а не массив: нужен только конец, а срез с начала каждый раз копирует всё.
+  const stack = session.checkpoints ?? [];
+  session.checkpoints = [...stack, checkpoint].slice(-CHECKPOINT_LIMIT);
+  return checkpoint;
+}
+
+/**
+ * Запомнить «как было» для файла — до правки и только один раз.
+ *
+ * Повторный вызов на тот же файл в том же ходе игнорируется: агент идёт шагами и
+ * может тронуть файл дважды, а откат должен вернуть состояние ДО хода, а не
+ * после первого шага.
+ */
+export function addCheckpointFile(
+  checkpoint: Checkpoint | undefined,
+  path: string,
+  state: CheckpointFile,
+): void {
+  if (!checkpoint || checkpoint.files.has(path)) return;
+  checkpoint.files.set(path, state);
+}
+
+/** Есть ли откат для вопроса с таким номером: без снимка кнопку не показываем. */
+export function hasCheckpoint(session: ChatSession, messageIndex: number): boolean {
+  return (session.checkpoints ?? []).some((checkpoint) => checkpoint.messageIndex === messageIndex);
+}
+
+/**
+ * Что откатывать, если открутиться к чекпойнту `index`.
+ *
+ * Берём всё, что изменили ходы НАЧИНАЯ с `index`: конец работы возвращается к
+ * состоянию перед `index`. Файл, тронутый дважды, берёт снимок САМОГО РАННЕГО
+ * хода — к нему и возвращаемся, иначе откат отменил бы только часть изменения.
+ *
+ * В ответе — плоская карта путь → что записать (последнее слово за самым ранним).
+ */
+export function revertPlan(checkpoints: readonly Checkpoint[], index: number): Map<string, CheckpointFile> {
+  const plan = new Map<string, CheckpointFile>();
+  for (const checkpoint of checkpoints.slice(index)) {
+    for (const [path, state] of checkpoint.files) {
+      if (!plan.has(path)) plan.set(path, state);
+    }
+  }
+  return plan;
+}
+
+/**
+ * Обрезать чекпойнты после отката: возвращённая беседа больше не содержит этих ходов.
+ *
+ * Без этого пункты меню остались бы от работы, которой уже нет, и второй откат
+ * вернул бы файлы в состояние, которого человек никогда не видел.
+ */
+export function truncateCheckpoints(session: ChatSession, index: number): void {
+  session.checkpoints = (session.checkpoints ?? []).slice(0, index);
+}
+
+/**
+ * Где в истории начинается ход с номером `messageIndex`.
+ *
+ * После отката лента и `history` перерисовываются, и «номер вопроса» сам по себе
+ * врёт — нужен он только чтобы найти границу среза до того, как всё сместится.
+ */
+export function historyTailFrom(history: readonly ChatMessage[], messageIndex: number): ChatMessage[] {
+  const boundary = Math.max(0, messageIndex);
+  return history.slice(0, boundary);
+}

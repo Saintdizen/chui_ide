@@ -12,6 +12,7 @@ import type { ToolPresetId } from '../../shared/tool-presets';
 import type { ChatRunLog } from '../../shared/run-log';
 import type { ReadCoverageSnapshot } from '../../shared/read-coverage';
 import type { ToggledFile } from './chat-changes';
+import type { Checkpoint } from './chat-checkpoints';
 import type { RunArtifact } from '../core/artifacts';
 
 /**
@@ -129,6 +130,13 @@ export interface ChatSession {
    * когда прогон закончится. Не сохраняется: без прогона очередь бессмысленна.
    */
   queue?: QueuedPrompt[];
+  /**
+   * Снимки «как было до вопроса». Только в памяти: откат нужен внутри сессии, а
+   * держать на диске тексты всех тронутых файлов дороже, чем польза от этого.
+   */
+  checkpoints?: Checkpoint[];
+  /** Текущий ход: правки `applyAgentEdits` досыпают в него снимки файлов. */
+  activeCheckpoint?: Checkpoint;
 }
 
 /** Вопрос, ждущий своей очереди: текст отправки и что было к нему приложено. */

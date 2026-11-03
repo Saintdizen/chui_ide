@@ -40,6 +40,7 @@ import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom'
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createAttachments } from './chat-attachments';
 import { clearQueuedPrompts, dropQueuedPrompt, enqueuePrompt, takeNextPrompt } from './chat-queue';
+import { addCheckpointFile, beginCheckpoint, hasCheckpoint, revertPlan, truncateCheckpoints } from './chat-checkpoints';
 import { MAX_RUN_ARTIFACTS, type RunArtifacts } from '../core/artifacts';
 import { createToolFeed, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
@@ -833,6 +834,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           message.content,
           () => editUserMessage(session, index, message.content),
           message.images ?? [],
+          // Кнопка отката есть только там, где снимок ещё в памяти: после перезапуска
+          // чекпойнты пропадают, и обещать возврат нечего.
+          hasCheckpoint(session, index) ? () => void revertToCheckpoint(session, index) : undefined,
         );
         return;
       }
@@ -1386,6 +1390,77 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     );
   }
 
+  /**
+   * «Вернуть всё, как было до этого вопроса».
+   *
+   * Отличие от «Отменить»: та откатывает последние правки в документах, а эта — целый
+   * ход вместе с файловыми операциями и историей. Откат целиком: на три вопроса назад
+   * по одному файлу бессмысленно, а с историей наше состояние станет неполным.
+   */
+  async function revertToCheckpoint(session: ChatSession, index: number): Promise<void> {
+    if (busy) {
+      // Пока идёт ответ, агент может править те же файлы — откат под ним потеряется.
+      showToast('Сначала остановите ответ', 'error');
+      return;
+    }
+    const checkpoints = session.checkpoints ?? [];
+    const at = checkpoints.findIndex((item) => item.messageIndex === index);
+    if (at < 0) return;
+    // Файлы откатываем ВСЕЕЙ работы начиная с этого вопроса: открутка на три шага
+    // вперёд с оставленными правками промежуточных шагов — это не «как было».
+    const plan = revertPlan(checkpoints, at);
+
+    // Сперва файлы: не вышло — историю не трогаем. Вопрос, которого нет в ленте,
+    // с оставленными правками хуже, чем неоткаченный вовсе.
+    const edits: FileEdit[] = [];
+    const created: string[] = [];
+    for (const [file, snapshot] of plan) {
+      if (!snapshot.existed) {
+        // Файла до этого вопроса не было: агент его создал — откат значит убрать.
+        created.push(file);
+        continue;
+      }
+      const lines = snapshot.text.split('\n');
+      const last = lines[lines.length - 1] ?? '';
+      edits.push({
+        path: file,
+        edits: [{ startLine: 1, startColumn: 1, endLine: lines.length, endColumn: last.length + 1, newText: snapshot.text }],
+      });
+    }
+    const failed: string[] = [];
+    if (edits.length > 0) {
+      // Тем же путём, что и «Отменить»: правка идёт и в документ, и на диск.
+      const result = await deps.edits.applyFileEdits(edits, 'programmatic');
+      await persistPaths(edits.map((file) => file.path));
+      failed.push(...result.failed.map((item) => item.path));
+    }
+    for (const file of created) {
+      try {
+        await deps.rpc.request('workspace.trash', { path: file });
+      } catch {
+        failed.push(file);
+      }
+    }
+    if (failed.length > 0) {
+      showToast(`Не удалось вернуть файлов: ${failed.length}. История не тронута`, 'error');
+      return;
+    }
+
+    // История и лента — только после файлов.
+    session.history.length = index;
+    session.transcript.length = index;
+    truncateCheckpoints(session, at);
+    // Счётчики «Изменён N файл» от откаченных ходов тоже сбрасываем.
+    for (const file of plan.keys()) session.touched.delete(file);
+    session.files = (session.files ?? []).filter((file) => !plan.has(file.path));
+    session.activeCheckpoint = undefined;
+    session.queue = [];
+    renderQueue(session);
+    renderHistory(session);
+    renderChanges();
+    showToast(`Всё вернулось к состоянию до этого вопроса: файлов ${plan.size}`, 'success');
+  }
+
   // Композер и всё, что под лентой. Кнопка «к последнему сообщению» живёт здесь
   // же и позиционируется от футера: иначе фиксированный отступ при высоком
   // поле ввода оставлял бы кнопку поверх него.
@@ -1532,13 +1607,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     text: string,
     onEdit?: () => void,
     images: readonly string[] = [],
+    onRevert?: () => void,
   ): HTMLElement {
     const content = h('div', { class: 'msg-body' });
     if (text) markdown.renderInto(content, text);
     const messageEl = h('div', { class: `msg msg-${role}` }, content, imagesNode(images));
     // Действия есть только у вопросов пользователя — у ответов они рисуются
     // отдельно, когда ответ завершён (см. chat-stream.ts / renderHistory).
-    if (role === 'user' && onEdit) attachUserActions(messageEl, text, onEdit);
+    if (role === 'user' && onEdit) attachUserActions(messageEl, text, onEdit, onRevert);
     // Вопрос открывает новый ход, ответ дописывается в текущий.
     (role === 'user' ? beginTurn(session) : currentTurn(session)).appendChild(messageEl);
     scrollToEnd(session);
@@ -1655,14 +1731,25 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return button;
   }
 
-  /** Кнопки под сообщением пользователя: править текст вопроса и скопировать. */
-  function attachUserActions(messageEl: HTMLElement, text: string, onEdit: () => void): void {
+  /**
+   * Кнопки под сообщением пользователя: править, скопировать и вернуть всё назад.
+   *
+   * «Назад» есть только если для этого вопроса есть снимок: без него обещать
+   * откат нечего, и серая кнопка путала бы.
+   */
+  function attachUserActions(
+    messageEl: HTMLElement,
+    text: string,
+    onEdit: () => void,
+    onRevert?: () => void,
+  ): void {
     messageEl.appendChild(
       h(
         'div',
         { class: 'msg-actions' },
         messageAction('pencil', 'Править', onEdit),
         messageAction('copy', 'Копировать', () => copyText(text)),
+        ...(onRevert ? [messageAction('clock', 'Всё как было до этого вопроса', onRevert)] : []),
       ),
     );
   }
@@ -1820,13 +1907,22 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     const question: ChatMessage = { role: 'user', content: text, ...(images.length > 0 ? { images } : {}) };
     session.history.push(question);
     session.transcript.push(question);
+    // Чекпойнт — раньше первой правки: `applyAgentEdits` досыпает в него снимки.
+    session.activeCheckpoint = beginCheckpoint(session, session.history.length - 1, text);
     if (session.history.length === 1) {
       // Первый вопрос убирает приветствие: беседа началась, подсказка больше не нужна.
       clear(session.thread);
       syncTabTitle(session, text);
     }
     const index = session.history.length - 1;
-    appendMessage(session, 'user', text, () => editUserMessage(session, index, text), images);
+    appendMessage(
+      session,
+      'user',
+      text,
+      () => editUserMessage(session, index, text),
+      images,
+      () => void revertToCheckpoint(session, index),
+    );
 
     // Новый вопрос — снова следим за низом ленты.
     autoScroll = true;
@@ -2065,6 +2161,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     for (const file of selected) {
       const text = await currentText(file.path);
       if (text !== null) before.set(file.path, text);
+      // И в чекпойнт хода — но только если файл уже существовал. Созданный агентом
+      // файла "до" не имеет, и откат его просто удалит — об этом см. `existed`.
+      addCheckpointFile(session.activeCheckpoint, file.path, { existed: text !== null, text: text ?? '' });
     }
 
     const result = await deps.edits.applyFileEdits(selected, 'programmatic');
