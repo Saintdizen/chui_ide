@@ -24,23 +24,6 @@
 
 Дешёвые прицепки, без порядка: часть 8, п. 2–4 и часть 7.
 
-## Часть 1. LSP
-
-1. **`textDocument/semanticTokens/range`** — подсветка видимого куска вместо всего
-   файла; на больших файлах заметно.
-2. **`textDocument/semanticTokens/full/delta`** — правка на символ перекрашивает
-   весь файл.
-3. **`textDocument/willSaveWaitUntil`** — форматирование перед сохранением
-   (`editor.formatOnSave`); одного `willSave` мало.
-4. **`resolve` у codeAction / codeLens / documentLink / inlayHint.** Сейчас есть
-   только у `completionItem` и `workspaceSymbol`; остальные теряют заголовки и
-   команды. Звать, если сервер объявил `resolveProvider`.
-5. **Pull-диагностика** (`textDocument/diagnostic`, `workspace/diagnostic`). Живём
-   на push-модели и так её и объявляем — но на больших проектах push дороже. Нужен
-   кэш, `resultId`, отмена.
-6. **`didSave` не открытых в редакторе файлов:** сохранение через файловый менеджер
-   тоже стоит сообщать серверу.
-
 ## Часть 2. IDE
 
 1. **Нет `Ctrl+Tab` по порядку использования.** VS Code держит MRU отдельно от
