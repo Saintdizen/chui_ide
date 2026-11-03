@@ -7,6 +7,7 @@ import {
   type ChatPausedPayload,
   type ChatPlanPayload,
   type ChatReasoningPayload,
+  type ChatStepPayload,
   type ChatStreamDone,
   type ChatToolResultPayload,
   type ChatToolStartPayload,
@@ -138,18 +139,30 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
   /** Индикатор работы ассистента: живёт внизу сообщения всю генерацию. */
   function createActivity(): {
     element: HTMLElement;
+    /** Сменное действие: «думает…», «выполняю: read_file». */
     state(label: string): void;
+    /** Постоянная часть: «шаг 7 из 24». Не перебивается действием. */
+    step(label: string | null): void;
     hide(): void;
     dispose(): void;
   } {
+    const stepLabel = h('span', { class: 'msg-activity-step', hidden: true });
     const label = h('span', { class: 'msg-activity-label' });
     const dots = h('span', { class: 'msg-activity-dots' }, h('i', {}), h('i', {}), h('i', {}));
-    const element = h('div', { class: 'msg-activity', hidden: true }, dots, label);
+    const element = h('div', { class: 'msg-activity', hidden: true }, dots, stepLabel, label);
     return {
       element,
       state(text: string) {
         label.textContent = text;
         element.hidden = false;
+      },
+      step(text: string | null) {
+        // Шаг и действие живут в РАЗНЫХ узлах намеренно. Одним полем их не свести:
+        // каждое событие действия (`выполняю…`, «думает…») затирало бы номер шага,
+        // и «шаг 7 из 24» мелькал бы на мгновение вместо того, чтобы стоять весь шаг.
+        stepLabel.textContent = text ?? '';
+        stepLabel.hidden = !text;
+        if (text) element.hidden = false;
       },
       hide() {
         element.hidden = true;
@@ -266,6 +279,15 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
                 messageEl.insertBefore(segment, activity.element);
                 host.scrollToEnd(session);
               }
+              return;
+            }
+            if (event === ChatStreamEvent.Step) {
+              const { index, limit } = payload as ChatStepPayload;
+              // Номер шага — с потолком, а не сам по себе: «шаг 7» ничего не говорит,
+              // «шаг 7 из 24» говорит, сколько ещё ждать и когда рука должна лечь
+              // на «стоп». Именно этого требует правило части — агент не должен
+              // быть невидимым.
+              activity.step(`шаг ${index} из ${limit}`);
               return;
             }
             if (event === ChatStreamEvent.Paused) {

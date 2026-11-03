@@ -121,14 +121,24 @@ app.whenReady().then(async () => {
     ],
     holdMs: 0,
   };
+  // Держать прогон открытым, пока проверка читает строку статуса. Без этого
+  // события идут одним тактом, и к моменту чтения строки активности уже нет:
+  // `activity.dispose()` снимает её вместе с концом прогона.
+  const stepDemo = { holdMs: 0 };
   ai.chat = async (_request, emit) => {
     const text = 'Ответ на вопрос пробы.';
+    const holdMs = stepDemo.holdMs;
+    stepDemo.holdMs = 0;
     if (planDemo.holdMs > 0) {
       const holdMs = planDemo.holdMs;
       planDemo.holdMs = 0;
       emit('plan', { steps: planDemo.steps });
       await wait(holdMs);
     }
+    // Номер шага едет отдельным событием ДО работы шага: строка «шаг N из M»
+    // должна стоять, пока агент работает, а не появиться после.
+    emit('step', { index: 1, limit: 24 });
+    if (holdMs > 0) await wait(holdMs);
     // События идут одним тактом, без паузы: инструмент, который ответил сразу
     // (чтение кэша, готовый снимок), отвечает именно так. Порядок доставки с
     // ответом на вызов при этом не обещан — ответ обгоняет события, — и лента
@@ -956,17 +966,37 @@ app.whenReady().then(async () => {
   // Заголовок вкладки ставится по первому вопросу («проверь, что тут слома…»), и в
   // полосе из пяти вкладок такие подписи не различаются. После первого ответа
   // панель спрашивает у модели название по сути разговора и меняет подпись.
+  // Прогон держим открытым: вместе с ним читаем и строку статуса — она живёт
+  // ровно пока идёт прогон (`activity.dispose()` снимает её в конце).
+  stepDemo.holdMs = 1200;
   const renamed = await ask(
     ide,
     `(async () => {
       const input = document.querySelector('.chat-input');
       if (!input) return { нет: 'поля' };
       const before = document.querySelector('.chat-tab.is-active .tab-label')?.textContent ?? null;
+      const шаг = { текст: null, действие: null, точка: null };
       input.value = 'Проверь, что тут сломалось в сборке на маке';
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Ловим строку «шаг N из M», пока прогон стоит на паузе. Ищем каждые 25 мс:
+      // момент, когда строка появилась, зависит от того, когда main прислал событие.
+      const начали = Date.now();
+      while (Date.now() - начали < 1000) {
+        const метка = [...document.querySelectorAll('.msg-activity-step')].find((е) => !е.hidden);
+        if (метка) {
+          шаг.текст = метка.textContent;
+          шаг.действие = метка.closest('.msg-activity')?.querySelector('.msg-activity-label')?.textContent ?? null;
+          // Точка-разделитель — псевдоэлемент: в textContent её нет, а без неё
+          // «шаг 1 из 24думает…» читается одной фразой. Судим по вычисленному стилю.
+          шаг.точка = getComputedStyle(метка, '::after').content;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
       return {
+        шаг,
         было: before,
         стало: document.querySelector('.chat-tab.is-active .tab-label')?.textContent ?? null,
         ответ: [...document.querySelectorAll('.chat-thread .msg-assistant')]
@@ -985,6 +1015,12 @@ app.whenReady().then(async () => {
     renamed.стало,
   );
   check('ответ в ленте остался', typeof renamed.ответ === 'string' && renamed.ответ.includes('Ответ'), renamed.ответ);
+
+  // Требование пункта: номер шага ВИДЕН, пока агент работает — «шаг 7 из 24»
+  // отвечает, сколько ещё ждать и когда ложиться рукой на «стоп».
+  check('номер шага виден во время прогона', renamed.шаг?.текст === 'шаг 1 из 24', renamed.шаг);
+  check('номер шага стоит рядом с действием', renamed.шаг?.действие === 'думает…', renamed.шаг);
+  check('номер шага отделён от действия точкой', renamed.шаг?.точка === '"\u00b7"', renamed.шаг);
 
   /* ── инспектор вызова: аргументы и результат ───────────────────────────── */
 

@@ -9,6 +9,7 @@ import {
   type ChatMessage,
   type ChatRequest,
   type ChatRunTrace,
+  type ChatStepPayload,
   type ChatStreamDone,
   type ChatUsage,
   type CommitMessageResult,
@@ -1112,6 +1113,10 @@ export class AiService {
       // Шаг трассы: время, текст модели и её вызовы. `commit` один на шаг —
       // вызывается на каждом выходе из итерации, повторный вызов ничего не делает.
       const stepStartedAt = Date.now();
+      // Счётчик шагов — ДО работы, а не после: человек должен видеть «шаг 7 из 24»
+      // в тот момент, когда агент взялся за седьмой, иначе рука на «стоп»
+      // замирает над пустым местом. Потолок шлём каждый раз: он меняется в настройках.
+      emit(ChatStreamEvent.Step, { index: step + 1, limit: steps } satisfies ChatStepPayload);
       const stepLog: RunStepLog = {
         index: runStepLogs.length + 1,
         ms: 0,

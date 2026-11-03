@@ -372,6 +372,8 @@ export const ChatStreamEvent = {
   Goal: 'goal',
   /** Прогон встал на границе шага или пошёл дальше (пауза, `ai.setPaused`). */
   Paused: 'paused',
+  /** Начался новый шаг прогона: номер и сколько всего разрешено. */
+  Step: 'step',
 } as const;
 
 export interface ChatDeltaPayload {
@@ -381,6 +383,20 @@ export interface ChatDeltaPayload {
 /** Прогон встал на паузу или снялся с неё. */
 export interface ChatPausedPayload {
   paused: boolean;
+}
+
+/**
+ * Начался новый шаг прогона.
+ *
+ * Потолок едет с каждым шагом, а не приходит один раз: он меняется в настройках
+ * посреди прогона (`ai.maxAutopilotSteps`), и старое значение сделало бы счётчик
+ * врущим — «6 из 24» там, где осталось три шага до остановки.
+ */
+export interface ChatStepPayload {
+  /** Номер шага, с единицы. */
+  index: number;
+  /** Сколько шагов разрешено этому прогону. */
+  limit: number;
 }
 
 /** Цель поставлена, закрыта или прогон пошёл на новый круг ради неё. */

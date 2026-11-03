@@ -409,7 +409,7 @@
 
 /* Крестик снятия: тот же вид, что у прочих мелких кнопок в ленте. */
 .queue-drop::before {
-  content: '×';
+  content: "×";
   font-size: var(--font_small_size);
   line-height: 1;
 }
@@ -678,6 +678,22 @@
 .msg-activity-dots {
   display: inline-flex;
   gap: 3px;
+}
+
+/*
+ * Номер шага — тише самого действия, но отделён от него точкой: иначе
+ * «шаг 7 из 24выполняю: read_file» слипается в одну фразу.
+ * `tabular-nums` — чтобы цифры не дёргали строку при смене шага.
+ */
+.msg-activity-step {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.msg-activity-step:not([hidden])::after {
+  content: "·";
+  margin-left: 8px;
+  opacity: 0.6;
 }
 
 .msg-activity-dots i {
