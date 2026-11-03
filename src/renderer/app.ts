@@ -427,6 +427,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     onVimModeChange: () => refreshStatus(),
     emacsMode: settings.editor.emacsMode,
     ligatures: settings.editor.fontLigatures,
+    // Ctrl+колесо: размер шрифта живёт в настройках, поэтому редактор только просит шаг.
+    onZoomFont: (step) => zoomFontByWheel(step),
     // Живой геттер: настройку меняют в окне без пересоздания редактора.
     emmetEnabled: () => settings.editor.emmet,
     // Проверка орфографии: словарь общий, настройка — живой геттер.
@@ -2955,6 +2957,21 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   const setEditorMode = (name: EditorModeName, on: boolean): void => {
     settings = { ...settings, editor: { ...settings.editor, [name]: on } };
     void saveSettingsPatch({ editor: { [name]: on } }).catch(() => undefined);
+  };
+
+  /**
+   * Ctrl+колесо: шаг размера шрифта. Живёт здесь, а не в редакторе: размер — настройка
+   * приложения, и колесо обязано идти тем же путём, что и поле в настройках.
+   * Крылья настоящие: 6 px уже не разобрать, 72 px уже не помещается.
+   */
+  const zoomFontByWheel = (step: number): void => {
+    const current = settings.editor.fontSize;
+    const next = Math.min(72, Math.max(6, current + step));
+    if (next === current) return;
+    settings = { ...settings, editor: { ...settings.editor, fontSize: next } };
+    // Применяем сразу: ждать записи на диск, чтобы увидеть шаг, — не то, чего ждёшь от колеса.
+    editors.applyOptions({ fontSize: next });
+    void saveSettingsPatch({ editor: { fontSize: next } }).catch(() => undefined);
   };
 
   // Режимы ввода и орфография — `core/editor-mode-commands.ts`: там порядок

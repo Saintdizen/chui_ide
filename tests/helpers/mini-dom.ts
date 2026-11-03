@@ -96,8 +96,11 @@ function defineEvents(node: any): void {
   // `dispatchEvent` зовёт обработчики этого типа: тесту нужно нажимать и набирать,
   // а не только вешать обработчики. У настоящего DOM событие всплывает — здесь
   // достаточно целевого узла, виждеты слушают те элементы, к которым привязаны.
+  //
+  // Событие отдаём САМОМУ объекту, а не копии: `preventDefault` в обработчике
+  // должен быть виден тесту (проверяем, что редактор гасит зум браузера).
   node.dispatchEvent = (event: { type: string }) => {
-    for (const handler of node.handlers[event.type] ?? []) handler({ ...event, target: node });
+    for (const handler of node.handlers[event.type] ?? []) handler(Object.assign(event, { target: node }));
     return true;
   };
   // `click` зовёт обработчики: тесту нужно нажимать, а не только вешать.

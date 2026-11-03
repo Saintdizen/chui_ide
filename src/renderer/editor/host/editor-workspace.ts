@@ -111,6 +111,8 @@ export interface EditorWorkspaceOptions {
   emacsMode?: boolean;
   /** Включать ли лигатуры шрифта. */
   ligatures?: boolean;
+  /** `Ctrl`+колесо: шаг размера шрифта (+1/−1) — размер живёт в настройках приложения. */
+  onZoomFont?: (step: number) => void;
   /** Emmet: раскрытие сокращений по Tab в разметке и стилях (см. `input/emmet.ts`). */
   emmetEnabled?: () => boolean;
   /**
@@ -301,6 +303,7 @@ export class EditorWorkspace {
   private readonly spellEnabled: (() => boolean) | undefined;
   private readonly spellSaveWord: ((word: string) => void) | undefined;
   private readonly ligatures: boolean | undefined;
+  private readonly onZoomFont: ((step: number) => void) | undefined;
   private readonly snippets: (() => readonly Snippet[]) | undefined;
   /** Шов к инструменту формата: его у редактора нет, о нём знает приложение. */
   private readonly formatCode: ((path: string) => void) | undefined;
@@ -451,6 +454,7 @@ export class EditorWorkspace {
     this.spellEnabled = options.spellcheckEnabled;
     this.spellSaveWord = options.spellSaveWord;
     this.ligatures = options.ligatures;
+    this.onZoomFont = options.onZoomFont;
     this.snippets = options.snippets;
     this.formatCode = options.formatCode;
     this.codeActions = options.codeActions;
@@ -566,6 +570,7 @@ export class EditorWorkspace {
       spellcheckEnabled: this.spellEnabled,
       spellSaveWord: this.spellSaveWord,
       ligatures: this.ligatures,
+      onZoomFont: this.onZoomFont,
       snippets: this.snippets,
       hoverFromLanguage: this.hoverFromLanguage,
       completionFromLanguage: this.completionFromLanguage,

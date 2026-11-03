@@ -60,7 +60,10 @@ export type CommandName =
   | 'expandSelection'
   | 'shrinkSelection'
   /** Закончить текущий оператор: скобки, двоеточие или `;` — язык знает вызывающий. */
-  | 'completeStatement';
+  | 'completeStatement'
+  /** Шрифт редактора с `Ctrl`+колесом: шаг +1/−1, вызывающий помнит значение. */
+  | 'fontSizeUp'
+  | 'fontSizeDown';
 
 /**
  * Кто может забрать клавишу себе раньше редактора. Так устроены попапы: при видимом
@@ -157,6 +160,9 @@ export class EditorInputBinding {
     this.viewport = view.element.querySelector<HTMLElement>('.own-editor-viewport');
     this.viewport?.addEventListener('mousedown', this.onMouseDown);
     this.viewport?.addEventListener('dblclick', this.onDoubleClick);
+    // `Ctrl`+колесо — шрифт. Слушаем на корне редактора, а не на окне: колесо над
+    // панелью Explorera или терминалом шрифт кода трогать не должно.
+    this.view.element.addEventListener('wheel', this.onWheel, { passive: false });
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('mouseup', this.onMouseUp);
 
@@ -435,6 +441,18 @@ export class EditorInputBinding {
   }
 
   // — мышь —
+
+  // `Ctrl`+колесо — шрифт редактора (в VS Code — `editor.mouseWheelZoom`). Своё
+  // масштабирование браузера при этом не работает, поэтому `preventDefault` здесь
+  // обязателен: без него Chrome ещё и зумит всю страницу.
+  private readonly onWheel = (event: WheelEvent): void => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    // На тачпаде колесо приходит дробными шагами и инерцией: без нуля не поймать
+    // ни одного шага, поэтому прокрутку делим на дельту события, а не на пиксели.
+    if (event.deltaY === 0) return;
+    event.preventDefault();
+    this.onCommand?.(event.deltaY < 0 ? 'fontSizeUp' : 'fontSizeDown');
+  };
 
   private readonly onMouseDown = (event: MouseEvent): void => {
     if (event.button !== 0) return;

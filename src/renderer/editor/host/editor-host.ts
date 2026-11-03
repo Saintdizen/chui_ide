@@ -191,6 +191,11 @@ export interface EditorHostOptions {
   /** Включать ли лигатуры шрифта. */
   ligatures?: boolean;
   /**
+   * `Ctrl`+колесо: шаг размера шрифта (+1/−1). Размер живёт в настройках приложения,
+   * поэтому редактор только сообщает о шаге. Не задано — колесо ничего не меняет.
+   */
+  onZoomFont?: (step: number) => void;
+  /**
    * Подсказки-вставки файла (inlay hints) от языкового сервера: путь, конец и начало
    * видимой области → подсказки (см. `shared/lsp-inlay-hints.ts`). Раньше здесь был
    * текст, и серверу передавался весь документ; теперь запрос ограничен экраном.
@@ -450,6 +455,8 @@ export class EditorHost {
   private languageId = 'plaintext';
   /** Выбор человека по миникарте (`editor.minimap`): дзен прячет её, но не отменяет. */
   private minimapWanted = false;
+  /** Колесо с `Ctrl`: приложение меняет `editor.fontSize`. */
+  private readonly onZoomFont: ((step: number) => void) | undefined;
   /** Дзен-режим включён: вид урезан до текста. */
   private zen = false;
 
@@ -847,6 +854,9 @@ export class EditorHost {
             inlineSource.complete({ path: this.path ?? '', language: this.languageId, prefix, suffix }),
         })
       : null;
+
+    // Колесо с `Ctrl` — только сообщить хозяину шаг: размер шрифта живёт у него.
+    this.onZoomFont = options.onZoomFont;
 
     // Ввод: панели показывает вызывающий, клавишу первыми забирают попапы (подсказки,
     // список мест, призрачный текст). Подсказки идут первыми: их список обычно открыт
@@ -2073,7 +2083,18 @@ export class EditorHost {
     else if (command === 'expandSelection') this.expandSelection();
     else if (command === 'shrinkSelection') this.shrinkSelection();
     else if (command === 'completeStatement') this.completeStatement();
+    else if (command === 'fontSizeUp') this.zoomFont(1);
+    else if (command === 'fontSizeDown') this.zoomFont(-1);
     else this.find.show(command === 'replace' ? 'replace' : 'find');
+  }
+
+  /**
+   * `Ctrl`+колесо: шаг в один пиксель туда-обратно. Размер живёт в приложении
+   * (`editor.fontSize` в настройках — у хозяина), поэтому зум сообщаем наружу, а не
+   * правим сами: иначе колесо и настройка начнут спорить за одно число.
+   */
+  private zoomFont(step: number): void {
+    this.onZoomFont?.(step);
   }
 
   /**
