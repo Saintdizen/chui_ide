@@ -176,8 +176,80 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--radius_xs);
+  background: none;
   color: var(--text_color_secondary);
+  font: inherit;
   font-size: var(--font_labels_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-info-row:hover {
+  background: var(--element_background_hover);
+}
+
+/* Раскрытая строка — заголовок своей выноски: держим её на виду при прокрутке. */
+.session-info-item.is-open > .session-info-row {
+  color: var(--text_color);
+  cursor: pointer;
+}
+
+.session-info-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 4px 14px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border_subtle, rgba(128, 128, 128, 0.25));
+}
+
+.session-info-detail-line,
+.session-info-detail-empty,
+.session-info-detail-locked {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  line-height: 1.45;
+}
+
+/* Системный промпт многострочный: переносим, но не раздуваем панель до экрана. */
+.session-info-detail-pre {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.session-info-detail-drop {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 2px 8px;
+  border: 1px solid var(--border_subtle, rgba(128, 128, 128, 0.35));
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color_secondary);
+  font: inherit;
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.session-info-detail-drop:hover {
+  border-color: var(--border_focus, rgba(128, 128, 128, 0.6));
+  color: var(--text_color);
+}
+
+/* Части без выключателя: молчание читалось бы как недоделка. */
+.session-info-detail-locked {
+  opacity: 0.7;
+  font-style: italic;
 }
 
 .session-info-label {

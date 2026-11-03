@@ -96,7 +96,7 @@ describe('createChangesPanel — блоки изменений', () => {
       reveal() {},
       onRevert() {},
       onSave() {},
-      hunks: async () => hunks([1]),
+      hunks: async () => hunks([1, 2, 1, 3], [10, 0, 12, 1]),
       openDiff,
     });
     panel.render(touched());
@@ -105,7 +105,7 @@ describe('createChangesPanel — блоки изменений', () => {
     await settle();
 
     // Кнопка одна на блок и стоит после «Показать» — берём по подписи.
-    const compare = [...document.querySelectorAll('.changes-hunk-btn')].find(
+    const compare = [...(document.querySelectorAll('.changes-hunk-btn') as unknown as HTMLElement[])].find(
       (node) => node.textContent === 'Сравнить',
     );
     expect(compare).toBeDefined();

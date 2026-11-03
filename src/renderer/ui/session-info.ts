@@ -3,8 +3,10 @@ import {
   contextUsage,
   estimateAttachmentTokens,
   estimateContextParts,
+  estimateTextTokens,
   type ContextUsage,
 } from '../../shared/context-fit';
+import { AGENT_TOOLS } from '../../shared/tools';
 import { formatTokens } from '../../shared/usage';
 import { clear, h, svgIcon } from './dom';
 import { formatBalance, type AccountBalance } from '../../shared/balance';
@@ -57,6 +59,35 @@ interface Part {
   tokens: number;
   /** Уточнение состава части: сколько из неё пришлось на что. */
   note?: string;
+  /**
+   * Что именно уходит в модель за эту часть — по строке на кусок.
+   * Цифра без содержимого ничего не объясняет: «системные — 4 200» не
+   * подсказывает, что из промпта выкинуть, чтобы стало 3 500.
+   */
+  detail(): string[];
+  /**
+   * Можно ли снять часть и за счёт чего. Пусто — часть неотъемлемая:
+   * без системных инструкций и описаний инструментов агент не работает,
+   * а историю не «выключают», её сжимают (кнопка внизу).
+   */
+  drop?: { label: string; run(): void };
+}
+
+/**
+ * Раскрытый текст части. Длинные куски режем: панель — подсказка, а не читалка.
+ * Ограничение по символам, а не по строкам: одна строка кода бывает на экран.
+ */
+const DETAIL_LIMIT = 1200;
+
+function clip(text: string): string {
+  return text.length > DETAIL_LIMIT ? `${text.slice(0, DETAIL_LIMIT)}\n…` : text;
+}
+
+/** Однострочная подпись куска: переводы строк ломают список.
+ */
+function oneLine(text: string, limit = 90): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
 }
 
 /**
@@ -75,16 +106,88 @@ function attachmentNote(attachments: readonly ChatAttachment[]): string {
   return rest > 0 ? `${labelled.join(', ')}, ещё ${rest}` : labelled.join(', ');
 }
 
-/** Что занимает место в контексте: разбивка по частям запроса (см. `context-fit`). */
-function split(data: SessionInfoData): Part[] {
+/**
+ * Что занимает место в контексте: разбивка по частям запроса (см. `context-fit`).
+ *
+ * `detail` и `drop` собираются из тех же `data`, что и вес: строка должна
+ * объяснять ровно ту цифру, что стоит рядом с ней.
+ */
+function split(data: SessionInfoData, options: { onDropFiles?(): void }): Part[] {
   const parts = estimateContextParts(data);
+  const toolNames = AGENT_TOOLS.map((tool) => tool.name);
+  const fileLines = data.attachments.map((item) => `${item.label} — ${formatTokens(estimateAttachmentTokens(item))}`);
   return [
-    { key: 'system', label: 'Системные инструкции', tokens: parts.system },
-    { key: 'tools', label: 'Описания инструментов', tokens: parts.tools },
-    { key: 'messages', label: 'Сообщения', tokens: parts.messages },
-    { key: 'results', label: 'Результаты инструментов', tokens: parts.results },
-    { key: 'files', label: 'Файлы', tokens: parts.files },
+    {
+      key: 'system',
+      label: 'Системные инструкции',
+      tokens: parts.system,
+      detail: () => (data.systemPrompt ? [clip(data.systemPrompt)] : []),
+    },
+    {
+      key: 'tools',
+      label: 'Описания инструментов',
+      tokens: parts.tools,
+      detail: () =>
+        data.tools
+          ? [
+              `Схемы ${toolNames.length} инструментов: ${toolNames.join(', ')}`,
+              'Убрать их нельзя: без схем агент не вызовет ни одного инструмента.',
+            ]
+          : ['Описания моделям не передаются: у выбранной модели вызов инструментов выключен.'],
+    },
+    {
+      key: 'messages',
+      label: 'Сообщения',
+      tokens: parts.messages,
+      detail: () => {
+        const counts = new Map<string, number>();
+        for (const message of data.history) {
+          if (message.role === 'tool') continue;
+          counts.set(message.role, (counts.get(message.role) ?? 0) + 1);
+        }
+        const lines = [...counts].map(([role, count]) => `${roleLabel(role)}: ${count}`);
+        if (data.pending) lines.push(`Ещё не отправлено: ${oneLine(data.pending)}`);
+        if (lines.length === 0) return [];
+        return [...lines, 'Выключить историю нельзя — её сжимают кнопкой внизу.'];
+      },
+    },
+    {
+      key: 'results',
+      label: 'Результаты инструментов',
+      tokens: parts.results,
+      detail: () => {
+        const results = data.history.filter((message) => message.role === 'tool');
+        if (results.length === 0) return [];
+        // Самые тяжёлые — первыми: чистить имеет смысл именно их.
+        const heavy = results
+          .map((message) => ({
+            name: message.name ?? 'инструмент',
+            tokens: estimateTextTokens(message.content ?? ''),
+          }))
+          .sort((a, b) => b.tokens - a.tokens)
+          .slice(0, 5)
+          .map((item) => `${item.name} — ${formatTokens(item.tokens)}`);
+        return [`Всего ответов: ${results.length}`, ...heavy];
+      },
+    },
+    {
+      key: 'files',
+      label: 'Файлы',
+      tokens: parts.files,
+      detail: () => fileLines,
+      drop:
+        options.onDropFiles && data.attachments.length > 0
+          ? { label: 'Убрать все', run: options.onDropFiles }
+          : undefined,
+    },
   ];
+}
+
+/** Роль сообщения по-русски: модель, человек и инструмент — не `user`/`assistant`. */
+function roleLabel(role: string): string {
+  if (role === 'user') return 'Вопросы';
+  if (role === 'assistant') return 'Ответы модели';
+  return role;
 }
 
 /**
@@ -153,6 +256,11 @@ export function createUsageRing(onClick: () => void): UsageRing {
 export function createSessionInfo(options: {
   onCompact(): void;
   balance?(): Promise<AccountBalance | null>;
+  /**
+   * Снять все вложения разом. По одному они снимаются в чипах; здесь — когда
+   * файлов набралось столько, что кликать по каждому дольше, чем начать заново.
+   */
+  onDropFiles?(): void;
 }): SessionInfoView {
   const title = h('div', { class: 'session-info-title' }, svgIcon('info', 13), h('span', {}, 'Информация о сессии'));
   const contextHead = h('div', { class: 'session-info-sub' }, 'Контекстное окно');
@@ -186,9 +294,12 @@ export function createSessionInfo(options: {
   );
 
   let open = false;
+  // Раскрытые строки контекста: помним между отрисовками, иначе панель,
+  // обновляясь на каждой правке, захлопывала бы только что открытую строку.
+  const folded = new Set<string>();
 
   function render(data: SessionInfoData): void {
-    const parts = split(data);
+    const parts = split(data, { onDropFiles: options.onDropFiles });
     const estimated = parts.reduce((sum, part) => sum + part.tokens, 0);
     const real = data.usage?.promptTokens;
     // Масштаб: сумма частей догоняет реальный размер запроса, пропорции сохраняются.
@@ -232,23 +343,72 @@ export function createSessionInfo(options: {
     // подсказкой для работы. Остались контекст, запас и баланс.
 
     clear(list);
+    const shown = new Set(folded);
     for (const part of parts) {
       const share = total > 0 ? (part.tokens / total) * 100 : 0;
+      const isOpen = shown.has(part.key) && part.tokens > 0;
       list.appendChild(
         h(
           'div',
-          { class: 'session-info-row', title: part.note },
+          { class: `session-info-item${isOpen ? ' is-open' : ''}` },
           h(
-            'span',
-            { class: 'session-info-label' },
-            h('span', { class: `context-dot context-seg-${part.key}` }),
-            part.label,
-            part.note ? h('span', { class: 'session-info-note' }, part.note) : '',
+            'button',
+            {
+              class: 'session-info-row',
+              type: 'button',
+              title: part.tokens > 0 ? part.note || 'Показать, из чего сложилась часть' : part.note,
+              // Раскрытие — не ради галочки: цифра без содержимого не подсказывает,
+              // что именно выкинуть, чтобы стало меньше. Пустую часть не раскрываем.
+              onclick: () => {
+                if (part.tokens <= 0) return;
+                if (shown.has(part.key)) shown.delete(part.key);
+                else shown.add(part.key);
+                folded.clear();
+                for (const key of shown) folded.add(key);
+                render(data);
+              },
+            },
+            h(
+              'span',
+              { class: 'session-info-label' },
+              h('span', { class: `context-dot context-seg-${part.key}` }),
+              part.label,
+              part.note ? h('span', { class: 'session-info-note' }, part.note) : '',
+            ),
+            h('span', { class: 'session-info-share' }, `${share.toFixed(1)}%`),
+            h('span', { class: 'session-info-tokens' }, formatTokens(part.tokens)),
           ),
-          h('span', { class: 'session-info-share' }, `${share.toFixed(1)}%`),
-          h('span', { class: 'session-info-tokens' }, formatTokens(part.tokens)),
         ),
       );
+      if (!isOpen) continue;
+      const lines = part.detail();
+      const box = h('div', { class: 'session-info-detail' });
+      if (lines.length === 0)
+        box.appendChild(h('div', { class: 'session-info-detail-empty' }, 'Пусто — эта часть ничего не весит.'));
+      for (const line of lines) {
+        // Многострочный кусок (системный промпт) — в <pre>: пробелы в нём значимы.
+        box.appendChild(
+          line.includes('\n')
+            ? h('pre', { class: 'session-info-detail-pre' }, line)
+            : h('div', { class: 'session-info-detail-line' }, line),
+        );
+      }
+      if (part.drop) {
+        const button = h('button', { class: 'session-info-detail-drop', type: 'button' }, part.drop.label);
+        button.title = 'Снять эту часть контекста с этого хода';
+        button.addEventListener('click', (event) => {
+          // Клик по кнопке — не клик по строке: иначе она бы ещё и свернулась.
+          event.stopPropagation();
+          part.drop?.run();
+        });
+        box.appendChild(button);
+      } else if (part.tokens > 0) {
+        // Молчание читалось как недоделка: «почему у файлов кнопка есть, а у
+        // инструкций нет». Части, без которых агент перестанет быть агентом,
+        // прямо говорят, что выключателя у них нет.
+        box.appendChild(h('div', { class: 'session-info-detail-locked' }, 'Эту часть убрать нельзя'));
+      }
+      list.appendChild(box);
     }
 
     // Строку про деньги здесь не трогаем: баланс приходит отдельным запросом

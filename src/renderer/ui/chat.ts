@@ -864,6 +864,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   const sessionInfo = createSessionInfo({
     onCompact: () => void compactActive(),
+    // «Снять всё» у части «Файлы»: `takeForSend` забирает и очищает список —
+    // вложений терять не надо, они либо уйдут дальше, либо их и не было.
+    onDropFiles: () => {
+      attachments.takeForSend();
+      // Цифры в открытой панели — из данных сессии: без пересчёта они бы
+      // остались старыми до следующего события.
+      syncSessionInfo();
+    },
     // Счёт у провайдера — только если он его показывает: у локальных серверов
     // и большинства OpenAI-совместимых метода нет, и main вернёт `null`.
     balance: () => deps.rpc.request('ai.balance'),
