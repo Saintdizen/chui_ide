@@ -93,3 +93,74 @@ describe('закрытие других', () => {
     expect(open.active?.path).toBe('/keep.ts');
   });
 });
+
+describe('порядок использования', () => {
+  it('вкладки помнят, когда их показывали: свежие впереди', () => {
+    const { documents, open } = setup();
+    open.open(documents.open('/a.ts', 'a'));
+    open.open(documents.open('/b.ts', 'b'));
+    open.activate('/a.ts');
+    expect(open.recent).toEqual(['/a.ts', '/b.ts']);
+  });
+
+  it('шаг идёт к предыдущей по показу, а не к соседке по полосе', () => {
+    const { documents, open } = setup();
+    for (const name of ['a', 'b', 'c']) open.open(documents.open(`/${name}.ts`, name));
+    // Показы: a, b, c, a. Полоса — a b c, а по порядку использования за a идёт c.
+    open.activate('/a.ts');
+    expect(open.cycleRecent(1)).toBe('/c.ts');
+  });
+
+  it('повторные нажатия идут дальше по кругу, а не прыгают туда-обратно', () => {
+    const { documents, open } = setup();
+    for (const name of ['a', 'b', 'c']) open.open(documents.open(`/${name}.ts`, name));
+    open.activate('/a.ts');
+    const first = open.cycleRecent(1);
+    expect(first).toBe('/c.ts');
+    open.activate('/c.ts');
+    expect(open.cycleRecent(1)).toBe('/b.ts');
+    open.activate('/b.ts');
+    // Круг замкнулся — дальше снова свежая вкладка, а не та, откуда начали.
+    expect(open.cycleRecent(1)).toBe('/a.ts');
+  });
+
+  it('обратный шаг заходит с другого конца круга', () => {
+    const { documents, open } = setup();
+    for (const name of ['a', 'b', 'c']) open.open(documents.open(`/${name}.ts`, name));
+    open.activate('/a.ts');
+    expect(open.cycleRecent(-1)).toBe('/b.ts');
+  });
+
+  it('закрытая во время перебора вкладка из снимка выпадает', () => {
+    const { documents, open } = setup();
+    for (const name of ['a', 'b', 'c']) open.open(documents.open(`/${name}.ts`, name));
+    open.activate('/a.ts');
+    expect(open.cycleRecent(1)).toBe('/c.ts');
+    open.close('/c.ts');
+    expect(open.cycleRecent(1)).toBe('/b.ts');
+  });
+
+  it('одной вкладки для перебора мало', () => {
+    const { documents, open } = setup();
+    open.open(documents.open('/a.ts', 'a'));
+    expect(open.cycleRecent(1)).toBeNull();
+  });
+
+  it('отпущенная клавиша начинает перебор заново — со свежей вкладки', () => {
+    const { documents, open } = setup();
+    for (const name of ['a', 'b', 'c']) open.open(documents.open(`/${name}.ts`, name));
+    open.activate('/a.ts');
+    expect(open.cycleRecent(1)).toBe('/c.ts');
+    open.activate('/c.ts');
+    open.endRecentCycle();
+    expect(open.cycleRecent(1)).toBe('/a.ts');
+  });
+
+  it('restoreRecent выбрасывает пути, которых нет среди вкладок', () => {
+    const { documents, open } = setup();
+    open.open(documents.open('/a.ts', 'a'));
+    open.open(documents.open('/b.ts', 'b'));
+    open.restoreRecent(['/gone.ts', '/a.ts', '/b.ts']);
+    expect(open.recent).toEqual(['/a.ts', '/b.ts']);
+  });
+});

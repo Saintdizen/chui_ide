@@ -20,6 +20,16 @@ describe('launchConfigs', () => {
     expect(configs).toEqual([{ name: 'start', program: '/proj/src/a.js', args: [], env: {}, stopOnEntry: false }]);
   });
 
+  it('${env:ИМЯ} берётся из окружения, которое передал main', () => {
+    // Окружение приходит снаружи: в renderer `process` нет, а модуль общий.
+    const configs = launchConfigs(
+      file([{ type: 'node', request: 'launch', name: 'start', program: 'a.js', cwd: '${env:PROJ_DIR}' }]),
+      ROOT,
+      { PROJ_DIR: '/tmp' },
+    );
+    expect(configs[0]?.cwd).toBe('/tmp');
+  });
+
   it('аргументы, cwd и env переносятся', () => {
     const configs = launchConfigs(
       file([

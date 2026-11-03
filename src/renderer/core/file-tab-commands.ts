@@ -66,6 +66,37 @@ export function registerFileTabCommands(define: DefineCommand, deps: FileTabDeps
     browserStrip.deactivate();
   });
 
+  // Перебор вкладок по порядку использования — как в VS Code: полоса хранит свой порядок,
+  // а `Ctrl+Tab` идёт по истории показов. Снимок порядка держит `openEditors`.
+  const cycleTab = (step: 1 | -1): void => {
+    const path = openEditors.cycleRecent(step);
+    if (!path) return;
+    openEditors.activate(path);
+    const document = documents.get(path);
+    if (document && !isImagePath(path) && !isOfficePath(path)) editors.open(document);
+    browserStrip.deactivate();
+  };
+
+  define(
+    {
+      id: 'file.previousRecent',
+      title: 'Вкладка: предыдущая по использованию',
+      category: 'Файл',
+      keybinding: 'Ctrl+Tab',
+    },
+    () => cycleTab(1),
+  );
+
+  define(
+    {
+      id: 'file.nextRecent',
+      title: 'Вкладка: следующая по использованию',
+      category: 'Файл',
+      keybinding: 'Ctrl+Shift+Tab',
+    },
+    () => cycleTab(-1),
+  );
+
   define(
     {
       id: 'file.close',

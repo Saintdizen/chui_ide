@@ -62,6 +62,12 @@ describe('sanitizeSession', () => {
     expect(sanitizeSession({}).roots).toBeUndefined();
   });
 
+  it('порядок использования оставляет только открытые вкладки', () => {
+    // Путь закрытого файла в переборе `Ctrl+Tab` — дыра, ведущая в никуда.
+    const state = sanitizeSession({ tabs: ['/p/a.ts', '/p/b.ts'], mru: ['/p/b.ts', '/p/gone.ts', 42] });
+    expect(state.mru).toEqual(['/p/b.ts']);
+  });
+
   it('битый список корней не ломает сессию', () => {
     expect(sanitizeSession({ roots: [1, null, '', '/a', '/b'] }).roots).toEqual(['/a', '/b']);
     expect(sanitizeSession({ roots: 'нет' }).roots).toBeUndefined();

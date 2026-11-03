@@ -31,16 +31,19 @@ const NODE_TYPES = new Set(['node', 'pwa-node', 'node-terminal']);
  * Остальные (`${file}`, `${selectedText}`) в файле без открытого файла не значат
  * ничего. Подставить случайное хуже, чем не показать конфигурацию вовсе: запустят
  * отладку не того файла.
+ *
+ * Окружение приходит снаружи, как и в `external-terminal.ts`: модуль общий с renderer,
+ * а там `process` нет вовсе.
  */
-function expand(value: string, root: string): string | null {
+function expand(value: string, root: string, env: Readonly<Record<string, string | undefined>>): string | null {
   let unknown = false;
   const text = value.replace(/\$\{([^}]*)\}/g, (_match, name: string) => {
     const trimmed = name.trim();
     if (trimmed === 'workspaceFolder' || trimmed === 'workspaceRoot') return root;
     if (trimmed.startsWith('env:')) {
-      const env = process.env[trimmed.slice(4)] ?? '';
-      if (env === '') unknown = true;
-      return env;
+      const found = env[trimmed.slice(4)] ?? '';
+      if (found === '') unknown = true;
+      return found;
     }
     unknown = true;
     return '';
@@ -56,13 +59,17 @@ function strings(value: unknown): string[] {
 }
 
 /** `env` — объект; значения приводим к строкам, как ждёт DAP. */
-function environment(value: unknown, root: string): Record<string, string> {
+function environment(
+  value: unknown,
+  root: string,
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
   if (!value || typeof value !== 'object') return {};
   const result: Record<string, string> = {};
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     const text = typeof raw === 'string' ? raw : typeof raw === 'number' ? String(raw) : null;
     if (text === null) continue;
-    const expanded = expand(text, root);
+    const expanded = expand(text, root, env);
     if (expanded !== null) result[key] = expanded;
   }
   return result;
@@ -77,9 +84,14 @@ function isAbsolute(path: string): boolean {
  * Конфигурации из текста `launch.json` (JSONC).
  *
  * `root` нужен, чтобы `program` стал путём от корня проекта: отладчик работает
- * в его каталоге, а файл описывает пути относительно корня.
+ * в его каталоге, а файл описывает пути относительно корня. `env` — окружение для
+ * `${env:ИМЯ}`; читает его main, здесь оно только подставляется.
  */
-export function launchConfigs(text: string, root: string): LaunchConfig[] {
+export function launchConfigs(
+  text: string,
+  root: string,
+  env: Readonly<Record<string, string | undefined>> = {},
+): LaunchConfig[] {
   const parsed = parseJsonc(text);
   if (!parsed) return [];
   const raw = Array.isArray(parsed.configurations) ? parsed.configurations : [];
@@ -91,11 +103,11 @@ export function launchConfigs(text: string, root: string): LaunchConfig[] {
     const type = typeof record.type === 'string' ? record.type : '';
     // `attach` — подключение к чужому процессу: адрес задаёт человек, не файл.
     if (record.request !== undefined && record.request !== 'launch') continue;
-    const declared = typeof record.program === 'string' ? expand(record.program, root) : null;
+    const declared = typeof record.program === 'string' ? expand(record.program, root, env) : null;
     if (!declared) continue;
     if (!NODE_TYPES.has(type) && type !== 'python' && type !== 'debugpy') continue;
 
-    const cwd = typeof record.cwd === 'string' ? expand(record.cwd, root) : null;
+    const cwd = typeof record.cwd === 'string' ? expand(record.cwd, root, env) : null;
     configs.push({
       name:
         typeof record.name === 'string' && record.name.trim() !== ''
@@ -103,10 +115,10 @@ export function launchConfigs(text: string, root: string): LaunchConfig[] {
           : declared.split(/[/\\]/).pop() || declared,
       program: isAbsolute(declared) ? declared : joinPath(root, declared),
       args: strings(record.args)
-        .map((arg) => expand(arg, root))
+        .map((arg) => expand(arg, root, env))
         .filter((arg): arg is string => arg !== null),
       ...(cwd ? { cwd: isAbsolute(cwd) ? cwd : joinPath(root, cwd) } : {}),
-      env: environment(record.env, root),
+      env: environment(record.env, root, env),
       stopOnEntry: record.stopOnEntry === true,
     });
   }

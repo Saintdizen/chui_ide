@@ -21,6 +21,17 @@ export class OpenEditors {
   /** Вкладка-предпросмотр (одна) или `null`, если предпросмотра нет. */
   private previewPath: string | null = null;
   private readonly pinned = new Set<string>();
+  /**
+   * Порядок ИСПОЛЬЗОВАНИЯ — отдельно от порядка вкладок в полосе: `Ctrl+Tab` идёт
+   * по нему, как в VS Code. Свежая вкладка впереди.
+   */
+  private recentlyUsed: string[] = [];
+  /**
+   * Перебор по `Ctrl+Tab`: снимок порядка на время, пока клавишу не отпустили.
+   * Без снимка каждый шаг ставил бы в голову только что показанную вкладку, и
+   * сочетание ходило бы «туда-обратно» между двумя файлами.
+   */
+  private recentCycle: { order: string[]; index: number } | null = null;
 
   private readonly changeEmitter = new Emitter<void>();
   readonly onDidChange = this.changeEmitter.event;
@@ -57,6 +68,77 @@ export class OpenEditors {
     return this.previewPath === path;
   }
 
+  /** Порядок использования: свежие впереди. Его же хранит сессия. */
+  get recent(): readonly string[] {
+    return this.recentlyUsed;
+  }
+
+  /** Запомнить показ вкладки: она становится свежей. */
+  private touch(path: string): void {
+    const at = this.recentlyUsed.indexOf(path);
+    if (at >= 0) this.recentlyUsed.splice(at, 1);
+    this.recentlyUsed.unshift(path);
+    // Перебор продолжается, только пока шагаем по его же снимку: любой другой показ
+    // (клик по вкладке, открытие файла) начинает порядок заново.
+    if (this.recentCycle && this.recentCycle.order[this.recentCycle.index] !== path) {
+      this.recentCycle = null;
+    }
+  }
+
+  /** Выкинуть путь из порядка использования: вкладки больше нет. */
+  private forget(path: string): void {
+    const at = this.recentlyUsed.indexOf(path);
+    if (at >= 0) this.recentlyUsed.splice(at, 1);
+  }
+
+  /**
+   * Вкладка на шаг по порядку использования: `1` — предыдущая, `-1` — следующая.
+   * Возвращает путь, но НЕ активирует: показ (и редактор) — дело команды.
+   */
+  cycleRecent(step: 1 | -1): string | null {
+    if (!this.recentCycle) {
+      const order = this.recentlyUsed.filter((path) => this.order.includes(path));
+      // Активная свежее всех по определению; иначе первый шаг вёл бы в неё же.
+      const at = this.activeId ? order.indexOf(this.activeId) : -1;
+      if (this.activeId && at > 0) {
+        order.splice(at, 1);
+        order.unshift(this.activeId);
+      }
+      // Вкладки, которых нет в порядке использования (сессия открыта в обход `open`),
+      // дописываем в конец — иначе они выпали бы из перебора.
+      for (const path of this.order) if (!order.includes(path)) order.push(path);
+      this.recentCycle = { order, index: 0 };
+    }
+
+    // Закрытые за время перебора вкладки из снимка выпадают.
+    const order = this.recentCycle.order.filter((path) => this.order.includes(path));
+    if (order.length < 2) {
+      this.recentCycle = null;
+      return null;
+    }
+    const current = this.recentCycle.order[this.recentCycle.index];
+    const from = current ? Math.max(order.indexOf(current), 0) : 0;
+    const index = (from + step + order.length) % order.length;
+    this.recentCycle = { order, index };
+    return order[index] ?? null;
+  }
+
+  /** Закончить перебор: клавишу отпустили или окно потеряло фокус. */
+  endRecentCycle(): void {
+    this.recentCycle = null;
+  }
+
+  /** Вернуть порядок использования из сессии: чужие и закрытые пути отбрасываются. */
+  restoreRecent(paths: readonly string[]): void {
+    const recent: string[] = [];
+    for (const path of paths) {
+      if (this.order.includes(path) && !recent.includes(path)) recent.push(path);
+    }
+    for (const path of this.order) if (!recent.includes(path)) recent.push(path);
+    this.recentlyUsed = recent;
+    this.recentCycle = null;
+  }
+
   /** Открыть файл. `preview` — вкладка «на посмотреть» (вытеснит прежний предпросмотр). */
   open(document: TextDocument, options: { preview?: boolean } = {}): void {
     const path = document.path;
@@ -66,6 +148,7 @@ export class OpenEditors {
       // Уже открыт: открытие «насовсем» снимает с него метку предпросмотра.
       if (!preview && this.previewPath === path) this.previewPath = null;
       this.activeId = path;
+      this.touch(path);
       this.changeEmitter.fire();
       return;
     }
@@ -76,6 +159,7 @@ export class OpenEditors {
         // Вытесняем прежний предпросмотр, вставая на его место: полоса вкладок не дёргается.
         const index = this.order.indexOf(current);
         this.order.splice(index, 1);
+        this.forget(current);
         this.documents.close(current);
         this.order.splice(index, 0, path);
       } else {
@@ -87,12 +171,19 @@ export class OpenEditors {
     }
 
     this.activeId = path;
+    this.touch(path);
     this.changeEmitter.fire();
   }
 
   activate(path: string): void {
-    if (!this.order.includes(path) || this.activeId === path) return;
+    if (!this.order.includes(path)) return;
+    if (this.activeId === path) {
+      // Вкладка уже показана, но в порядке использования могла отстать — выправляем.
+      this.touch(path);
+      return;
+    }
     this.activeId = path;
+    this.touch(path);
     this.changeEmitter.fire();
   }
 
@@ -116,6 +207,7 @@ export class OpenEditors {
 
     this.order.splice(index, 1);
     this.pinned.delete(path);
+    this.forget(path);
     if (this.previewPath === path) this.previewPath = null;
     this.documents.close(path);
 
@@ -131,6 +223,7 @@ export class OpenEditors {
     for (const path of [...this.order]) {
       if (path === keep || this.pinned.has(path)) continue;
       this.order.splice(this.order.indexOf(path), 1);
+      this.forget(path);
       this.documents.close(path);
     }
     if (this.order.includes(keep)) this.activeId = keep;
@@ -141,6 +234,8 @@ export class OpenEditors {
     for (const path of [...this.order]) this.documents.close(path);
     this.order.length = 0;
     this.pinned.clear();
+    this.recentlyUsed.length = 0;
+    this.recentCycle = null;
     this.previewPath = null;
     this.activeId = null;
     this.changeEmitter.fire();

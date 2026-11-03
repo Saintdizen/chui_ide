@@ -201,6 +201,9 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       ...(roots.length > 1 ? { roots } : {}),
       tabs: [...openEditors.paths],
       ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
+      // Порядок использования — отдельно от полосы: `Ctrl+Tab` после перезапуска должен
+      // вести туда же, куда вёл до него.
+      ...(openEditors.recent.length > 0 ? { mru: [...openEditors.recent] } : {}),
       expanded: explorer.expandedPaths(),
       pinned: explorer.pinnedPaths(),
       ...(explorer.labels().length > 0 ? { labels: explorer.labels() } : {}),
@@ -297,6 +300,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
         const document = documents.get(state.activeTab);
         if (document) editors.open(document);
       }
+      // После показа активной: порядок использования начинается с неё.
+      openEditors.restoreRecent(state.mru ?? []);
 
       explorer.restoreExpanded(state.expanded);
       explorer.restorePinned(state.pinned ?? []);

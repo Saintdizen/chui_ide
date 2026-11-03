@@ -3842,6 +3842,14 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
 
   new KeybindingService(commands, DEFAULT_KEYBINDINGS, () => settings.keybindings.overrides).attach(window);
 
+  // Перебор вкладок (Ctrl+Tab) кончается вместе с клавишей: снимок порядка живёт от
+  // нажатия до отпускания. Потеря фокуса — тоже конец: следующий Ctrl+Tab должен
+  // начинать с свежей вкладки, а не продолжать старый перебор.
+  window.addEventListener('keyup', (event) => {
+    if (event.key === 'Control' || event.key === 'Meta') openEditors.endRecentCycle();
+  });
+  window.addEventListener('blur', () => openEditors.endRecentCycle());
+
   // Двойное нажатие Shift — второй способ позвать палитру, как в Zed/JetBrains.
   // Хоткей меню и Ctrl+Shift+P работают там, где фокус в окне; этот — заодно и после
   // того, как фокус вернулся из панели браузера (там Shift человек жмёт «просто так»).

@@ -46,7 +46,7 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
     const root = deps.workspace.rootPath();
     if (!root) return { configs: [] };
     const text = await readFile(`${root}/.vscode/launch.json`, 'utf8').catch(() => '');
-    return { configs: text ? launchConfigs(text, root) : [] };
+    return { configs: text ? launchConfigs(text, root, process.env) : [] };
   });
   router.register('workspace.compareFolders', (params) => deps.workspace.compareFolders(params.left, params.right));
   router.register('workspace.replace', (params) => deps.workspace.replace(params));

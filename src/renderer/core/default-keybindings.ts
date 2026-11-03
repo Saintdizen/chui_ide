@@ -53,4 +53,8 @@ export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { combo: 'Ctrl+Alt+B', command: 'editor.bookmarksList' },
   // Меню — как в приложениях KDE: Alt+F10 открывает его с клавиатуры.
   { combo: 'Alt+F10', command: 'app.showMenu' },
+  // Перебор вкладок по порядку использования. В меню этих сочетаний нет (там простой
+  // порядок полосы), поэтому живут только здесь.
+  { combo: 'Ctrl+Tab', command: 'file.previousRecent' },
+  { combo: 'Ctrl+Shift+Tab', command: 'file.nextRecent' },
 ];

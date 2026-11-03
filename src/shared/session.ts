@@ -82,6 +82,10 @@ export function sanitizeSession(raw: unknown): SessionState {
   if (typeof value.activeTab === 'string' && tabs.includes(value.activeTab)) {
     state.activeTab = value.activeTab;
   }
+  // Порядок использования — только по нынешним вкладкам: путь закрытого файла в
+  // переборе `Ctrl+Tab` был бы дырой, ведущей в никуда.
+  const mru = stringList(value.mru, MAX_TABS).filter((path) => tabs.includes(path));
+  if (mru.length > 0) state.mru = mru;
   if (typeof value.dockActive === 'string' && value.dockActive) {
     state.dockActive = value.dockActive.slice(0, MAX_PATH_CHARS);
   }
