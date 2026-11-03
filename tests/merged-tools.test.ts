@@ -18,7 +18,17 @@ describe('слитые инструменты: схема', () => {
       const property = spec(name).inputSchema.properties.action as { enum?: string[] };
       return property.enum ?? [];
     };
-    expect(actions('browser')).toEqual(['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close']);
+    expect(actions('browser')).toEqual([
+      'open',
+      'snapshot',
+      'click',
+      'type',
+      'evaluate',
+      // Снимок картинкой: для canvas и карт, где текстовый снимок пуст.
+      'screenshot',
+      'zoom',
+      'close',
+    ]);
     expect(actions('lsp')).toEqual(['references', 'definition', 'outline', 'rename']);
     // Терминала здесь нет: его восемь действий — восемь имён. Это сторожит
     // соседний тест — чтобы слитое имя не вернулось тихо.

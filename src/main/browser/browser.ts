@@ -50,6 +50,11 @@ export interface BrowserTools {
   type(ref: string, text: string, submit: boolean): Promise<BrowserSnapshot>;
   /** Выполнить выражение на странице и вернуть результат текстом. */
   evaluate(expression: string): Promise<string>;
+  /**
+   * Снимок страницы картинкой (PNG, base64) — для того, чего нет в дереве:
+   * canvas, карта, график. Необязательный: без него инструмент так и скажет.
+   */
+  screenshot?(maxWidth?: number): Promise<string>;
   /** Закрыть браузер и убрать временный профиль. */
   close(): Promise<void>;
 }
@@ -83,6 +88,10 @@ export class BrowserService implements BrowserTools {
 
   async snapshot(): Promise<BrowserSnapshot> {
     return (await this.ensure()).snapshot();
+  }
+
+  async screenshot(maxWidth?: number): Promise<string> {
+    return (await this.ensure()).screenshot(maxWidth);
   }
 
   async click(ref: string): Promise<BrowserSnapshot> {

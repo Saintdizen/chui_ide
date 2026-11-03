@@ -563,10 +563,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         action: {
           type: 'string',
-          enum: ['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close'],
+          enum: ['open', 'snapshot', 'click', 'type', 'evaluate', 'screenshot', 'zoom', 'close'],
           description:
             'open: a page; snapshot: the page in text — after each action, since the page changes ' +
-            'and old refs expire; click, type: by ref; evaluate: a JS expression; zoom; close.',
+            'and old refs expire; click, type: by ref; evaluate: a JS expression; screenshot: the ' +
+            'page as a picture, for canvas, maps and charts where the text snapshot is empty; zoom; close.',
         },
         url: { type: 'string', description: 'open: page address; no scheme means https.' },
         ref: { type: 'string', description: 'click, type: element number from snapshot.' },

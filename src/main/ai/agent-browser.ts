@@ -48,6 +48,8 @@ function pageSummary(snapshot: BrowserSnapshot): string {
 export async function browserAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const action = requireString(args, 'action').trim();
   switch (action) {
+    case 'screenshot':
+      return browserScreenshot(ctx);
     case 'snapshot':
       return await browserSnapshot(ctx);
     case 'close':
@@ -85,6 +87,24 @@ async function browserSnapshot(ctx: ToolContext): Promise<ToolOutcome> {
   if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
   const snapshot = await ctx.browser.snapshot();
   return snapshotOutcome(snapshot, pageSummary(snapshot));
+}
+
+/**
+ * Снимок страницы картинкой.
+ *
+ * Только для того, чего в текстовом снимке нет: canvas, карта, график — они в
+ * дереве выглядят пустым прямоугольником. Заодно это путь «посмотреть глазами»
+ * после вёрстки, но за токены картинки: звать его вместо `snapshot` незачем.
+ */
+async function browserScreenshot(ctx: ToolContext): Promise<ToolOutcome> {
+  if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
+  if (!ctx.browser.screenshot) return { ok: false, summary: 'Здесь снимка страницы нет' };
+  const data = await ctx.browser.screenshot();
+  return {
+    ok: true,
+    summary: 'Снимок страницы — картинка в следующем сообщении',
+    images: [`data:image/png;base64,${data}`],
+  };
 }
 
 async function browserClick(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {

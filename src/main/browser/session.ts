@@ -128,6 +128,31 @@ export class PageSession {
     return this.snapshot();
   }
 
+  /**
+   * Снимок экрана страницы картинкой (PNG, base64).
+   *
+   * Нужен там, где DOM бессилен: canvas, карта, график — они в снимке дерева
+   * выглядят как пустой прямоугольник, и по нему не понять, что сломалось.
+   * `captureBeyondViewport` берём, чтобы не прокручивать: модель не должна
+   * требовать «прокрути и сними ещё раз».
+   */
+  async screenshot(maxWidth = 1280): Promise<string> {
+    // Ширину ограничиваем до захвата: читать она будет уменьшенной, а платить
+    // (время на кодирование и передачу) — за полную.
+    const metrics = (await this.channel.send('Page.getLayoutMetrics')) as {
+      cssLayoutViewport?: { clientWidth?: number };
+    };
+    const width = Number(metrics.cssLayoutViewport?.clientWidth ?? 0);
+    const scale = width > maxWidth ? maxWidth / width : 1;
+    const result = (await this.channel.send('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true,
+      ...(scale < 1 ? { scale } : {}),
+    })) as { data?: string };
+    if (!result.data) throw new Error('Снимок не получился: страница ничего не отдала');
+    return result.data;
+  }
+
   async evaluate(expression: string): Promise<string> {
     const text = expression.trim();
     if (!text) throw new Error('Пустое выражение');
