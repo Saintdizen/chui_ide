@@ -140,6 +140,12 @@ export interface ChatDeps {
    */
   git?: GitModel;
   /**
+   * Показать файл в экране различий против HEAD. Нужен ревью правок: блок можно
+   * разглядеть только там — в попапе изменений видна только одна цифра строк.
+   * Необязательно: без него пункт просто не появляется.
+   */
+  openDiff?: (path: string, staged: boolean) => void;
+  /**
    * Места проекта по смыслу — для `#codebase`. Тот же поиск, что у палитры по смыслу;
    * необязательно: без него пункт молчит и говорит, почему.
    */
@@ -359,6 +365,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           hunks: async (path: string) => (await deps.git!.fileHunks(path)).unstaged,
           onStageHunk: (path: string, hunk: { newStart: number }) => void stageHunkByLine(path, hunk.newStart),
           onDiscardFile: (path: string) => void discardFile(path),
+          ...(deps.openDiff ? { openDiff: (path: string) => deps.openDiff?.(path, false) } : {}),
         }
       : {}),
   });

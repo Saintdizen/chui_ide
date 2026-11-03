@@ -52,6 +52,8 @@ export interface ChangesPanelDeps {
   onStageHunk?(path: string, hunk: GitDiffHunk): void;
   /** Вернуть файл к `HEAD` целиком — рядом с блоками, чтобы видеть цену блока. */
   onDiscardFile?(path: string): void;
+  /** Показать файл в экране различий против `HEAD` — следующий шаг после блоков. */
+  openDiff?(path: string): void;
 }
 
 export interface ChangesPanelView {
@@ -258,6 +260,21 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
           },
           'Показать',
         ),
+        deps.openDiff
+          ? h(
+              'button',
+              {
+                class: 'btn btn-small changes-hunk-btn',
+                type: 'button',
+                title: 'Открыть файл в сравнении с HEAD',
+                onClick: () => {
+                  popover.close();
+                  deps.openDiff?.(target);
+                },
+              },
+              'Сравнить',
+            )
+          : null,
         index === count - 1
           ? h(
               'button',

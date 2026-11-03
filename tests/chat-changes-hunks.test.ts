@@ -90,6 +90,29 @@ describe('createChangesPanel — блоки изменений', () => {
     expect(stage.mock.calls[0]![1]).toEqual({ oldStart: 10, oldCount: 0, newStart: 12, newCount: 1 });
   });
 
+  it('«Сравнить» открывает файл в экране различий', async () => {
+    const openDiff = vi.fn();
+    const panel = createChangesPanel({
+      reveal() {},
+      onRevert() {},
+      onSave() {},
+      hunks: async () => hunks([1]),
+      openDiff,
+    });
+    panel.render(touched());
+
+    rowsIn(panel)[0]!.click();
+    await settle();
+
+    // Кнопка одна на блок и стоит после «Показать» — берём по подписи.
+    const compare = [...document.querySelectorAll('.changes-hunk-btn')].find(
+      (node) => node.textContent === 'Сравнить',
+    );
+    expect(compare).toBeDefined();
+    compare!.click();
+    expect(openDiff).toHaveBeenCalledWith('src/a.ts');
+  });
+
   it('повторный клик по файлу сворачивает блоки', async () => {
     const panel = createChangesPanel({
       reveal() {},

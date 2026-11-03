@@ -1613,6 +1613,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     commands,
     workspace,
     git,
+    openDiff: (path, staged) => diffView.open(path, staged),
     // Страница встроенного браузера: адрес открытой вкладки — для `#web`.
     browserUrl: () => browserView.url,
     // `#codebase`: места проекта по смыслу — те же два источника, что у палитры.
