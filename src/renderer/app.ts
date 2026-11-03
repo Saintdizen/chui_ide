@@ -121,7 +121,7 @@ import { showContextMenu } from './ui/context-menu';
 import { createBreadcrumbs } from './ui/breadcrumbs';
 import { createChatPanel, type ChatView } from './ui/chat';
 import { createDock } from './ui/dock';
-import { createConflictView } from './ui/conflict-view';
+import { createConflictView, toastKindFor } from './ui/conflict-view';
 import { createDiffView } from './ui/diff-view';
 import { basename, h, svgIcon, type IconName } from './ui/dom';
 import { createEmptyState } from './ui/empty-state';
@@ -1045,7 +1045,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       await git.markResolved(path);
     },
     openInEditor: (path) => void openPath(path),
-    notify: (message, kind) => showToast(message, kind === 'error' ? 'error' : 'info'),
+    notify: (message, kind) => showToast(message, toastKindFor(kind)),
   });
   layout.editorHost.appendChild(conflictView.element);
 

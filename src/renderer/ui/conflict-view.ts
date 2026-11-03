@@ -1,6 +1,7 @@
 import {
   type ConflictBlock,
   type ConflictChoice,
+  conflictChoiceResult,
   conflictEdit,
   hasConflicts,
   parseConflicts,
@@ -25,7 +26,12 @@ export interface ConflictViewDeps {
   finish: (path: string) => Promise<void>;
   openInEditor: (path: string) => void;
   /** Сообщение человеку: ошибка применения или итог разрешения. */
-  notify?: (message: string, kind?: 'info' | 'error') => void;
+  notify?: (message: string, kind?: 'info' | 'warn' | 'error') => void;
+}
+
+/** Привести тон сообщения к тому, что умеет тост: предупреждения отдельного вида нет. */
+export function toastKindFor(kind: 'info' | 'warn' | 'error' = 'info'): 'info' | 'error' {
+  return kind === 'error' ? 'error' : 'info';
 }
 
 export interface ConflictView {
@@ -126,6 +132,17 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
       });
       if (edits.length === 0) return;
       await deps.applyEdits(path, edits);
+
+      // § «оба»: когда обе стороны правили ОДНУ строку, склейка — догадка, а не
+      // результат слияния. Молчать нельзя: `a += 1` и `a += 2` рядом выглядят как
+      // готовый код. Файл не сохраняем молча — редактор открыт, и решает человек.
+      const guessed = current.filter((block) => {
+        const choice = choices.get(block.index);
+        return choice === 'both' && conflictChoiceResult(block, choice).ambiguous;
+      });
+      if (guessed.length > 0) {
+        deps.notify?.(`Оба: стороны легли на одну строку (блок ${guessed[0]!.index + 1}) — проверь результат`, 'warn');
+      }
     } catch (error) {
       deps.notify?.(error instanceof Error ? error.message : String(error), 'error');
     } finally {

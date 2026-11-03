@@ -1,12 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import {
+  conflictChoiceResult,
   conflictChoiceText,
   conflictEdit,
   hasConflicts,
   mergeConflicts,
   parseConflicts,
+  VARIANT_MARK,
+  type ConflictBlock,
 } from '../src/shared/conflicts';
+import { toastKindFor } from '../src/renderer/ui/conflict-view';
 import { applyTextEdits } from '../src/shared/edits';
+
+describe('toastKindFor', () => {
+  it('предупреждение не становится ошибкой, ошибка остаётся ошибкой', () => {
+    // Тост знает только info/error: «оба» — не сбой, а подсказка, и краснеть ей незачем.
+    expect(toastKindFor('warn')).toBe('info');
+    expect(toastKindFor('error')).toBe('error');
+    expect(toastKindFor()).toBe('info');
+  });
+});
 
 /** Файл с одним конфликтом в обычном (2-way) стиле. */
 const ONE = ['начало', '<<<<<<< HEAD', 'наша строка', '=======', 'их строка', '>>>>>>> feature', 'конец', ''].join(
@@ -110,6 +123,51 @@ describe('conflictChoiceText', () => {
   });
 });
 
+/**
+ * Подбор порядка для «оба».
+ *
+ * Два случая, которые и различают подсказку от угадывания:
+ * правки в разных местах (общая часть одна — её не удваиваем) и правки ОДНОЙ
+ * строки (склеивать нельзя — получится `a += 1a += 2`).
+ */
+describe('«оба» без мусора', () => {
+  const block = (ours: string, theirs: string, base?: string): ConflictBlock => {
+    const parsed = parseConflicts(
+      [
+        '<<<<<<< HEAD',
+        ours,
+        ...(base === undefined ? [] : ['||||||| base', base]),
+        '=======',
+        theirs,
+        '>>>>>>> other',
+        '',
+      ].join('\n'),
+    )[0];
+    if (!parsed) throw new Error('блок не разобрался');
+    return parsed;
+  };
+
+  it('общий край не удваивается', () => {
+    // База обязательна: без неё неизвестно, что `import a` — общее, а не правка.
+    const result = conflictChoiceResult(block('import a\nimport b', 'import a\nimport c', 'import a'), 'both');
+    expect(result.text).toBe('import a\nimport b\nimport c');
+    expect(result.ambiguous).toBe(false);
+  });
+
+  it('без базы склеивает в порядке «наше, их» и НЕ притворяется, что понял', () => {
+    // Без базы `import a` неотличимо от правки: удвоение здесь — цена честности,
+    // и `ambiguous` говорит интерфейсу, что это не готовый результат.
+    const result = conflictChoiceResult(block('import a\nimport b', 'import a\nimport c'), 'both');
+    expect(result.text).toBe('import a\nimport b\nimport a\nimport c');
+    expect(result.ambiguous).toBe(true);
+  });
+
+  it('базовый текст отделяет дописанное от общего', () => {
+    const result = conflictChoiceResult(block('x\nлевый хвост', 'x\nправый хвост', 'x'), 'both');
+    expect(result.text).toBe('x\nлевый хвост\nправый хвост');
+  });
+});
+
 describe('mergeConflicts', () => {
   it('заменяет выбранные блоки и оставляет невыбранные как есть', () => {
     const merged = mergeConflicts(TWO, ['ours']);
@@ -125,9 +183,25 @@ describe('mergeConflicts', () => {
 
     expect(hasConflicts(merged)).toBe(false);
     expect(merged).toContain('theirs1');
-    expect(merged).toContain('ours2\ntheirs2');
+    expect(merged).toContain('ours2');
+    expect(merged).toContain('theirs2');
     expect(merged.startsWith('a\n')).toBe(true);
     expect(merged.endsWith('c\n')).toBe(true);
+  });
+
+  it('«оба» без базы в файле не теряет стороны, но и не склеивает их вслепую', () => {
+    // В обычном стиле (`merge`) базы в файле нет, а `mergeConflicts` работает
+    // со строками блоков. Поэтому стороны не склеиваются — маркер варианта
+    // отделяет одну от другой.
+    const merged = mergeConflicts(TWO, [undefined, 'both']);
+    // Маркер варианта здесь НЕ ставится: в файле без base нет шва на одной строке,
+    // а без шва стороны ставятся рядом — порядок и так виден по номерам строк.
+    expect(merged).not.toContain(VARIANT_MARK);
+    expect(merged).toContain('ours2\ntheirs2');
+    // Первый блок выбора не получил и ОСТАЛСЯ конфликтом — так и должно быть:
+    // `undefined` означает «не трогать».
+    expect(hasConflicts(merged)).toBe(true);
+    expect(merged).toContain('<<<<<<< HEAD\nours1');
   });
 
   it('текст без конфликтов возвращается без изменений', () => {

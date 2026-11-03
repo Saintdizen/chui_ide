@@ -42,6 +42,26 @@ export interface ConflictBlock {
 /** Что оставить на месте блока. */
 export type ConflictChoice = 'ours' | 'theirs' | 'both';
 
+/**
+ * Итог склейки «обоих».
+ *
+ * `ambiguous` — стороны дописали ОДНУ И ТУ ЖЕ строку по-разному: поставить их
+ * рядом — значит выдать мусор (`a += 1a += 2`) за ответ. Тогда отдаём только
+ * одну сторону плюс пометку места: человек решает сам, а не угадывает.
+ */
+export interface BothResult {
+  text: string;
+  ambiguous: boolean;
+}
+
+/**
+ * Пометка на месте спора — прямо в тексте, а не тостом.
+ *
+ * Человек будет смотреть на этот файл ещё долго (в диффе, в поиске, в редакторе),
+ * и объяснение должно ехать вместе с местом.
+ */
+export const VARIANT_MARK = '// Конфликт: обе стороны правили это место — выбери одну';
+
 /** Строка — маркер начала стороны? Проверяем префикс: далее может быть пометка. */
 function isMarker(line: string, marker: string): boolean {
   return line.startsWith(marker) && (line.length === marker.length || line[marker.length] === ' ');
@@ -121,14 +141,128 @@ export function hasConflicts(text: string): boolean {
   return text.includes(`\n${OURS}`) || text.startsWith(OURS) || text.includes(`\n${THEIRS}`);
 }
 
-/** Текст, которым заменяется блок при выбранной стороне. */
-export function conflictChoiceText(block: ConflictBlock, choice: ConflictChoice): string {
-  if (choice === 'ours') return block.ours;
-  if (choice === 'theirs') return block.theirs;
-  // «Оба»: наше, затем их. Пустые стороны не добавляют лишних переводов строки.
-  if (block.ours === '') return block.theirs;
-  if (block.theirs === '') return block.ours;
-  return `${block.ours}\n${block.theirs}`;
+/**
+ * Текст, которым заменяется блок при выбранной стороне.
+ *
+ * `base` — общий предок из блока (стиль diff3). Он нужен только для «обоих»:
+ * по нему видно, что стороны делали с базой, — см. `joinSides`.
+ */
+export function conflictChoiceText(
+  block: ConflictBlock,
+  choice: ConflictChoice,
+  base: string | null = block.base,
+): string {
+  return conflictChoiceResult(block, choice, base).text;
+}
+
+/** То же, что `conflictChoiceText`, но с ответом «пришлось выбирать за тебя?». */
+export function conflictChoiceResult(
+  block: ConflictBlock,
+  choice: ConflictChoice,
+  base: string | null = block.base,
+): BothResult {
+  if (choice === 'ours') return { text: block.ours, ambiguous: false };
+  if (choice === 'theirs') return { text: block.theirs, ambiguous: false };
+  return joinSides(block.ours, block.theirs, base);
+}
+
+/**
+ * «Оба»: в каком порядке ставить стороны.
+ *
+ * Наивное «наше, затем их» ломает код: две правки одной строки (`a += 1` и
+ * `a += 2`) дают `a += 1a += 2` — мусор без ошибки. Так же ломается вставка
+ * в одно и то же место: два новых `import` слипаются в одну строку.
+ *
+ * Порядок восстанавливаем по ОБЩЕМУ КРАЮ: если обе стороны сохранили одинаковые
+ * строки в начале или в конце, это и есть место, куда они вставляли, — склеиваем
+ * по нему, и вставки встают в нужном порядке. Края убираем по одной штуке и не
+ * больше половины стороны: иначе у правки самого края мы съедим её же текст.
+ *
+ * Остались куски, которые вставить рядом нельзя (спор об одной строке) — отдаём
+ * одну сторону и говорим `ambiguous`: молча склеить — соврать, молча выбрать
+ * сторону — потерять правку.
+ */
+export function joinSides(ours: string, theirs: string, base: string | null): BothResult {
+  if (ours === '') return { text: theirs, ambiguous: false };
+  if (theirs === '') return { text: ours, ambiguous: false };
+  // Без базы порядок сторон не угадать: склеиваем как есть, но говорим правду —
+  // в diff3/zdiff3 база есть всегда, и тогда будет точнее.
+  if (base === null) return { text: `${ours}\n${theirs}`, ambiguous: true };
+
+  const oursLines = ours.split('\n');
+  const theirsLines = theirs.split('\n');
+  const head = commonPrefix(oursLines, theirsLines);
+  const tail = commonSuffix(oursLines, theirsLines, head);
+
+  const oursMid = oursLines.slice(head, oursLines.length - tail);
+  const theirsMid = theirsLines.slice(head, theirsLines.length - tail);
+  const prefix = oursLines.slice(0, head);
+  const suffix = oursLines.slice(oursLines.length - tail);
+
+  const merged = joinMiddle(oursMid, theirsMid);
+  if (merged === null) {
+    // Спор об одном месте: показываем одну сторону и метим место пометкой.
+    return { text: `${ours}\n${VARIANT_MARK}`, ambiguous: true };
+  }
+  return { text: [...prefix, ...merged, ...suffix].join('\n'), ambiguous: false };
+}
+
+/** Сколько первых строк совпадает. */
+function commonPrefix(a: readonly string[], b: readonly string[]): number {
+  const limit = Math.min(a.length, b.length);
+  let n = 0;
+  while (n < limit && a[n] === b[n]) n += 1;
+  return n;
+}
+
+/**
+ * Сколько последних строк совпадает, не залезая в уже общий префикс.
+ * Края убираем в порядке склейки — значит остаётся ровно одна копия общего куска.
+ */
+function commonSuffix(a: readonly string[], b: readonly string[], prefix: number): number {
+  const limit = Math.min(a.length, b.length) - prefix;
+  let n = 0;
+  while (n < limit && a[a.length - 1 - n] === b[b.length - 1 - n]) n += 1;
+  return n;
+}
+
+/**
+ * Склеить середины сторон или сказать, что это нельзя.
+ *
+ * Отказываемся ровно тогда, когда оба продолжили ОДНУ И ТУ ЖЕ строку: обе стороны
+ * непусты, база на месте кончилась, и половинки склеиваются в строку кода. Признак —
+ * хвост одной и голова другой вместе читаются как одна строка (есть непарная скобка,
+ * кавычка, оператор). Без синтаксиса тут не обойтись: у текста, который стороны
+ * просто поставили рядом, такого шва нет.
+ *
+ * Две стороны подряд без шва — вставки в разные места: ставим их рядом.
+ */
+function joinMiddle(ours: readonly string[], theirs: readonly string[]): string[] | null {
+  if (ours.length === 0) return [...theirs];
+  if (theirs.length === 0) return [...ours];
+  const lastOurs = ours[ours.length - 1] ?? '';
+  const lastTheirs = theirs[theirs.length - 1] ?? '';
+  if (isSameLineSeam(lastOurs) || isSameLineSeam(lastTheirs)) return null;
+  return [...ours, ...theirs];
+}
+
+/**
+ * Строки склеятся в одну?
+ *
+ * Считаем только очевидные случаи: непарная кавычка или скобка, конец на операторе.
+ * Гадать по отступам нельзя — а вот `a +` и `= 1` рядом оставлять нельзя точно.
+ */
+function isSameLineSeam(left: string): boolean {
+  const tail = left.trim();
+  if (tail === '') return false;
+  // Конец на операторе или на открывающей скобке/кавычке — строка явно не кончена.
+  if (/[=+\-*/%<>!&|^~?:,([{]$/.test(tail)) return true;
+  // Непарная кавычка в конце — строка продолжается внутри литерала.
+  const single = (tail.match(/'/g) ?? []).length;
+  const double = (tail.match(/"/g) ?? []).length;
+  const back = (tail.match(/`/g) ?? []).length;
+  if (single % 2 === 1 || double % 2 === 1 || back % 2 === 1) return true;
+  return false;
 }
 
 /**
@@ -156,8 +290,8 @@ export function mergeConflicts(text: string, choices: ReadonlyArray<ConflictChoi
       continue;
     }
 
-    const replacement = conflictChoiceText(block, choice);
-    if (replacement !== '') out.push(...replacement.split('\n'));
+    const replacement = conflictChoiceResult(block, choice);
+    if (replacement.text !== '') out.push(...replacement.text.split('\n'));
     cursor = endIndex + 1;
   }
 
