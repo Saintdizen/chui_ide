@@ -2833,6 +2833,35 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     dock,
     promptValue,
     launchOptions,
+    // Конфигурации читаются по запросу: файл правят руками, и копия в памяти
+    // показывала бы устаревший список ровно тогда, когда его только что поправили.
+    launchConfigs: async () => (await rpc.request('workspace.launchConfigs').catch(() => ({ configs: [] }))).configs,
+    pickLaunchConfig: async (configs) => {
+      const rect = layout.editorHost.getBoundingClientRect();
+      return new Promise((resolve) => {
+        let chosen = false;
+        showPopupMenu(
+          configs.map((config) => ({
+            label: config.name,
+            hint: config.program,
+            onSelect: () => {
+              chosen = true;
+              resolve(config);
+            },
+          })),
+          rect.left + 40,
+          rect.top + 40,
+          // Закрытие без выбора — тоже ответ: обещание не должно висеть.
+          {
+            anchor: layout.editorHost,
+            onClose: () => {
+              if (!chosen) resolve(null);
+            },
+          },
+        );
+      });
+    },
+    openPath,
     activeDebuggableFile: () => activeDebuggableFile(),
     startDebug: (options) => startDebug(options),
     getLaunchOptions: () => debugOptions,

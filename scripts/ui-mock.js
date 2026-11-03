@@ -845,6 +845,9 @@ module.exports = [
     // Сниппеты чужого проекта: в моке их нет — пусто, а не отказ.
     'workspace.snippetFiles': () => ({ files: [] }),
 
+    // Конфигурации отладки: в моке нет .vscode/launch.json.
+    'workspace.launchConfigs': () => ({ configs: [] }),
+
     'session.load': (params) =>
       workspaceSessions.get(params.root) ?? {
         tabs: [],

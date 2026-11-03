@@ -59,6 +59,7 @@ import type {
   WorkspaceInfo,
 } from './fs';
 import type { WindowState } from './window';
+import type { LaunchConfig } from '../launch-json';
 import type {
   BrowserAction,
   BrowserPickedElement,
@@ -337,6 +338,13 @@ export interface ChuiMethods {
    * в имени файла, а формат JSONC разбирается одним правилом для обоих.
    */
   'workspace.snippetFiles': { params: void; result: { files: { name: string; text: string }[] } };
+  /**
+   * Конфигурации отладки из `.vscode/launch.json`, приведённые к `debug.start`.
+   *
+   * Пусто — файла нет или в нём ничего, что наш отладчик умеет запустить:
+   * отличить «нет конфигураций» от «файл есть, но не наш» вызывающему не нужно.
+   */
+  'workspace.launchConfigs': { params: void; result: { configs: readonly LaunchConfig[] } };
   /** Сравнить две папки рабочей области: какие файлы различаются. */
   'workspace.compareFolders': { params: { left: string; right: string }; result: FolderCompareResult };
   /** Сессия проекта: восстановление при открытии и сохранение изменений. */

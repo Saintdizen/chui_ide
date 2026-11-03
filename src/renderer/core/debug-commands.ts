@@ -1,4 +1,5 @@
 import type { DebugLaunchOptions } from '../../shared/api';
+import type { LaunchConfig } from '../../shared/launch-json';
 import type { EditorWorkspace } from '../editor/host/editor-workspace';
 import type { ToastKind, ToastOptions } from '../ui/toast';
 import type { DefineCommand } from './command-args';
@@ -25,6 +26,23 @@ export interface DebugCommandDeps {
   setLaunchOptions(options: DebugLaunchOptions): void;
   scheduleSave(): void;
   showToast(message: string, kind?: ToastKind, options?: ToastOptions): void;
+  /**
+   * Конфигурации отладки из `.vscode/launch.json` чужого проекта.
+   *
+   * Читаются по запросу, а не держатся в памяти: файл меняется руками, и держать
+   * его копию значит показывать устаревший список ровно тогда, когда человек его
+   * только что поправил.
+   */
+  launchConfigs(): Promise<readonly LaunchConfig[]>;
+  /**
+   * Показать список конфигураций меню и дать выбранную (или null).
+   *
+   * Меню, а не диалог: конфигураций бывает две-три, и выбирают их так же, как
+   * команды в других местах редактора.
+   */
+  pickLaunchConfig(configs: readonly LaunchConfig[]): Promise<LaunchConfig | null>;
+  /** Открыть файл перед отладкой: отладчик ждёт на нём точку останова. */
+  openPath(path: string): Promise<void>;
 }
 
 /**
@@ -86,6 +104,32 @@ export function registerDebugCommands(define: DefineCommand, deps: DebugCommandD
     if (!result.ok) showToast(result.message, 'error');
     else dock.show('debug');
   });
+
+  /**
+   * Запуск по конфигурации из `.vscode/launch.json` чужого проекта.
+   *
+   * Отдельная команда, а не часть F5: F5 запускает открытый файл, а конфигурация
+   * описывает запуск проекта целиком — с аргументами, окружением и каталогом.
+   * Слить их значило бы спорить за один и тот же слот в палитре.
+   */
+  define(
+    { id: 'debug.startConfig', title: 'Отладка: запустить конфигурацию из launch.json…', category: 'Отладка' },
+    async () => {
+      const configs = await deps.launchConfigs();
+      if (configs.length === 0) {
+        showToast('В .vscode/launch.json нет конфигураций, которые мы умеем запускать', 'info');
+        return;
+      }
+      const chosen = await deps.pickLaunchConfig(configs);
+      if (!chosen) return;
+      await deps.openPath(chosen.program);
+      await startDebug({
+        ...(chosen.args.length > 0 ? { args: [...chosen.args] } : {}),
+        ...(chosen.cwd ? { cwd: chosen.cwd } : {}),
+        ...(Object.keys(chosen.env).length > 0 ? { env: { ...chosen.env } } : {}),
+      });
+    },
+  );
 
   // F5: не идёт отладка — начать, стоит на паузе — продолжить.
   define(

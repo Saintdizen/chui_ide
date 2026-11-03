@@ -4,7 +4,15 @@ import { registerDebugCommands, type DebugCommandDeps } from '../src/renderer/co
 
 type Run = (...args: unknown[]) => unknown;
 
-function setup(opts: { phase?: string; active?: { path: string } | null; answer?: string | null } = {}) {
+function setup(
+  opts: {
+    phase?: string;
+    active?: { path: string } | null;
+    answer?: string | null;
+    configs?: readonly unknown[];
+    pickIndex?: number;
+  } = {},
+) {
   const commands = new Map<string, Run>();
   const define: DefineCommand = (descriptor, handler) => commands.set(descriptor.id, handler);
   const log: string[] = [];
@@ -42,6 +50,10 @@ function setup(opts: { phase?: string; active?: { path: string } | null; answer?
     startDebug: async (options?: unknown) => log.push(`start:${JSON.stringify(options ?? null)}`),
     getLaunchOptions: () => ({ program: 'kept.py' }),
     setLaunchOptions: (options: unknown) => log.push(`setOptions:${JSON.stringify(options)}`),
+    launchConfigs: async () => opts.configs ?? [],
+    pickLaunchConfig: async (configs: readonly { name: string }[]) =>
+      opts.pickIndex === undefined ? null : (configs[opts.pickIndex] ?? null),
+    openPath: async (path: string) => log.push(`open:${path}`),
     scheduleSave: () => log.push('save-session'),
     showToast: (text: string, kind?: string) => toasts.push({ text, kind }),
   } as unknown as DebugCommandDeps;
@@ -52,11 +64,12 @@ function setup(opts: { phase?: string; active?: { path: string } | null; answer?
 const run = (f: ReturnType<typeof setup>, id: string) => f.commands.get(id)!();
 
 describe('registerDebugCommands', () => {
-  it('регистрирует девять команд отладки', () => {
+  it('регистрирует десять команд отладки', () => {
     expect([...setup().commands.keys()].sort()).toEqual([
       'debug.attach',
       'debug.continue',
       'debug.start',
+      'debug.startConfig',
       'debug.startWithOptions',
       'debug.stepInto',
       'debug.stepOut',
@@ -122,5 +135,43 @@ describe('registerDebugCommands', () => {
     const empty = setup();
     await run(empty, 'debug.toggleBreakpoint');
     expect(empty.log).toEqual([]);
+  });
+});
+
+/**
+ * Запуск по конфигурации из чужого `launch.json`.
+ *
+ * Отдельно от F5: F5 запускает открытый файл, а конфигурация описывает запуск
+ * проекта — с аргументами, окружением и каталогом.
+ */
+describe('debug.startConfig', () => {
+  const config = {
+    name: 'server',
+    program: '/p/server.ts',
+    args: ['--port', '3000'],
+    cwd: '/p',
+    env: { NODE_ENV: 'test' },
+    stopOnEntry: false,
+  };
+
+  it('запускает выбранную конфигурацию с её аргументами и окружением', async () => {
+    const f = setup({ configs: [config], pickIndex: 0 });
+    await run(f, 'debug.startConfig');
+
+    expect(f.log).toContain('open:/p/server.ts');
+    expect(f.log.at(-1)).toBe('start:{"args":["--port","3000"],"cwd":"/p","env":{"NODE_ENV":"test"}}');
+  });
+
+  it('отказ от выбора ничего не запускает', async () => {
+    const f = setup({ configs: [config], pickIndex: undefined });
+    await run(f, 'debug.startConfig');
+    expect(f.log).toEqual([]);
+  });
+
+  it('без конфигураций говорит об этом и не молчит', async () => {
+    const f = setup({ configs: [] });
+    await run(f, 'debug.startConfig');
+    expect(f.toasts[0]?.text).toContain('launch.json');
+    expect(f.log).toEqual([]);
   });
 });

@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { launchConfigs } from '../../../shared/launch-json';
 import { projectAliases } from '../../project/local-imports';
 import { readProjectSnippets } from '../../project/snippet-files';
 import type { RpcServices } from '../context';
@@ -31,6 +33,14 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
   router.register('workspace.snippetFiles', async () => {
     const root = deps.workspace.rootPath();
     return { files: root ? await readProjectSnippets(root) : [] };
+  });
+  // Конфигурации отладки чужого проекта. Читаем здесь же: путь к файлу известен
+  // только корню, а разбор путей `${workspaceFolder}` требует его в руках.
+  router.register('workspace.launchConfigs', async () => {
+    const root = deps.workspace.rootPath();
+    if (!root) return { configs: [] };
+    const text = await readFile(`${root}/.vscode/launch.json`, 'utf8').catch(() => '');
+    return { configs: text ? launchConfigs(text, root) : [] };
   });
   router.register('workspace.compareFolders', (params) => deps.workspace.compareFolders(params.left, params.right));
   router.register('workspace.replace', (params) => deps.workspace.replace(params));
