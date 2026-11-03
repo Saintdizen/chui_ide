@@ -38,12 +38,36 @@ export function comboFromEvent(event: KeyboardEvent): string {
  * изменил в настройках. Переопределения читаются функцией, а не значением: так
  * правка настроек меняет поведение сразу, без повторной подписки на клавиатуру.
  */
+/**
+ * Положение, в котором действует своё сочетание.
+ *
+ * Дзен — пример: `Escape` в нём должен выйти, а вне его принадлежит редактору
+ * (снять мультикурсор, закрыть поиск). Прописать `Escape` в умолчаниях нельзя —
+ * он отнял бы клавишу у всего. Поэтому условие, а не безусловное сочетание.
+ */
+export interface ContextBinding extends Keybinding {
+  /** Когда действует. Проверяется на КАЖДОЕ нажатие: положение меняется на ходу. */
+  when(): boolean;
+}
+
 export class KeybindingService {
+  private readonly contexts: ContextBinding[] = [];
+
   constructor(
     private readonly commands: CommandRegistry,
     private readonly defaults: readonly Keybinding[],
     private readonly overrides: () => readonly KeybindingOverride[] = () => [],
   ) {}
+
+  /**
+   * Сочетание, которое действует только в своём положении.
+   *
+   * Спрашивается РАНЬШЕ умолчаний: в дзене `Escape` не должен одновременно
+   * значить «снять мультикурсор» — иначе за одно нажатие случится два дела.
+   */
+  bindInContext(binding: ContextBinding): void {
+    this.contexts.push(binding);
+  }
 
   attach(target: Window): void {
     target.addEventListener('keydown', (event) => this.handle(event));
@@ -77,6 +101,12 @@ export class KeybindingService {
 
   private handle(event: KeyboardEvent): void {
     const combo = comboFromEvent(event);
+    const contextual = this.contexts.find((item) => item.combo === combo && item.when());
+    if (contextual) {
+      event.preventDefault();
+      void this.commands.execute(contextual.command, ...(contextual.args ?? []));
+      return;
+    }
     const binding = this.effective().find((item) => item.combo === combo);
     if (!binding) return;
     event.preventDefault();

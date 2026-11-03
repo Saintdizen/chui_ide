@@ -4028,7 +4028,11 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // Полоски изменений для уже открытых файлов — если при старте что-то открыто.
   changeGutter.refresh();
 
-  new KeybindingService(commands, DEFAULT_KEYBINDINGS, () => settings.keybindings.overrides).attach(window);
+  const keys = new KeybindingService(commands, DEFAULT_KEYBINDINGS, () => settings.keybindings.overrides);
+  // Выход из дзена по Escape. Без условия Escape отнял бы клавишу у редактора
+  // (снять мультикурсор, закрыть поиск) — дзен проверяется на каждое нажатие.
+  keys.bindInContext({ combo: 'Escape', command: 'view.zen', when: () => layout.root.classList.contains('is-zen') });
+  keys.attach(window);
 
   // Перебор вкладок (Ctrl+Tab) кончается вместе с клавишей: снимок порядка живёт от
   // нажатия до отпускания. Потеря фокуса — тоже конец: следующий Ctrl+Tab должен
