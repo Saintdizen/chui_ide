@@ -38,6 +38,15 @@ export interface ApprovalHost {
   scrollToEnd(): void;
   /** Зарегистрировать отмену; возвращает функцию снятия регистрации. */
   register(cancel: () => void): () => void;
+  /**
+   * Вернуть фокус тому, кто ответил.
+   *
+   * Карточка по итогам ответа заменяет себе содержимое (`replaceChildren`), и
+   * кнопка, на которой стоял фокус, исчезает вместе с ним: фокус улетает
+   * в `document.body`, а следующий Tab начинает обход страницы с начала.
+   * Поэтому после ответа фокус ставим явно — в ленту или в поле ввода.
+   */
+  returnFocus(): void;
 }
 
 /**
@@ -149,6 +158,7 @@ export function createEditReview(host: ApprovalHost): EditReview {
         ),
       );
       settle(approved && chosen.length > 0 ? fileEdits.filter((_, index) => chosen.includes(index)) : null);
+      host.returnFocus();
     }
 
     const applyButton = h(
@@ -282,6 +292,7 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
       );
       block.scrollIntoView({ block: 'nearest' });
       settle(allowed);
+      host.returnFocus();
     }
 
     const runButton = h(
@@ -392,6 +403,7 @@ export function createAskPrompt(host: ApprovalHost): AskPrompt {
       );
       block.scrollIntoView({ block: 'nearest' });
       settle(text);
+      host.returnFocus();
     }
 
     const input = h('input', {
@@ -494,6 +506,7 @@ export function createPlanApproval(host: ApprovalHost): PlanApproval {
       );
       block.scrollIntoView({ block: 'nearest' });
       settle({ approved, note: approved ? '' : noteText() });
+      host.returnFocus();
     }
 
     note.addEventListener('keydown', (event) => {

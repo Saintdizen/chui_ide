@@ -91,13 +91,17 @@ function mountDom() {
 function host() {
   const mounted: FakeNode[] = [];
   const cancels: (() => void)[] = [];
+  /** Сколько раз карточка возвращала фокус после ответа. */
+  const focusReturns: number[] = [];
   return {
     mounted,
     cancels,
+    focusReturns,
     host: {
       readText: async () => null,
       mount: (block: FakeNode) => mounted.push(block),
       scrollToEnd: () => {},
+      returnFocus: () => focusReturns.push(1),
       register: (cancel: () => void) => {
         cancels.push(cancel);
         return () => {
@@ -121,7 +125,7 @@ async function setup() {
 describe('chat-approvals: утверждение плана', () => {
   it('кнопка «Утвердить» отдаёт согласие и сворачивает карточку', async () => {
     const create = await setup();
-    const { host: approvalHost, mounted } = host();
+    const { host: approvalHost, mounted, focusReturns } = host();
     const approval = create(approvalHost as never);
 
     const decision = approval.ask('план работ');
@@ -132,6 +136,9 @@ describe('chat-approvals: утверждение плана', () => {
     approve?.fire('click');
 
     await expect(decision).resolves.toEqual({ approved: true, note: '' });
+    // Карточка стёрла кнопку вместе с фокусом: без явного возврата фокус
+    // улетел бы в `document.body`, и следующий Tab начал обход с начала.
+    expect(focusReturns).toHaveLength(1);
     expect(mounted[0]?.classes.has('decision-done')).toBe(true);
     expect(mounted[0]?.findAll((item) => item.text === 'План утверждён — работаю')).toHaveLength(1);
   });

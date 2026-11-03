@@ -16,6 +16,7 @@ import type { ApplyFailure, FileEdit } from '../../shared/edits';
 import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectCommand } from '../../shared/commands';
 import { sessionAttachment } from '../../shared/session-context';
 import { leaveQuestion, type RunLeaving } from '../../shared/run-keep';
+import { composerAction, focusAfterCard, type ComposerAction } from '../../shared/run-keys';
 import { isAutoTitle } from '../../shared/chat-title';
 import { resolvePatches } from '../../shared/patch';
 import { turnsSinceCompact } from './compact-turns';
@@ -276,7 +277,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   let streamingOutcome: RunOutcome | null = null;
   const active = (): ChatSession => sessions.find((session) => session.id === activeId) ?? sessions[0]!;
 
-  const body = h('div', { class: 'chat-body' });
+  // `tabindex` — чтобы в ленту можно было вернуть фокус после ответа на
+  // карточку. Без него фокус уходит в `document.body`, и следующий Tab
+  // начинает обход страницы с начала — мимо чата.
+  const body = h('div', { class: 'chat-body', tabindex: '-1' });
 
   /** Кнопка возврата к низу: появляется, когда лента прокручена вверх. */
   const jumpButton = h(
@@ -2549,11 +2553,36 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    * Пауза пришла из main — там цикл шагов, здесь только вид.
    * Кнопка паузы живёт в композере, поэтому нить короткая.
    */
+  /**
+   * Стоит ли прогон на паузе прямо сейчас — в ОДНОМ месте.
+   *
+   * У кнопки в композере своё состояние, но `stop()` решает по вот этому:
+   * читая чужое, он бы не знал, что паузу поставил main (её включает и он:
+   * событием `paused`), и не снял бы её перед стопом — пауза ждала бы
+   * в main неведомо кого.
+   */
+  let paused = false;
+
   function setPaused(value: boolean, _session: ChatSession = active()): void {
+    paused = value;
     composer.setPaused(value);
     // И строку в ленте — сразу, не на границе шага. `stream` создан ниже, но
     // эта функция зовётся только из уведомления main, то есть после старта.
     stream.notePause(value);
+  }
+
+  /** Выполнить действие, выбранное по клавише в поле ввода. */
+  function runAction(action: Exclude<ComposerAction, 'none'>): void {
+    if (action === 'stop') {
+      stop();
+      return;
+    }
+    const next = action === 'pause';
+    setPaused(next);
+    // main подтвердит своё событием, но человек должен увидеть отклик СРАЗУ:
+    // между нажатием и границей шага может пройти минута (идёт терминал).
+    void deps.rpc.request('ai.setPaused', { paused: next }).catch(() => undefined);
+    showToast(next ? 'Пауза после текущего шага' : 'Продолжаем');
   }
 
   function stop(): void {
@@ -2563,6 +2592,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
     // Пауза, поставленная перед стопом, осталась бы в main и ждала неведомо кого.
     // Снимаем её тем же способом, каким ставили.
+    if (paused) setPaused(false);
     void deps.rpc.request('ai.setPaused', { paused: false }).catch(() => undefined);
     deps.rpc.cancelActive();
   }
@@ -2657,6 +2687,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const approvals: ApprovalHost = {
     readText: currentText,
     mount: (block) => currentTurn(streamingSession ?? active()).appendChild(block),
+    // Ответ на карточку стёр кнопку вместе с фокусом. Куда его вернуть,
+    // решает shared/run-keys: идёт прогон — в ленту (следующий вопрос придёт
+    // туда), прогон кончился — в поле ввода (самое время писать дальше).
+    returnFocus: () => {
+      if (focusAfterCard(busy) === 'composer') input.focus();
+      else body.focus({ preventScroll: true });
+    },
     scrollToEnd: () => scrollToEnd(),
     register: (cancel) => {
       pendingApprovals.add(cancel);
@@ -2926,6 +2963,25 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   input.addEventListener('input', () => menu.sync());
 
   input.addEventListener('keydown', (event) => {
+    // Стоп, пауза и «продолжить» — с клавиш, а не только мышью. Разбор
+    // события — в shared/run-keys (чистый): здесь только действие.
+    // Проверяем РАНЬШЕ меню: прогон надо уметь остановить всегда, не глядя
+    // на то, открыт ли список подсказок.
+    const action = composerAction(
+      {
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+      },
+      { busy, paused },
+    );
+    if (action !== 'none') {
+      event.preventDefault();
+      runAction(action);
+      return;
+    }
+
     // Пока открыт список — стрелки, Enter и Esc принадлежат ему, а не отправке.
     if (menu.isOpen()) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
