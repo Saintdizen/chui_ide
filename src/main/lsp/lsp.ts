@@ -459,6 +459,8 @@ interface LspCapabilities {
   textDocumentSyncSave?: { includeText: boolean };
   /** Объявлен ли `willSave` (`textDocumentSync.willSave`): сообщать ДО записи. */
   textDocumentSyncWillSave?: boolean;
+  /** Сервер готов форматировать при сохранении (`willSaveWaitUntil`). */
+  textDocumentSyncWillSaveWaitUntil?: boolean;
   /** Наблюдение за файлами вне редактора (`workspace.didChangeWatchedFiles`). */
   workspaceWatchedFiles?: boolean;
   /** Сервер попросил уведомлять его об операциях с файлами (`workspace.fileOperations`). */
@@ -513,6 +515,10 @@ function withSyncCapabilities(capabilities: unknown): LspCapabilities {
     ...(caps as LspCapabilities),
     ...(syncSave ? { textDocumentSyncSave: syncSave } : {}),
     textDocumentSyncWillSave: Boolean((sync as { willSave?: unknown } | undefined)?.willSave),
+    // Форматирование при сохранении: сервер сам скажет, что записать вместо файла.
+    textDocumentSyncWillSaveWaitUntil: Boolean(
+      (sync as { willSaveWaitUntil?: unknown } | undefined)?.willSaveWaitUntil,
+    ),
     workspaceWatchedFiles: Boolean(workspace?.didChangeWatchedFiles),
     workspaceFileOperations: Boolean(operations?.didCreate),
     workspaceConfiguration: workspace?.didChangeConfiguration !== undefined,
@@ -897,6 +903,44 @@ export class LspService {
       textDocument: { uri: pathToFileURL(path).toString() },
       reason: 1,
     });
+  }
+
+  /**
+   * Файл сейчас будет записан, и сервер вправе сказать, что записать вместо
+   * этого (`textDocument/willSaveWaitUntil`).
+   *
+   * Это то, что в VS Code делает format-on-save у языков, где форматирует сам
+   * сервер: он видит документ и знает, что поправить. `didSave` без этого — уже
+   * поздно, файл на диске.
+   *
+   * Правки сервер считает по своему тексту, а записываем мы `text`. Поэтому
+   * сравниваем: не совпало — правок не берём (см. ниже). Настройки — табы и 4
+   * пробела: своих настроек форматирования у нас нет, а сервер берёт их отсюда.
+   *
+   * Пусто — либо сервер не умеет, либо записывать надо как есть. Различия между
+   * этими случаями вызывающему не нужны: и то и другое значит «правок нет».
+   */
+  async willSaveWaitUntil(path: string, text: string): Promise<TextEdit[]> {
+    const runtime = this.runtimeForPath(path);
+    if (!runtime || this.openedIn.get(path) !== runtime) return [];
+    const capabilities = runtime.capabilities as { textDocumentSyncWillSaveWaitUntil?: boolean };
+    if (!capabilities.textDocumentSyncWillSaveWaitUntil) return [];
+    // Сервер форматирует свою копию документа, а записываем мы `text`. Если он
+    // видел другой текст, его правки встанут не туда — а молча испортить файл при
+    // сохранении хуже, чем не отформатировать.
+    if (this.latestText.get(path) !== text) return [];
+    await runtime.initialized.catch(() => undefined);
+    try {
+      const result = await runtime.connection.request('textDocument/willSaveWaitUntil', {
+        textDocument: { uri: pathToFileURL(path).toString() },
+        reason: 1,
+        options: { tabSize: 4, insertSpaces: true },
+      });
+      return toFormatEdits(result);
+    } catch {
+      // Отказ сервера — не повод не сохранять: пишем то, что получили.
+      return [];
+    }
   }
 
   /**

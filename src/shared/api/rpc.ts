@@ -299,7 +299,15 @@ export interface ChuiMethods {
   'workspace.readImage': { params: { path: string }; result: ViewImage };
   /** Прочитать документ Office для предпросмотра (.docx/.xlsx). */
   'workspace.readOffice': { params: { path: string }; result: OfficePreview };
-  'workspace.writeFile': { params: { path: string; text: string }; result: { mtimeMs: number } };
+  /**
+   * Записать файл. `text` в ответе — только когда на диск легло не то, что просили:
+   * сервер отформатировал файл при сохранении (`willSaveWaitUntil`). Буфер обязан
+   * это взять, иначе следующее сохранение перетрёт формат.
+   */
+  'workspace.writeFile': {
+    params: { path: string; text: string };
+    result: { mtimeMs: number; text?: string };
+  };
   'workspace.stat': { params: { path: string }; result: FileStat };
 
   /*
@@ -786,6 +794,14 @@ export interface ChuiMethods {
   'lsp.open': { params: { path: string; languageId: string; text: string }; result: void };
   'lsp.change': { params: { path: string; text: string }; result: void };
   'lsp.close': { params: { path: string }; result: void };
+  /**
+   * Сервер вправе переписать файл в момент записи (`willSaveWaitUntil`) — это и
+   * есть форматирование при сохранении.
+   *
+   * `text` — то, что сейчас будет записано: правки считаются по нему, а если
+   * сервер видел другой текст, он честно вернёт пусто.
+   */
+  'lsp.willSaveWaitUntil': { params: { path: string; text: string }; result: TextEdit[] };
   'lsp.restart': { params: void; result: LspStatus };
   'lsp.status': { params: void; result: LspStatus };
   /**

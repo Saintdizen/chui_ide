@@ -29,7 +29,7 @@ describe('diskConflict', () => {
 });
 
 /** Мок RPC: отдаём время файла на диске (`diskMtime`), время записи и текст файла. */
-function makeService(diskMtime: number | null, writeMtime = 5000, diskText = '') {
+function makeService(diskMtime: number | null, writeMtime = 5000, diskText = '', written = '') {
   const documents = new DocumentStore();
   const calls: string[] = [];
   const rpc = {
@@ -39,7 +39,9 @@ function makeService(diskMtime: number | null, writeMtime = 5000, diskText = '')
         if (diskMtime === null) throw new Error('файла нет');
         return { path: '/p/a.ts', kind: 'file', size: 1, mtimeMs: diskMtime };
       }
-      if (method === 'workspace.writeFile') return { mtimeMs: writeMtime };
+      // `written` — то, что сервер фактически положил на диск: так приходит
+      // форматирование при сохранении (`willSaveWaitUntil`).
+      if (method === 'workspace.writeFile') return { mtimeMs: writeMtime, ...(written ? { text: written } : {}) };
       if (method === 'workspace.readFile') {
         if (diskMtime === null) throw new Error('файла нет');
         return { text: diskText, mtimeMs: diskMtime };
@@ -91,6 +93,17 @@ describe('EditService.saveDocument', () => {
     expect(await service.saveDocument(document)).toBe('saved');
     expect(document.dirty).toBe(false);
     expect(document.diskMtime).toBe(1500);
+  });
+
+  it('сервер отформатировал файл при сохранении — буфер берёт его текст', async () => {
+    const { service, documents } = makeService(1000, 1500, '', 'const a = 1;\n');
+    const document = editedDocument(documents, 1000);
+
+    expect(await service.saveDocument(document)).toBe('saved');
+    // На диске формат сервера; если буфер его не возьмёт, следующее сохранение
+    // запишет обратно сырой текст и затёртую правку сервера.
+    expect(document.value).toBe('const a = 1;\n');
+    expect(document.dirty).toBe(false);
   });
 
   it('файла нет (stat не удался) — сохраняем без ложной тревоги', async () => {

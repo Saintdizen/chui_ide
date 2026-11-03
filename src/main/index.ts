@@ -23,6 +23,7 @@ import { installProxyFromEnv } from './net/proxy';
 import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
 import { SandboxService } from './sandbox/sandbox';
+import { applyTextEdits } from '../shared/edits';
 import { TelemetryStore, telemetryDir } from './ai/telemetry';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { WINDOW_BACKGROUND } from '../shared/colors';
@@ -423,6 +424,21 @@ if (!app.requestSingleInstanceLock()) {
         lsp.saved(file);
       } else lsp.watchedFiles([file], 3);
       return captured;
+    };
+
+    // Форматирование при сохранении: сервер вправе сказать, что записать вместо
+    // файла. Отдельно от onBeforeChange: тот зовётся ДО записи и про историю, а
+    // этот — про то, что окажется на диске.
+    workspace.onWillSave = async (file, text) => {
+      const edits = await lsp.willSaveWaitUntil(file, text);
+      if (edits.length === 0) return null;
+      // Правка, не легшая на текст (сервер разошёлся с нами), роняет все — тогда
+      // null: пишем без форматирования. Половина форматирования хуже, чем ноль.
+      try {
+        return applyTextEdits(text, edits);
+      } catch {
+        return null;
+      }
     };
 
     const deps = {

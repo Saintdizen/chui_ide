@@ -76,10 +76,17 @@ export class EditService {
     if (prepared !== document.value) document.setText(prepared, 'programmatic');
     // На диск — в том формате, в каком файл пришёл: модель документа живёт в `\n`, а
     // Windows-файл с `\r\n` после сохранения без правок иначе переписывался бы целиком.
-    const { mtimeMs } = await this.deps.rpc.request('workspace.writeFile', {
+    const { mtimeMs, text: written } = await this.deps.rpc.request('workspace.writeFile', {
       path: document.path,
       text: document.diskText,
     });
+    // Сервер отформатировал файл при сохранении — буфер обязан взять его текст.
+    // Иначе на диске один формат, в редакторе другой, и следующее сохранение
+    // перетрёт чужую работу: курсор при этом остаётся где стоял (правка `programmatic`).
+    if (written !== undefined && written !== document.diskText) {
+      // `setText` сам переводит на `\n` — модель живет в нём всегда.
+      document.setText(written, 'programmatic');
+    }
     document.markSaved(mtimeMs);
     return 'saved';
   }

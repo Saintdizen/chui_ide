@@ -235,6 +235,15 @@ export class WorkspaceService {
    */
   onBeforeChange: ((file: string, reason: 'save' | 'delete') => Promise<void> | void) | null = null;
   /**
+   * Последнее слово о том, что писать на диск (`willSaveWaitUntil` сервера).
+   *
+   * Возвращает текст с его правками или null — тогда пишем как есть. Сюда
+   * приходят и сохранения из редактора, и переименования, и замены по проекту:
+   * правило «в файле то, что просит сервер» одно на всех, иначе форматирование
+   * при сохранении работало бы через раз.
+   */
+  onWillSave: ((file: string, text: string) => Promise<string | null> | string | null) | null = null;
+  /**
    * Правки вне редактора: пакет изменений за одно окно сжатия. В уведомление для
    * дерева идёт только последний путь, а языковому серверу нужны все: переименование
    * приходит двумя событиями (старое имя пропало, новое появилось).
@@ -536,19 +545,23 @@ export class WorkspaceService {
     }
   }
 
-  async writeFile(filePath: string, text: string): Promise<{ mtimeMs: number }> {
+  async writeFile(filePath: string, text: string): Promise<{ mtimeMs: number; text?: string }> {
     const file = await this.safePath(filePath);
     await fs.mkdir(path.dirname(file), { recursive: true });
     // Прежнее содержимое откладываем в локальную историю, пока оно ещё на диске.
     await this.onBeforeChange?.(file, 'save');
-    await fs.writeFile(file, text, 'utf8');
+    const written = await this.savedText(file, text);
+    await fs.writeFile(file, written, 'utf8');
     // Свою правку забываем сразу: ждать, пока `mtime` перестанет совпадать,
     // нельзя — у быстрой записи он может остаться тем же, и поиск нашёл бы
     // текст, которого в файле уже нет.
     this.contents.invalidate(file);
     const stat = await fs.stat(file);
     this.notifyChanged(file);
-    return { mtimeMs: stat.mtimeMs };
+    // Если текст на диске не тот, что просили (сервер отформатировал при
+    // сохранении), говорим об этом: иначе буфер человека останется старым,
+    // а файл — отформатированным, и следующее сохранение перетрёт формат.
+    return written === text ? { mtimeMs: stat.mtimeMs } : { mtimeMs: stat.mtimeMs, text: written };
   }
 
   async stat(filePath: string): Promise<FileStat> {
@@ -1069,7 +1082,7 @@ export class WorkspaceService {
       if (result.count === 0) continue;
 
       await this.onBeforeChange?.(file, 'save');
-      await fs.writeFile(file, result.text, 'utf8');
+      await fs.writeFile(file, await this.savedText(file, result.text), 'utf8');
       this.contents.invalidate(file);
       this.notifyChanged(file);
       changed.push(file);
@@ -1202,7 +1215,7 @@ export class WorkspaceService {
 
       // Прежнее содержимое — в локальную историю, как при любой перезаписи.
       await this.onBeforeChange?.(file, 'save');
-      await fs.writeFile(file, result.text, 'utf8');
+      await fs.writeFile(file, await this.savedText(file, result.text), 'utf8');
       this.contents.invalidate(file);
       this.notifyChanged(file);
       changed.push(file);
@@ -1249,6 +1262,21 @@ export class WorkspaceService {
    * `allowOutsideSymlink` снимает запрет там, где наружу уходит лишь чтение
    * метаданных (см. `stat`): виртуальные окружения устроены именно так.
    */
+  /**
+   * Что писать на диск: текст с правками сервера, если он их прислал.
+   *
+   * Правка, которая не легла на текст (сервер разошёлся с нами), роняет все его
+   * правки разом: половина форматирования хуже, чем ничего.
+   */
+  private async savedText(file: string, text: string): Promise<string> {
+    const hook = this.onWillSave;
+    if (!hook) return text;
+    // Сбой хука — не повод не сохранять: пишем то, что просили. Оборачиваем вызов,
+    // а не обещание: бросок бывает и синхронным (сервер недоступен — и всё сразу).
+    const edited = await (async () => hook(file, text))().catch(() => null);
+    return edited ?? text;
+  }
+
   private async safePath(
     target: string,
     options: { allowOutsideSymlink?: boolean; allowDependency?: boolean } = {},

@@ -23,6 +23,8 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
   router.register('lsp.close', (params) => {
     deps.lsp?.close(params.path);
   });
+  // Форматирование при сохранении: сервер говорит, что записать вместо файла.
+  router.register('lsp.willSaveWaitUntil', (params) => deps.lsp?.willSaveWaitUntil(params.path, params.text) ?? []);
   router.register('lsp.restart', () => deps.lsp?.restart() ?? NO_LSP_STATUS);
   router.register('lsp.status', () => deps.lsp?.status() ?? NO_LSP_STATUS);
   // Прогрев: поднять серверы языков проекта, не дожидаясь открытия файлов.
