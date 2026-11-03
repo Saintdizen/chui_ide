@@ -39,14 +39,20 @@ function chainGoes(child: readonly DirEntry[] | undefined): child is readonly [D
  * `children` — уже прочитанные списки папок. Непрочитанная папка обрывает цепочку
  * так же, как пустая: удлинять строку, пока ответ не пришёл, значило бы потом
  * перерисовывать её с другим заголовком.
+ *
+ * `into` — складывать склеенные папки во вложенные «пути» (`a/b` → `a/b/c`).
+ * Вызывающий экономит на повторном проходе: дерево собирает строки сверху вниз,
+ * и при раскрытии `a/b` без этого карта `children` читалась бы заново от начала.
  */
 export function folderChain(
   entry: DirEntry,
   children: ReadonlyMap<string, readonly DirEntry[]>,
   separator = '/',
+  into?: Map<string, FolderChain>,
 ): FolderChain {
-  const parts = [entry.name];
-  let path = entry.path;
+  const known = into?.get(entry.path);
+  const parts = known ? [...known.parts] : [entry.name];
+  let path = known ? known.path : entry.path;
   // Счётчик — страховка от петли в данных: кольцо в `children` случиться не должно,
   // но дерево рисуется на каждом кадре, и вечная цепочка подвесила бы отрисовку.
   for (let step = 0; step < 64; step += 1) {
@@ -56,6 +62,7 @@ export function folderChain(
     parts.push(only.name);
     path = only.path;
   }
+  if (into) into.set(entry.path, { label: parts.join(separator), parts, path });
   return { label: parts.join(separator), parts, path };
 }
 

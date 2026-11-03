@@ -2,7 +2,7 @@ import type { DirEntry, ExplorerSettings, GitChange, WorkspaceInfo } from '../..
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { submoduleStateLabel, type GitSubmodule } from '../../shared/git-submodules';
 import { maskToRegExp } from '../../shared/glob';
-import { chainDepth, folderChain } from '../core/folder-chain';
+import { chainDepth, folderChain, type FolderChain } from '../core/folder-chain';
 import { isInsidePath, joinPath, nameOf, parentOf, pathAfter, separatorOf, splitPath } from '../../shared/paths';
 import {
   alreadyThereNotice,
@@ -1333,6 +1333,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    */
   const buildFlat = (info: WorkspaceInfo): FlatRow[] => {
     const rows: FlatRow[] = [];
+    // Склеенные цепочки — на один проход сборки дерева, а не на кадр: дерево
+    // пересобирается и при раскрытии папки, а карта прочитанных папок живёт долго.
+    const chains = new Map<string, FolderChain>();
 
     const pushDir = (dir: string, depth: number, skip?: ReadonlySet<string>): void => {
       const entries = children.get(dir);
@@ -1356,7 +1359,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const pushEntry = (entry: DirEntry): void => {
         // Цепочку склеиваем только у настоящих каталогов: строка-имя со спутниками
         // (вложенный файл) — это не путь, и удлинять её не за что.
-        const chain = entryIsDirectory(entry) ? folderChain(entry, children) : null;
+        const chain = entryIsDirectory(entry) ? folderChain(entry, children, '/', chains) : null;
         const deeper = chain ? chainDepth(chain) : 1;
         rows.push(
           chain && deeper > 1

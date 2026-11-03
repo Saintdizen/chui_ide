@@ -11,14 +11,6 @@ const dir = (path: string): DirEntry => ({
 });
 const file = (path: string): DirEntry => ({ ...dir(path), kind: 'file' });
 
-const map = (...lists: DirEntry[][]): Map<string, DirEntry[]> => {
-  const result = new Map<string, DirEntry[]>();
-  for (const list of lists) {
-    if (list.length > 0) result.set(list[0]!.path.slice(0, list[0]!.path.lastIndexOf('/')), list);
-  }
-  return result;
-};
-
 /**
  * Свёрнутые цепочки папок. Правило одно и жёсткое: склеиваем только пока в папке
  * ровно одна запись и это папка. Файл обрывает цепочку — иначе `src/index.ts` и
@@ -56,6 +48,29 @@ describe('folderChain', () => {
   it('состав не меняется на несвоих данных', () => {
     const children = new Map<string, DirEntry[]>([['/p/a', [file('/p/a/b')]]]);
     expect(folderChain(dir('/p/a'), children).label).toBe('a');
+  });
+});
+
+describe('folderChain: пересборка', () => {
+  it('склеенный хвост переиспользуется, а не считается заново', () => {
+    const children = new Map<string, DirEntry[]>([
+      ['/p/a', [dir('/p/a/b')]],
+      ['/p/a/b', [dir('/p/a/b/c')]],
+      ['/p/a/b/c', [file('/p/a/b/c/x.ts')]],
+    ]);
+    const cache = new Map();
+    const top = folderChain(dir('/p/a'), children, '/', cache);
+    // Вложенную папку дерево собирает отдельной строкой только при раскрытии —
+    // и берёт готовый хвост от родителя.
+    const inner = folderChain(dir('/p/a/b'), children, '/', cache);
+    expect(top.label).toBe('a/b/c');
+    expect(inner.label).toBe('b/c');
+    expect(cache.get('/p/a/b')?.path).toBe('/p/a/b/c');
+  });
+
+  it('без карты всё работает как раньше', () => {
+    const children = new Map<string, DirEntry[]>([['/p/a', [dir('/p/a/b')]]]);
+    expect(folderChain(dir('/p/a'), children).parts).toEqual(['a', 'b']);
   });
 });
 
