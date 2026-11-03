@@ -50,6 +50,7 @@ import {
 } from '../core/tree-selection';
 import { walkTree, type WalkAction, type WalkKey, type WalkRow } from '../core/tree-walk';
 import { ariaPositions, type AriaPosition } from '../core/tree-aria';
+import { EMPTY_TYPEAHEAD, typeaheadPress, typeaheadTarget } from '../core/tree-typeahead';
 import { showContextMenu } from './context-menu';
 import { clear, debounce, h, svgIcon } from './dom';
 import { fileIcon, folderIcon } from './file-icons';
@@ -260,6 +261,24 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       event.preventDefault();
       return;
     }
+    // Типизированный поиск: буква без модификаторов — прыжок к строке на неё.
+    // Стоит ДО `Enter`/`F2`: там свои сочетания, а сюда попадает только одиночный
+    // печатный символ. Ctrl/Alt уже разобраны выше, поэтому не конфликтует с ними.
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      typeahead = typeaheadPress(typeahead, event.key, Date.now());
+      const rows = walkRows();
+      const hit = typeaheadTarget(
+        rows.map((row) => ({ path: row.path, name: nameOf(row.path) })),
+        selected,
+        typeahead.buffer,
+      );
+      if (hit) {
+        event.preventDefault();
+        applyWalk({ kind: 'move', path: hit });
+        return;
+      }
+    }
+
     // Ход по дереву стрелками: до этого их не было вовсе — до файла можно было
     // добраться только мышью. Строки знают свою глубину и раскрыты ли они, поэтому
     // правило живёт в `core/tree-walk.ts`, а здесь только применение.
@@ -1996,6 +2015,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   };
 
   const scheduleRefresh = debounce(() => void refresh(), 250);
+
+  /** Набранное для прыжка к строке; сбрасывается паузой (`core/tree-typeahead.ts`). */
+  let typeahead = EMPTY_TYPEAHEAD;
 
   /** Клавиши хода по дереву: те, что разбирает `core/tree-walk.ts`. */
   const WALK_KEYS: ReadonlySet<string> = new Set([
