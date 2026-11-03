@@ -190,4 +190,44 @@ describe('prewarm', () => {
     await servers.prewarm();
     expect(calls).toHaveLength(0);
   });
+
+  // Грабля: при открытии проекта `prewarm` зовётся раньше, чем карта готова.
+  // Он молча выходил, и серверы поднимались только при первом запросе — то есть
+  // «сервер не запущен» выглядело как «нет подсказок после точки».
+  it('карты ещё нет — ждёт её, а не бросает дело', async () => {
+    let map: ProjectScan | null = null;
+    let release = (): void => undefined;
+    const ready = new Promise<void>((resolve) => {
+      release = () => {
+        map = { ...scan, languages: [{ id: 'python' }] } as unknown as ProjectScan;
+        resolve();
+      };
+    });
+    const calls: string[] = [];
+    const servers = createLspServers({
+      rpc: {
+        request: vi.fn(async (method: string) => {
+          calls.push(method);
+          return undefined;
+        }),
+      } as unknown as RpcClient,
+      settings: () => ({ lsp: { enabled: true, servers: [] } }),
+      root: () => '/p',
+      scan: () => map,
+      waitForScan: () => ready,
+      documents: () => [],
+      toast: () => undefined,
+      openLspSettings: () => undefined,
+      onStatus: () => undefined,
+    });
+
+    const flight = servers.prewarm();
+    // Пока карты нет — в сервер ещё не пошли.
+    await Promise.resolve();
+    expect(calls).toHaveLength(0);
+
+    release();
+    await flight;
+    expect(calls).toEqual(['lsp.prewarm']);
+  });
 });

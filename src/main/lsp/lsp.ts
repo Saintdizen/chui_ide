@@ -593,6 +593,12 @@ export class LspService {
   private readonly runtimes = new Map<string, ServerRuntime>();
   /** Подъёмы, которые ещё не завершились: ключ — язык. */
   private readonly starting = new Map<string, Promise<ServerRuntime | null>>();
+  /**
+   * Открытия, которые ещё в пути (`open` не вернулся). Запрос к файлу ждёт их:
+   * renderer шлёт `lsp.open` без ожидания, и запрос на дополнение мог обогнать
+   * его — сервер отвечал по неоткрытому документу, то есть пустотой.
+   */
+  private readonly opening = new Map<string, Promise<void>>();
   /** Номер поколения серверов: растёт при перезапуске, отсекает устаревшие подъёмы. */
   private generation = 0;
   private readonly languageOfPath = new Map<string, string>();
@@ -858,14 +864,26 @@ export class LspService {
 
   /** Открыть документ в подходящем сервере. Нет сервера для языка — тихо ничего не делаем. */
   async open(path: string, languageId: string, text: string): Promise<void> {
+    // Обещание кладём в карту ДО первого `await`: `request` по этому же пути ждёт
+    // его и не обгоняет открытие. Снять — в `finally`, чтобы ошибка не заклинила файл.
+    const pending = this.doOpen(path, languageId, text).finally(() => {
+      if (this.opening.get(path) === pending) this.opening.delete(path);
+    });
+    this.opening.set(path, pending);
+    return pending;
+  }
+
+  private async doOpen(path: string, languageId: string, text: string): Promise<void> {
     // Язык и текст помним сразу, до подъёма сервера: правки могут прийти уже сейчас,
     // а `didOpen` уедет только после `initialize`.
     this.languageOfPath.set(path, languageId);
     this.latestText.set(path, text);
     const runtime = await this.runtimeFor(languageId);
     if (!runtime) {
-      this.languageOfPath.delete(path);
-      this.latestText.delete(path);
+      // Сервера нет — молчим, но язык и текст НЕ забываем: файл открыт в редакторе,
+      // и знание о нём нужно следующему `open` (перезапуск сервера) и `change`.
+      // Раньше здесь стоял `delete` — один неудачный подъём стирал файл из карты,
+      // и правки/запросы уходили в никуда до переоткрытия вкладки.
       return;
     }
     await runtime.initialized.catch(() => undefined);
@@ -1112,7 +1130,10 @@ export class LspService {
   }
 
   private runtimeForPath(path: string): ServerRuntime | null {
-    const language = this.languageOfPath.get(path);
+    // Язык узнаём тем же способом, что и запросы (`languageFor`): из карты открытых
+    // файлов, а если файла там ещё нет — по расширению. Иначе первый же запрос,
+    // пришедший раньше `didOpen`, молча получал `null` и подсказок не было вовсе.
+    const language = this.languageFor(path);
     return language ? (this.runtimes.get(language) ?? null) : null;
   }
 
@@ -1467,7 +1488,14 @@ export class LspService {
    * редактор обязан работать дальше.
    */
   async request(path: string, method: string, params: unknown): Promise<unknown> {
-    const runtime = this.runtimeForPath(path);
+    const language = this.languageFor(path);
+    if (!language) return null;
+    // Ждём открытия этого файла, если оно ещё в пути: иначе запрос уходит вперёд
+    // `didOpen`, и сервер ищет по документу, которого не знает — ответ пустой.
+    await this.opening.get(path)?.catch(() => undefined);
+    // Сервер поднимаем тут же, если его ещё нет: `open` и запрос идут от renderer
+    // разными запросами, и порядок между ними не гарантирован.
+    const runtime = await this.runtimeFor(language);
     if (!runtime) return null;
     await runtime.initialized.catch(() => undefined);
     // Ключ отмены — «этот файл, этот вид запроса»: свежий вытесняет устаревший.
@@ -2073,7 +2101,10 @@ export class LspService {
     run: (uri: string) => Promise<T>,
   ): Promise<T> {
     await runtime.initialized.catch(() => undefined);
-    const opened = this.runtimeForPath(path) === runtime;
+    // Открыт ли документ — вопрос ИМЕННО к карте открытых (`openedIn`), а не к
+    // `runtimeForPath`: тот с некоторых пор находит сервер и по расширению, и
+    // спрашивать его здесь значило бы считать открытым любой файл языка.
+    const opened = this.openedIn.get(path) === runtime;
     const uri = pathToFileURL(path).toString();
     if (opened) {
       // Документ у сервера уже открыт, но его копия могла отстать: файл правили на

@@ -31,6 +31,12 @@ export interface LspServersOptions {
   };
   /** Карта проекта — для языков и для вида проекта; `null` — ещё не пересчитана. */
   scan: () => ProjectScan | null;
+  /**
+   * Дождаться пересчёта карты для текущего корня. При открытии проекта `prewarm`
+   * зовётся раньше, чем карта готова — без ожидания он молча ничего не делал,
+   * и серверы поднимались только при первом же запросе, а не с открытием проекта.
+   */
+  waitForScan?: () => Promise<void>;
   /** Корень активного проекта: карта от другого корня считается чужой. */
   root: () => string | null;
   /** Открытые документы: после `lsp.restart` их нужно снова открыть в сервере. */
@@ -93,12 +99,22 @@ export function createLspServers(options: LspServersOptions) {
    */
   const prewarm = async (): Promise<void> => {
     if (!settings().lsp.enabled) return;
+    // Карта проекта на момент открытия проекта ещё считается: `app.ts` зовёт прогрев
+    // сразу после пересчёта. Без ожидания `map` был `null`, и прогрев молча выходил —
+    // серверы поднимались только по первому запросу, а не вместе с проектом.
+    if (options.waitForScan) await options.waitForScan().catch(() => undefined);
     const activeRoot = root();
     const map = scan();
     if (!activeRoot || !map || map.root !== activeRoot) return;
     const languages = prewarmLanguages(map);
-    if (languages.length === 0) return;
-    await rpc.request('lsp.prewarm', { languages });
+    // Карта без единого известного языка — не повод сдаваться: серверы для настроенных
+    // языков поднимутся и без неё, а лишать проект подсказок из-за пустой карты нельзя.
+    const configured = settings()
+      .lsp.servers.filter((server) => server.enabled)
+      .map((server) => server.language);
+    const wanted = languages.length > 0 ? languages : configured;
+    if (wanted.length === 0) return;
+    await rpc.request('lsp.prewarm', { languages: wanted });
     // Прогрев заодно запускает сборку карты символов в main — начинаем за ней следить.
     options.onPrewarmed?.();
   };

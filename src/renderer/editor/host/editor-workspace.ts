@@ -22,6 +22,7 @@
 import type { CursorPosition } from '../../../shared/api';
 import type { TextEdit } from '../../../shared/edits';
 import type { GitLineChange } from '../../../shared/git-line-changes';
+import type { CompletionContext } from '../../../shared/lsp-completions';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import type { DocumentColor } from '../../../shared/lsp-document-color';
 import type { DocumentHighlightSpan } from '../../../shared/lsp-document-highlight';
@@ -174,6 +175,7 @@ export interface EditorWorkspaceOptions {
   completionFromLanguage?: (
     path: string,
     position: { line: number; column: number },
+    context?: CompletionContext,
   ) => Promise<{ items: readonly CompletionItem[]; isIncomplete: boolean }>;
   /** Символы проекта из карты: ими расширяется список повторным Ctrl+Space. */
   projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;

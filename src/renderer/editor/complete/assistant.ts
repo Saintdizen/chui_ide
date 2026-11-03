@@ -906,6 +906,10 @@ export class CompletionAssistant {
       this.anchor(caret),
       member.replaces,
     );
+    // Запрос уходит с причиной «символ» (`2`) и самим знаком, который его вызвал.
+    // Без этого сервер считает вызов ручным (Ctrl+Space) и отвечает общим списком
+    // или пустотой — членов приёмника (`page.` → методы `page`) в ответе нет вовсе.
+    this.pendingTrigger = { triggerKind: 2, triggerCharacter: '.' };
     this.askServer(member.prefix, caret);
   }
 

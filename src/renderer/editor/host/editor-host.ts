@@ -27,6 +27,7 @@ import { detectIndent, resolveIndent } from '../../../shared/indent';
 import type { TextEdit } from '../../../shared/edits';
 import type { FoldRange } from '../../../shared/fold-ranges';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
+import type { CompletionContext } from '../../../shared/lsp-completions';
 import type { GitLineChange } from '../../../shared/git-line-changes';
 import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-lens';
 import type { SignatureContext, SignatureHelp } from '../../../shared/lsp-signature';
@@ -226,6 +227,8 @@ export interface EditorHostOptions {
   completionFromLanguage?: (
     path: string,
     position: { line: number; column: number },
+    /** Почему спросили: 1 — вручную, 2 — знаком, 3 — дотягивание. Сервер решает по этому. */
+    context?: CompletionContext,
   ) => Promise<{ items: readonly CompletionItem[]; isIncomplete: boolean }>;
   /**
    * Символы проекта по имени — карта символов. Ими расширяется список подсказок:
@@ -806,7 +809,7 @@ export class EditorHost {
       onDidWriteFile: options.onDidWriteFile,
       currentPath: () => this.activePath,
       lsp: options.completionFromLanguage
-        ? (_prefix, position) => {
+        ? (_prefix, position, context) => {
             const path = this.activePath;
             // Пустой ответ — не «подсказок нет», а «спросить не у кого»: признак
             // неполноты здесь нечего выставлять, и список не будет перезапрашиваться.
@@ -815,7 +818,9 @@ export class EditorHost {
             // не уехать (правка идёт разными путями): тогда сервер ответит по
             // устаревшему документу, и подсказка будет не про то место.
             this.registry.push(path);
-            return options.completionFromLanguage!(path, position);
+            // Причину запроса не теряем: без неё сервер считает вызов ручным
+            // (Ctrl+Space) и после точки отвечает общим списком или пустотой.
+            return options.completionFromLanguage!(path, position, context);
           }
         : undefined,
       // Дотягивание подсказки: путь берём активный — панель о нём знает, ассистент нет.

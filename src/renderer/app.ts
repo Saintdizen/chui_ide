@@ -459,7 +459,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       return text ? { text } : null;
     },
     // Подсказки от сервера подмешиваются к словам языка и документа.
-    completionFromLanguage: (path, position) => lsp.completionList(path, position),
+    completionFromLanguage: (path, position, context) => lsp.completionList(path, position, context),
     // Повторный Ctrl+Space расширяет список символами проекта: сначала свои объявления,
     // потом из зависимостей. Источник — карта символов: она отвечает мгновенно и без
     // языкового сервера, а `package` в ответе и есть признак чужого объявления.
@@ -1855,10 +1855,26 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Карта от прошлого проекта не должна мелькать на новом: чистим сразу.
     projectScan = null;
     refreshStatus();
-    projectScan = await rpc.request('project.scan').catch(() => null);
+    // Прогрев серверов ждёт именно этого обещания (см. `waitForScan` ниже).
+    scanSettled = rpc
+      .request('project.scan')
+      .then((scan) => {
+        projectScan = scan;
+      })
+      .catch(() => {
+        projectScan = null;
+      });
+    await scanSettled;
     syncRunControl();
     refreshStatus();
   }
+
+  /**
+   * Карта пересчитывается прямо сейчас. Нужна прогреву серверов: он зовётся при
+   * открытии проекта раньше, чем карта готова, и без ожидания просто ничего не делал.
+   */
+  let scanSettled: Promise<void> = Promise.resolve();
+  const waitForScan = (): Promise<void> => scanSettled;
 
   /**
    * Языковые серверы: поиск недостающих, перезапуск, прогрев.
@@ -1874,6 +1890,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     settings: () => ({ lsp: settings.lsp }),
     root: () => workspace.root,
     scan: () => projectScan,
+    waitForScan,
     documents: () => documents.all(),
     // Уведомление с кнопкой — форма `showToast`, но кнопка называется иначе.
     toast: (message, kind, action) =>

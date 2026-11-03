@@ -126,6 +126,25 @@ describe('LspFeatures', () => {
     expect(items[0]!.snippet).toBe('for ${1:x} in y:');
   });
 
+  // Грабля: причина запроса (`context`) терялась по дороге — `Assistant` её передавал,
+  // а контракт `completionFromLanguage` (`editor-host`/`editor-workspace`) принимала
+  // только два аргумента, и `app.ts` вызывал `completionList` без третьего. Для Python
+  // ответ тот же, а серверы, различающие ручной вызов и триггер, отвечали не тем.
+  it('причина запроса доезжает до сервера', async () => {
+    const { rpc, calls } = fakeRpc({ items: [] });
+    const features = new LspFeatures(rpc);
+    await features.completionList(
+      '/p/a.py',
+      { line: 1, column: 3 },
+      {
+        triggerKind: 2,
+        triggerCharacter: '.',
+      },
+    );
+    const params = calls[0]!.params as { params: { context?: unknown } };
+    expect(params.params.context).toEqual({ triggerKind: 2, triggerCharacter: '.' });
+  });
+
   it('переименование разбирает правки по файлам', async () => {
     const { rpc, calls } = fakeRpc({
       changes: {
