@@ -1690,6 +1690,92 @@ textarea {
   color: var(--text_color);
 }
 
+/* Артефакты — тот же список, что «Открытые редакторы», но про работу агента:
+   свежие сверху, подсказкой — заметка или папка. */
+.artifacts {
+  flex: 0 1 auto;
+  max-height: 28%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border_color);
+}
+
+/* Пустой блок не рисуем: `display: flex` перебил бы встроенное `[hidden]`. */
+.artifacts[hidden] {
+  display: none;
+}
+
+.artifacts-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: calc(var(--tree_row_height) * var(--density));
+  padding: 0 8px 0 10px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.artifacts-count {
+  margin-left: auto;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.artifacts-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+.artifact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: calc(var(--tree_row_height) * var(--density));
+  margin: 0 4px;
+  padding: 0 8px;
+  border-radius: var(--radius_xs);
+  color: var(--text_color_secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.artifact:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.artifact:focus-visible {
+  outline: 1px solid var(--link_color);
+  outline-offset: -1px;
+}
+
+.artifact-name {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
 .explorer {
   display: flex;
   flex-direction: column;

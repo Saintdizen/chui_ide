@@ -12,6 +12,7 @@ import type { ToolPresetId } from '../../shared/tool-presets';
 import type { ChatRunLog } from '../../shared/run-log';
 import type { ReadCoverageSnapshot } from '../../shared/read-coverage';
 import type { ToggledFile } from './chat-changes';
+import type { RunArtifact } from '../core/artifacts';
 
 /**
  * Беседа панели ассистента. Вкладок может быть много, поэтому всё, что относится
@@ -47,6 +48,12 @@ export interface ChatSession {
   touched: Map<string, ToggledFile>;
   /** Файлы, которых агент коснулся без правки документа: создал, удалил, перенёс. */
   files: ToolFileChange[];
+  /**
+   * Что агент предъявил в этой беседе (`present`): та же лента, только без
+   * прокрутки — панель артефактов показывает список именно этой вкладки.
+   * Не сохраняется: после перезапуска список начинается заново.
+   */
+  artifacts?: RunArtifact[];
   attachments: ChatAttachment[];
   /**
    * Приложенный контекст, переживший сжатие беседы. После сжатия больше не

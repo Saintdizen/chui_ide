@@ -72,6 +72,11 @@ export interface StreamHost {
   hidePlan(session: ChatSession): void;
   /** Перерисовать панель изменений после файловых операций инструмента. */
   renderChanges(): void;
+  /**
+   * Файлы, которые агент предъявил по итогам вызова (`presented`): лента
+   * показывает карточку, а панель артефактов — постоянный список.
+   */
+  presentArtifacts(items: NonNullable<ChatToolResultPayload['presented']>, session: ChatSession): void;
   /** Переключить «занято»: панель по этому гасит ввод и меняет кнопку. */
   setBusy(value: boolean, session: ChatSession): void;
   /** Закрыть открытые ожидания подтверждений (ревью правок, команда). */
@@ -309,6 +314,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
                 }
                 host.renderChanges();
               }
+              if (result.ok && result.presented?.length) host.presentArtifacts(result.presented, session);
             }
           },
         );

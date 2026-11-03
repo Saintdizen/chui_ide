@@ -131,6 +131,8 @@ import { createImageView } from './ui/image-view';
 import { createBrowserView } from './ui/browser-view';
 import { createExplorer } from './ui/explorer';
 import { createOpenEditorsBlock } from './ui/open-editors-block';
+import { createArtifactsBlock } from './ui/artifacts-block';
+import { createRunArtifacts } from './core/artifacts';
 import { mountProjectSelect } from './ui/project-select';
 import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
@@ -215,6 +217,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   const commands = new CommandRegistry();
   const documents = new DocumentStore();
   const openEditors = new OpenEditors(documents);
+  // Артефакты прогона: файлы, которые агент предъявил (`present`). Живут весь
+  // разговор: панель в боковой колонке показывает их, даже когда лента ушла вверх.
+  const runArtifacts = createRunArtifacts();
   const workspace = new WorkspaceModel(rpc);
   // Состояние репозитория — отдельная модель: она подписана на push-события main,
   // поэтому UI не переспрашивает статус после каждой своей операции.
@@ -895,6 +900,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // Список открытых файлов над деревом: по нему видно, что открыто и что не сохранено,
   // не глядя на полосу вкладок наверху. Как в VS Code — первым в боковой панели.
   layout.sidebarBody.appendChild(createOpenEditorsBlock({ openEditors, documents, commands }).element);
+  // Артефакты прогона — рядом с редактором, а не только в ленте чата.
+  layout.sidebarBody.appendChild(createArtifactsBlock({ artifacts: runArtifacts, commands }).element);
   layout.sidebarBody.appendChild(explorer.element);
 
   const sourceControl = createSourceControl({
@@ -1685,6 +1692,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     commands,
     workspace,
     git,
+    artifacts: runArtifacts,
     openDiff: (path, staged) => diffView.open(path, staged),
     // Страница встроенного браузера: адрес открытой вкладки — для `#web`.
     browserUrl: () => browserView.url,

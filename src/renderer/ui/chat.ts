@@ -39,6 +39,7 @@ import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createAttachments } from './chat-attachments';
+import { MAX_RUN_ARTIFACTS, type RunArtifacts } from '../core/artifacts';
 import { createToolFeed, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
 import { createChatComposer } from './chat-composer';
@@ -145,6 +146,8 @@ export interface ChatDeps {
    * Необязательно: без него пункт просто не появляется.
    */
   openDiff?: (path: string, staged: boolean) => void;
+  /** Артефакты прогона: что агент предъявил (`present`) — их же видит боковая панель. */
+  artifacts?: RunArtifacts;
   /**
    * Места проекта по смыслу — для `#codebase`. Тот же поиск, что у палитры по смыслу;
    * необязательно: без него пункт молчит и говорит, почему.
@@ -551,6 +554,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       transcript: [],
       touched: new Map(),
       files: [],
+      artifacts: [],
       attachments: [],
       draft: '',
     };
@@ -576,6 +580,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     input.value = next.draft;
     attachments.render();
     renderChanges();
+    // Артефакты — тоже свойство беседы: у соседней вкладки свои файлы.
+    deps.artifacts?.set(next.artifacts ?? []);
     goalPanel.render(next.goal ?? null);
     // Панель плана одна на все вкладки: без перерисовки на новой вкладке
     // остался бы чек-лист предыдущей беседы — или её пустота вместо плана.
@@ -2058,6 +2064,18 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       if (session.id === activeId) planPanel.hide();
     },
     renderChanges,
+    presentArtifacts: (items, session) => {
+      // Тот же путь, что у `files`: сначала в беседу — прогон мог идти в фоновой
+      // вкладке, — и только активная показывает список на панели.
+      for (const item of items) {
+        const known = session.artifacts ?? [];
+        session.artifacts = [
+          { path: item.path, note: item.note ?? '', at: Date.now() },
+          ...known.filter((other) => other.path !== item.path),
+        ].slice(0, MAX_RUN_ARTIFACTS);
+      }
+      if (session.id === activeId) deps.artifacts?.set(session.artifacts ?? []);
+    },
     setBusy,
     closeApprovals,
     setStreaming: (session) => {
