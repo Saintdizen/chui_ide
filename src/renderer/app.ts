@@ -2034,10 +2034,15 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       // Метка «есть непрочитанное»: точка на кнопке панели, которая сейчас
       // свёрнута. Когда панель открыта, человек уже видит чат — метка лишняя.
       aiButton.classList.toggle('has-unseen', aiEnabled() && chatUnseen && !layout.rightVisible);
-      aiButton.classList.toggle('has-unseen-error', aiEnabled() && chatUnseen && chatUnseenFailed && !layout.rightVisible);
+      aiButton.classList.toggle(
+        'has-unseen-error',
+        aiEnabled() && chatUnseen && chatUnseenFailed && !layout.rightVisible,
+      );
       aiButton.setAttribute(
         'aria-label',
-        chatUnseen && !layout.rightVisible ? 'AI Assistant (Ctrl+Shift+A) — есть новый ответ' : 'AI Assistant (Ctrl+Shift+A)',
+        chatUnseen && !layout.rightVisible
+          ? 'AI Assistant (Ctrl+Shift+A) — есть новый ответ'
+          : 'AI Assistant (Ctrl+Shift+A)',
       );
     }
   };

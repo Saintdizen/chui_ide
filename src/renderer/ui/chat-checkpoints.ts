@@ -65,11 +65,7 @@ export function beginCheckpoint(session: ChatSession, messageIndex: number, ques
  * может тронуть файл дважды, а откат должен вернуть состояние ДО хода, а не
  * после первого шага.
  */
-export function addCheckpointFile(
-  checkpoint: Checkpoint | undefined,
-  path: string,
-  state: CheckpointFile,
-): void {
+export function addCheckpointFile(checkpoint: Checkpoint | undefined, path: string, state: CheckpointFile): void {
   if (!checkpoint || checkpoint.files.has(path)) return;
   checkpoint.files.set(path, state);
 }
@@ -164,7 +160,8 @@ export function revertPreview(
     files: plan.size,
     removed: removed.sort(),
     unsaved: lost.sort(),
-    turns: checkpoints.filter((checkpoint) => checkpoint.messageIndex >= (checkpoints[index]?.messageIndex ?? 0)).length,
+    turns: checkpoints.filter((checkpoint) => checkpoint.messageIndex >= (checkpoints[index]?.messageIndex ?? 0))
+      .length,
   };
 }
 

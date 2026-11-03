@@ -82,7 +82,15 @@ import { createChatFindBar } from './chat-find-bar';
 import { showContextMenu } from './context-menu';
 import { isPopupOpen } from './popup-menu';
 import { showToast } from './toast';
-import { announceMessage, announceTitle, runEnd, shouldRefocus, tailOf, type RunEnd, type RunOutcome } from './chat-notify';
+import {
+  announceMessage,
+  announceTitle,
+  runEnd,
+  shouldRefocus,
+  tailOf,
+  type RunEnd,
+  type RunOutcome,
+} from './chat-notify';
 
 /**
  * Чем кончился ход.
@@ -1403,7 +1411,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Последний ход ленты — тот, с которого беседа продолжается. Нет ходов
     // (сжали сразу после сводки) — отметке место в ленте.
     const last = tail?.lastElementChild instanceof HTMLElement ? tail.lastElementChild : null;
-    const host = last?.classList.contains('chat-turn') ? last : tail ?? session.thread;
+    const host = last?.classList.contains('chat-turn') ? last : (tail ?? session.thread);
     host.appendChild(note);
   }
 
@@ -1672,7 +1680,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       const last = lines[lines.length - 1] ?? '';
       edits.push({
         path: file,
-        edits: [{ startLine: 1, startColumn: 1, endLine: lines.length, endColumn: last.length + 1, newText: snapshot.text }],
+        edits: [
+          { startLine: 1, startColumn: 1, endLine: lines.length, endColumn: last.length + 1, newText: snapshot.text },
+        ],
       });
     }
     const failed: string[] = [];
@@ -2121,12 +2131,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    * «Назад» есть только если для этого вопроса есть снимок: без него обещать
    * откат нечего, и серая кнопка путала бы.
    */
-  function attachUserActions(
-    messageEl: HTMLElement,
-    text: string,
-    onEdit: () => void,
-    onRevert?: () => void,
-  ): void {
+  function attachUserActions(messageEl: HTMLElement, text: string, onEdit: () => void, onRevert?: () => void): void {
     messageEl.appendChild(
       h(
         'div',

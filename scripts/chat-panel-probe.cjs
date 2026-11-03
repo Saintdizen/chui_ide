@@ -1320,7 +1320,11 @@ app.whenReady().then(async () => {
       обведено: document.querySelectorAll('.msg.is-find-current').length,
     }))()`,
   );
-  check('счётчик нашёл совпадения в нескольких сообщениях', /^1 из (?:[2-9]|[1-9]\d+)$/.test(firstFind.счётчик), firstFind.счётчик);
+  check(
+    'счётчик нашёл совпадения в нескольких сообщениях',
+    /^1 из (?:[2-9]|[1-9]\d+)$/.test(firstFind.счётчик),
+    firstFind.счётчик,
+  );
   check('совпадения подсвечены метками', firstFind.совпадений >= 2, firstFind.совпадений);
   check('текущее сообщение обведено', firstFind.обведено === 1, firstFind.обведено);
 
@@ -1420,7 +1424,10 @@ app.whenReady().then(async () => {
     second,
     `(() => document.querySelectorAll('.msg.is-prompt-current')[0]?.textContent.slice(0, 30) ?? '')()`,
   );
-  check('второй Alt+↑ перешёл на предыдущий вопрос', navUp2.startsWith('Проверь'), { было: navUp.текст, стало: navUp2 });
+  check('второй Alt+↑ перешёл на предыдущий вопрос', navUp2.startsWith('Проверь'), {
+    было: navUp.текст,
+    стало: navUp2,
+  });
 
   // Это и есть проверка «не замыкается»: на первом вопросе «вверх» молчит.
   // Без неё навигация по кругу улетала бы в конец беседы с первого же нажатия.
@@ -1445,10 +1452,7 @@ app.whenReady().then(async () => {
   check('Alt+↓ перешёл на следующий вопрос', navDown.startsWith('Составь план'), { navTop, navDown });
 
   // Alt без стрелки и стрелка без Alt — чужая территория, класс ставиться не должен.
-  await ask(
-    second,
-    `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })), true`,
-  );
+  await ask(second, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })), true`);
   const navUnchanged = await ask(
     second,
     `(() => document.querySelectorAll('.msg.is-prompt-current')[0]?.textContent.slice(0, 30) ?? '')()`,
@@ -1481,11 +1485,23 @@ app.whenReady().then(async () => {
     })()`,
   );
   await wait(400);
-  check('откат спрашивает ДО того, как трогать файлы', последнийДиалог !== null, последнийДиалог?.title ?? 'диалога не было');
+  check(
+    'откат спрашивает ДО того, как трогать файлы',
+    последнийДиалог !== null,
+    последнийДиалог?.title ?? 'диалога не было',
+  );
   const подробности = последнийДиалог?.detail ?? '';
   check('в диалоге сказано, что откат необратим', подробности.includes('нельзя'), подробности.slice(0, 120));
-  check('в диалоге назван вопрос, к которому откатываемся', (последнийДиалог?.message ?? '').startsWith('Вернуть файлы'), последнийДиалог?.message);
-  check('кнопка диалога называет действие, а не «ОК»', (последнийДиалог?.buttons ?? [])[0] === 'Откатить', последнийДиалог?.buttons);
+  check(
+    'в диалоге назван вопрос, к которому откатываемся',
+    (последнийДиалог?.message ?? '').startsWith('Вернуть файлы'),
+    последнийДиалог?.message,
+  );
+  check(
+    'кнопка диалога называет действие, а не «ОК»',
+    (последнийДиалог?.buttons ?? [])[0] === 'Откатить',
+    последнийДиалог?.buttons,
+  );
 
   // После отказа лента не обрезана — кнопка отката на месте.
   const послеОтказа = await ask(
@@ -1498,7 +1514,6 @@ app.whenReady().then(async () => {
   check('отказ ничего не сломал: кнопка отката на месте', послеОтказа.откат === true, послеОтказа);
 
   /* ── метка «в чате непрочитанный ответ» ────────────────────────────────── */
-
 
   const до = await ask(
     second,
