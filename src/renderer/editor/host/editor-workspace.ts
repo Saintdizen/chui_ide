@@ -687,6 +687,14 @@ export class EditorWorkspace {
     this.pane.focus();
   }
 
+  /**
+   * Перечитать язык открытых файлов: сменились свои ассоциации (см. `files.associations`
+   * в настройках). Без этого подсветка ждала бы повторного открытия файла.
+   */
+  refreshLanguages(): void {
+    for (const pane of this.panes) pane.refreshLanguage();
+  }
+
   /** Разложить панели: одна — во всю зону, две — в ряд, три и четыре — сеткой. */
   private applyPaneLayout(): void {
     const count = this.panes.length;

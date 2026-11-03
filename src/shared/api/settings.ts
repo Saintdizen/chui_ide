@@ -1,4 +1,5 @@
 import type { CursorStyle } from '../cursor-style';
+import type { FileAssociation } from '../associations';
 import type { AutoSaveMode } from '../auto-save';
 import type { IconBadgeRule } from '../icon-badges';
 import type { Snippet } from '../snippets';
@@ -217,6 +218,11 @@ export interface EditorSettings {
   autoSaveDelayMs: number;
   /** Столбцы направляющих (ruler): вертикальные черты через всю высоту редактора. */
   rulers: number[];
+  /**
+   * Свои языки по имени файла: `*.proto = proto`, `Jakefile = make`. Нужны там, где
+   * расширение язык не выдаёт, а сервер для него есть (см. `shared/associations.ts`).
+   */
+  fileAssociations: FileAssociation[];
   /** Показ невидимых знаков: ничего, только хвостовые пробелы или все. */
   renderWhitespace: WhitespaceMode;
   /** Миникарта справа: сжатый вид всего файла. */

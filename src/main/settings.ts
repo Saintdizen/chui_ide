@@ -26,6 +26,8 @@ import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { normalizeSnippets } from '../shared/snippets';
 import { normalizeRulers } from '../shared/rulers';
+import { normalizeFileAssociations } from '../shared/associations';
+import { setFileAssociations } from '../shared/languages';
 import { normalizeCursorStyle, normalizeLineHeight } from '../shared/cursor-style';
 import { normalizeWhitespaceMode } from '../shared/whitespace';
 import { normalizeSpellWords } from '../shared/spellcheck';
@@ -247,6 +249,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Направляющие по умолчанию — привычные 80 и 120 столбцов: это ориентир длины
     // строки, а не украшение; список пуст — черт нет.
     rulers: [80, 120],
+    // Своих языков из коробки нет: таблица расширений уже покрывает обычное, а здесь
+    // только то, что человек назвал сам (см. shared/associations.ts).
+    fileAssociations: [],
     // Невидимые знаки по умолчанию скрыты: точки и стрелки в коде мешают читать.
     renderWhitespace: 'none',
     // Миникарта по умолчанию выключена: узкий файл она только заслоняет.
@@ -399,6 +404,8 @@ export class SettingsStore {
     this.filePath = filePath ?? path.join(app.getPath('userData'), 'settings.json');
     this.credentials = new CredentialsStore(credentialsPathFor(this.filePath));
     this.data = loadSettings(this.filePath);
+    // Свои ассоциации видны до первого окна: язык нужен и подсветке, и серверу.
+    setFileAssociations(this.data.editor.fileAssociations);
     // Перенос из прежней версии: ключи лежали в `ai.providers[].apiKey` и в
     // `ai.webSearch.apiKey`. Забираем их в отдельный файл и убираем из настроек —
     // иначе бэкап настроек продолжит возить пароли.
@@ -540,6 +547,9 @@ export class SettingsStore {
       if (patch.editor.snippets !== undefined) next.snippets = normalizeSnippets(patch.editor.snippets);
       // Направляющие из формы приходят строкой — приводим тем же разбором, что при чтении.
       if (patch.editor.rulers !== undefined) next.rulers = normalizeRulers(patch.editor.rulers);
+      if (patch.editor.fileAssociations !== undefined) {
+        next.fileAssociations = normalizeFileAssociations(patch.editor.fileAssociations);
+      }
       if (patch.editor.renderWhitespace !== undefined)
         next.renderWhitespace = normalizeWhitespaceMode(patch.editor.renderWhitespace);
       if (patch.editor.minimap !== undefined) next.minimap = patch.editor.minimap === true;
@@ -697,6 +707,7 @@ export class SettingsStore {
     writeFileSync(temporary, `${JSON.stringify(this.data, null, 2)}\n`, 'utf8');
     renameSync(temporary, this.filePath);
     const snapshot = this.get();
+    setFileAssociations(snapshot.editor.fileAssociations);
     for (const listener of this.listeners) listener(snapshot);
   }
 }
@@ -1024,6 +1035,7 @@ function loadSettings(filePath: string): StoredSettings {
       snippets: normalizeSnippets(parsed.editor?.snippets),
       // Направляющие могли править руками — приводим к списку столбцов тем же разбором.
       rulers: normalizeRulers(parsed.editor?.rulers),
+      fileAssociations: normalizeFileAssociations(parsed.editor?.fileAssociations),
       renderWhitespace: normalizeWhitespaceMode(parsed.editor?.renderWhitespace),
       minimap: parsed.editor?.minimap === true,
       wordWrap: parsed.editor?.wordWrap === true,

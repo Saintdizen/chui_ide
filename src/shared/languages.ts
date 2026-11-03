@@ -11,6 +11,8 @@
  * и подсветка, и подсказки. Всё остальное — наши надстройки.
  */
 
+import { type FileAssociation, languageFromAssociations } from './associations';
+
 /** Как рисовать значок файла: от вида зависит форма и цвет. */
 export type FileIconKind =
   | 'code'
@@ -32,9 +34,9 @@ export type FileIconKind =
   | 'lock'
   | 'git';
 
-/** Чем запускается файл: оболочка запуска подбирает команду сама. */
 export type RunKind = 'python' | 'node' | 'shell';
 
+/** Чем запускается файл: оболочка запуска подбирает команду сама. */
 export interface LanguageIndent {
   tabSize: number;
   /** Python и Makefile требуют разного: пробелы против символа табуляции. */
@@ -262,8 +264,31 @@ export function basename(target: string): string {
   return index < 0 ? target : target.slice(index + 1);
 }
 
+/**
+ * Свои ассоциации из настроек (`files.associations`): их ставит тот, кто прочитал
+ * настройки, — окно при загрузке, main при чтении файла настроек. Одна точка, потому
+ * что спрашивают их из десятка мест: протаскивать настройки через каждый вызов значило
+ * бы повторять одно и то же.
+ */
+let associations: readonly FileAssociation[] = [];
+
+/** Поставить свои ассоциации: имя файла → язык (см. `associations.ts`). */
+export function setFileAssociations(next: readonly FileAssociation[]): void {
+  associations = next;
+}
+
 /** Язык файла по его пути. Имя файла целиком проверяем раньше расширения. */
 export function languageInfoForPath(filePath: string): LanguageInfo | null {
+  // Своё имя сильнее таблицы: человек сказал «*.proto — это proto» — так и делаем.
+  const own = languageFromAssociations(filePath, associations);
+  if (own !== null) {
+    const known = BY_ID.get(own);
+    if (known) return known;
+    // Языка нет в таблице — берём значок и подпись общего, но id оставляем свой:
+    // сервер и подсветка ищут именно его.
+    return { ...BY_ID.get(PLAIN_LANGUAGE)!, id: own, label: own };
+  }
+
   const name = basename(filePath).toLowerCase();
   const byName = BY_FILENAME.get(name);
   if (byName) return byName;

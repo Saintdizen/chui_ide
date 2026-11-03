@@ -61,6 +61,7 @@ import { KeybindingService } from './core/keybindings';
 import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
 import { attachDoubleShift } from './core/double-shift';
 import { languageFromPath, languageLabel, languageIndent } from './core/languages';
+import { setFileAssociations } from '../shared/languages';
 import { normalizeBrowserUrl, isLocalUrl } from '../shared/browser';
 import { imageFormatLabel, isImagePath } from '../shared/images';
 import { fileUrlFor, isPdfPath, pdfTabTitle } from '../shared/pdf';
@@ -400,6 +401,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // выглядеть как «в проекте ничего нет». Решение — в core/project-symbols.ts.
     return projectSymbolAnswer(found, status);
   };
+
+  // Свои языки по имени файла: язык нужен сразу — подсветке, значкам, запуску.
+  setFileAssociations(settings.editor.fileAssociations);
 
   const editors = new EditorWorkspace(layout.editorHost, new DocumentRegistry(documents), {
     tabSize: settings.editor.tabSize,
@@ -3414,6 +3418,13 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       ligatures: next.editor.fontLigatures,
       spellcheck: next.editor.spellcheck,
     });
+    // Ассоциации могли смениться: пересчитываем язык открытых файлов и документов
+    // (по нему работают подсветка, подсказки и сервер) — иначе ждали бы переоткрытия.
+    setFileAssociations(next.editor.fileAssociations);
+    for (const document of documents.all()) {
+      document.languageId = languageFromPath(document.path);
+    }
+    editors.refreshLanguages();
     // Словарь человека изменили — пересобираем модель (она сама перепроверит текст).
     if (plan.spellWords) spell.setUserWords(next.editor.spellWords);
     // Автосохранение сменили — режим или паузу: снимаем уже назначенную запись или

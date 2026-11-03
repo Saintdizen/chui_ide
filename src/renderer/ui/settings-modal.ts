@@ -50,6 +50,7 @@ import { AUTO_SAVE_LABELS, AUTO_SAVE_MODES, normalizeAutoSaveMode } from '../../
 import { parseFieldNumber, type FieldNumber } from './number-field';
 import { CURSOR_STYLES, CURSOR_STYLE_LABELS, MAX_LINE_HEIGHT, normalizeCursorStyle } from '../../shared/cursor-style';
 import { serializeThemeFile } from '../../shared/theme-file';
+import { normalizeFileAssociations, fileAssociationsToText } from '../../shared/associations';
 import { normalizeRulers, rulersToText } from '../../shared/rulers';
 import { PULL_MODES, pullModeLabel } from '../../shared/git-pull';
 import { uiScaleOptions } from '../../shared/ui-scale';
@@ -1136,7 +1137,20 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
 
       h('div', { class: 'settings-divider' }),
-      h('div', { class: 'field-label' }, 'Вид'),
+      h('div', { class: 'field-label' }, 'Свои языки файлов'),
+      field(
+        'Шаблон = язык',
+        textInput(fileAssociationsToText(editor.fileAssociations), (value) =>
+          editable({ fileAssociations: normalizeFileAssociations(value) }),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Для файлов, у которых расширение о языке молчит: «*.proto = proto», «Jakefile = make». ' +
+          'Последнее подходящее правило главнее, пустое поле — обычная таблица языков.',
+      ),
+
       field(
         'Невидимые знаки',
         selectInput(

@@ -22,6 +22,7 @@
  */
 
 import type { CursorPosition, LspDiagnostic } from '../../../shared/api';
+import { languageFromPath } from '../../core/languages';
 import type { TextEdit } from '../../../shared/edits';
 import type { FoldRange } from '../../../shared/fold-ranges';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
@@ -447,6 +448,23 @@ export class EditorHost {
   private readonly inline: InlineCompletions | null;
   /** Язык открытого файла: нужен подсказке и подсветке. */
   private languageId = 'plaintext';
+
+  /** Язык панели: подсветка, подсказки и слова — от него же. */
+  private setLanguageOf(languageId: string): void {
+    this.view.setLanguage(languageId);
+    this.assistant.setLanguage(languageId);
+    this.languageId = languageId;
+  }
+
+  /**
+   * Перечитать язык по имени файла: сменились свои ассоциации (`files.associations`)
+   * или язык файла назван вручную. Без этого подсветка ждала бы повторного открытия.
+   */
+  refreshLanguage(): void {
+    const path = this.path;
+    if (!path) return;
+    this.setLanguageOf(languageFromPath(path));
+  }
   /**
    * Чем открывается палитра команд (F1). Отдельным полем, а не в опциях: панель
    * создаётся раньше, чем палитра готова, и опцию ставит `openPaletteOnF1` позже.
@@ -931,9 +949,7 @@ export class EditorHost {
     this.signature?.setBuffer(buffer);
     // Подсветку и слова подсказок берём по языку документа: один реестр языков на всё.
     // Языка без грамматики это не смущает — текст покажется простым (см. registry.ts).
-    this.view.setLanguage(document.languageId);
-    this.assistant.setLanguage(document.languageId);
-    this.languageId = document.languageId;
+    this.setLanguageOf(document.languageId);
     // Призрачная подсказка говорила о прошлом файле — к новому она не относится.
     this.inline?.setBuffer();
     // Копия «заглянуть» относилась к прежнему файлу — прячем её вместе с ним.
