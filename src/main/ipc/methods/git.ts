@@ -78,6 +78,7 @@ export function registerGitMethods(router: RpcRouter, deps: RpcServices): void {
   router.register('git.logGraph', (params) => deps.git.logGraph(params.limit));
   router.register('git.conflictParts', (params) => deps.git.conflictParts(params.path));
   router.register('git.markResolved', (params) => deps.git.markResolved(params.path));
+  router.register('git.remerge', (params) => deps.git.remerge(params.path, params.force ?? false));
   router.register('git.branches', () => deps.git.branches());
   router.register('git.checkout', (params) => deps.git.checkout(params.name, params.create));
   router.register('git.remotes', () => deps.git.remotes());

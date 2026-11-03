@@ -658,6 +658,47 @@
   border-top: 1px solid var(--separator_color);
 }
 
+/* Итог занимает всё место: длинный файл должен прокручиваться, а не вылезать. */
+.conflict-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.conflict-result-head {
+  margin: 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Моноширинно и с прокруткой — это код, а не сообщение. */
+.conflict-result-text {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--editor_background);
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_xs);
+  font-family: var(--font_mono, monospace);
+  font-size: var(--font_small_size);
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.conflict-result-hint {
+  margin: 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
 /* ── ветка в статусбаре ─────────────────────────────────────────────────── */
 
 .status-git {

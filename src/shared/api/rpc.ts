@@ -567,6 +567,11 @@ export interface ChuiMethods {
   'git.conflictParts': { params: { path: string }; result: GitConflictParts };
   /** Отметить конфликт решённым: содержимое файла уходит в индекс (`git add`). */
   'git.markResolved': { params: { path: string }; result: GitStatus };
+  /**
+   * Пере-слияние: вернуть стадии 1–3 в индекс и маркеры в файл (`git checkout -m`).
+   * Без `force` отказывает, если в файле есть правка поверх индекса — она пропадёт.
+   */
+  'git.remerge': { params: { path: string; force?: boolean }; result: GitStatus };
   'git.branches': { params: void; result: GitBranch[] };
   'git.checkout': { params: { name: string; create?: boolean }; result: GitStatus };
   'git.remotes': { params: void; result: GitRemote[] };

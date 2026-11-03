@@ -609,6 +609,11 @@ export class GitModel {
     return this.apply(await this.rpc.request('git.markResolved', { path }));
   }
 
+  /** Пере-слияние: маркеры и стороны — обратно. `force` — согласие потерять правку. */
+  async remerge(path: string, force = false): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.remerge', { path, force }));
+  }
+
   /** Проиндексировать один блок изменений файла (не весь файл). */
   async stageHunk(path: string, index: number): Promise<GitStatus> {
     return this.apply(await this.rpc.request('git.stageHunk', { path, index }));

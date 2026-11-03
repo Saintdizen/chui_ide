@@ -29,7 +29,7 @@ import type { GitBisectState } from '../../shared/git-bisect';
 import { bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, reset, revert } from './inspect';
 import { commitDiff, discard, discardHunk, fileHunks, stage, stageHunk, unstage, unstageHunk } from './index-staging';
-import { markResolved as gitMarkResolved } from './conflict';
+import { markResolved as gitMarkResolved, remerge as gitRemerge } from './conflict';
 import { checkIgnore as gitCheckIgnore } from './check-ignore';
 import { runNetwork } from './network';
 import {
@@ -339,6 +339,11 @@ export class GitService {
   /** Конфликт решён → `conflict.ts`: `add --` ровно этого пути и свежий статус. */
   async markResolved(filePath: string): Promise<GitStatus> {
     return gitMarkResolved({ status: () => this.status(), refresh: () => this.refresh() }, filePath);
+  }
+
+  /** Пере-слияние → `conflict.ts`: `checkout -m --` и свежий статус. */
+  async remerge(filePath: string, force = false): Promise<GitStatus> {
+    return gitRemerge({ status: () => this.status(), refresh: () => this.refresh() }, filePath, force);
   }
 
   /** Статус плюс рассылка события: любую правку в репозитории UI узнаёт отсюда. */

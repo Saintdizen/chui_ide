@@ -1121,6 +1121,78 @@ describe('GitService: конфликты слияния', () => {
     expect(entry?.change).not.toBe('conflicted');
     expect(entry?.staged).toBe(true);
   });
+
+  it('conflictParts() после отметки отдаёт текст файла — иначе результат нечем смотреть', async () => {
+    if (!gitAvailable) return;
+    const { work, file } = await makeConflict();
+    const service = serviceFor(work);
+
+    await fs.writeFile(file, 'resolved\n');
+    await service.markResolved(file);
+    const parts = await service.conflictParts(file);
+
+    expect(parts.conflicted).toBe(false);
+    expect(parts.worktree).toBe('resolved\n');
+  });
+
+  it('remerge() возвращает стадии и маркеры в файл', async () => {
+    if (!gitAvailable) return;
+    const { work, file } = await makeConflict();
+    const service = serviceFor(work);
+
+    await fs.writeFile(file, 'resolved\n');
+    await service.markResolved(file);
+    const status = await service.remerge(file);
+
+    // Стадии снова в индексе — файл опять «не слит».
+    expect(status.files.find((item) => item.path === file)?.change).toBe('conflicted');
+    const text = await fs.readFile(file, 'utf8');
+    expect(text).toContain('<<<<<<<');
+  });
+
+  it('remerge() без force отказывает, если в файле правка поверх индекса', async () => {
+    if (!gitAvailable) return;
+    const { work, file } = await makeConflict();
+    const service = serviceFor(work);
+
+    await fs.writeFile(file, 'resolved\n');
+    await service.markResolved(file);
+    // Дописали руками уже после отметки — это и есть та работа, которую жалко.
+    await fs.writeFile(file, 'resolved\nещё строка\n');
+
+    await expect(service.remerge(file)).rejects.toThrow();
+    // Отказ — не разрушение: файл на месте.
+    expect(await fs.readFile(file, 'utf8')).toContain('ещё строка');
+  });
+
+  it('remerge() с force затирает правку и возвращает маркеры', async () => {
+    if (!gitAvailable) return;
+    const { work, file } = await makeConflict();
+    const service = serviceFor(work);
+
+    await fs.writeFile(file, 'resolved\n');
+    await service.markResolved(file);
+    await fs.writeFile(file, 'resolved\nещё строка\n');
+
+    const status = await service.remerge(file, true);
+
+    expect(status.files.find((item) => item.path === file)?.change).toBe('conflicted');
+    expect(await fs.readFile(file, 'utf8')).not.toContain('ещё строка');
+  });
+
+  it('conflictParts() после отметки отдаёт текст с диска и честный conflicted', async () => {
+    if (!gitAvailable) return;
+    const { work, file } = await makeConflict();
+    const service = serviceFor(work);
+
+    await fs.writeFile(file, 'resolved\n');
+    await service.markResolved(file);
+    const parts = await service.conflictParts(file);
+
+    // Именно то, что человек выбрал, — без открытия файла.
+    expect(parts.worktree).toBe('resolved\n');
+    expect(parts.conflicted).toBe(false);
+  });
 });
 
 describe('GitService: сводка по корням рабочей области', () => {

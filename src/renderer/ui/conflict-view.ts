@@ -24,6 +24,10 @@ export interface ConflictViewDeps {
   applyEdits: (path: string, edits: readonly TextEdit[]) => Promise<void>;
   /** Сохранить файл и отметить конфликт решённым (`git add`). */
   finish: (path: string) => Promise<void>;
+  /** Вернуть стороны и маркеры (`git checkout -m`); `force` — согласие потерять правку. */
+  remerge: (path: string, force: boolean) => Promise<void>;
+  /** Спросить человека, если пере-слияние затрёт его правку. */
+  confirm?: (message: string) => Promise<boolean>;
   openInEditor: (path: string) => void;
   /** Сообщение человеку: ошибка применения или итог разрешения. */
   notify?: (message: string, kind?: 'info' | 'warn' | 'error') => void;
@@ -76,7 +80,24 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
     { class: 'btn', type: 'button', onClick: () => void finishFile() },
     'Отметить решённым',
   );
-  const footer = h('div', { class: 'conflict-footer' }, applyButton, finishButton);
+  /**
+   * Пере-слияние нужно ИМЕННО после отметки: до неё оно ничего не меняет.
+   *
+   * `git add` убивает стадии 1–3 — и вместе с ними любую возможность переиграть.
+   * Кнопка возвращает маркеры и стороны, а `force` (второй шаг) — согласие
+   * потерять то, что дописали после отметки.
+   */
+  const remergeButton = h(
+    'button',
+    {
+      class: 'btn',
+      type: 'button',
+      title: 'Вернуть маркеры и стороны заново',
+      onClick: () => void remergeFile(false),
+    },
+    'Пере-слить',
+  );
+  const footer = h('div', { class: 'conflict-footer' }, applyButton, finishButton, remergeButton);
 
   const openButton = h(
     'button',
@@ -89,6 +110,7 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
     { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
     svgIcon('close', 14),
   );
+
   const header = h('div', { class: 'diff-header' }, svgIcon('file', 14), title, subtitle, openButton, closeButton);
   const element = h('div', { class: 'conflict-view' }, header, diffBody, blocksHost, footer);
   element.hidden = true;
@@ -99,6 +121,14 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
   let blocks: readonly ConflictBlock[] = [];
   const choices = new Map<number, ConflictChoice>();
   let busy = false;
+  /**
+   * Текущий результат — вместо сравнения сторон, когда сравнивать уже неча.
+   *
+   * После «отметить решённым» маркеров нет и разбирать нечего: вместо трёх колонок
+   * надо показать то, что легло в индекс. Без этого результат видели только открыв
+   * файл целиком — потому пере-слияние и было нужно вслепую.
+   */
+  let resultText: string | null = null;
 
   document.addEventListener('keydown', (event) => {
     if (open && event.key === 'Escape') close();
@@ -140,6 +170,7 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
         const choice = choices.get(block.index);
         return choice === 'both' && conflictChoiceResult(block, choice).ambiguous;
       });
+
       if (guessed.length > 0) {
         deps.notify?.(`Оба: стороны легли на одну строку (блок ${guessed[0]!.index + 1}) — проверь результат`, 'warn');
       }
@@ -151,15 +182,56 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
     await render(path);
   }
 
+  /**
+   * Отметить решённым — но НЕ закрывать экран.
+   *
+   * Раньше здесь был `close()`, и увидеть, что получилось, было негде: файл
+   * уходил в индекс, вкладка закрывалась, и результат человек читал в файле
+   * целиком. Теперь экран остаётся открытым и показывает то, что легло в индекс.
+   */
   async function finishFile(): Promise<void> {
     if (!path || busy) return;
     busy = true;
     try {
       await deps.finish(path);
       deps.notify?.(`Конфликт разрешён: ${path.split('/').pop() ?? path}`);
-      close();
+      await render(path);
     } catch (error) {
       deps.notify?.(error instanceof Error ? error.message : String(error), 'error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  /**
+   * Вернуть маркеры и стороны заново (`git checkout -m`).
+   *
+   * Второй шаг (`force`) — только после отказа main: там правка, которую потеряем.
+   * Согласие спрашиваем сами: молча терять работу человека нельзя.
+   */
+  async function remergeFile(force: boolean): Promise<void> {
+    if (!path || busy) return;
+    busy = true;
+    try {
+      await deps.remerge(path, force);
+      choices.clear();
+      deps.notify?.(`Пере-слито: ${path.split('/').pop() ?? path}`);
+      await render(path);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (force || !/(затрёт|потеряется|lost)/i.test(message)) {
+        deps.notify?.(message, 'error');
+      } else if (deps.confirm) {
+        const agreed = await deps.confirm(`${message}. Всё равно пере-слить?`);
+        await render(path);
+        if (agreed) {
+          busy = false;
+          await remergeFile(true);
+          return;
+        }
+      } else {
+        deps.notify?.(message, 'error');
+      }
     } finally {
       busy = false;
     }
@@ -203,6 +275,26 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
   /** Список блоков: у каждого — обе стороны и три кнопки выбора. */
   function renderBlocks(text: string, parts: GitConflictParts | null): void {
     clear(blocksHost);
+    // Отмечено решённым: блоков нет не потому, что нечего разбирать, а потому что
+    // разобрали. Молчать об этом нельзя — иначе «пусто» читается как поломка.
+    if (blocks.length === 0 && resultText !== null) {
+      const pre = h('pre', { class: 'conflict-result-text' });
+      pre.textContent = resultText === '' ? '(файл пуст)' : resultText;
+      blocksHost.appendChild(
+        h(
+          'div',
+          { class: 'conflict-result' },
+          h('p', { class: 'conflict-result-head' }, 'В индексе сейчас:'),
+          pre,
+          h(
+            'p',
+            { class: 'conflict-result-hint' },
+            'Не то? «Пере-слить» вернёт стороны и маркеры — разбор можно переиграть.',
+          ),
+        ),
+      );
+      return;
+    }
     if (blocks.length === 0) {
       blocksHost.appendChild(
         h(
@@ -282,16 +374,21 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
 
     // Стороны для сравнения берём из индекса: это и есть две конфликтующие версии.
     const parts = await deps.git.conflictParts(next).catch(() => null);
+    resultText = blocks.length === 0 && parts?.worktree !== undefined ? (parts.worktree ?? '') : null;
     if (parts) {
       if (!handle) handle = deps.createDiff(diffBody);
       handle.set({ language: languageFromPath(next), original: parts.ours, modified: parts.theirs });
     }
+    diffBody.hidden = resultText !== null;
 
     renderBlocks(text, parts);
     // «Применить» нужно, только когда есть что применять; «Отметить решённым» —
     // когда маркеров не осталось (иначе в индекс ушёл бы файл с маркерами).
     applyButton.disabled = choices.size === 0;
     finishButton.disabled = blocks.length > 0;
+    // Пере-слияние имеет смысл только там, где стороны ещё есть в индексе:
+    // без стадий 1–3 `git checkout -m` гарантированно откажет.
+    remergeButton.disabled = parts?.conflicted === false;
   }
 
   return {

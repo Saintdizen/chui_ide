@@ -742,6 +742,8 @@ module.exports = [
       return { base: text, ours: text, theirs: text };
     },
     'git.markResolved': (params) => setStaged([params.path], true),
+    // Пере-слияние в браузере нечего отыгрывать: держать нужно только контракт.
+    'git.remerge': (params) => setStaged([params.path], false),
     'git.branches': () => gitBranches.map((branch) => ({ ...branch })),
     'git.checkout': (params) => {
       gitState.repository.branch = params.name;

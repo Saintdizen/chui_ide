@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { RpcErrorCode } from '../../shared/api';
 import type { GitCommit, GitConflictParts, GitDiff } from '../../shared/api';
@@ -131,23 +132,38 @@ export async function conflictParts(ctx: HistoryContext, filePath: string): Prom
   if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
 
   const relative = relativeTo(repoRoot, filePath);
-  const [base, ours, theirs] = await Promise.all([
+  const [base, ours, theirs, worktree] = await Promise.all([
     fromRef(repoRoot, `:1:${relative}`),
     fromRef(repoRoot, `:2:${relative}`),
     fromRef(repoRoot, `:3:${relative}`),
+    readWorktree(repoRoot, relative),
   ]);
   const style = await conflictStyle(repoRoot);
 
   // Непустая база или наша сторона — стадии в индексе есть, файл не слит.
-  if (base !== '' || ours !== '') return { base, ours, theirs, style, conflicted: true };
+  if (base !== '' || ours !== '') return { base, ours, theirs, style, conflicted: true, worktree };
 
   const incoming = await incomingHead(repoRoot);
-  if (!incoming) return { base, ours, theirs, style, conflicted: false };
+  if (!incoming) return { base, ours, theirs, style, conflicted: false, worktree };
   const [head, other] = await Promise.all([
     showFile(`HEAD:${relative}`, repoRoot),
     showFile(`${incoming}:${relative}`, repoRoot),
   ]);
-  return { base, ours: head, theirs: other, style, conflicted: false };
+  return { base, ours: head, theirs: other, style, conflicted: false, worktree };
+}
+
+/**
+ * Рабочий файл целиком: то, что действительно получилось после разрешения.
+ *
+ * Читаем диском, а не из индекса: интересен именно «сухой остаток» — включая
+ * правку руками после отметки. `null` — файла нет (удалён одной из сторон).
+ */
+async function readWorktree(repoRoot: string, relative: string): Promise<string | null> {
+  try {
+    return await readFile(path.join(repoRoot, relative), 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 /**

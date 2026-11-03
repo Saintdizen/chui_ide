@@ -1044,6 +1044,22 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       if (outcome === 'conflict') throw new Error('Файл изменён на диске — сохраните вручную и отметьте решённым');
       await git.markResolved(path);
     },
+    remerge: async (path, force) => {
+      await git.remerge(path, force);
+      // Файл на диске сменил git — открытая вкладка должна это увидеть, иначе
+      // человек будет смотреть на свой текст, которого уже нет.
+      await reloadIfOpen(path);
+    },
+    confirm: async (message) => {
+      // Тот же диалог, что и при перечитывании с диска: вопрос «потеряешь работу?»
+      // должен выглядеть одинаково, где бы он ни встал.
+      const { confirmed } = await rpc.request('dialog.confirm', {
+        title: 'Пере-слияние',
+        message,
+        confirmLabel: 'Вернуть маркеры',
+      });
+      return confirmed;
+    },
     openInEditor: (path) => void openPath(path),
     notify: (message, kind) => showToast(message, toastKindFor(kind)),
   });
