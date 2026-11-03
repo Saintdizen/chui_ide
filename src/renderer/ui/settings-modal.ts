@@ -1346,7 +1346,14 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       if (!commands.has(command)) commands.set(command, { category: 'Прочее', title: command, keywords: '' });
     }
 
-    const entries: Array<{ element: HTMLElement; search: string; header: boolean; hasKey: boolean }> = [];
+    const entries: Array<{
+      element: HTMLElement;
+      search: string;
+      header: boolean;
+      hasKey: boolean;
+      /** Команда или `menu:…` — по нему ищем строку среди спорящих. */
+      rowId?: string;
+    }> = [];
     const bindings: BindingLike[] = [];
     let category = '';
     // Порядок — по категории, затем по названию: так заголовок группы стоит один раз,
@@ -1380,7 +1387,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           h('span', {}, info.title),
           comboControl(current, (combo) => write(command, combo, fallback)),
         );
-        entries.push({ element: row, search: searchText, header: false, hasKey: rendererKey });
+        entries.push({ element: row, search: searchText, header: false, hasKey: rendererKey, rowId: command });
       }
       // Клавиша пункта меню: отдельной строкой, потому что её держит система. Строка
       // есть и у пункта без встроенной клавиши — если человек задал её сам.
@@ -1395,8 +1402,19 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           h('span', { class: 'field-sub' }, `${info.title} — клавиша меню`),
           comboControl(current, (combo) => write(key, combo, fallback)),
         );
-        entries.push({ element: row, search: `${searchText} клавиша меню`, header: false, hasKey: true });
+        entries.push({ element: row, search: `${searchText} клавиша меню`, header: false, hasKey: true, rowId: key });
       }
+    }
+
+    // Что с чем столкнулось: одно сочетание у нескольких команд — почти всегда описка.
+    // Считаем ПОСЛЕ заполнения: `bindings` собирается в том же цикле выше.
+    const clashes = bindingConflicts(bindings);
+    const clashing = new Set(clashes.flatMap((item) => item.commands));
+    // Предупреждение общим списком «столкнулись Ctrl+K, Ctrl+J» заставляет искать
+    // спорящие строки глазами по сотне: человек должен видеть ОБЕ рядом.
+    for (const entry of entries) {
+      const id = entry.rowId;
+      if (id && clashing.has(id)) entry.element.classList.add('st-ui-clash');
     }
 
     const filter = h('input', {
@@ -1434,9 +1452,6 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     filter.addEventListener('input', applyFilter);
     applyFilter();
 
-    // Что с чем столкнулось: одно сочетание у нескольких команд — почти всегда описка.
-    const clashes = bindingConflicts(bindings);
-
     const head: Child[] = [
       filter,
       h(
@@ -1451,9 +1466,9 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       head.push(
         h(
           'div',
-          { class: 'field-hint' },
+          { class: 'field-hint st-ui-warn' },
           `Одно сочетание у нескольких команд: ${clashes.map((item) => item.combo).join(', ')}. ` +
-            'Сработает первое, остальным стоит задать другое.',
+            'Сработает первое, остальным стоит задать другое. Спорящие строки помечены ниже.',
         ),
       );
     }
