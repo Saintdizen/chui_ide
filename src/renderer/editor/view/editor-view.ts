@@ -25,6 +25,7 @@
  * (`line-layout.ts`, `viewport.ts`, `selection.ts`) и проверяется в тестах без окна.
  */
 
+import { wrapsByLineCount } from '../../../shared/large-file';
 import type { TextBuffer } from '../core/text-buffer';
 import { LineHighlighter } from '../highlight/highlighter';
 import { sharedTokens } from '../highlight/token-cache';
@@ -175,6 +176,15 @@ export class EditorView {
    * (`wrap-model.ts`).
    */
   private wrapOn = false;
+  /**
+   * Человек хочет перенос строк (настройка).
+   *
+   * Отдельно от `wrapOn` затем, что для большого файла перенос выключается
+   * сам: раскладка строк на знаки не влезает в разумное время (см.
+   * `shared/large-file.ts`). Держать в одном флаге значило бы, что смена
+   * документа на большой молча стирает настройку человека.
+   */
+  private wrapWanted = false;
   /** Таблица визуальных рядов с учётом переноса: строится, только когда перенос включён. */
   private readonly rows = new RowMap();
   /** Ключ, при котором построена таблица рядов (версия, ширина, табуляция, свёртка). */
@@ -959,6 +969,10 @@ export class EditorView {
     this.layoutCache = null;
     this.rowsKey = '';
     this.lineCount = buffer.lineCount;
+    // Новый документ — другой размер: перенос для большого файла не включаем.
+    // Флаг `wrapOn` держим честным, чтобы `wordWrap` не врал и строки не
+    // раскладывались на знаки у файла на сто тысяч строк.
+    this.wrapOn = this.wrapWanted && wrapsByLineCount(buffer.lineCount);
     // Диапазоны свёртки и схлопнутое состояние — прошлого файла: начинаем с чистого листа.
     this.folds.reset();
     this.highlighter.reset();
@@ -1049,16 +1063,29 @@ export class EditorView {
 
   /** Включить или выключить перенос длинных строк. */
   setWordWrap(on: boolean): void {
+    this.wrapWanted = on;
+    this.applyWrap();
+  }
+
+  /**
+   * Включён ли перенос строк НА САМОМ ДЕЛЕ.
+   *
+   * Большой файл перенос не получает даже при включённой настройке: иначе
+   * `ensureRows` разложил бы каждую его строку и окно замерло бы на открытии.
+   * Спрашивать надо вот это, а не намерение.
+   */
+  get wordWrap(): boolean {
+    return this.wrapOn;
+  }
+
+  /** Перенос разрешён для этого документа: настройка плюс размер по строкам. */
+  private applyWrap(): void {
+    const on = this.wrapWanted && wrapsByLineCount(this.buffer.lineCount);
     if (this.wrapOn === on) return;
     this.wrapOn = on;
     // Таблица рядов построена для прежнего режима — начинаем с чистого листа.
     this.rowsKey = '';
     this.rerender();
-  }
-
-  /** Включён ли перенос строк. */
-  get wordWrap(): boolean {
-    return this.wrapOn;
   }
 
   /** Ширина, до которой переносим строки — ширина поля прокрутки в пикселях. */

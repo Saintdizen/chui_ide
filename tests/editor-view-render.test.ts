@@ -38,6 +38,47 @@ function makeView(text: string, options: { gutter?: boolean } = {}) {
 }
 
 describe('отрисовка редактора', () => {
+  describe('перенос строк в большом файле', () => {
+    /**
+     * Найдено разбором: при включённом переносе `ensureRows` раскладывает на знаки
+     * КАЖДУЮ строку файла — массив на каждый знак, и все разом. На ста тысячах
+     * строк это миллионы чисел и пауза до первого кадра: окно замирает на открытии.
+     * Выше порога (`MAX_WRAP_LINES`) перенос выключается сам.
+     */
+    it('маленький файл получает перенос', () => {
+      const { view } = makeView('aaa\nbbb');
+      view.setWordWrap(true);
+      expect(view.wordWrap).toBe(true);
+    });
+
+    it('большой файл переноса не получает, даже если его включили', () => {
+      const { view } = makeView('a\n'.repeat(50_001));
+      view.setWordWrap(true);
+      expect(view.wordWrap).toBe(false);
+    });
+
+    it('открыли большой файл — включённый перенос не раскладывает его', () => {
+      // Переключение вкладки идёт через setBuffer, и там же решается перенос:
+      // иначе настройка, включённая на маленьком файле, повесила бы окно на большом.
+      const { view, buffer } = makeView('aaa\nbbb');
+      view.setWordWrap(true);
+      expect(view.wordWrap).toBe(true);
+      buffer.replace(0, buffer.length, 'a\n'.repeat(50_001));
+      view.setBuffer(buffer);
+      expect(view.wordWrap).toBe(false);
+    });
+
+    it('вернулись на маленький файл — перенос снова работает', () => {
+      // Намерение человека не стёрто: оно живёт в wrapWanted.
+      const { view } = makeView('a\n'.repeat(50_001));
+      view.setWordWrap(true);
+      expect(view.wordWrap).toBe(false);
+      const small = new TextBuffer('aaa\nbbb');
+      view.setBuffer(small);
+      expect(view.wordWrap).toBe(true);
+    });
+  });
+
   beforeEach(() => {
     installMiniDom();
   });

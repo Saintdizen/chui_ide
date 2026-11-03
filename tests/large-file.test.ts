@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { LARGE_FILE_BYTES, MAX_OPEN_BYTES, isReadOnlySize, withinOpenLimit } from '../src/shared/large-file';
+import {
+  LARGE_FILE_BYTES,
+  MAX_OPEN_BYTES,
+  MAX_WRAP_LINES,
+  isReadOnlySize,
+  withinOpenLimit,
+  wrapsByLineCount,
+} from '../src/shared/large-file';
 
 /**
  * Размер решает, как редактор обойдётся с файлом: до порога — обычная правка, выше —
@@ -32,5 +39,35 @@ describe('withinOpenLimit', () => {
 
   it('порог «только чтение» ниже жёсткого предела', () => {
     expect(LARGE_FILE_BYTES).toBeLessThan(MAX_OPEN_BYTES);
+  });
+});
+
+describe('wrapsByLineCount', () => {
+  /**
+   * Найдено разбором: при включённом переносе `ensureRows` раскладывал на знаки
+   * КАЖДУЮ строку файла — массив на каждый знак, и все разом. На ста тысячах
+   * строк это миллионы чисел и пауза до первого кадра: окно замирает.
+   */
+  it('до порога перенос разрешён', () => {
+    expect(wrapsByLineCount(MAX_WRAP_LINES)).toBe(true);
+  });
+
+  it('на строку сверх порога — уже нет', () => {
+    expect(wrapsByLineCount(MAX_WRAP_LINES + 1)).toBe(false);
+  });
+
+  it('очень длинный файл — тем более нет', () => {
+    expect(wrapsByLineCount(1_000_000)).toBe(false);
+  });
+
+  it('пустой и короткий файл — разрешён', () => {
+    expect(wrapsByLineCount(0)).toBe(true);
+    expect(wrapsByLineCount(1)).toBe(true);
+  });
+
+  it('порог по строкам ниже жёсткого предела по байтам', () => {
+    // Иначе файл, который ещё можно открыть, открывался бы с рывком: порог
+    // переноса обязан срабатывать раньше, чем файл перестанут брать вовсе.
+    expect(MAX_WRAP_LINES).toBeLessThan(MAX_OPEN_BYTES);
   });
 });
