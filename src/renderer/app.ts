@@ -2918,6 +2918,14 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // команд: оно переживает вызовы и умирает вместе с окном, как и сам макет.
   let zenSaved: ZenSnapshot | null = null;
 
+  // Миникарта на один раз: живой вид меняется, а `settings.json` не трогаем — там
+  // остаётся выбор человека. Живёт здесь, потому что больше никому не нужно.
+  let minimapNow: boolean | null = null;
+  const toggleMinimap = (): void => {
+    minimapNow = !(minimapNow ?? settings.editor.minimap);
+    editors.applyOptions({ minimap: minimapNow });
+  };
+
   // Вид: панели, док, разделение и дзен — `core/view-commands.ts`. Состояние остаётся
   // в раскладке и доке; команда только переключает и просит перерисовать кнопки.
   registerViewCommands(define, {
@@ -2935,6 +2943,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     openGitManager,
     isMarkdownPath,
     toggleMarkdownPreview,
+    toggleMinimap,
     regexTester,
     showToast,
   });
@@ -3438,6 +3447,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       ligatures: next.editor.fontLigatures,
       spellcheck: next.editor.spellcheck,
     });
+    // Миникарта в дзене спрятана, но настройку не отменяет: пока режим включён, живой
+    // правкой её не показать — панели пересоберутся при возвращении раскладки.
+    if (!layout.root.classList.contains('is-zen')) editors.applyOptions({ minimap: next.editor.minimap });
     // Ассоциации могли смениться: пересчитываем язык открытых файлов и документов
     // (по нему работают подсветка, подсказки и сервер) — иначе ждали бы переоткрытия.
     setFileAssociations(next.editor.fileAssociations);

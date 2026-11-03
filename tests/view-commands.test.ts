@@ -10,11 +10,21 @@ function setup(opts: { active?: { path: string } | null } = {}) {
   const log: string[] = [];
   const toasts: string[] = [];
   let zen: ZenSnapshot | null = null;
-  const visible = { sidebar: true, right: true, dock: true, editor: true };
+  /** Классы, реально висящие на корне: `contains` обязан отвечать правдой. */
+  const zenClass = new Set<string>();
+  const visible = { sidebar: true, right: true, dock: true, editor: true, minimap: true };
   const deps = {
     layout: {
       root: {
-        classList: { add: (c: string) => log.push(`class+${c}`), remove: (c: string) => log.push(`class-${c}`) },
+        classList: {
+          add: (c: string) => zenClass.add(c),
+          remove: (c: string) => zenClass.delete(c),
+          toggle: (c: string, on: boolean) => {
+            if (on) zenClass.add(c);
+            else zenClass.delete(c);
+          },
+          contains: (c: string) => zenClass.has(c),
+        },
       },
       get sidebarVisible() {
         return visible.sidebar;
@@ -48,6 +58,8 @@ function setup(opts: { active?: { path: string } | null } = {}) {
     dock: {
       visible: true,
       activeId: 'problems',
+      height: 0,
+      setHeight: (height: number) => log.push(`height:${height}`),
       show: (id: string) => log.push(`show:${id}`),
       hide: () => log.push('hide'),
       toggle: (id: string) => log.push(`toggle:${id}`),
@@ -67,12 +79,14 @@ function setup(opts: { active?: { path: string } | null } = {}) {
       splitEditor: () => log.push('split'),
       splitEditorGrid: () => log.push('grid'),
       closeSplit: () => log.push('closeSplit'),
+      setZen: (on: boolean) => log.push(`zen:${on}`),
     },
     openEditors: { active: opts.active ?? null },
     statusBar: { gitAnchor: null },
     openGitManager: (anchor: unknown) => log.push(`git:${String(anchor)}`),
     isMarkdownPath: (path: string) => path.endsWith('.md'),
     toggleMarkdownPreview: (path: string) => log.push(`preview:${path}`),
+    toggleMinimap: () => log.push(`minimap:${visible.minimap}`),
     regexTester: { open: () => log.push('regex') },
     showToast: (message: string, kind?: string) => toasts.push(`${kind ?? 'info'}:${message}`),
   } as unknown as ViewCommandDeps;
@@ -83,8 +97,8 @@ function setup(opts: { active?: { path: string } | null } = {}) {
 const run = (f: ReturnType<typeof setup>, id: string) => f.commands.get(id)!();
 
 describe('registerViewCommands', () => {
-  it('регистрирует пятнадцать команд вида', () => {
-    expect(setup().commands.size).toBe(15);
+  it('регистрирует шестнадцать команд вида', () => {
+    expect(setup().commands.size).toBe(16);
   });
 
   it('панель редактора — такой же тумблер, как боковая и нижняя', () => {
@@ -106,11 +120,11 @@ describe('registerViewCommands', () => {
   it('дзен прячет обвязку без сохранения макета и возвращает ровно прежнее', () => {
     const f = setup();
     run(f, 'view.zen');
-    expect(f.log).toEqual(['nopersist', 'sidebar:false', 'right:false', 'dock:false', 'class+is-zen', 'sync']);
+    expect(f.log).toEqual(['height:0', 'nopersist', 'sidebar:false', 'right:false', 'dock:false', 'zen:true', 'sync']);
     expect(f.zen()).toEqual({ sidebar: true, right: true, dock: true });
 
     run(f, 'view.zen');
-    expect(f.log.slice(6)).toEqual(['nopersist', 'sidebar:true', 'right:true', 'dock:true', 'class-is-zen', 'sync']);
+    expect(f.log.slice(7)).toEqual(['nopersist', 'sidebar:true', 'right:true', 'dock:true', 'zen:false', 'sync']);
     expect(f.zen()).toBeNull();
   });
 
@@ -121,6 +135,32 @@ describe('registerViewCommands', () => {
     run(f, 'view.zen');
     expect(f.log).toContain('right:false');
     expect(f.log).not.toContain('right:true');
+  });
+
+  it('дзен отдаёт место дока самому доку: спрятанный док своё место теряет', () => {
+    const f = setup();
+    // Высоту помнит сам док: спрятанный док своё место теряет, и открытый на выходе
+    // вернулся бы к высоте по умолчанию. Поэтому её запоминают при входе, а не при выходе.
+    run(f, 'view.zen');
+    expect(f.log.filter((line) => line.startsWith('height:'))).toEqual(['height:0']);
+    run(f, 'view.zen');
+    // Выход высоту не трогает: док вернётся на своё место сам.
+    expect(f.log.filter((line) => line.startsWith('height:'))).toEqual(['height:0']);
+  });
+
+  it('миникарта в дзене не показывается: команда отказывает и не трогает редактор', () => {
+    const f = setup();
+    run(f, 'view.zen');
+    run(f, 'view.toggleMinimap');
+    expect(f.log).not.toContain('minimap:true');
+    expect(f.toasts).toEqual(['error:Миникарта в режиме дзен не показывается']);
+  });
+
+  it('вне дзена миникарта переключается без записи настроек', () => {
+    const f = setup();
+    run(f, 'view.toggleMinimap');
+    expect(f.log).toEqual(['minimap:true']);
+    expect(f.toasts).toEqual([]);
   });
 
   it('тумблер нижней панели помнит вкладку и скрывает видимую', () => {

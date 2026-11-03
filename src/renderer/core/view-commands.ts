@@ -23,6 +23,10 @@ export interface ViewLayout {
 export interface ViewDock {
   readonly visible: boolean;
   readonly activeId: string | null;
+  /** Место, которое панель держала до дзена: ноль — не помнит. */
+  readonly height: number;
+  /** Запомнить место панели; ноль — забыть. */
+  setHeight(height: number): void;
   show(id: string): void;
   hide(): void;
   toggle(id: string): void;
@@ -44,12 +48,16 @@ export interface ViewCommandDeps {
     splitEditor(): void;
     splitEditorGrid(): void;
     closeSplit(): void;
+    /** Дзен-режим: редактор сам прячет миникарту и возвращает её на выходе. */
+    setZen(on: boolean): void;
   };
   openEditors: { readonly active: { readonly path: string } | null };
   statusBar: { readonly gitAnchor: HTMLElement | null };
   openGitManager(anchor: HTMLElement | null): void;
   isMarkdownPath(path: string): boolean;
   toggleMarkdownPreview(path: string): void;
+  /** Миникарта вкл/выкл на один раз: настройку `editor.minimap` не трогает. */
+  toggleMinimap(): void;
   regexTester: { open(): void };
   showToast(message: string, kind?: ToastKind, options?: ToastOptions): void;
 }
@@ -91,6 +99,17 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
   // Режим дзен: прячем всю обвязку — панели, нижний док, строку состояния и шапку — и
   // оставляем только редактор. Что было видно, ЗАПОМИНАЕМ и возвращаем на выходе;
   // спрятанный макет сохранять нельзя, поэтому прячем внутри `withoutPersist`.
+  //
+  // Высота дока и миникарта — тоже часть картинки: свёрнутый док теряет место,
+  // открытый на выходе вернулся бы к высоте по умолчанию. Обе помнит тот, кому
+  // принадлежат: док — свою высоту (`dock.height`), редактор — миникарту.
+  // Только сам класс: вид редактора на дзен отзывается сам (`editors.setZen`), а в
+  // шапке кнопки гасить незачем — она и так спрятана.
+  const setZen = (on: boolean): void => {
+    layout.root.classList.toggle('is-zen', on);
+    deps.editors.setZen(on);
+  };
+
   define({ id: 'view.zen', title: 'Режим дзен', category: 'Вид', keywords: ['zen', 'фокус'] }, () => {
     const saved = deps.getZen();
     if (saved) {
@@ -100,15 +119,17 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
         layout.setRightVisible(saved.right);
         layout.setDockVisible(saved.dock);
       });
-      layout.root.classList.remove('is-zen');
+      setZen(false);
     } else {
       deps.setZen({ sidebar: layout.sidebarVisible, right: layout.rightVisible, dock: layout.dockVisible });
+      // Свёрнутый док своё место теряет: перед тем как отдать его дзену, запомним.
+      dock.setHeight(dock.height);
       withoutPersist(() => {
         layout.setSidebarVisible(false);
         layout.setRightVisible(false);
         layout.setDockVisible(false);
       });
-      layout.root.classList.add('is-zen');
+      setZen(true);
     }
     syncViewButtons();
   });
@@ -120,6 +141,17 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
 
   define({ id: 'view.showOutline', title: 'Структура файла', category: 'Вид' }, () => {
     dock.toggle('outline');
+  });
+
+  // Миникарта — отдельно от настройки: настройка решает, как открывать файл, а команда
+  // (и палитра) мнёт её на один раз и обратно, не лезя в `settings.json`. В дзене
+  // миникарты нет ни в каком случае — там она противоречит самому смыслу режима.
+  define({ id: 'view.toggleMinimap', title: 'Миникарта', category: 'Вид', keybinding: 'Alt+M' }, () => {
+    if (layout.root.classList.contains('is-zen')) {
+      showToast('Миникарта в режиме дзен не показывается', 'error');
+      return;
+    }
+    deps.toggleMinimap();
   });
 
   define({ id: 'view.notebooks', title: 'Ячейки ноутбука', category: 'Вид' }, () => {

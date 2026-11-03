@@ -20,6 +20,9 @@ export interface DockView {
   refreshBadges(): void;
   readonly visible: boolean;
   readonly activeId: string | null;
+  /** Где была панель до дзена: по этому месту она и вернётся. */
+  readonly height: number;
+  setHeight(height: number): void;
   onVisibilityChange(listener: (visible: boolean) => void): void;
 }
 
@@ -45,6 +48,8 @@ export function createDock(): DockView {
   const listeners = new Set<(visible: boolean) => void>();
   let activeId: string | null = null;
   let visible = false;
+  /** Высота, которую панель отдала дзену: пока она не ноль, панель свою высоту помнит. */
+  let stash: number | null = null;
 
   const notify = (): void => {
     for (const listener of [...listeners]) listener(visible);
@@ -114,6 +119,12 @@ export function createDock(): DockView {
     },
     get activeId() {
       return activeId;
+    },
+    get height() {
+      return stash ?? 0;
+    },
+    setHeight(height) {
+      stash = height > 0 ? height : null;
     },
     onVisibilityChange(listener) {
       listeners.add(listener);

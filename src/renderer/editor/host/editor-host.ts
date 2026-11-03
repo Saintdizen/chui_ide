@@ -448,6 +448,10 @@ export class EditorHost {
   private readonly inline: InlineCompletions | null;
   /** Язык открытого файла: нужен подсказке и подсветке. */
   private languageId = 'plaintext';
+  /** Выбор человека по миникарте (`editor.minimap`): дзен прячет её, но не отменяет. */
+  private minimapWanted = false;
+  /** Дзен-режим включён: вид урезан до текста. */
+  private zen = false;
 
   /** Язык панели: подсветка, подсказки и слова — от него же. */
   private setLanguageOf(languageId: string): void {
@@ -678,6 +682,7 @@ export class EditorHost {
     });
     this.view.setWordWrap(options.wordWrap === true);
     this.view.setSmoothScroll(options.smoothScroll === true);
+    this.minimapWanted = options.minimap === true;
     if (options.fontSize !== undefined) this.view.setFontSize(options.fontSize);
     if (options.lineHeight !== undefined) this.view.setLineHeight(options.lineHeight);
     if (options.cursorStyle !== undefined) this.view.setCursorStyle(options.cursorStyle);
@@ -1178,6 +1183,7 @@ export class EditorHost {
     emacsMode?: boolean;
     ligatures?: boolean;
     spellcheck?: boolean;
+    zen?: boolean;
   }): void {
     if (options.tabSize !== undefined) {
       this.indentSize = options.tabSize;
@@ -1190,12 +1196,22 @@ export class EditorHost {
     if (options.cursorBlink !== undefined) this.view.setCursorBlink(options.cursorBlink);
     if (options.rulers !== undefined) this.view.setRulers(options.rulers);
     if (options.whitespace !== undefined) this.view.setWhitespace(normalizeWhitespaceMode(options.whitespace));
-    if (options.minimap !== undefined) this.view.setMinimap(options.minimap);
+    if (options.minimap !== undefined) {
+      this.minimapWanted = options.minimap;
+      if (!this.zen) this.view.setMinimap(options.minimap);
+    }
     if (options.wordWrap !== undefined) this.view.setWordWrap(options.wordWrap);
     if (options.smoothScroll !== undefined) this.view.setSmoothScroll(options.smoothScroll);
     if (options.vimMode !== undefined) this.input.setVimMode(options.vimMode);
     if (options.emacsMode !== undefined) this.input.setEmacsMode(options.emacsMode);
     if (options.ligatures !== undefined) this.view.setLigatures(options.ligatures);
+    // Дзен конкурирует с настройкой, а не перебивает её навсегда: выключить дзен
+    // значит вернуть то, что человек выбрал в настройках, поэтому миникарту
+    // переставляем в обе стороны.
+    if (options.zen !== undefined) {
+      this.zen = options.zen;
+      this.view.setMinimap(this.minimapWanted && !options.zen);
+    }
     // Проверку включили или выключили: отметки пересчитываем или снимаем.
     if (options.spellcheck !== undefined) this.refreshSpell();
   }

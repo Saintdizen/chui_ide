@@ -1073,6 +1073,11 @@ export class EditorWorkspace {
     for (const pane of this.panes) pane.setEmacsMode(on);
   }
 
+  /** Дзен-режим: панели прячут миникарту и возвращают её на выходе. */
+  setZen(on: boolean): void {
+    for (const pane of this.panes) pane.applyOptions({ zen: on });
+  }
+
   /** Раздать макрос всем панелям: повтор доступен в любой из них. */
   restoreMacro(steps: readonly MacroStep[]): void {
     for (const pane of this.panes) pane.restoreMacro(steps);
@@ -1094,6 +1099,7 @@ export class EditorWorkspace {
     emacsMode?: boolean;
     ligatures?: boolean;
     spellcheck?: boolean;
+    zen?: boolean;
   }): void {
     for (const pane of this.panes) pane.applyOptions(options);
   }
