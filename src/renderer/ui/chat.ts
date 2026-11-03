@@ -68,6 +68,7 @@ import { createRunInspector } from './run-inspector';
 import { createChatPersistence, newChatUid } from './chat-persistence';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
+import { announceMessage, announceTitle, runEnd, tailOf, type RunEnd, type RunOutcome } from './chat-notify';
 
 /**
  * Чем кончился ход.
@@ -145,6 +146,11 @@ export interface ChatDeps {
    */
   git?: GitModel;
   /**
+   * Прогон кончился, а человек мог и не смотреть на ленту. Необязательно: без него
+   * заметка всё равно выходит, только док и заголовок вкладки не подсвечиваются.
+   */
+  onRunEnd?(how: RunEnd, title: string): void;
+  /**
    * Показать файл в экране различий против HEAD. Нужен ревью правок: блок можно
    * разглядеть только там — в попапе изменений видна только одна цифра строк.
    * Необязательно: без него пункт просто не появляется.
@@ -211,6 +217,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   let nextId = 1;
   /** Беседа, которая сейчас генерирует: хостовые вызовы приходят именно от неё. */
   let streamingSession: ChatSession | null = null;
+  /**
+   * Чем кончился последний прогон: `setBusy(false)` зовётся и в `finally` стрима, где
+   * исхода уже не видно, а сказать в доке надо именно исход.
+   */
+  let streamingOutcome: RunOutcome | null = null;
   const active = (): ChatSession => sessions.find((session) => session.id === activeId) ?? sessions[0]!;
 
   const body = h('div', { class: 'chat-body' });
@@ -1929,6 +1940,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     jumpButton.hidden = true;
 
     const outcome = await stream.run(session, provider.id, model, sent);
+    // Исход запоминаем здесь: `setBusy(false)` зовётся в `finally` стрима, где его уже не видно.
+    streamingOutcome = outcome;
     // Название — после ответа и не в очередь отправки: человек не должен ждать
     // лишний запрос, чтобы увидеть ответ.
     void maybeNameSession(session);
@@ -1974,7 +1987,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     await send(next.text);
   }
 
-  function setBusy(value: boolean, _session: ChatSession = active()): void {
+  function setBusy(value: boolean, session: ChatSession = active()): void {
     busy = value;
     // Искра в кнопке «Информация о сессии»: цвет говорит, что ассистент работает.
     aiSparkle.classList.toggle('is-busy', busy);
@@ -1985,6 +1998,29 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     composer.setBusy(value);
     // Конец прогона — конец и паузе: кнопка не должна остаться в «продолжить».
     if (!value) composer.setPaused(false);
+    // Прогон кончился, а человек, может быть, ушёл в другое окно.
+    if (!value && session === streamingSession) announceRunEnd(session);
+  }
+
+  /**
+   * Сказать, что ответ готов, если человек на него не смотрел.
+   *
+   * Признак «не смотрел» — окно без фокуса или видна другая беседа. Молчать
+   * всегда нельзя (прогон идёт минуты), говорить всегда — значит перекрикивать
+   * ответ, который человек и так читает. Решение, что сказать, — в `chat-notify`:
+   * там же и правила про шум.
+   */
+  function announceRunEnd(session: ChatSession): void {
+    const how = runEnd(streamingOutcome ?? 'started');
+    if (!how) return;
+    const seen = document.hasFocus() && session.id === activeId;
+    const name = session.title?.trim() || 'Беседа';
+    const message = announceMessage(how, name, tailOf(session.history), seen);
+    if (!message) return;
+    // Заметка вместо системного окна: разрешений у ОС не спрашивает и не звенит.
+    showToast(message, how === 'failed' ? 'error' : 'info');
+    // Док и заголовок вкладки — на случай, если человек смотрит на окно, но не на ленту.
+    deps.onRunEnd?.(how, announceTitle(how, name));
   }
 
   /**
