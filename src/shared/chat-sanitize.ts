@@ -101,6 +101,13 @@ export function sanitizeConversations(raw: unknown): ChatConversation[] {
     // Набор инструментов беседы. Правило общее с настройками (`sanitizeToolPreset`):
     // незнакомое значение — не мусор в файле, а повод взять общий набор.
     if (typeof value.toolPreset === 'string') conversation.toolPreset = sanitizeToolPreset(value.toolPreset);
+    // Черновик. Поле в файл пишется (`serializeSession`), но белый список выше его
+    // терял: набранный вопрос оставался в памяти и исчезал при первом закрытии окна.
+    // Ограничение — то же, что у сообщения: черновик — это несохранённый вопрос, и
+    // держать в нём больше, чем влезает в вопрос, нечем.
+    if (typeof value.draft === 'string' && value.draft) {
+      conversation.draft = clampString(value.draft, '', MAX_CONTENT_CHARS);
+    }
 
     used += conversationSize(messages);
     result.push(conversation);

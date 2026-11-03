@@ -651,6 +651,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /** Закрытие вкладки. Последнюю не закрываем — вместо неё появляется пустая. */
   function closeSession(id: number): void {
+    // Черновик уходящей вкладки забираем ДО всего остального. Поле ввода одно на
+    // всё окно: без этого набранное в закрываемой беседе стиралось бы молча.
+    const leaving = sessions.find((session) => session.id === id);
+    if (leaving) leaving.draft = input.value;
+
     if (sessions.length === 1) {
       newChat();
       return;
@@ -767,6 +772,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         // Перенесённый через сжатие контекст: следующий пересказ не должен потерять
         // присланные файлы.
         session.kept = conversation.keptAttachments;
+        // Черновик: окно, закрытое с набранным вопросом, открывается с ним же.
+        session.draft = conversation.draft ?? '';
 
         renderHistory(session);
       }
@@ -2149,6 +2156,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   function newChat(): void {
     stop();
+    // Набранное в прежней беседе остаётся в ней: поле одно на всё окно, и без этой
+    // строки новая вкладка стирала бы чужой черновик.
+    active().draft = input.value;
     const session = createSession();
     for (const item of sessions) item.thread.hidden = item.id !== session.id;
     activeId = session.id;

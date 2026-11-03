@@ -48,7 +48,7 @@ describe('serializeSession', () => {
     expect(typeof conversation.updatedAt).toBe('number');
   });
 
-  it('лента DOM, правки агента и черновик в файл не уходят', () => {
+  it('лента DOM и правки агента в файл не уходят, а черновик — уходит', () => {
     const session = makeSession({
       history: [user('вопрос')],
       draft: 'недописанный вопрос',
@@ -56,7 +56,11 @@ describe('serializeSession', () => {
       files: [{ kind: 'created', path: '/p/b.ts' }],
     });
     const conversation = serializeSession(session);
-    expect(Object.keys(conversation).sort()).toEqual(['messages', 'title', 'uid', 'updatedAt']);
+    // Раньше здесь черновика не было и он терялся при перезапуске. Теперь он в
+    // файле — это нарочно: окно, закрытое с набранным вопросом, не должно терять
+    // текст молча. Лента DOM и правки — по-прежнему не место в файле беседы.
+    expect(Object.keys(conversation).sort()).toEqual(['draft', 'messages', 'title', 'uid', 'updatedAt']);
+    expect(conversation.draft).toBe('недописанный вопрос');
   });
 
   it('сохраняет то, чем беседа живёт после перезапуска: имя, вызов, оценку', () => {
