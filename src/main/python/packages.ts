@@ -145,8 +145,11 @@ export async function missingModules(
 }
 
 /**
- * Свои модули проекта: `app.py` в корне и папки с `__init__.py` (корень и `src`).
- * Без этого локальный `import app` выглядел бы как неустановленная библиотека.
+ * Свои модули проекта: `app.py` в корне и пакеты (корень и `src`).
+ *
+ * Пакет — любой каталог, а не только с `__init__.py`: в Python 3 каталог без него
+ * тоже импортируется (namespace-пакет). Требовать `__init__.py` значило бы
+ * показывать «не установлен» на `import section` из собственного проекта.
  */
 async function projectModules(root: string): Promise<ReadonlySet<string>> {
   const names = new Set<string>();
@@ -157,12 +160,8 @@ async function projectModules(root: string): Promise<ReadonlySet<string>> {
         names.add(entry.name.slice(0, -3));
         continue;
       }
-      if (!entry.isDirectory()) continue;
-      const init = await fs
-        .access(path.join(dir, entry.name, '__init__.py'))
-        .then(() => true)
-        .catch(() => false);
-      if (init) names.add(entry.name);
+      // Каталог — уже пакет: в Python 3 `__init__.py` не обязателен.
+      if (entry.isDirectory()) names.add(entry.name);
     }
   }
   return names;
