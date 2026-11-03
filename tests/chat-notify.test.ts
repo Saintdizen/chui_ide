@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { announceMessage, announceTitle, runEnd, tailOf } from '../src/renderer/ui/chat-notify';
+import { announceMessage, announceTitle, runEnd, shouldRefocus, tailOf } from '../src/renderer/ui/chat-notify';
 
 /**
  * Конец прогона: заметка вместо системного окна.
@@ -59,5 +59,30 @@ describe('уведомление о конце прогона', () => {
     ];
     expect(tailOf(history)).toBe('ответ');
     expect(tailOf([])).toBe('');
+  });
+});
+
+describe('фокус в поле после ответа', () => {
+  const free = { typed: false, menuOpen: false, windowFocused: true };
+
+  it('возвращается после готового ответа и после ошибки', () => {
+    expect(shouldRefocus('done', free)).toBe(true);
+    expect(shouldRefocus('failed', free)).toBe(true);
+  });
+
+  it('после остановки — нет: человек сам только что нажал стоп', () => {
+    expect(shouldRefocus('stopped', free)).toBe(false);
+  });
+
+  it('не забирает фокус, если человек уже печатает', () => {
+    expect(shouldRefocus('done', { ...free, typed: true })).toBe(false);
+  });
+
+  it('не сбрасывает раскрытое меню', () => {
+    expect(shouldRefocus('done', { ...free, menuOpen: true })).toBe(false);
+  });
+
+  it('не работает в окне без фокуса: там его всё равно никто не увидит', () => {
+    expect(shouldRefocus('done', { ...free, windowFocused: false })).toBe(false);
   });
 });

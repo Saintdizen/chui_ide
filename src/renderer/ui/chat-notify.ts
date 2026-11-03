@@ -61,6 +61,20 @@ export function announceMessage(how: RunEnd, chatTitle: string, tail: string, se
 }
 
 /**
+ * Возвращать ли фокус в поле вопроса после ответа.
+ *
+ * Фокус можно ЗАБРАТЬ из редактора, но нельзя — из поля, где человек сам сейчас
+ * пишет (он успел начать следующий вопрос), и из раскрытого меню: переход сбросил бы
+ * его выбор. Окно без фокуса — тоже «нет»: там фокус никому не виден.
+ */
+export function shouldRefocus(how: RunEnd, context: { typed: boolean; menuOpen: boolean; windowFocused: boolean }): boolean {
+  if (context.typed) return false;
+  if (context.menuOpen) return false;
+  if (!context.windowFocused) return false;
+  return how === 'done' || how === 'failed';
+}
+
+/**
  * Последний абзац ответа — та самая строка заметки.
  *
  * Берём последнее сообщение ассистента: у оборванного прогона конца нет, а у

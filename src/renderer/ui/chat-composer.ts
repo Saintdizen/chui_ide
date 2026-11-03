@@ -83,6 +83,14 @@ export interface ChatComposerView {
   setModel(providerLabel: string, model: string): void;
   /** Доступность усилия размышления — по возможностям выбранной модели. */
   setEffort(effort: ReasoningEffort, disabled: boolean, title: string): void;
+  /**
+   * Вернуть фокус в поле вопроса.
+   *
+   * Отдельным вызовом, а не `input.focus()` снаружи: поле живёт здесь, а снаружи
+   * лезут в `input` только ради текста. Выделение НЕ ставим: человек после ответа
+   * чаще набирает новое, чем правит старое, но курсор в конце — чтобы не потерять в тексте.
+   */
+  focusInput(): void;
   /** Набор инструментов: хранят его настройки, композер только показывает выбор. */
   setToolPreset(preset: ToolPresetId): void;
 }
@@ -348,6 +356,18 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
   }
 
   /**
+   * Фокус в поле — с курсором в конце, но без выделения.
+   *
+   * `preventScroll` внутри `focus`: панель может быть в длинной ленте, и браузер
+   * иначе дёрнул бы её к полю, потеряв место, где человек читал ответ.
+   */
+  function focusInput(): void {
+    input.focus({ preventScroll: true });
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }
+
+  /**
    * Сменить режим не пальцем по селекту, а по ходу дела: «утвердить план» переводит
    * панель из «Плана» в «Агента». Идём через тот же `syncMode`, что и селект, — иначе
    * значки и подписи разошлись бы с правдой.
@@ -425,5 +445,6 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     setModel,
     setEffort,
     setToolPreset,
+    focusInput,
   };
 }

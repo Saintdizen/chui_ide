@@ -67,8 +67,9 @@ import { createChatTabs, type ChatSearchHit } from './chat-tabs';
 import { createRunInspector } from './run-inspector';
 import { createChatPersistence, newChatUid } from './chat-persistence';
 import { showContextMenu } from './context-menu';
+import { isPopupOpen } from './popup-menu';
 import { showToast } from './toast';
-import { announceMessage, announceTitle, runEnd, tailOf, type RunEnd, type RunOutcome } from './chat-notify';
+import { announceMessage, announceTitle, runEnd, shouldRefocus, tailOf, type RunEnd, type RunOutcome } from './chat-notify';
 
 /**
  * Чем кончился ход.
@@ -1999,28 +2000,34 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Конец прогона — конец и паузе: кнопка не должна остаться в «продолжить».
     if (!value) composer.setPaused(false);
     // Прогон кончился, а человек, может быть, ушёл в другое окно.
-    if (!value && session === streamingSession) announceRunEnd(session);
+    if (!value && session === streamingSession) finishRun(session);
   }
 
   /**
-   * Сказать, что ответ готов, если человек на него не смотрел.
+   * Прогон кончился: сказать об этом, если человек не смотрел, и вернуть фокус.
    *
-   * Признак «не смотрел» — окно без фокуса или видна другая беседа. Молчать
-   * всегда нельзя (прогон идёт минуты), говорить всегда — значит перекрикивать
-   * ответ, который человек и так читает. Решение, что сказать, — в `chat-notify`:
-   * там же и правила про шум.
+   * Два разных повода, одно место — чтобы порядок был один: сперва заметка, потом
+   * фокус. Фокус в поле — последний акт заботы: следующее действие после ответа —
+   * чаще всего новый вопрос, и лишний клик по полю бесит сильнее, чем кажется.
    */
-  function announceRunEnd(session: ChatSession): void {
+  function finishRun(session: ChatSession): void {
     const how = runEnd(streamingOutcome ?? 'started');
     if (!how) return;
-    const seen = document.hasFocus() && session.id === activeId;
+    const focused = document.hasFocus();
+    const seen = focused && session.id === activeId;
     const name = session.title?.trim() || 'Беседа';
     const message = announceMessage(how, name, tailOf(session.history), seen);
-    if (!message) return;
-    // Заметка вместо системного окна: разрешений у ОС не спрашивает и не звенит.
-    showToast(message, how === 'failed' ? 'error' : 'info');
-    // Док и заголовок вкладки — на случай, если человек смотрит на окно, но не на ленту.
-    deps.onRunEnd?.(how, announceTitle(how, name));
+    if (message) {
+      // Заметка вместо системного окна: разрешений у ОС не спрашивает и не звенит.
+      showToast(message, how === 'failed' ? 'error' : 'info');
+      // Док и заголовок вкладки — если человек смотрит на окно, но не на ленту.
+      deps.onRunEnd?.(how, announceTitle(how, name));
+    }
+    // Печатать человек начал, пока шёл ответ? Значит поле ему мешать не надо: он в нём.
+    const typed = session.draft.trim().length > 0;
+    if (shouldRefocus(how, { typed, menuOpen: isPopupOpen(), windowFocused: focused })) {
+      composer.focusInput();
+    }
   }
 
   /**
