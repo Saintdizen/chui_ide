@@ -67,6 +67,7 @@ import { countLines, plural, snippetFor, titleFrom } from './chat-text';
 import { createChatTabs, type ChatSearchHit } from './chat-tabs';
 import { createRunInspector } from './run-inspector';
 import { createChatPersistence, newChatUid } from './chat-persistence';
+import { chatExportFileName, chatToMarkdown } from '../../shared/chat-export';
 import { showContextMenu } from './context-menu';
 import { isPopupOpen } from './popup-menu';
 import { showToast } from './toast';
@@ -510,10 +511,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     focusInput: () => input.focus(),
   });
 
-  /** Контекстное меню вкладки беседы: закрыть её. */
+  /** Контекстное меню вкладки беседы: выгрузить в .md или закрыть. */
   function openTabMenu(id: number, event: MouseEvent): void {
     showContextMenu(
       [
+        {
+          label: 'Экспорт в Markdown…',
+          onSelect: () => void exportSession(id),
+        },
         {
           label: 'Закрыть беседу',
           danger: true,
@@ -523,6 +528,45 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       event.clientX,
       event.clientY,
     );
+  }
+
+  /**
+   * Экспорт беседы в `.md`: путь спрашивает main (`chat.export`), файл пишет он же.
+   *
+   * Берём `transcript`, а не `history`: после сжатия в контексте осталось резюме,
+   * и выгружать оттуда — значит отдать файл, где половины разговора нет. Именно ту
+   * половину и хотят показать.
+   */
+  async function exportSession(id: number): Promise<void> {
+    const session = sessions.find((item) => item.id === id);
+    if (!session) return;
+
+    const messages = session.transcript.length > 0 ? session.transcript : session.history;
+    if (messages.length === 0) {
+      showToast('В беседе нечего выгружать', 'info');
+      return;
+    }
+
+    // Дата — в экспорте и в имени файла: два выгруза одной беседы за разные дни
+    // не должны затирать друг друга в папке загрузок.
+    const today = new Date().toISOString().slice(0, 10);
+    const contents = chatToMarkdown(messages, {
+      title: session.title,
+      date: today,
+      model: currentModel(),
+      workspace: deps.workspace.root ?? undefined,
+    });
+
+    try {
+      const result = await deps.rpc.request('chat.export', {
+        contents,
+        name: chatExportFileName(session.title, today),
+      });
+      // Отмена в диалоге — не ошибка и не повод для тоста.
+      if (result.path) showToast(`Беседа выгружена: ${result.path}`, 'info');
+    } catch (error) {
+      showToast(`Не удалось выгрузить беседу: ${String(error)}`, 'error');
+    }
   }
 
   /** Поиск по беседам: одна строка на беседу, в которой нашлось совпадение. */

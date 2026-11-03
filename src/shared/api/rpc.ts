@@ -788,6 +788,8 @@ export interface ChuiMethods {
   /** Импорт набора значков дерева из JSON-файла: правила «маска → значок». */
   'explorer.importBadges': { params: void; result: { settings: Settings; count: number } };
   'theme.export': { params: { contents: string; name: string }; result: { path: string | null } };
+  /** Беседа в Markdown: содержимое собирает renderer, main спрашивает путь и пишет файл. */
+  'chat.export': { params: { contents: string; name: string }; result: { path: string | null } };
   'theme.clear': { params: void; result: Settings };
 
   /* Языковые серверы: синхронизация документа и перезапуск. */

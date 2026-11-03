@@ -45,6 +45,17 @@ export function registerDialogMethods(router: RpcRouter, deps: RpcServices): voi
     return { path: result.filePath };
   });
 
+  router.register('chat.export', async (params: ParamsOf<'chat.export'>, ctx) => {
+    const result = await dialog.showSaveDialog(senderWindow(ctx), {
+      title: 'Экспорт беседы',
+      defaultPath: params.name,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (result.canceled || !result.filePath) return { path: null };
+    await fs.writeFile(result.filePath, params.contents, 'utf8');
+    return { path: result.filePath };
+  });
+
   router.register('dialog.pickFolder', async (params: ParamsOf<'dialog.pickFolder'>) => {
     const result = await dialog.showOpenDialog({
       title: params.title ?? 'Открыть проект',
