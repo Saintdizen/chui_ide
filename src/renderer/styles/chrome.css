@@ -1382,6 +1382,12 @@ textarea {
   background: var(--element_background_hover);
 }
 
+/* Поле с мусором вместо числа: красная рамка и подсказка вместо молчаливой
+   подмены на минимум. Заголовок ставит само поле (см. numberInput). */
+.field-input.is-invalid {
+  border-color: var(--text_color_error);
+}
+
 .select > svg {
   flex: 0 0 auto;
   margin-left: auto;

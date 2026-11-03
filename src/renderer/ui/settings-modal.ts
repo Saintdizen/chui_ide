@@ -47,6 +47,7 @@ function presetOf(provider: AiProviderView): ProviderPreset {
   };
 }
 import { AUTO_SAVE_LABELS, AUTO_SAVE_MODES, normalizeAutoSaveMode } from '../../shared/auto-save';
+import { parseFieldNumber, type FieldNumber } from './number-field';
 import { CURSOR_STYLES, CURSOR_STYLE_LABELS, MAX_LINE_HEIGHT, normalizeCursorStyle } from '../../shared/cursor-style';
 import { serializeThemeFile } from '../../shared/theme-file';
 import { normalizeRulers, rulersToText } from '../../shared/rulers';
@@ -273,13 +274,33 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   ): HTMLInputElement {
     const input = h('input', { class: 'field-input', type: 'number', min, max, step });
     input.value = String(value);
+    /** Проверить поле и покрасить его: правило разбора живёт в `parseFieldNumber`. */
+    const check = (): FieldNumber => {
+      // Пустую строку браузер отдаёт и для «12abc» — поэтому смотрим `badInput`.
+      const parsed = input.validity.badInput
+        ? { ok: false as const, hint: 'Ожидалось число' }
+        : parseFieldNumber(input.value, min, max);
+      input.classList.toggle('is-invalid', !parsed.ok);
+      input.setAttribute('aria-invalid', parsed.ok ? 'false' : 'true');
+      input.setCustomValidity(parsed.ok ? '' : parsed.hint);
+      input.title = parsed.ok ? '' : parsed.hint;
+      return parsed;
+    };
+
     input.addEventListener('change', () => {
-      const next = Number(input.value);
-      if (!Number.isFinite(next)) {
-        input.value = String(value);
+      const parsed = check();
+      if (!parsed.ok) {
+        // Текст оставляем как есть — пусть видно, что именно не приняли, — и ещё
+        // говорим вслух: красная рамка не объясняет, чего ждут.
+        showToast(parsed.hint, 'error');
         return;
       }
-      onCommit(Math.min(Math.max(next, min), max));
+      onCommit(parsed.value);
+    });
+
+    // Пока человек печатает, не ругаемся: половина числа — ещё не мусор.
+    input.addEventListener('input', () => {
+      if (input.validity.valid) check();
     });
     return input;
   }
@@ -758,10 +779,21 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
       field(
         'Потолок расхода на беседу, $',
-        textInput(
-          String(ai.chatBudgetUsd || ''),
-          (value) => void patch({ ai: { chatBudgetUsd: Number(value.replace(',', '.')) || 0 } }),
-        ),
+        textInput(String(ai.chatBudgetUsd || ''), (value) => {
+          const text = value.trim().replace(',', '.');
+          // Пусто — это осознанное «без потолка», а мусор — нет: раньше и то, и другое
+          // молча становилось нулём, и настройка как будто принимала опечатку.
+          if (text === '') {
+            void patch({ ai: { chatBudgetUsd: 0 } });
+            return;
+          }
+          const next = Number(text);
+          if (!Number.isFinite(next) || next < 0) {
+            showToast('Потолок расхода — число в долларах; пустое поле — без потолка', 'error');
+            return;
+          }
+          void patch({ ai: { chatBudgetUsd: next } });
+        }),
       ),
       h(
         'div',
