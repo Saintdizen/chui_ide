@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  describeProblem,
   nextProblem,
   orderProblems,
   ProblemNavigation,
@@ -119,6 +120,58 @@ describe('связка перехода по пометкам', () => {
     navigation.next();
     expect(revealed).toEqual([]);
     expect(notices).toEqual(['Пометок нет']);
+  });
+
+  it('фраза о пустоте одна на оба направления', () => {
+    // Раньше на «назад» отвечали «Пометки нет»: в единственном числе, будто речь о
+    // конкретной пометке. Два разных предложения об одном и том же читались как две
+    // разные беды.
+    const { navigation, notices } = setup([], { path: '/a.ts', line: 1, column: 1 });
+    navigation.next();
+    navigation.previous();
+    expect(notices).toEqual(['Пометок нет', 'Пометок нет']);
+  });
+
+  it('после перехода сообщает, куда приехали и что там', () => {
+    // Курсор прыгает молча — по подчёркиванию под ним не отличить ошибку от придирки
+    // линтера, особенно если строка короткая.
+    const { navigation, notices } = setup([problem('/src/a.ts', 2)], null);
+    navigation.next();
+    expect(notices).toEqual(['a.ts:2:1 · ошибка (lsp): сообщение']);
+  });
+
+  it('место в сообщении — с единицы, как в списке проблем', () => {
+    const { navigation, notices } = setup([problem('/a.ts', 7, 1, 'warning')], null);
+    navigation.next();
+    expect(notices[0]).toMatch(/^a\.ts:7:1 · предупреждение/);
+  });
+
+  it('уровень важности называется словом, а не значком', () => {
+    // В тосте значков нет — только текст, поэтому `severity` переводится.
+    const { navigation, notices } = setup([problem('/a.ts', 1, 1, 'info')], null);
+    navigation.next();
+    expect(notices[0]).toMatch(/ · сведения/);
+  });
+
+  it('сообщение берёт только имя файла, а не весь путь', () => {
+    // Полный путь в тосте не помещается и всё равно не помогает: файл уже открыт.
+    const { navigation, notices } = setup([problem('/очень/длинный/путь/a.ts', 3)], null);
+    navigation.next();
+    expect(notices[0]?.startsWith('a.ts:3:1')).toBe(true);
+  });
+
+  it('без источника скобок в сообщении нет', () => {
+    // `problem()` всегда кладёт источник; здесь проверяем саму сборку строки.
+    // `source` в типе обязателен, но пустой: скобки с источником тогда не рисуются.
+    const item: DiagnosticItem = {
+      path: '/a.ts',
+      line: 3,
+      column: 1,
+      severity: 'info',
+      message: 'лишняя точка с запятой',
+      source: '',
+    };
+    expect(describeProblem(item)).toBe('a.ts:3:1 · сведения: лишняя точка с запятой');
   });
 
   it('без сообщения (оно необязательно) отсутствие пометок не роняет', () => {

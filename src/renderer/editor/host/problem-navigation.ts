@@ -93,16 +93,40 @@ export class ProblemNavigation {
   previous(): void {
     this.go('previous');
   }
-
   private go(direction: ProblemDirection): void {
     const problems = this.deps.problems();
     const target = nextProblem(problems, this.deps.position(), direction);
     if (!target) {
-      this.deps.notice?.(direction === 'next' ? 'Пометок нет' : 'Пометок нет');
+      // Одна формулировка на оба направления: пометок нет — неважно, куда шли.
+      this.deps.notice?.('Пометок нет');
       return;
     }
     this.deps.reveal({ path: target.path, line: target.line, column: target.column });
+    // После перехода говорим, КУДА приехали и что там: иначе курсор прыгает по файлу
+    // молча, и человек не отличает ошибку от предупреждения — только по подчёркиванию под
+    // курсором, которого на другой строке может и не быть. Место считаем от единицы, как
+    // договаривались в списке проблем: `line` у пометки — с единицы уже здесь.
+    this.deps.notice?.(describeProblem(target));
   }
+}
+
+/** Название места для сообщения: имя файла и `строка:столбец`. */
+function describeSpot(path: string, line: number, column: number): string {
+  const name = path.split(/[\\/]/).pop() ?? path;
+  return `${name}:${line}:${column}`;
+}
+
+/**
+ * Короткая строка о пометке для тоста: место, уровень, текст и источник языка.
+ *
+ * Важность — словом, а не значком: тост — текстовая строка, а цветных значков в нём нет.
+ * Источник (`ts`, `eslint`) — в скобках, потому что по нему один и тот же текст читается
+ * по-разному (ошибка компилятора или придирка линтера).
+ */
+export function describeProblem(item: DiagnosticItem): string {
+  const level = item.severity === 'error' ? 'ошибка' : item.severity === 'warning' ? 'предупреждение' : 'сведения';
+  const source = item.source ? ` (${item.source})` : '';
+  return `${describeSpot(item.path, item.line, item.column)} · ${level}${source}: ${item.message}`;
 }
 
 /** Сравнение пометок как позиций: файл, строка, столбец. */
