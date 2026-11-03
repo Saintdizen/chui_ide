@@ -50,7 +50,7 @@ import { createChangesPanel } from './chat-changes';
 import { archivePlan, createPlanPanel } from './chat-plan';
 import { createGoalPanel } from './chat-goal';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
-import { scrollTargetFor } from './chat-session';
+import { contextIndexOf, scrollTargetFor } from './chat-session';
 import type { ChatSession } from './chat-session';
 import type { CodebasePlace } from '../../shared/meaning-search';
 import { hunkAtLine } from '../../shared/hunk-lines';
@@ -1893,15 +1893,34 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     messageEl.appendChild(actions);
   }
 
-  /** «Править»: отрезать этот вопрос и всё после него, вернуть текст в поле ввода. */
-  function editUserMessage(session: ChatSession, index: number, text: string): void {
+  /**
+   * «Править»: отрезать этот вопрос и всё после него, вернуть текст в поле ввода.
+   *
+   * `threadIndex` — номер в ЛЕНТЕ (`transcript`). Раньше он же шёл в `history`, а
+   * после сжатия беседы это разные массивы: правка отрезала не тот вопрос и
+   * ломала контекст (вопрос человека улетал, а резюме оставалось). Теперь номер
+   * переводится через `contextIndexOf`.
+   */
+  function editUserMessage(session: ChatSession, threadIndex: number, text: string): void {
     if (busy) {
       showToast('Дождитесь ответа или остановите генерацию');
       return;
     }
-    if (index < 0 || index >= session.history.length) return;
+    const index = contextIndexOf(session.transcript, session.history, threadIndex);
+    if (index < 0) {
+      // Вопрос уже за резюме сжатия: в контексте его нет, резать нечего. Вернуть
+      // текст в поле всё равно полезно — человек хотел его поправить.
+      showToast('Этот вопрос уже вне контекста: беседа сжата, поправка не отрежет историю');
+      input.value = text;
+      session.draft = text;
+      input.focus();
+      return;
+    }
 
     session.history = session.history.slice(0, index);
+    // Ленту режем тем же номером — по `threadIndex`, не по индексу контекста: без
+    // этого переписанный вопрос оставался бы на экране, а модель его уже не видит.
+    session.transcript = session.transcript.slice(0, threadIndex);
     session.usage = undefined;
     // После обрезки продолжение другое: по старому расходу про кеш не судим.
     session.usageFresh = false;

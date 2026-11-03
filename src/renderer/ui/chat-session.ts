@@ -172,3 +172,55 @@ export interface QueuedPrompt {
 export function scrollTargetFor(next: ChatSession): number | 'end' {
   return next.scrollTop ?? 'end';
 }
+
+/**
+ * Где в контексте (`history`) лежит вопрос, который в ленте (`transcript`) стоит
+ * на позиции `index`. `-1` — этого вопроса в контексте нет.
+ *
+ * Зачем это нужно. Ленту рисуют по `transcript`, а модель получает `history`, и
+ * после сжатия беседы это РАЗНЫЕ массивы: в `history` остаётся резюме и пара
+ * служебных сообщений, а `transcript` хранит всю переписку. Кнопка «Править»
+ * получала номер из ленты и резала им контекст — то есть отрезала не тот вопрос.
+ *
+ * Считаем по содержимому, а не арифметикой: у сообщений нет общих идентификаторов,
+ * и любая формула «индекс плюс сдвиг» не выдержит очереди и служебных вставок.
+ *
+ * Повторения считаются с КОНЦА ленты. Это тонкость, на которой легко ошибиться:
+ * сжатие съедает только начало переписки, поэтому повтор, который в ленте идёт
+ * вторым, в контексте может оказаться ЕДИНСТВЕННЫМ. Счёт же от начала отсёк бы
+ * пропавшее первое вхождение и вернул «не найдено» — человеку сказали бы, что
+ * правка невозможна, хотя она возможна.
+ *
+ * Отсюда же следствие: «тот же вопрос» — это и текст, и картинки. Два «глянь»
+ * с разными снимками — разные вопросы.
+ */
+export function contextIndexOf(
+  transcript: readonly ChatMessage[],
+  history: readonly ChatMessage[],
+  index: number,
+): number {
+  if (index < 0 || index >= transcript.length) return -1;
+  const target = transcript[index]!;
+  // Картинки — часть вопроса: два «глянь» с разными снимками — это два разных
+  // вопроса, и правка второго не должна попадать в первый.
+  const sameAs = (message: ChatMessage): boolean =>
+    message.role === 'user' &&
+    message.content === target.content &&
+    (message.images?.length ?? 0) === (target.images?.length ?? 0) &&
+    (message.images ?? []).every((image, at) => image === target.images?.[at]);
+
+  // Сколько таких же вопросов идёт в ленте ПОСЛЕ этого: столько же отступаем от
+  // конца контекста. Считаем с конца — сжатие режет начало, и повтор, второй в
+  // ленте, в контексте часто единственный (см. комментарий к функции).
+  let after = 0;
+  for (let i = index + 1; i < transcript.length; i += 1) {
+    if (sameAs(transcript[i]!)) after += 1;
+  }
+
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (!sameAs(history[i]!)) continue;
+    if (after === 0) return i;
+    after -= 1;
+  }
+  return -1;
+}
