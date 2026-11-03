@@ -64,15 +64,29 @@ describe('полоса вкладок умеет то, что обещает р�
 });
 
 describe('папка дерева говорит, раскрыта ли она', () => {
-  it('у папки есть `aria-expanded`, у выбранной строки — `aria-current`', () => {
-    const EXPLORER = source('explorer.ts');
+  const EXPLORER = source('explorer.ts');
+
+  it('у папки есть `aria-expanded`, у строки — `aria-selected`', () => {
     expect(EXPLORER).toMatch(/isDirectory \? \{ 'aria-expanded': isExpanded \? 'true' : 'false' \} : \{\}/);
-    expect(EXPLORER).toMatch(/'aria-current': 'true'/);
+    // Было `aria-current`: он говорит «текущая в наборе ссылок», а у нас это
+    // ВЫДЕЛЕННАЯ строка дерева — для дерева положено `aria-selected`.
+    expect(EXPLORER).toMatch(/'aria-selected': 'true'/);
   });
 
-  it('роль `tree` не выставлена — хода стрелками по дереву у нас нет', () => {
-    // Так честнее: `treeitem` обещает клавиатурный ход внутри дерева, которого нет.
-    expect(source('explorer.ts')).not.toMatch(/role: 'tree('|item')/);
+  it('роль `tree` и `treeitem` выставлены вместе с ходом стрелками', () => {
+    // Раньше роли НЕ было намеренно: `treeitem` обещает клавиатурный ход внутри
+    // дерева, а хода не было — объявить роль значило соврать читалке. Теперь
+    // ход есть (`core/tree-walk.ts`), поэтому и роль, и место в наборе честные.
+    expect(EXPLORER).toMatch(/role: 'tree'/);
+    expect(EXPLORER).toMatch(/role: 'treeitem'/);
+    expect(EXPLORER).toMatch(/'aria-level'/);
+    expect(EXPLORER).toMatch(/'aria-setsize'/);
+    expect(EXPLORER).toMatch(/'aria-posinset'/);
+  });
+
+  it('ход по дереву действительно подключён, а не только объявлен', () => {
+    // Иначе роль снова врёт: объявленный договор должен вызываться.
+    expect(EXPLORER).toMatch(/walkTree\(walkRows\(\)/);
   });
 });
 

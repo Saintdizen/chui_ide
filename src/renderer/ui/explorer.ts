@@ -48,6 +48,8 @@ import {
   type TreeClickMode,
   type TreeSelection,
 } from '../core/tree-selection';
+import { walkTree, type WalkAction, type WalkKey, type WalkRow } from '../core/tree-walk';
+import { ariaPositions, type AriaPosition } from '../core/tree-aria';
 import { showContextMenu } from './context-menu';
 import { clear, debounce, h, svgIcon } from './dom';
 import { fileIcon, folderIcon } from './file-icons';
@@ -258,6 +260,20 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       event.preventDefault();
       return;
     }
+    // Ход по дереву стрелками: до этого их не было вовсе — до файла можно было
+    // добраться только мышью. Строки знают свою глубину и раскрыты ли они, поэтому
+    // правило живёт в `core/tree-walk.ts`, а здесь только применение.
+    const walkKey = event.key;
+    if (WALK_KEYS.has(walkKey)) {
+      const action = walkTree(walkRows(), selected, walkKey as WalkKey);
+      if (action) {
+        event.preventDefault();
+        applyWalk(action);
+        return;
+      }
+      // Край списка или файл без детей — нажатие не наше, дальше его не трогаем.
+    }
+
     if (!selected) return;
 
     if (event.key === 'F2') {
@@ -1024,6 +1040,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // её приносит человек или набор значков (`explorer.badges`).
     const badge = options.badges.length > 0 ? badgeFor(entry.path, relativeOf(entry.path), options.badges) : null;
 
+    const place = ariaPlace(entry.path);
     const row = h(
       'button',
       {
@@ -1031,11 +1048,18 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         type: 'button',
         draggable: 'true',
         // Папка — кнопка, которая раскрывает содержимое: сказать об этом читалке
-        // обязательно, иначе «папка» и «файл» звучат одинаково. Роль `treeitem`
-        // не ставим намеренно: она обещает ход стрелками по дереву, а его у нас
-        // нет — полоса прокручивается как обычный список.
+        // обязательно, иначе «папка» и «файл» звучат одинаково.
+        //
+        // Роль `treeitem` раньше НЕ ставилась намеренно: она обещает ход стрелками,
+        // а хода не было — объявить роль значило бы соврать читалке. Теперь ход есть
+        // (`core/tree-walk.ts`), поэтому и роль, и уровень, и положение в наборе
+        // говорятся честно.
+        role: 'treeitem',
+        'aria-level': String(place.level),
+        'aria-posinset': String(place.posInSet),
+        'aria-setsize': String(place.setSize),
         ...(isDirectory ? { 'aria-expanded': isExpanded ? 'true' : 'false' } : {}),
-        ...(selected === entry.path ? { 'aria-current': 'true' } : {}),
+        ...(selected === entry.path ? { 'aria-selected': 'true' } : { 'aria-selected': 'false' }),
         title: isDeleted
           ? `${entry.path} — удалён, но ещё не закоммичен`
           : linkLabel
@@ -1491,6 +1515,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const scroller = treeEl;
     if (!host || !scroller) return;
 
+    // Таблицу мест считаем ЗДЕСЬ: строки рисуются из `flatRows`, и место строки
+    // в наборе зависит от всего набора, а не от окна (`renderWindow` рисует лишь
+    // видимую часть).
+    ariaPlaces = ariaTable();
+
     const total = flatRows.length;
     const viewport = scroller.clientHeight;
 
@@ -1835,11 +1864,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // tabindex -1: дерево можно сфокусировать программно (в мышь и клавиатуру
     // табом оно не попадает). Фокус нужен, чтобы F2 и Del относились к дереву,
     // а не к редактору: глобальная привязка Delete удаляла бы файл при наборе.
-    const tree = h('div', { class: 'tree', tabindex: '-1' });
+    const tree = h('div', { class: 'tree', tabindex: '-1', role: 'tree', 'aria-label': 'Файлы проекта' });
     // Ссылку на поле фильтра берём после сборки: `h` не умеет `ref`.
     filterInput = element.querySelector<HTMLInputElement>('.tree-filter');
     treeEl = tree;
-    const host = h('div', { class: 'tree-rows' });
+    const host = h('div', { class: 'tree-rows', role: 'group' });
     rowsHost = host;
     // Избранное — выше закреплённых: это постоянный список, к нему возвращаются чаще.
     if (favorites.length > 0) tree.appendChild(favoritesBlock());
@@ -1965,6 +1994,79 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   };
 
   const scheduleRefresh = debounce(() => void refresh(), 250);
+
+  /** Клавиши хода по дереву: те, что разбирает `core/tree-walk.ts`. */
+  const WALK_KEYS: ReadonlySet<string> = new Set([
+    'ArrowUp',
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+    'Home',
+    'End',
+    'Enter',
+  ]);
+
+  /**
+   * Видимые строки с тем, что нужно для хода: глубина (по ней ищется родитель)
+   * и раскрыт ли каталог. `loading`/`deleted` в ход не входят — это не строки
+   * файлов, и стрелка не должна на них застревать.
+   */
+  const walkRows = (): WalkRow[] => {
+    const rows: WalkRow[] = [];
+    for (const row of flatRows) {
+      if (row.kind !== 'entry' || row.deleted) continue;
+      const directory = entryIsDirectory(row.entry);
+      rows.push({
+        path: row.entry.path,
+        depth: row.depth,
+        directory,
+        expanded: directory && expanded.has(row.entry.path),
+      });
+    }
+    return rows;
+  };
+
+  /**
+   * Место строки в наборе для читалки. Считается по ВИДИМОМУ дереву на кадр и
+   * запоминается: у строки спрашивают трижды за отрисовку, а собрать таблицу
+   * на весь набор — один проход.
+   */
+  const ariaTable = (): Map<string, AriaPosition> =>
+    ariaPositions(
+      flatRows.flatMap((row) =>
+        row.kind === 'entry' && !row.deleted ? [{ path: row.entry.path, depth: row.depth }] : [],
+      ),
+    );
+  let ariaPlaces = new Map<string, AriaPosition>();
+  const ariaPlace = (path: string): AriaPosition => ariaPlaces.get(path) ?? { level: 1, posInSet: 1, setSize: 1 };
+
+  const applyWalk = (action: WalkAction): void => {
+    switch (action.kind) {
+      case 'move': {
+        selected = action.path;
+        selection = { paths: [action.path], anchor: action.path };
+        revealTarget = action.path;
+        render();
+        // Прокрутку заказываем номером строки: если она вне окна, в DOM её ещё нет,
+        // и `querySelector` вернул бы пусто (`reveal` делает так же).
+        element
+          .querySelector<HTMLElement>(`[data-path="${CSS.escape(action.path)}"]`)
+          ?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      case 'expand':
+        if (!expanded.has(action.path)) toggleDir(action.path);
+        return;
+      case 'collapse':
+        if (expanded.has(action.path)) toggleDir(action.path);
+        return;
+      case 'open': {
+        const entry = [...children.values()].flat().find((item) => item.path === action.path);
+        if (entry) void onClick(entry);
+        return;
+      }
+    }
+  };
 
   const reveal = (target: string): void => {
     const info = deps.workspace.current;
