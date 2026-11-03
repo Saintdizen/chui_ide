@@ -103,6 +103,8 @@ export interface EditorCommandContext {
   unfold(): void;
   foldAll(): void;
   unfoldAll(): void;
+  /** Сложить всё до уровня `level` включительно (1 — верхние блоки). */
+  foldToLevel(level: number): void;
   /** Мультикурсор: следующее вхождение слова, все вхождения, каретка по столбцу. */
   selectNextOccurrence(): void;
   selectAllOccurrences(): void;
@@ -523,6 +525,29 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     alias: 'unfoldAll',
     category: CATEGORY,
     run: (context) => context.unfoldAll(),
+  },
+  // Уровни отдельными командами: иначе «свернуть уровень 2» — это ввод числа
+  // где-то ещё, а палитра команд умолкла бы о самом нужном.
+  {
+    id: 'editor.foldLevel1',
+    label: 'Свернуть всё до уровня 1',
+    alias: 'foldLevel1',
+    category: CATEGORY,
+    run: (context) => context.foldToLevel(1),
+  },
+  {
+    id: 'editor.foldLevel2',
+    label: 'Свернуть всё до уровня 2',
+    alias: 'foldLevel2',
+    category: CATEGORY,
+    run: (context) => context.foldToLevel(2),
+  },
+  {
+    id: 'editor.foldLevel3',
+    label: 'Свернуть всё до уровня 3',
+    alias: 'foldLevel3',
+    category: CATEGORY,
+    run: (context) => context.foldToLevel(3),
   },
   {
     id: 'editor.codeActions',

@@ -447,6 +447,15 @@ export class EditorHost {
    * при настройке «два».
    */
   private defaultIndent = { tabSize: 4, insertSpaces: true };
+
+  /**
+   * Какие блоки сложены — по пути файла.
+   *
+   * Свёртка привязана к ФАЙЛУ, а не к вкладке: вернулись на вкладку — видите то
+   * же, что оставили. Хранится здесь, а не в виде, потому что вид —
+   * один на панель и меняет документ.
+   */
+  private readonly foldState = new Map<string, number[]>();
   private readonly completionTriggersSource: ((path: string) => Promise<CompletionTriggers>) | undefined;
   /** Номер запроса триггеров: ответ на прежний файл не применяем. */
   private triggersRequestId = 0;
@@ -2366,6 +2375,37 @@ export class EditorHost {
 
   foldAll(): void {
     this.view.foldAll();
+    this.rememberFolds();
+  }
+
+  /**
+   * Сложить всё до уровня `level` (1 — верхние блоки файла).
+   *
+   * Отдельно от «свернуть всё»: в большом файле хочется видеть остов — верхние
+   * функции — и не хочется раскрывать каждую вложенную ветку по одной.
+   */
+  foldToLevel(level: number): void {
+    this.view.foldToLevel(level);
+    this.rememberFolds();
+  }
+
+  /** Запомнить свёрнутое для ЭТОГО файла: при возврате на вкладку вернём как было. */
+  private rememberFolds(): void {
+    if (this.path) this.foldState.set(this.path, this.view.collapsedFolds());
+  }
+
+  /** Свёрнутое состояние по путям — для сессии. */
+  foldPositions(): Record<string, number[]> {
+    const result: Record<string, number[]> = {};
+    for (const [path, starts] of this.foldState) result[path] = [...starts];
+    if (this.path) result[this.path] = this.view.collapsedFolds();
+    return result;
+  }
+
+  /** Вернуть свёрнутое из сессии. Вид применит своё при открытии файла. */
+  restoreFoldPositions(positions: Record<string, readonly number[]>): void {
+    this.foldState.clear();
+    for (const [path, starts] of Object.entries(positions)) this.foldState.set(path, [...starts]);
   }
 
   // — мультикурсор —
@@ -2406,6 +2446,9 @@ export class EditorHost {
 
   unfoldAll(): void {
     this.view.unfoldAll();
+    // Пустой список — тоже состояние: иначе развёрнутый файл при возврате
+    // показал бы старое свёрнутое.
+    this.rememberFolds();
   }
 
   /** Диапазоны свёртки текущего файла: спросить у приложения и отдать виду. */
@@ -2420,6 +2463,12 @@ export class EditorHost {
     // Пока спрашивали, файл сменился или текст переписали — ответ уже не к месту.
     if (id !== this.foldRequestId || this.path !== path) return;
     this.view.setFoldRanges(ranges);
+    // И сразу вернуть то, что человек сложил в прошлый раз. Именно здесь, а не
+    // при открытии файла: до `setFoldRanges` модель не знает блоков и выбросила
+    // бы переданное — восстановление было бы пустым. Это и была причина, почему
+    // раскрытое состояние не переживало возврат на вкладку.
+    const saved = this.foldState.get(path);
+    if (saved && saved.length > 0) this.view.restoreCollapsedFolds(saved);
   }
 
   /** Пересчитать свёртку с паузой: на каждое нажатие считать блоки незачем. */

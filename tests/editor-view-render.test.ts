@@ -38,6 +38,45 @@ function makeView(text: string, options: { gutter?: boolean } = {}) {
 }
 
 describe('отрисовка редактора', () => {
+  describe('свёртка: уровень и возврат на вкладку', () => {
+    /**
+     * Найдено разбором: `collapseToLevel` и `restoreCollapsed` в модели были
+     * написаны и не вызывались НИОТКУДА — мёртвый код. «Свернуть уровень N» не
+     * существовало, а свёрнутое не переживало возврат на вкладку.
+     */
+    const ranges = [
+      { startLine: 0, endLine: 5 },
+      { startLine: 1, endLine: 3 },
+    ];
+
+    it('свернуть до уровня 1 — складывает внешний блок', () => {
+      const { view } = makeView('a\nb\nc\nd\ne\nf');
+      view.setFoldRanges(ranges);
+      view.foldToLevel(1);
+      expect(view.collapsedFolds()).toEqual([0]);
+    });
+
+    it('свёрнутое состояние читается и возвращается', () => {
+      // Ровно то, что делает хозяин: запомнил при уходе, применил при возврате.
+      const { view } = makeView('a\nb\nc\nd\ne\nf');
+      view.setFoldRanges(ranges);
+      view.foldAll();
+      const saved = view.collapsedFolds();
+      view.unfoldAll();
+      expect(view.collapsedFolds()).toEqual([]);
+      view.restoreCollapsedFolds(saved);
+      expect(view.collapsedFolds()).toEqual([0, 1]);
+    });
+
+    it('возврат без диапазонов ничего не воскрешает', () => {
+      // Порядок и был причиной, почему восстановление было пустым: до
+      // `setFoldRanges` модель не знает блоков.
+      const { view } = makeView('a\nb\nc\nd\ne\nf');
+      view.restoreCollapsedFolds([0, 1]);
+      expect(view.collapsedFolds()).toEqual([]);
+    });
+  });
+
   describe('перенос строк в большом файле', () => {
     /**
      * Найдено разбором: при включённом переносе `ensureRows` раскладывает на знаки

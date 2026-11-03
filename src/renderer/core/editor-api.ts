@@ -35,6 +35,10 @@ export interface EditorApi {
   scrollPositions(): Record<string, number>;
   /** Раздать верхние строки: панель встанет туда при открытии файла. */
   restoreScrollPositions(positions: Record<string, number>): void;
+  /** Какие блоки свёрнуты в каждом файле — для сессии. */
+  foldPositions(): Record<string, number[]>;
+  /** Вернуть свёрнутое из сессии. */
+  restoreFoldPositions(positions: Record<string, readonly number[]>): void;
   /** Перейти к строке и столбцу, показывая это место. */
   reveal(path: string, line: number, column: number): void;
   /** Текст выделенного участка. Пустая строка, если выделения нет. */

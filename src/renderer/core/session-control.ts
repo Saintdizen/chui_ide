@@ -196,6 +196,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     const cursors = editors.cursorPositions();
     // Верхние строки — отдельно от каретки: см. `scrollPositions` редактора.
     const scrollTops = editors.scrollPositions();
+    // Свёрнутое — тоже место работы: файл, где всё раскрыто, читается иначе.
+    const foldedBlocks = editors.foldPositions();
     // Несохранённые правки — часть рабочего места: без них перезапуск (и любое
     // закрытие окна) терял бы работу, которую человек ещё не записал.
     const unsaved = selectUnsavedBuffers(
@@ -231,6 +233,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       ...(Object.keys(cursors).length > 0 ? { cursors } : {}),
       // Прокрутка — та же часть рабочего места: курсор в начале файла — не то, что ждёшь.
       ...(Object.keys(scrollTops).length > 0 ? { scrollTops } : {}),
+      ...(Object.keys(foldedBlocks).length > 0 ? { foldedBlocks } : {}),
       ...(unsaved.length > 0 ? { unsaved } : {}),
       ...(macro.length > 0 ? { macro: [...macro] } : {}),
     };
@@ -290,6 +293,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       editors.restoreCursorPositions(state.cursors ?? {});
       // Верхние строки — там же: `open` встанет на них тем же показом.
       editors.restoreScrollPositions(state.scrollTops ?? {});
+      // Свёртка — до открытия вкладок: вид применит её, когда придут диапазоны.
+      editors.restoreFoldPositions(state.foldedBlocks ?? {});
 
       for (const path of state.tabs) {
         try {

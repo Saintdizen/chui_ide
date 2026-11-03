@@ -1054,6 +1054,26 @@ export class EditorView {
     this.render();
   }
 
+  /** Сложить всё до уровня `level` включительно (1 — верхние блоки файла). */
+  foldToLevel(level: number): void {
+    this.folds.collapseToLevel(level);
+    this.render();
+  }
+
+  /** Свёрнутое состояние — для сессии: какие блоки сложены. */
+  collapsedFolds(): number[] {
+    return this.folds.collapsedStarts();
+  }
+
+  /**
+   * Вернуть схлопнутое состояние из сессии. Нужен `setRanges`: до раскладки
+   * свёртки модель не знает блоков и выбросила бы всё переданное.
+   */
+  restoreCollapsedFolds(starts: readonly number[]): void {
+    this.folds.restoreCollapsed(starts);
+    this.render();
+  }
+
   /** Что со свёрткой сейчас — для проб и проверок. */
   foldState(): { rows: number; collapsed: number[] } {
     return { rows: this.rowCount(), collapsed: this.folds.collapsedStarts() };

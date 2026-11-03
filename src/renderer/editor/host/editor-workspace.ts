@@ -777,6 +777,18 @@ export class EditorWorkspace {
     for (const pane of this.panes) pane.restoreScrollPositions(positions);
   }
 
+  /** Свёрнутые блоки по путям — для сессии. */
+  foldPositions(): Record<string, number[]> {
+    const result: Record<string, number[]> = {};
+    for (const pane of this.panes) Object.assign(result, pane.foldPositions());
+    return result;
+  }
+
+  /** Вернуть свёрнутое из сессии: панели применят его при открытии файлов. */
+  restoreFoldPositions(positions: Record<string, readonly number[]>): void {
+    for (const pane of this.panes) pane.restoreFoldPositions(positions);
+  }
+
   /** Перейти к строке и столбцу: в панель, где открыт файл, иначе — в активную. */
   reveal(path: string, line: number, column: number): void {
     const pane = this.paneWith(path);
@@ -848,6 +860,7 @@ export class EditorWorkspace {
       unfold: () => this.pane.unfoldAtCursor(),
       foldAll: () => this.pane.foldAll(),
       unfoldAll: () => this.pane.unfoldAll(),
+      foldToLevel: (level: number) => this.pane.foldToLevel(level),
       // Мультикурсор: команды палитры делают то же, что клавиши в панели.
       selectNextOccurrence: () => void this.pane.selectNextOccurrence(),
       selectAllOccurrences: () => void this.pane.selectAllOccurrences(),
