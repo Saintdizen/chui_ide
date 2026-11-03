@@ -132,3 +132,34 @@ function severityNumber(severity: LspDiagnostic['severity']): number {
   if (severity === 'warning') return 2;
   return 3;
 }
+
+/**
+ * Действия, которые сервер отдал без правок и команды: их надо дотянуть.
+ *
+ * Часть серверов (`typescript-language-server` для автоимпорта, к примеру) в
+ * первом ответе присылает только заголовок и `data`, а правки кладёт после
+ * `codeAction/resolve`. Такому действию в списке делать нечего — оно ничего не
+ * сделает. Считать надо по исходным объектам: в нашей форме `data` нет.
+ */
+export function unresolvedIndexes(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const indexes: number[] = [];
+  raw.forEach((entry, index) => {
+    if (!entry || typeof entry !== 'object') return;
+    const value = entry as { edit?: unknown; command?: unknown };
+    if (value.edit || value.command) return;
+    indexes.push(index);
+  });
+  return indexes;
+}
+
+/**
+ * Слить исходный объект с ответом `resolve`: сервер дописывает поля, а не отдаёт
+ * новый объект. `title` из ответа берём, только если он есть: протокол его
+ * разрешает не повторять, а нам он нужен в списке.
+ */
+export function mergeResolved(source: unknown, resolved: unknown): unknown {
+  if (!resolved || typeof resolved !== 'object') return source;
+  if (!source || typeof source !== 'object') return resolved;
+  return { ...(source as Record<string, unknown>), ...(resolved as Record<string, unknown>) };
+}

@@ -35,7 +35,13 @@ import {
   type CompletionContext,
   type ResolvedCompletion,
 } from '../../../shared/lsp-completions';
-import { toCodeActions, toLspDiagnostics, type CodeActionItem } from '../../../shared/lsp-code-actions';
+import {
+  mergeResolved,
+  unresolvedIndexes,
+  toCodeActions,
+  toLspDiagnostics,
+  type CodeActionItem,
+} from '../../../shared/lsp-code-actions';
 import { pickAnyRefactors, pickRefactors, type RefactorAction } from '../../../shared/lsp-refactor';
 import { toFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
 import { targetFromResolvedLink, toDocumentLinks, type DocumentLinkEntry } from '../../../shared/lsp-document-links';
@@ -44,7 +50,7 @@ import { toSelectionSpans, type SelectionSpan } from '../../../shared/lsp-select
 import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import { toMonikers, type MonikerEntry } from '../../../shared/lsp-moniker';
 import { toInlineValues, type InlineValue } from '../../../shared/lsp-inline-value';
-import { toInlayHints, type InlayHint } from '../../../shared/lsp-inlay-hints';
+import { resolveInlayHints, toInlayHints, type InlayHint } from '../../../shared/lsp-inlay-hints';
 import { commandFromLens, toCodeLenses, type CodeLensEntry } from '../../../shared/lsp-code-lens';
 import {
   signatureContext,
@@ -313,7 +319,28 @@ export class LspFeatures {
       range: { start: range, end: range },
       context: { diagnostics: toLspDiagnostics(diagnostics), triggerKind: 1 },
     });
-    return toCodeActions(result, uriToPath);
+    return toCodeActions(await this.resolveActions(path, result), uriToPath);
+  }
+
+  /**
+   * Дотянуть действия, которые сервер отдал без правок и команды.
+   *
+   * Так устроен `codeAction/resolve`: автоимпорт `typescript-language-server` в
+   * первом ответе — только заголовок, а правки приходят после резолва. Действие
+   * без них в списке ничего не делает, поэтому либо дотягиваем, либо не
+   * показываем: пустой пункт хуже отсутствующего.
+   */
+  private async resolveActions(path: string, result: unknown): Promise<unknown> {
+    const indexes = unresolvedIndexes(result);
+    if (indexes.length === 0 || !Array.isArray(result)) return result;
+    const actions = [...result];
+    await Promise.all(
+      indexes.map(async (index) => {
+        const resolved = await this.request(path, 'codeAction/resolve', actions[index]);
+        actions[index] = mergeResolved(actions[index], resolved);
+      }),
+    );
+    return actions;
   }
 
   /**
@@ -411,7 +438,13 @@ export class LspFeatures {
       textDocument: { uri: pathToUri(path) },
       range: { start: from, end: to },
     });
-    return toInlayHints(result);
+    // Сервер с `resolveProvider` может прислать подсказку без подписи: её спросят
+    // отдельно. Дотягиваем здесь, чтобы представление получало готовые — иначе на
+    // экране появился бы пустой зазор.
+    const hints = Array.isArray(result)
+      ? await resolveInlayHints(result, (hint) => this.request(path, 'inlayHint/resolve', hint))
+      : result;
+    return toInlayHints(hints);
   }
 
   /**

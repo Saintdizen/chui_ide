@@ -31,6 +31,9 @@ export function toInlayHints(raw: unknown): InlayHint[] {
     const position = value.position as { line?: unknown; character?: unknown } | undefined;
     if (!position || typeof position.line !== 'number' || typeof position.character !== 'number') continue;
     const label = labelText(value.label);
+    // Пустая подпись у подсказки, которую сервер отдал без неё, — не брак: он ждёт
+    // `inlayHint/resolve` (так делают серверы типов, экономя на большом файле).
+    // Сюда же попадают недотянутые; на экране от них только пустой зазор.
     if (label === '') continue;
     hints.push({
       line: position.line + 1,
@@ -61,4 +64,27 @@ function kindOf(raw: unknown): InlayHintKind {
   if (raw === 1) return 'type';
   if (raw === 2) return 'parameter';
   return 'other';
+}
+
+/**
+ * Дотянуть подсказки, пришедшие без подписи.
+ *
+ * `resolve` зовём только для тех, у кого подписи нет: у остальных сервер уже
+ * сказал всё, и лишний запрос на каждый параметр — трата на ровном месте.
+ * Ответ сервер дописывает в тот же объект (label, tooltip, textEdits), поэтому
+ * сливаем, а не заменяем: место подсказки знает только первый ответ.
+ */
+export async function resolveInlayHints(
+  raw: readonly unknown[],
+  resolve: (hint: unknown) => Promise<unknown>,
+): Promise<unknown[]> {
+  return Promise.all(
+    raw.map(async (hint) => {
+      if (!hint || typeof hint !== 'object') return hint;
+      if (labelText((hint as { label?: unknown }).label) !== '') return hint;
+      const resolved = await resolve(hint).catch(() => null);
+      if (!resolved || typeof resolved !== 'object') return hint;
+      return { ...(hint as Record<string, unknown>), ...(resolved as Record<string, unknown>) };
+    }),
+  );
 }

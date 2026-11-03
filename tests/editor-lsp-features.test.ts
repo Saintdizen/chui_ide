@@ -202,4 +202,43 @@ describe('LspFeatures', () => {
     expect(calls[0]!.method).toBe('lsp.semanticTokens');
     expect(calls[0]!.params).toEqual({ path: '/p/a.py', languageId: 'python' });
   });
+
+  it('действие без правок дотягивается через codeAction/resolve', async () => {
+    // Так ведёт себя автоимпорт typescript-language-server: в первом ответе только
+    // заголовок и `data`, правки — после резолва. Без него пункт в списке пустой.
+    const calls: Array<{ method: string; params: { method: string; params: unknown } }> = [];
+    const rpc = {
+      request: vi.fn(async (_method: string, params: { method: string; params: unknown }) => {
+        calls.push({ method: _method, params });
+        if (params.method === 'textDocument/codeAction') {
+          return [{ title: 'Добавить import', kind: 'quickfix', data: { id: 1 } }];
+        }
+        if (params.method === 'codeAction/resolve') {
+          return { title: 'Добавить import', edit: { changes: {} } };
+        }
+        return null;
+      }),
+    } as unknown as RpcClient;
+    const features = new LspFeatures(rpc);
+
+    const actions = await features.codeActions('/p/a.ts', { line: 1, column: 1 }, []);
+    expect(calls.map((call) => call.params.method)).toEqual(['textDocument/codeAction', 'codeAction/resolve']);
+    // Резолв получил исходный объект целиком — с `data`, иначе сервер не поймёт, о чём речь.
+    expect(calls[1]!.params.params).toEqual({ title: 'Добавить import', kind: 'quickfix', data: { id: 1 } });
+    expect(actions).toHaveLength(1);
+  });
+
+  it('действие с командой не резолвится: делать есть что и без сервера', async () => {
+    const calls: Array<{ method: string }> = [];
+    const rpc = {
+      request: vi.fn(async (_method: string, params: { method: string }) => {
+        calls.push({ method: params.method });
+        return [{ title: 'Сделать', kind: 'refactor', command: { command: 'do.it', arguments: [] } }];
+      }),
+    } as unknown as RpcClient;
+    const features = new LspFeatures(rpc);
+
+    await features.codeActions('/p/a.ts', { line: 1, column: 1 }, []);
+    expect(calls.map((call) => call.method)).toEqual(['textDocument/codeAction']);
+  });
 });
