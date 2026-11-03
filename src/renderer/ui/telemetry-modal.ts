@@ -1,4 +1,5 @@
 import type { AiTelemetrySnapshot } from '../../shared/api';
+import { digestLine, digestRuns } from '../../shared/run-digest';
 import { describeRecord, finishedLabel } from '../../shared/telemetry';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
@@ -30,6 +31,8 @@ export interface TelemetryModalView {
 
 /** Сколько строк показывать: журнал — список последних прогонов, а не архив. */
 const VISIBLE_RECORDS = 20;
+/** Сколько бесед показать сводкой: больше — уже лента записей под ней. */
+const VISIBLE_DIGESTS = 5;
 
 export function createTelemetryModal(deps: TelemetryModalDeps): TelemetryModalView {
   const body = h('div', { class: 'telemetry-body' });
@@ -99,6 +102,36 @@ export function createTelemetryModal(deps: TelemetryModalDeps): TelemetryModalVi
     if (snapshot.records.length === 0) {
       listBox.append(h('p', { class: 'telemetry-empty' }, 'Записей пока нет: прогон ещё не шёл.'));
       return;
+    }
+
+    // Сводка по беседам — над лентой записей. Записи отвечают «что было»,
+    // сводка — «сколько это стоило и что в этом сломалось»; человек приходит
+    // именно за вторым, а складывать токены по строкам глазами — работа машины.
+    const digests = digestRuns(snapshot.records);
+    const worst = digests.slice(0, VISIBLE_DIGESTS);
+    if (worst.length > 0) {
+      const box = h('div', { class: 'telemetry-digests' });
+      for (const digest of worst) {
+        const failures = digest.failures.reduce((sum, item) => sum + item.count, 0);
+        box.append(
+          h(
+            'div',
+            { class: `telemetry-digest${failures > 0 ? ' has-failures' : ''}` },
+            h('span', { class: 'telemetry-digest-line' }, digestLine(digest)),
+            digest.failures.length > 0
+              ? h(
+                  'span',
+                  { class: 'telemetry-digest-why', title: digest.failures.map((f) => `${f.tool}: ${f.why}`).join('\n') },
+                  digest.failures
+                    .slice(0, 3)
+                    .map((f) => `${f.tool}: ${f.why}${f.count > 1 ? ` ×${f.count}` : ''}`)
+                    .join(' · '),
+                )
+              : null,
+          ),
+        );
+      }
+      listBox.append(box);
     }
 
     for (const record of snapshot.records.slice(-VISIBLE_RECORDS)) {

@@ -3060,6 +3060,47 @@
   gap: 2px;
 }
 
+/* Сводка по беседам — над лентой записей. Рамка сверху отделяет «сколько это
+   стоило» от «что именно было»: это разные вопросы, и мешать их в один список
+   значит заставить человека снова складывать глазами. */
+.telemetry-digests {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.telemetry-digest {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+  font-size: var(--font_small_size);
+}
+
+.telemetry-digest-line {
+  font-family: var(--font_mono);
+  color: var(--text_color);
+}
+
+/* Сломанное — единственное, что в сводке должно бросаться в глаза: остальное
+   человек прочитает, а сбои пропустит, если они того же цвета, что и цифры. */
+.telemetry-digest.has-failures .telemetry-digest-line {
+  color: var(--text_color_error);
+}
+
+.telemetry-digest-why {
+  overflow: hidden;
+  color: var(--text_color_error);
+  font-size: var(--font_small_size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Строка журнала — одна строка таблицы: время слева, итог справа. Подписи
    мелкие и без рамок: записей бывает много, и рамка на каждой превратила бы
    список в решётку. */
