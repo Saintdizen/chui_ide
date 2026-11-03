@@ -62,6 +62,11 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
   // Пауза, а не стоп: прогон не рвётся, следующий шаг ждёт «продолжить».
   router.register('ai.setPaused', (params) => {
     deps.ai.setPaused(params.paused);
+    // Отвечаем в окно СРАЗУ, не дожидаясь границы шага. Цикл шагов пришлёт своё
+    // событие `paused`, когда дойдёт до неё, но это может быть и через минуту
+    // (идёт терминал или длинный вызов) — и всё это время человек, нажавший
+    // паузу, не знает, приняли ли нажатие. Шлём факт «main услышал».
+    pushToRenderers(PushTopic.AiPaused, { paused: params.paused });
   });
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));
   // Проверка серверов MCP из настроек: поднимаем их и показываем инструменты.

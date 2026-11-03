@@ -994,9 +994,33 @@ app.whenReady().then(async () => {
         }
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
+      // Пауза — в этом же прогоне, чтобы не дописывать реплику: лишний ход
+      // сдвинул бы вопросы и сломал проверки навигации ниже.
+      // Смотрим на ОТВЕТ main (событие ai:paused), а не на оптимистичную иконку.
+      const кнопка = () => document.querySelector('.composer-pause');
+      const дождаться = async (условие, мс = 3000) => {
+        const старт = Date.now();
+        while (Date.now() - старт < мс) {
+          if (условие()) return true;
+          await new Promise((r) => setTimeout(r, 25));
+        }
+        return false;
+      };
+      const строкаСтатуса = () => [...document.querySelectorAll('.msg-activity-label')].pop()?.textContent ?? '';
+      const пауза = { видна: await дождаться(() => кнопка() && !кнопка().hidden) };
+      if (пауза.видна) {
+        пауза.подпись = кнопка().getAttribute('title') ?? '';
+        кнопка().click();
+        пауза.принята = await дождаться(() => (кнопка()?.getAttribute('title') ?? '').startsWith('Продолжить'));
+        пауза.строка = строкаСтатуса();
+        пауза.шаг = [...document.querySelectorAll('.msg-activity-step')].pop()?.textContent ?? '';
+        кнопка().click();
+        пауза.снята = await дождаться(() => (кнопка()?.getAttribute('title') ?? '').startsWith('Пауза'));
+      }
       await new Promise((resolve) => setTimeout(resolve, 1200));
       return {
         шаг,
+        пауза,
         было: before,
         стало: document.querySelector('.chat-tab.is-active .tab-label')?.textContent ?? null,
         ответ: [...document.querySelectorAll('.chat-thread .msg-assistant')]
@@ -1021,6 +1045,24 @@ app.whenReady().then(async () => {
   check('номер шага виден во время прогона', renamed.шаг?.текст === 'шаг 1 из 24', renamed.шаг);
   check('номер шага стоит рядом с действием', renamed.шаг?.действие === 'думает…', renamed.шаг);
   check('номер шага отделён от действия точкой', renamed.шаг?.точка === '"\u00b7"', renamed.шаг);
+
+  /* ── пауза на границе шага ─────────────────────────────────────────────── */
+
+  // PauseGate покрыт юнитами, но те не видят главного: что ЧЕЛОВЕК нажимает и
+  // что видит в ответ. Здесь настоящая кнопка, настоящий прогон и событие
+  // `ai:paused` обратно из main — то есть main УСЛЫШАЛ, а не «кнопка нажалась».
+  // Кнопка обязана звать и объяснять: пауза не рвёт действия в полслове.
+  check('кнопка паузы видна во время прогона', renamed.пауза?.видна === true, renamed.пауза);
+  check(
+    'кнопка паузы говорит, что не рвёт действие',
+    (renamed.пауза?.подпись ?? '').includes('не обрывает'),
+    renamed.пауза,
+  );
+  check('пауза подтверждена main, а не только нажатием', renamed.пауза?.принята === true, renamed.пауза);
+  check('лента говорит про паузу словами', (renamed.пауза?.строка ?? '').includes('пауза'), renamed.пауза);
+  check('номер шага в паузе не теряется', (renamed.пауза?.шаг ?? '').startsWith('шаг '), renamed.пауза);
+  check('«продолжить» возвращает работу', renamed.пауза?.снята === true, renamed.пауза);
+
 
   /* ── инспектор вызова: аргументы и результат ───────────────────────────── */
 

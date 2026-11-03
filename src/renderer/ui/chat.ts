@@ -125,6 +125,14 @@ export interface ChatView {
    * хода, что идёт сейчас: молча выполненное действие должно быть видно.
    */
   noteApprovalReview(command: string, reason: string): void;
+  /**
+   * main принял паузу или снял её.
+   *
+   * Событие `paused` внутри стрима не заменяет его: оно приходит только
+   * на границе шага, а между нажатием и ею может пройти минуту (идёт терминал
+   * или длинный вызов). До этого момента человек не знает, успело ли нажатие.
+   */
+  setPaused(value: boolean): void;
   /** Открыть окно «Прогон» для активной беседы (трасса последнего хода). */
   openRunLog(): void;
   askAboutSelection(mode: 'explain' | 'fix'): Promise<void>;
@@ -2448,6 +2456,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   function setPaused(value: boolean, _session: ChatSession = active()): void {
     composer.setPaused(value);
+    // И строку в ленте — сразу, не на границе шага. `stream` создан ниже, но
+    // эта функция зовётся только из уведомления main, то есть после старта.
+    stream.notePause(value);
   }
 
   function stop(): void {
@@ -2878,6 +2889,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     stop,
     flushHistory,
     currentToolPreset,
+    setPaused,
     askAboutSelection,
     openRunLog: () => {
       // Трасса есть только у прогонов этого запуска: она живёт в памяти беседы,

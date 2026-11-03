@@ -3649,6 +3649,14 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         if (payload?.command) chat.noteApprovalReview(payload.command, payload.reason ?? '');
         break;
       }
+      case PushTopic.AiPaused: {
+        // main принял паузу. Событие внутри стрима придёт позже — на границе шага,
+        // а пока идёт длинный вызов или терминал, человек без этого не знает,
+        // услышали его или нет.
+        const payload = message.payload as { paused?: boolean };
+        chat.setPaused(payload?.paused === true);
+        break;
+      }
       case PushTopic.SettingsChanged:
         baseSettings = message.payload as Settings;
         applySettings(rebuildSettings());

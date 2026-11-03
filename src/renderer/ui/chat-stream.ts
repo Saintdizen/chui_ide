@@ -110,6 +110,14 @@ export type StreamOutcome = 'done' | 'failed' | 'stopped';
 export interface StreamRunner {
   /** Отрисовать ответ на текущую историю беседы. */
   run(session: ChatSession, providerId: string, model: string, attachments: ChatAttachment[]): Promise<StreamOutcome>;
+  /**
+   * Пауза принята mainом — сообщить ленте СРАЗУ, не дожидаясь границы шага.
+   *
+   * Событие `paused` внутри стрима приходит только на границе шага: во время
+   * длинного вызова или терминала это минута, и всё это время в ленте висело
+   * «думает…», то есть строка продолжала утверждать, что работа идёт.
+   */
+  notePause(value: boolean): void;
 }
 
 /**
@@ -135,6 +143,12 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
    */
   let buffer = '';
   let frame = 0;
+  /**
+   * Живая строка работы текущего прогона. Нужна вне `run`: пауза приходит
+   * отдельным уведомлением из main, а не событием стрима, и должна попасть
+   * в ту же строку, не дожидаясь границы шага.
+   */
+  let liveActivity: ReturnType<typeof createActivity> | null = null;
 
   /** Индикатор работы ассистента: живёт внизу сообщения всю генерацию. */
   function createActivity(): {
@@ -187,6 +201,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     messageEl.appendChild(segment);
     // Индикатор работы держим внизу сообщения: новые сегменты вставляем перед ним.
     const activity = createActivity();
+    liveActivity = activity;
     messageEl.appendChild(activity.element);
     activity.state('думает…');
     // Подряд идущие вызовы инструментов живут одной группой — см. createToolFeed.
@@ -442,6 +457,8 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     } finally {
       host.hidePlan(session);
       activity.dispose();
+      // Строка ушла вместе с прогоном: пауза, пришедшая после конца, ей не адресована.
+      if (liveActivity === activity) liveActivity = null;
       // ПОРЯДОК ВАЖЕН: `setStreaming(null)` обнуляет сессию прогона, а
       // `setBusy(false)` по ней решает, звать ли `finishRun` (заметка о конце
       // прогона, метка в доке, заголовок окна). Поменяй местами — и `finishRun`
@@ -490,5 +507,11 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     frame = 0;
   }
 
-  return { run };
+  return {
+    run,
+    notePause(value: boolean) {
+      if (!liveActivity) return;
+      liveActivity.state(value ? 'пауза · продолжить — кнопка внизу' : 'думает…');
+    },
+  };
 }
