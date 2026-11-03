@@ -169,6 +169,27 @@ describe('отступы', () => {
     controller.outdent();
     expect(buffer.text).toBe('x');
   });
+
+  it('файл на табах получает таб, а не четыре пробела', () => {
+    // Найдено разбором: `indent()` ВСЕГДА вставлял ' '.repeat(tabSize), хотя в
+    // таблице языков у makefile и go стоит insertSpaces: false. Настройка
+    // была описана и не читалась нигде — в Makefile Tab давал пробелы, то есть
+    // рецепт, который make не выполнит.
+    const { controller, buffer } = make('x');
+    controller.setIndentStyle(false);
+    controller.setSelection({ anchor: 0, active: 0 }, false);
+    controller.indent();
+    expect(buffer.text).toBe('\tx');
+  });
+
+  it('файл на пробелах остался на пробелах', () => {
+    // Обратная ошибка тоже была бы ошибкой: таб в Python — синтаксическая поломка.
+    const { controller, buffer } = make('x');
+    controller.setIndentStyle(true);
+    controller.setSelection({ anchor: 0, active: 0 }, false);
+    controller.indent();
+    expect(buffer.text).toBe('    x');
+  });
 });
 
 describe('пакет правок', () => {

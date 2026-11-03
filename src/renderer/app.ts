@@ -413,6 +413,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
 
   const editors = new EditorWorkspace(layout.editorHost, new DocumentRegistry(documents), {
     tabSize: settings.editor.tabSize,
+    insertSpaces: settings.editor.insertSpaces,
     fontSize: settings.editor.fontSize,
     lineHeight: settings.editor.lineHeight,
     cursorStyle: settings.editor.cursorStyle,
@@ -3533,6 +3534,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     applyUiScale(next.appearance.uiScale);
     editors.applyOptions({
       tabSize: next.editor.tabSize,
+      insertSpaces: next.editor.insertSpaces,
       fontSize: next.editor.fontSize,
       lineHeight: next.editor.lineHeight,
       cursorStyle: next.editor.cursorStyle,

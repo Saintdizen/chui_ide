@@ -87,3 +87,36 @@ describe('reindentPasted', () => {
     expect(reindentPasted('  a\n  b\n', options({ baseIndent: '' }))).toBe('a\nb\n');
   });
 });
+
+describe('вставка уважает табы', () => {
+  /**
+   * Найдено разбором: `reindentPasted` брала только `tabSize` и всегда писала
+   * пробелы. В Makefile отступ — таб, иначе рецепт не выполнится: вставил
+   * блок — получил неработающий файл.
+   */
+  it('табы: шаг кратен tabSize — табами', () => {
+    const out = reindentPasted('a\n    b', { baseIndent: '', tabSize: 4, insertSpaces: false });
+    expect(out).toBe('a\n\tb');
+  });
+
+  it('табы: восемь колонок — два таба', () => {
+    const out = reindentPasted('a\n        b', { baseIndent: '', tabSize: 4, insertSpaces: false });
+    expect(out).toBe('a\n\t\tb');
+  });
+
+  it('табы: остаток добирается пробелами', () => {
+    // Таб стоит ровно на кратных шагах: 6 колонок — таб и два пробела.
+    const out = reindentPasted('a\n      b', { baseIndent: '', tabSize: 4, insertSpaces: false });
+    expect(out).toBe('a\n\t  b');
+  });
+
+  it('пробелы по умолчанию — как раньше', () => {
+    const out = reindentPasted('a\n    b', { baseIndent: '', tabSize: 4 });
+    expect(out).toBe('a\n    b');
+  });
+
+  it('базовый отступ тоже табами', () => {
+    const out = reindentPasted('a\nb', { baseIndent: '\t', tabSize: 4, insertSpaces: false });
+    expect(out).toBe('\ta\n\tb');
+  });
+});

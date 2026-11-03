@@ -85,6 +85,8 @@ export interface DebugHoverPosition {
 export interface EditorWorkspaceOptions {
   /** Сколько пробелов в шаге отступа (Tab). */
   tabSize?: number;
+  /** Отступ пробелами (иначе табами). Запасной ответ, когда файл ничего не подсказал. */
+  insertSpaces?: boolean;
   /** Кегль текста в редакторе, px. */
   fontSize?: number;
   /** Высота строки, px; `0` — «по шрифту». */
@@ -1091,6 +1093,7 @@ export class EditorWorkspace {
   /** Настройки вида: ширина отступа, кегль и направляющие. Панели равны — применяем ко всем. */
   applyOptions(options: {
     tabSize?: number;
+    insertSpaces?: boolean;
     fontSize?: number;
     lineHeight?: number;
     cursorStyle?: CursorStyle;

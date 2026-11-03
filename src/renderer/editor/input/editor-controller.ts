@@ -87,6 +87,8 @@ export interface EditorChange {
 export interface EditorControllerOptions {
   /** Сколько пробелов в одном шаге отступа (Tab). */
   tabSize?: number;
+  /** Отступ пробелами (иначе табами). Нет — берём пробелы. */
+  insertSpaces?: boolean;
   /** Предел истории в шагах. */
   historyLimit?: number;
 }
@@ -111,6 +113,13 @@ export class EditorController {
   private readonly history: EditHistory;
   private readonly listeners = new Set<(change: EditorChange) => void>();
   private tabSize: number;
+  /**
+   * Отступ табами или пробелами — для ЭТОГО файла.
+   *
+   * Не берётся из настроек здесь же: контроллер не знает ни файла, ни его языка.
+   * Ему говорят снаружи (`setIndentStyle`), когда вкладку открыли.
+   */
+  private useTabs = false;
   /**
    * Файл открыт только для чтения (большой файл, см. `shared/large-file.ts`). Курсор
    * ходит, выделять и копировать можно, а всё, что меняет текст, отсекается здесь — в
@@ -142,6 +151,7 @@ export class EditorController {
   constructor(buffer: TextBuffer, options: EditorControllerOptions = {}) {
     this.buffer = buffer;
     this.tabSize = options.tabSize ?? 4;
+    this.useTabs = options.insertSpaces === false;
     this.history = new EditHistory(options.historyLimit);
   }
 
@@ -184,6 +194,17 @@ export class EditorController {
    */
   setTabSize(tabSize: number): void {
     this.tabSize = Math.max(1, Math.floor(tabSize));
+  }
+
+  /**
+   * Чем будет отступ в этом файле: табами или пробелами.
+   *
+   * Решает вызывающий (см. `shared/indent.ts`: содержимое файла, затем язык,
+   * затем настройки). Контроллеру достаётся готовый ответ — ему же надо
+   * вставлять, а не рассуждать.
+   */
+  setIndentStyle(insertSpaces: boolean): void {
+    this.useTabs = !insertSpaces;
   }
 
   /** Переключить режим «только чтение»: панель открывает файл, большой или обычный. */
@@ -814,7 +835,8 @@ export class EditorController {
 
   /** Tab: вставить отступ на каждой каретке. */
   indent(): void {
-    const text = ' '.repeat(this.tabSize);
+    // Таб ровно один — шаг табуляции в редакторе уже настроен под файл.
+    const text = this.useTabs ? '\t' : ' '.repeat(this.tabSize);
     this.editAll((selection) => insertText(this.buffer, selection, text), 'other');
   }
 
@@ -855,6 +877,7 @@ export class EditorController {
     return reindentPasted(text, {
       baseIndent: /^[\t ]*/.exec(lineText)?.[0] ?? '',
       tabSize: this.tabSize,
+      insertSpaces: !this.useTabs,
       // Каретка в ведущих пробелах — блок начинается с отступа строки; посреди текста —
       // первая строка его продолжает, и отступ встал бы в середину.
       shiftFirstLine: lineText.slice(0, at - this.buffer.lineStart(line)).trim() === '',

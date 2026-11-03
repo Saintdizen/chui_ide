@@ -24,6 +24,12 @@ export interface ReindentOptions {
   /** Ширина табуляции: без неё отступы, набранные по-разному, не сравнить. */
   readonly tabSize: number;
   /**
+   * Отступ табами или пробелами. В Python и Makefile это не вкус, а правило:
+   * таб в Python — ошибка, пробелы в Makefile — ошибка. Настройка шла мимо
+   * вставки, и в Makefile при вставке блока выходили пробелы.
+   */
+  readonly insertSpaces?: boolean;
+  /**
    * Ставить ли отступ и ПЕРВОЙ строке. Каретка в ведущих пробелах — да: блок начинается
    * с отступа строки. Каретка посреди текста — нет: первая строка его продолжает, и
    * отступ встал бы в середину строки.
@@ -57,9 +63,21 @@ export function reindentPasted(text: string, options: ReindentOptions): string {
       // собственный отступ трогать нельзя.
       if (index === 0 && !shiftFirst) return line;
       const remainder = Math.max(0, indentWidth(line, options.tabSize) - common);
-      return `${options.baseIndent}${' '.repeat(remainder)}${line.trimStart()}`;
+      return `${options.baseIndent}${indentUnit(remainder, options)}${line.trimStart()}`;
     })
     .join('\n');
+}
+
+/**
+ * Отступ заданной ширины — табами или пробелами, как заведено в файле.
+ *
+ * Целые шаги идут табом, остаток — пробелами: таб в Makefile должен стоять
+ * ровно там, где отступ кратен шагу, иначе рецепт перестанет работать.
+ */
+function indentUnit(width: number, options: ReindentOptions): string {
+  if (options.insertSpaces !== false) return ' '.repeat(width);
+  const tabs = Math.floor(width / options.tabSize);
+  return '\t'.repeat(tabs) + ' '.repeat(width - tabs * options.tabSize);
 }
 
 /** Пустая ли строка: только пробелы, табы или вовсе ничего. */

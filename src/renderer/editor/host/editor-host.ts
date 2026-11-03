@@ -22,7 +22,8 @@
  */
 
 import type { CursorPosition, LspDiagnostic } from '../../../shared/api';
-import { languageFromPath } from '../../core/languages';
+import { languageFromPath, languageIndent } from '../../core/languages';
+import { detectIndent, resolveIndent } from '../../../shared/indent';
 import type { TextEdit } from '../../../shared/edits';
 import type { FoldRange } from '../../../shared/fold-ranges';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
@@ -164,6 +165,8 @@ export type ProfileLineEntry = readonly [path: string, rows: readonly { line: nu
 export interface EditorHostOptions {
   /** Сколько пробелов в шаге отступа (Tab). */
   tabSize?: number;
+  /** Отступ пробелами (иначе табами). Нет — пробелы: так безопаснее для новичка. */
+  insertSpaces?: boolean;
   /** Кегль текста в редакторе, px. */
   fontSize?: number;
   /** Высота строки, px; `0` — «по шрифту». */
@@ -436,6 +439,14 @@ export class EditorHost {
   /** Знаки-триггеры сервера для активного файла — отсюда их берёт попап подсказок. */
   /** Отступ одной ступени: им пользуется Emmet при раскрытии вложенных элементов. */
   private indentSize = 4;
+  /**
+   * Отступ, когда ни содержимое, ни язык ничего не сказали.
+   *
+   * Воля человека из настроек (`editor.tabSize`, `editor.insertSpaces`), а не
+   * константа: иначе файл без подсказок неожиданно получал бы четыре пробела
+   * при настройке «два».
+   */
+  private defaultIndent = { tabSize: 4, insertSpaces: true };
   private readonly completionTriggersSource: ((path: string) => Promise<CompletionTriggers>) | undefined;
   /** Номер запроса триггеров: ответ на прежний файл не применяем. */
   private triggersRequestId = 0;
@@ -465,6 +476,26 @@ export class EditorHost {
     this.view.setLanguage(languageId);
     this.assistant.setLanguage(languageId);
     this.languageId = languageId;
+  }
+
+  /**
+   * Решить, чем в этом файле делают отступ, и сказать контроллеру.
+   *
+   * Порядок ровно такой и он важен: СОДЕРЖИМОЕ перебивает язык. Файл Makefile с
+   * пробелами — это Makefile, который не работает, но человек вправе так писать;
+   * а TypeScript-файл, где всё на табах, — норма, и навязывать ему четыре
+   * пробела значит портить каждую новую строку.
+   */
+  private applyIndentStyle(languageId: string, buffer: TextBuffer): void {
+    // Всё начало файла целиком — `detectIndent` сам решает, сколько читать:
+    // граница выборки — его знание, а не наше.
+    const sample: string[] = [];
+    for (let line0 = 0; line0 < buffer.lineCount; line0 += 1) sample.push(buffer.lineText(line0));
+    const style = resolveIndent(detectIndent(sample), languageIndent(languageId) ?? undefined, this.defaultIndent);
+    this.controller.setIndentStyle(style.insertSpaces);
+    this.indentSize = style.tabSize;
+    this.controller.setTabSize(style.tabSize);
+    this.view.setTabSize(style.tabSize);
   }
 
   /**
@@ -729,7 +760,15 @@ export class EditorHost {
     this.documentColorSource = options.documentColors;
     this.highlightSource = options.documentHighlights;
     this.indentSize = options.tabSize ?? 4;
-    this.controller = new EditorController(buffer, { tabSize: options.tabSize });
+    // Воля человека — запасной ответ, когда ни содержимое, ни язык не подскажут.
+    this.defaultIndent = {
+      tabSize: options.tabSize ?? 4,
+      insertSpaces: options.insertSpaces ?? true,
+    };
+    this.controller = new EditorController(buffer, {
+      tabSize: options.tabSize,
+      insertSpaces: options.insertSpaces,
+    });
     // Документ (истина о содержимом) узнаёт о правке ПЕРВЫМ — раньше попапов.
     // Иначе запрос подсказок уходит серверу раньше синхронизации (`lsp.change`), и тот
     // отвечает по тексту БЕЗ последнего набранного знака: позиция в нём уже другая, и
@@ -965,6 +1004,9 @@ export class EditorHost {
     // Подсветку и слова подсказок берём по языку документа: один реестр языков на всё.
     // Языка без грамматики это не смущает — текст покажется простым (см. registry.ts).
     this.setLanguageOf(document.languageId);
+    // Отступ — свой у каждого файла: таб в Makefile, пробелы в TypeScript.
+    // Решается по содержимому, затем по языку, затем по настройкам.
+    this.applyIndentStyle(document.languageId, buffer);
     // Призрачная подсказка говорила о прошлом файле — к новому она не относится.
     this.inline?.setBuffer();
     // Копия «заглянуть» относилась к прежнему файлу — прячем её вместе с ним.
@@ -1180,6 +1222,7 @@ export class EditorHost {
   /** Настройки редактора, влияющие на вид: отступ (Tab), кегль, высота строки и каретка. */
   applyOptions(options: {
     tabSize?: number;
+    insertSpaces?: boolean;
     fontSize?: number;
     lineHeight?: number;
     cursorStyle?: CursorStyle;
@@ -1196,9 +1239,16 @@ export class EditorHost {
     zen?: boolean;
   }): void {
     if (options.tabSize !== undefined) {
+      this.defaultIndent = { ...this.defaultIndent, tabSize: options.tabSize };
       this.indentSize = options.tabSize;
       this.controller.setTabSize(options.tabSize);
       this.view.setTabSize(options.tabSize);
+    }
+    if (options.insertSpaces !== undefined) {
+      this.defaultIndent = { ...this.defaultIndent, insertSpaces: options.insertSpaces };
+      // Пока файл не открыт — применить некуда: отступ считается по содержимому
+      // при открытии и перебьёт эту настройку, как и договорено.
+      if (this.path) this.controller.setIndentStyle(options.insertSpaces);
     }
     if (options.fontSize !== undefined) this.view.setFontSize(options.fontSize);
     if (options.lineHeight !== undefined) this.view.setLineHeight(options.lineHeight);
