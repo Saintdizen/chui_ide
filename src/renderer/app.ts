@@ -247,6 +247,11 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     openNodeEnv: (anchor) => openNodeEnv(anchor),
     openProblems: () => editors.revealNextProblem(),
     openLsp: (anchor) => openLsp(anchor),
+    // Клик по слоту — та же дорога, что и из меню редактора: команды редактора
+    // живут в его собственных командах, а не в общем реестре приложения.
+    runCommand: (id) => {
+      editors.runAction(id);
+    },
   });
   layout.statusBarHost.appendChild(statusBar.element);
 

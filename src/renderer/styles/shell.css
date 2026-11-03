@@ -34,6 +34,28 @@
   white-space: nowrap;
 }
 
+/* Слоты с действием — кнопки (`button.status-item`). Сбрасываем вид кнопки:
+   в полосе они должны читаться как подписи, но вести себя как ссылки. */
+button.status-item {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.status-item:hover {
+  color: var(--text_color);
+  text-decoration: underline;
+}
+
+button.status-item:focus-visible {
+  outline: 1px solid var(--focus_ring_color, currentColor);
+  outline-offset: 2px;
+}
+
 /* Слот крошек в полосе: путь бывает длинным — обрезаем его, а не растягиваем
    полосу. Кнопки-сегменты рисует `ui/breadcrumbs.ts`. */
 .status-breadcrumbs {

@@ -114,6 +114,14 @@ export interface StatusBarDeps {
   openProblems(anchor: HTMLElement): void;
   /** Клик по чипу языкового сервера — попап со списком серверов и действиями. */
   openLsp(anchor: HTMLElement): void;
+  /**
+   * Выполнить команду по клику на слот статус-бара.
+   *
+   * Слот, у которого есть действие, должен им пользоваться: полоса из одних
+   * подписей — это справка, а не орган управления. Нет команды — слот остаётся
+   * текстом (кодировку пока менять нечем, и притворяться нельзя).
+   */
+  runCommand(id: string, anchor: HTMLElement): void;
 }
 
 /** Русское склонение по числу: 1 ошибка, 2 ошибки, 5 ошибок. */
@@ -171,8 +179,26 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   // Подпись ветки — обычным текстом полосы: своего шрифта у неё нет.
   const gitLabel = h('span', {});
   gitItem.appendChild(gitLabel);
-  const positionItem = h('span', { class: 'status-item' });
-  const eolItem = h('span', { class: 'status-item' });
+  // Слоты с действием — кнопки, без действия — текст. Так полоса не обещает
+  // клика там, где его нет: кодировку пока менять нечем (команды нет), и слот
+  // честно остаётся подписью.
+  const positionItem = h('button', {
+    class: 'status-item',
+    type: 'button',
+    title: 'Перейти к строке (Ctrl+G)',
+    onClick: (event: Event) => deps.runCommand('editor.gotoLine', event.currentTarget as HTMLElement),
+  });
+  // Конец строк переключается существующей командой; какой сейчас — решает
+  // состояние, поэтому клик зовёт ту, которая НЕ текущая.
+  const eolItem = h('button', {
+    class: 'status-item',
+    type: 'button',
+    onClick: (event: Event) =>
+      deps.runCommand(
+        state.eol === 'CRLF' ? 'format.lineEnding.lf' : 'format.lineEnding.crlf',
+        event.currentTarget as HTMLElement,
+      ),
+  });
   const encodingItem = h('span', { class: 'status-item' });
   const indentItem = h('span', { class: 'status-item' });
   const languageItem = h('span', { class: 'status-item' });
