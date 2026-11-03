@@ -40,7 +40,15 @@ import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom'
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createAttachments } from './chat-attachments';
 import { clearQueuedPrompts, dropQueuedPrompt, enqueuePrompt, moveQueuedPrompt, takeNextPrompt } from './chat-queue';
-import { addCheckpointFile, beginCheckpoint, hasCheckpoint, revertPlan, truncateCheckpoints } from './chat-checkpoints';
+import {
+  addCheckpointFile,
+  beginCheckpoint,
+  hasCheckpoint,
+  revertPlan,
+  revertPreview,
+  revertSummary,
+  truncateCheckpoints,
+} from './chat-checkpoints';
 import { MAX_RUN_ARTIFACTS, type RunArtifacts } from '../core/artifacts';
 import { createToolFeed, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
@@ -164,6 +172,13 @@ export interface ChatDeps {
    * а окно пустое. Необязательно: без него считаем, что видит (старое поведение).
    */
   isChatVisible?(): boolean;
+  /**
+   * Спросить человека перед необратимым — тем же системным диалогом, что у Git.
+   *
+   * Нужен именно здесь: откат к вопросу молча меняет файлы и удаляет созданные
+   * агентом. Необязателен ради тестов, но в окне всегда есть.
+   */
+  confirm(options: { title: string; message: string; detail: string; confirmLabel: string }): Promise<boolean>;
   /**
    * Показать файл в экране различий против HEAD. Нужен ревью правок: блок можно
    * разглядеть только там — в попапе изменений видна только одна цифра строк.
@@ -1621,6 +1636,27 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Файлы откатываем ВСЕЕЙ работы начиная с этого вопроса: открутка на три шага
     // вперёд с оставленными правками промежуточных шагов — это не «как было».
     const plan = revertPlan(checkpoints, at);
+
+    // СПРОС ДО ОТКАТА. Откат молчит: файлы меняются, а созданные агентом вовсе
+    // уходят в корзину — и узнаётся это уже после. Предосмотр называет цену
+    // словами: сколько файлов вернётся, какие будут удалены и что потеряет
+    // несохранённое. Отказ — не ошибка, а решение человека.
+    const preview = revertPreview(
+      checkpoints,
+      at,
+      deps.documents.dirty().map((document) => document.path),
+    );
+    const title = session.history[index]?.content ?? 'этому вопросу';
+    const confirmed = await deps.confirm({
+      title: 'Откатиться к состоянию до вопроса?',
+      message: `Вернуть файлы к состоянию до «${title.slice(0, 60)}»?`,
+      detail: `${revertSummary(preview, title.slice(0, 60))}\n\nВернуть откат будет нельзя.`,
+      confirmLabel: 'Откатить',
+      // Кнопка по умолчанию в диалоге — ПЕРВАЯ, то есть «Откатить». Значит Enter
+      // подтвердит необратимое. Так уже живёт весь проект (Cancel — вторая кнопка),
+      // и менять поведение ради одного места хуже: люди привыкли к порядку.
+    });
+    if (!confirmed) return;
 
     // Сперва файлы: не вышло — историю не трогаем. Вопрос, которого нет в ленте,
     // с оставленными правками хуже, чем неоткаченный вовсе.

@@ -118,3 +118,87 @@ export function historyTailFrom(history: readonly ChatMessage[], messageIndex: n
   const boundary = Math.max(0, messageIndex);
   return history.slice(0, boundary);
 }
+
+/**
+ * Что именно случится при откате — ДО того, как он случится.
+ *
+ * Откат молчит: файлы меняются на диске, несохранённые правки летят, и человек
+ * узнаёт об этом после. Предосмотр отвечает на три вопроса, каждый из которых
+ * он не может проверить сам: сколько файлов откатится, сколько будет УДАЛЕНО
+ * (агент их создал — вернуть их нельзя, файла до хода не было) и сколько
+ * потеряют несохранённое.
+ */
+export interface RevertPreview {
+  /** Сколько файлов откат тронет. */
+  files: number;
+  /** Из них созданных агентом — они будут удалены, а не возвращены. */
+  removed: string[];
+  /** Из них с несохранёнными правками — их нынешний вид пропадёт без следа. */
+  unsaved: string[];
+  /** Сколько ходов пропадёт из беседы (включая выбранный). */
+  turns: number;
+}
+
+/**
+ * Собрать предосмотр отката.
+ *
+ * `unsaved` — пути, у которых редактор держит изменения в памяти. Передаются
+ * списком, а не читаются из редактора: модуль чистый и про редактор не знает.
+ */
+export function revertPreview(
+  checkpoints: readonly Checkpoint[],
+  index: number,
+  unsaved: readonly string[] = [],
+): RevertPreview {
+  const plan = revertPlan(checkpoints, index);
+  const dirty = new Set(unsaved);
+  const removed: string[] = [];
+  const lost: string[] = [];
+  for (const [path, state] of plan) {
+    if (!state.existed) removed.push(path);
+    // Удаляемый файл отдельно не считаем дважды: пропадёт весь файл, и сказать
+    // «пропадут несохранённые правки» про него — lesser way of same thing.
+    else if (dirty.has(path)) lost.push(path);
+  }
+  return {
+    files: plan.size,
+    removed: removed.sort(),
+    unsaved: lost.sort(),
+    turns: checkpoints.filter((checkpoint) => checkpoint.messageIndex >= (checkpoints[index]?.messageIndex ?? 0)).length,
+  };
+}
+
+/**
+ * Одна фраза для окна подтверждения.
+ *
+ * Счёт файлов — первым: это то, из-за чего человек вообще задумается. Удаление
+ * и потеря несохранённого — отдельными строками, потому что обратно их вернуть
+ * нельзя, и «просто число файлов» об этом бы умолчало.
+ */
+export function revertSummary(preview: RevertPreview, title: string): string {
+  // Склонение по-русски: «2 файла», но «5 файлов». Общая форма «2 файла/файлов»
+  // читается как машинный шаблон ровно там, где человек взвешивает риск.
+  const plural = (n: number, one: string, few: string, many: string): string => {
+    const tail10 = n % 10;
+    const tail100 = n % 100;
+    if (tail10 === 1 && tail100 !== 11) return `${n} ${one}`;
+    if (tail10 >= 2 && tail10 <= 4 && (tail100 < 12 || tail100 > 14)) return `${n} ${few}`;
+    return `${n} ${many}`;
+  };
+  const ходы = plural(preview.turns, 'ход', 'хода', 'ходов');
+  const файлы = plural(preview.files, 'файл', 'файла', 'файлов');
+  const parts: string[] = [];
+  parts.push(
+    preview.files === 0
+      ? `Файлы не меняются — к состоянию до «${title}» вернётся только беседа.`
+      : `Файлов вернётся к состоянию до «${title}»: ${файлы}.`,
+  );
+  if (preview.removed.length > 0) {
+    parts.push(`Будут УДАЛЕНЫ (созданы агентом): ${preview.removed.join(', ')}.`);
+  }
+  if (preview.unsaved.length > 0) {
+    parts.push(`Пропадут несохранённые правки: ${preview.unsaved.join(', ')}.`);
+  }
+  parts.push(`Из беседы уйдёт ${ходы}.`);
+  return parts.join('\n');
+}

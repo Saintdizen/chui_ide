@@ -17,6 +17,17 @@
  * снимки — `.chui_ide/probe-shots/chat-panel-*.png`.
  */
 const { app } = require('electron');
+const electronDialog = require('electron').dialog;
+
+// Системный диалог в пробе не показать: он модальный и ждёт живого человека.
+// Подменяем ДО регистрации IPC и записываем, ЧТО в нём написано — иначе
+// проверять предосмотр отката нечем: окно закрывает сам тест.
+let последнийДиалог = null;
+let ответДиалога = 1; // 1 = «Отмена»: по умолчанию ничего не ломаем
+electronDialog.showMessageBox = async (_window, options) => {
+  последнийДиалог = options;
+  return { response: ответДиалога };
+};
 const { promises: fs } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -1443,6 +1454,48 @@ app.whenReady().then(async () => {
     `(() => document.querySelectorAll('.msg.is-prompt-current')[0]?.textContent.slice(0, 30) ?? '')()`,
   );
   check('стрелка без Alt ничего не переключает', navUnchanged.startsWith('Составь план'), navUnchanged);
+
+  /* ── предосмотр отката ─────────────────────────────────────────────────── */
+
+  // Кнопка отката живёт в действиях вопроса. Что она делает — видно только
+  // после диалога, поэтому проверяем то, что человек прочтёт в диалоге.
+  const кнопкаОтката = await ask(
+    second,
+    `(() => {
+      const кнопки = [...document.querySelectorAll('.msg-actions button')];
+      const откат = кнопки.find((b) => (b.getAttribute('title') ?? '').includes('как было до этого вопроса'));
+      return { есть: Boolean(откат), всего: кнопки.length };
+    })()`,
+  );
+  check('у вопроса есть кнопка отката', кнопкаОтката.есть === true, кнопкаОтката);
+
+  // Отказ — законный ответ: откат необратим, и человек вправе передумать.
+  ответДиалога = 1;
+  последнийДиалог = null;
+  await ask(
+    second,
+    `(() => {
+      const откат = [...document.querySelectorAll('.msg-actions button')].find((b) => (b.getAttribute('title') ?? '').includes('как было до этого вопроса'));
+      откат?.click();
+      return true;
+    })()`,
+  );
+  await wait(400);
+  check('откат спрашивает ДО того, как трогать файлы', последнийДиалог !== null, последнийДиалог?.title ?? 'диалога не было');
+  const подробности = последнийДиалог?.detail ?? '';
+  check('в диалоге сказано, что откат необратим', подробности.includes('нельзя'), подробности.slice(0, 120));
+  check('в диалоге назван вопрос, к которому откатываемся', (последнийДиалог?.message ?? '').startsWith('Вернуть файлы'), последнийДиалог?.message);
+  check('кнопка диалога называет действие, а не «ОК»', (последнийДиалог?.buttons ?? [])[0] === 'Откатить', последнийДиалог?.buttons);
+
+  // После отказа лента не обрезана — кнопка отката на месте.
+  const послеОтказа = await ask(
+    second,
+    `(() => ({
+      откат: Boolean([...document.querySelectorAll('.msg-actions button')].find((b) => (b.getAttribute('title') ?? '').includes('как было до этого вопроса'))),
+      сообщений: document.querySelectorAll('.chat-thread .msg').length,
+    }))()`,
+  );
+  check('отказ ничего не сломал: кнопка отката на месте', послеОтказа.откат === true, послеОтказа);
 
   /* ── метка «в чате непрочитанный ответ» ────────────────────────────────── */
 

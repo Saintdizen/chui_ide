@@ -1731,6 +1731,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // «Видит ленту» — это раскрытая правая колонка, а не фокус окна: у свёрнутой
     // панели фокус остаётся, и без этого прогон считался бы просмотренным.
     isChatVisible: () => layout.rightVisible,
+    // Тот же системный диалог, что у отката правок Git: откат чекпойнта необратим.
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
     onRunEnd: (how, _title) => {
       // ЗАГОЛОВОК ОКНА НЕ ТРОГАЕМ. Он принадлежит шапке: `refreshStatus` держит
       // там имя открытого файла и переписывает его при каждом изменении — наш
