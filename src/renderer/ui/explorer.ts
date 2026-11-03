@@ -2,6 +2,7 @@ import type { DirEntry, ExplorerSettings, GitChange, WorkspaceInfo } from '../..
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { submoduleStateLabel, type GitSubmodule } from '../../shared/git-submodules';
 import { maskToRegExp } from '../../shared/glob';
+import { chainDepth, folderChain } from '../core/folder-chain';
 import { isInsidePath, joinPath, nameOf, parentOf, pathAfter, separatorOf, splitPath } from '../../shared/paths';
 import {
   alreadyThereNotice,
@@ -949,7 +950,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     entry: DirEntry,
     depth: number,
     dir: string,
-    flags: { nested: boolean; deleted: boolean } = { nested: false, deleted: false },
+    flags: { nested: boolean; deleted: boolean; chain?: string } = { nested: false, deleted: false },
   ): HTMLElement | null => {
     const isDirectory = entryIsDirectory(entry);
     const isLink = entryIsSymlink(entry);
@@ -1042,7 +1043,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           ? folderIcon(entry.name, isExpanded)
           : fileIcon(entry.name)
         : svgIcon(isDirectory ? 'folder' : 'file', 15),
-      h('span', { class: 'tree-name' }, entry.name),
+      // Цепочка — одна строка на весь путь `a/b/c`; полный путь в подсказке,
+      // иначе по склеенной подписи не понять, где она кончается.
+      h('span', { class: 'tree-name' }, flags.chain ?? entry.name),
       // Метка — цветной ярлык: первая среди правых отметок, если она есть.
       label ? h('span', { class: `tree-label is-${label}`, title: `Метка: ${fileLabelName(label)}` }) : null,
       badge
@@ -1227,7 +1230,16 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    * по нему считаем окно (виртуализация) и работает выделение диапазоном.
    */
   type FlatRow =
-    | { kind: 'entry'; entry: DirEntry; depth: number; dir: string; nested: boolean; deleted: boolean }
+    | {
+        kind: 'entry';
+        entry: DirEntry;
+        depth: number;
+        dir: string;
+        nested: boolean;
+        deleted: boolean;
+        /** Подпись для строки-цепочки (`a/b/c`); нет поля — обычное имя. */
+        chain?: string;
+      }
     | { kind: 'group'; label: string; count: number; depth: number }
     | { kind: 'package'; name: string; dir: string; relative: string; depth: number }
     | { kind: 'root'; root: WorkspaceRoot; active: boolean; collapsed: boolean }
@@ -1342,14 +1354,22 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
       // Одна запись и её спутники (вложенные строки идут сразу под родителем).
       const pushEntry = (entry: DirEntry): void => {
-        rows.push({ kind: 'entry', entry, depth, dir, nested: false, deleted: false });
+        // Цепочку склеиваем только у настоящих каталогов: строка-имя со спутниками
+        // (вложенный файл) — это не путь, и удлинять её не за что.
+        const chain = entryIsDirectory(entry) ? folderChain(entry, children) : null;
+        const deeper = chain ? chainDepth(chain) : 1;
+        rows.push(
+          chain && deeper > 1
+            ? { kind: 'entry', entry, depth, dir, nested: false, deleted: false, chain: chain.label }
+            : { kind: 'entry', entry, depth, dir, nested: false, deleted: false },
+        );
         for (const name of nest?.children.get(entry.name) ?? []) {
           const child = list.find((item) => item.name === name);
           // Класс `is-nested` — метка спутника: по ней видно вложение, и на неё
           // смотрит проба (строка в дереве есть, но отдельной не считается).
           if (child) rows.push({ kind: 'entry', entry: child, depth: depth + 1, dir, nested: true, deleted: false });
         }
-        if (entryIsDirectory(entry) && expanded.has(entry.path)) pushDir(entry.path, depth + 1);
+        if (entryIsDirectory(entry) && expanded.has(entry.path)) pushDir(chain?.path ?? entry.path, depth + deeper);
       };
 
       // Обычно содержимое папки — один список. С группировкой файлы разбиваются
@@ -1431,7 +1451,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       if (edit?.kind !== 'create') return null;
       return inlineInput(row.depth, '', (value) => void commitCreate(edit, value));
     }
-    return renderRow(row.entry, row.depth, row.dir, { nested: row.nested, deleted: row.deleted });
+    return renderRow(row.entry, row.depth, row.dir, {
+      nested: row.nested,
+      deleted: row.deleted,
+      ...(row.chain ? { chain: row.chain } : {}),
+    });
   };
 
   /** Распорка высотой скрытых строк: она и держит честную длину прокрутки. */
