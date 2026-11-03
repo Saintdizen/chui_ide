@@ -4,6 +4,7 @@ import type { ToastKind, ToastOptions } from '../ui/toast';
 import type { DefineCommand } from './command-args';
 import { copiedToTrash, trackMoves, undoableAfterTrash, undoMoves, type MoveTrack } from './file-actions';
 import { deleteManyPrompt, deletePrompt, movedNotice, trashedNotice } from './file-notices';
+import { describeFileError } from './file-errors';
 import type { TextDocument } from './document';
 import type { OpenEditors } from './open-editors';
 import type { RpcClient } from './rpc';
@@ -95,18 +96,28 @@ export function registerFileMutationCommands(define: DefineCommand, deps: FileMu
     }
 
     let removed = 0;
+    let firstFailure: unknown = null;
     for (const path of list) {
       try {
         if (openEditors.has(path)) openEditors.close(path);
         await rpc.request('workspace.trash', { path });
         removed += 1;
-      } catch {
+      } catch (error) {
         // Одного неудачного объекта мало, чтобы отменить удаление остальных.
+        firstFailure ??= error;
       }
     }
     explorer.scheduleRefresh();
     const notice = trashedNotice(removed, objectsWord);
-    if (notice) showToast(notice);
+    if (notice) {
+      // Пропущенные — не молчание: человек должен знать, что удалено не всё и
+      // почему. Раньше причина терялась, и он видел только «удалено 2 из 3».
+      const why = removed < list.length ? describeFileError(firstFailure, 'файл') : null;
+      showToast(why ? `${notice} Не удалось: ${why}` : notice, why ? 'error' : undefined);
+    } else {
+      const why = describeFileError(firstFailure, 'файл');
+      if (why) showToast(why, 'error');
+    }
     // Восстановления из корзины нет (canUndoTrash) — кнопки не обещаем. Число
     // возвращаемых спрашивает undoableAfterTrash, а не литерал на месте.
     if (undoableAfterTrash(removed) > 0) {
@@ -143,19 +154,27 @@ export function registerFileMutationCommands(define: DefineCommand, deps: FileMu
 
     const tracks = trackMoves(steps, openEditors.active?.path ?? null);
     const moved: MoveTrack[] = [];
+    // Первая настоящая причина отказа. Раньше здесь стоял голый `catch {}`, и
+    // ЛЮБАЯ ошибка объявлялась конфликтом имён: без прав, на удалённую папку, на
+    // другой диск — человек искал несуществующий тёзку.
+    let firstFailure: unknown = null;
     for (const track of tracks) {
       try {
         if (openEditors.has(track.from)) openEditors.close(track.from);
         await rpc.request('workspace.rename', { from: track.from, to: track.to });
         moved.push(track);
-      } catch {
-        // Имя в целевой папке занято — этот объект пропускаем, остальные переносим.
+      } catch (error) {
+        // Этот объект пропускаем — остальные переносим. Причину запоминаем.
+        firstFailure ??= error;
       }
     }
 
     explorer.scheduleRefresh();
     if (moved.length === 0) {
-      showToast('Перенести не удалось: в целевой папке уже есть такое имя', 'error');
+      showToast(
+        `Перенести не удалось: ${describeFileError(firstFailure, 'имя') ?? 'в целевой папке уже есть такое имя'}`,
+        'error',
+      );
       return;
     }
     for (const step of moved) if (step.active) await deps.openPath(step.to);
@@ -175,18 +194,23 @@ export function registerFileMutationCommands(define: DefineCommand, deps: FileMu
     if (steps.length === 0) return;
 
     const copied: string[] = [];
+    let firstFailure: unknown = null;
     for (const step of steps) {
       try {
         const result = await rpc.request('workspace.copy', { from: step.from, to: step.to });
         copied.push(result.path);
-      } catch {
-        // Имя в целевой папке занято — копию пропускаем, остальные делаем.
+      } catch (error) {
+        // Копию пропускаем, остальные делаем. Причину — словами, см. выше.
+        firstFailure ??= error;
       }
     }
 
     explorer.scheduleRefresh();
     if (copied.length === 0) {
-      showToast('Скопировать не удалось: в целевой папке уже есть такое имя', 'error');
+      showToast(
+        `Скопировать не удалось: ${describeFileError(firstFailure, 'имя') ?? 'в целевой папке уже есть такое имя'}`,
+        'error',
+      );
       return;
     }
     showToast(
