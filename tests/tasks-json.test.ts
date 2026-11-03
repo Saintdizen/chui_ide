@@ -16,8 +16,11 @@ describe('tasksFromTasksJson', () => {
     expect(tasksFromTasksJson(text)).toEqual([{ label: 'dev', command: 'vite', source: 'tasks-json' }]);
   });
 
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: имя теста ровно про эти символы
   it('${workspaceFolder} вырезается, а не остаётся в команде', () => {
     const text = JSON.stringify({
+      // Переменная в data-строке: проверяем, что разбор её именно вырезает.
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: данные, не шаблон
       tasks: [{ label: 'go', command: 'go', args: ['build', '-o', '${workspaceFolder}/bin/app', './...'] }],
     });
     expect(tasksFromTasksJson(text)[0]?.command).toBe('go build -o /bin/app ./...');
