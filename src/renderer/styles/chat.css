@@ -1895,6 +1895,32 @@
   overflow-wrap: anywhere;
 }
 
+.approval-consequence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius_xs);
+  background: var(--element_background_2);
+  font-size: var(--font_small_size);
+}
+
+/* Откатываемо — спокойный тон: писать файлы агент ходит постоянно. */
+.approval-consequence.is-writes {
+  color: var(--text_color);
+}
+
+/*
+ * Необратимо — единственное место в ленте, где цвет кричит. Если `rm -rf`
+ * выглядит как `npm run build`, предупреждение не работает ни на ком.
+ */
+.approval-consequence.is-destroys {
+  background: color-mix(in srgb, var(--severity_error) 18%, transparent);
+  color: var(--text_color_error);
+  font-weight: 600;
+}
+
 .approval-actions {
   display: flex;
   align-items: center;

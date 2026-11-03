@@ -1,5 +1,6 @@
 import type { FileEdit } from '../../shared/edits';
 import type { PlanExitDecision } from '../../shared/plan-exit';
+import { commandConsequence, editsConsequence, type DangerLevel } from '../../shared/step-consequence';
 import { fileWord } from './chat-text';
 import { h, svgIcon, type IconName } from './dom';
 
@@ -80,6 +81,20 @@ export function createEditReview(host: ApprovalHost): EditReview {
     /** Сводка в шапке и подпись кнопки — по числу отмеченных файлов. */
     const head = h('div', { class: 'review-head' }, svgIcon('wrench', 13), h('span', { class: 'review-title' }));
     block.appendChild(head);
+    // Что будет, если согласиться, — одной фразой над диффами. Дифф говорит «как»,
+    // но решение принимают по «сколько»: один файл или двадцать. Пустую строку не
+    // рисуем: «ничего не изменится» на каждой карточке — шум.
+    const effect = editsConsequence(files.map((file) => file.path));
+    if (effect.note) {
+      block.appendChild(
+        h(
+          'div',
+          { class: `approval-consequence is-${effect.level}` },
+          svgIcon('wrench', 12),
+          h('span', {}, effect.note),
+        ),
+      );
+    }
 
     files.forEach((file) => {
       const box = h('input', { class: 'review-check', type: 'checkbox' }) as HTMLInputElement;
@@ -199,6 +214,14 @@ interface ApprovalRequest {
   icon: IconName;
   /** Что сказала проверка модели, если она не разрешила сама. */
   review?: string;
+  /**
+   * Последствие одной фразой и насколько оно опасно (`step-consequence.ts`).
+   *
+   * Не показываем — значит нечего сказать; пустые «всё в порядке» на каждой
+   * карточке быстро перестают читаться и мешают заметить настоящую опасность.
+   * `note: null` — разбор не нашёл за что зацепиться, и строка не рисуется.
+   */
+  consequence?: { level: DangerLevel; note: string | null };
 }
 
 export interface CommandApproval {
@@ -217,6 +240,19 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
     const block = h('div', { class: 'approval' });
     block.appendChild(h('div', { class: 'approval-head' }, svgIcon('warning', 13), h('span', {}, request.title)));
     block.appendChild(h('pre', { class: 'approval-command' }, request.body));
+    // Последствие — отдельной строкой над подсказкой: команда говорит «что», а
+    // человеку решать по «что будет». Цвет несёт опасность, чтобы `rm -rf` не
+    // читался как `npm test`: это единственное место, где глаз останавливается сам.
+    if (request.consequence?.note) {
+      block.appendChild(
+        h(
+          'div',
+          { class: `approval-consequence is-${request.consequence.level}` },
+          svgIcon(request.consequence.level === 'destroys' ? 'warning' : 'wrench', 12),
+          h('span', {}, request.consequence.note),
+        ),
+      );
+    }
     block.appendChild(h('div', { class: 'field-hint' }, request.hint));
     // Проверка модели не решилась — её причина стоит здесь, а не в отдельном
     // уведомлении: человек читает её в тот момент, когда принимает решение.
@@ -276,6 +312,9 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
         hint: 'Команда выполнится в папке проекта от вашего имени.',
         done: 'Выполняется скрипт',
         icon: 'terminal',
+        // Разбор — локальный и мгновенный, без модели: человек и так ждёт,
+        // а необратимое (`rm -rf`) должно читаться с первого взгляда.
+        consequence: commandConsequence(command),
         ...(review ? { review: `Проверка не решилась: ${review}` } : {}),
       }),
     confirmBrowser: (action) =>
