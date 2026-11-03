@@ -1666,6 +1666,30 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       return;
     }
     layout.setRightVisible(true);
+    clearChatUnseen();
+    syncViewButtons();
+  }
+
+  /**
+   * В чате есть исход прогона, который человек ещё не видел.
+   *
+   * Снимается, как только он посмотрит в чат: раскрыл панель или переключился
+   * на её вкладку. Сам по себе флаг ничего не рисует — его читает `syncViewButtons`.
+   */
+  let chatUnseen = false;
+  /** Прогон упал — тогда метка не «есть новое», а «есть беда», и цвет другой. */
+  let chatUnseenFailed = false;
+
+  function markChatUnseen(failed: boolean): void {
+    chatUnseen = true;
+    chatUnseenFailed = failed;
+    syncViewButtons();
+  }
+
+  function clearChatUnseen(): void {
+    if (!chatUnseen) return;
+    chatUnseen = false;
+    chatUnseenFailed = false;
     syncViewButtons();
   }
 
@@ -1684,6 +1708,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       return;
     }
     layout.setRightVisible(!layout.rightVisible);
+    // Свернул — метка остаётся (он ещё не прочёл), развернул — прочёл.
+    if (layout.rightVisible) clearChatUnseen();
     syncViewButtons();
   }
 
@@ -1697,6 +1723,21 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     git,
     artifacts: runArtifacts,
     openDiff: (path, staged) => diffView.open(path, staged),
+    // Прогон кончился, а человек на него не смотрел. Кроме заметки в окне (её
+    // показывает сам чат) надо оставить след там, где его видно издалека:
+    // в заголовке окна и на кнопке AI. Сообщение о конце прогона приходит
+    // ТОЛЬКО в этом случае — если человек смотрел на ленту, `onRunEnd` молчит,
+    // и незачем дёргать внимание повторно.
+    // «Видит ленту» — это раскрытая правая колонка, а не фокус окна: у свёрнутой
+    // панели фокус остаётся, и без этого прогон считался бы просмотренным.
+    isChatVisible: () => layout.rightVisible,
+    onRunEnd: (how, _title) => {
+      // ЗАГОЛОВОК ОКНА НЕ ТРОГАЕМ. Он принадлежит шапке: `refreshStatus` держит
+      // там имя открытого файла и переписывает его при каждом изменении — наш
+      // текст жил бы до первого чиха и всё равно был бы затёрт.
+      // Видимый след — метка на кнопке AI; словами её говорит `aria-label`.
+      markChatUnseen(how === 'failed');
+    },
     // Страница встроенного браузера: адрес открытой вкладки — для `#web`.
     browserUrl: () => browserView.url,
     // `#codebase`: места проекта по смыслу — те же два источника, что у палитры.
@@ -1988,6 +2029,14 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     if (aiButton) {
       aiButton.hidden = !aiEnabled();
       aiButton.classList.toggle('is-active', aiEnabled() && layout.rightVisible);
+      // Метка «есть непрочитанное»: точка на кнопке панели, которая сейчас
+      // свёрнута. Когда панель открыта, человек уже видит чат — метка лишняя.
+      aiButton.classList.toggle('has-unseen', aiEnabled() && chatUnseen && !layout.rightVisible);
+      aiButton.classList.toggle('has-unseen-error', aiEnabled() && chatUnseen && chatUnseenFailed && !layout.rightVisible);
+      aiButton.setAttribute(
+        'aria-label',
+        chatUnseen && !layout.rightVisible ? 'AI Assistant (Ctrl+Shift+A) — есть новый ответ' : 'AI Assistant (Ctrl+Shift+A)',
+      );
     }
   };
 

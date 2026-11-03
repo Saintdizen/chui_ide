@@ -1444,6 +1444,108 @@ app.whenReady().then(async () => {
   );
   check('стрелка без Alt ничего не переключает', navUnchanged.startsWith('Составь план'), navUnchanged);
 
+  /* ── метка «в чате непрочитанный ответ» ────────────────────────────────── */
+
+
+  const до = await ask(
+    second,
+    `(() => {
+      const el = document.querySelector('.right-panel');
+      const chat = document.querySelector('.chat');
+      const box = el?.getBoundingClientRect();
+      return {
+        right: box ? [Math.round(box.width), Math.round(box.height)] : null,
+        chat: chat ? [Math.round(chat.getBoundingClientRect().width), Math.round(chat.getBoundingClientRect().height)] : null,
+        классы: el?.className ?? '',
+        скрытАтрибут: el?.hidden ?? null,
+        стиль: el ? getComputedStyle(el).display + '/' + getComputedStyle(el).visibility : '',
+      };
+    })()`,
+  );
+  console.log('  ДО СВОРАЧИВАНИЯ:', JSON.stringify(до));
+  // Нужен именно СВЁРНУТЫЙ чат: когда панель открыта, человек и так видит ответ.
+  // Сворачиваем КНОПКОЙ, как человек: `window.chui.commands` не существует —
+  // мост это preload (RPC к main), а команды живут в renderer и наружу не отданы.
+  const нажатьAI = `(() => {
+    const кнопка = [...document.querySelectorAll('.icon-btn')].find((b) => (b.getAttribute('title') ?? '').startsWith('AI Assistant'));
+    if (!кнопка) return 'нет кнопки AI';
+    кнопка.click();
+    return true;
+  })()`;
+  // Скрывается не сам `.chat`, а правая колонка `.right-panel`: чат сидит в ней.
+  const панельСвёрнута = `(() => {
+    const el = document.querySelector('.right-panel');
+    if (!el) return true;
+    const box = el.getBoundingClientRect();
+    return box.width === 0 || box.height === 0;
+  })()`;
+
+  await ask(second, нажатьAI);
+  await wait(300);
+  check('чат свёрнут перед прогоном', (await ask(second, панельСвёрнута)) === true, 'панель не свернулась');
+
+  // Вопрос отправляем ПРОГРАММНО, минуя поле: поле в свёрнутой панели не видно,
+  // а нужен сам прогон. Это тот же путь, каким шлёт композер.
+  planDemo.holdMs = 1500;
+  await ask(
+    second,
+    `(async () => {
+      const input = document.querySelector('.chat-input');
+      input.value = 'Отвечай, пока меня нет';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+      return true;
+    })()`,
+  );
+  // Ждём конца прогона, а не фиксированное время: иначе проверка гоняется с
+  // самой собой и падает на медленной машине.
+  const кончился = await ask(
+    second,
+    `(async () => {
+      const старт = Date.now();
+      while (Date.now() - старт < 8000) {
+        const кнопка = [...document.querySelectorAll('.icon-btn')].find((b) => (b.getAttribute('title') ?? '').startsWith('AI Assistant'));
+        if (кнопка?.classList.contains('has-unseen')) {
+          return {
+            метка: true,
+            ошибка: кнопка.classList.contains('has-unseen-error'),
+            aria: кнопка.getAttribute('aria-label') ?? '',
+            заголовок: document.title,
+            секунд: Math.round((Date.now() - старт) / 100) / 10,
+          };
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return {
+        метка: false,
+        заголовок: document.title,
+        последнее: document.querySelector('.chat-thread .msg:last-child')?.textContent.slice(0, 40) ?? '',
+        осталосьПолей: document.querySelector('.chat-input')?.value ?? 'нет поля',
+        идёт: document.querySelector('.composer-pause')?.hidden === false,
+      };
+    })()`,
+  );
+  check('прогон при свёрнутом чате оставил метку', кончился.метка === true, кончился);
+  check('метка «новый ответ» без признака беды', кончился.ошибка === false, кончился);
+  check('метку слышно словами, а не только цветом', (кончился.aria ?? '').includes('есть новый ответ'), кончился.aria);
+
+  await ask(second, нажатьAI);
+  await wait(300);
+  const после = await ask(
+    second,
+    `(() => {
+      const кнопка = [...document.querySelectorAll('.icon-btn')].find((b) => (b.getAttribute('title') ?? '').startsWith('AI Assistant'));
+      return {
+        hasUnseen: кнопка ? кнопка.classList.contains('has-unseen') : null,
+        aria: кнопка?.getAttribute('aria-label') ?? '',
+        панельВидна: document.querySelector('.right-panel')?.getBoundingClientRect().width > 0,
+      };
+    })()`,
+  );
+  check('раскрыл чат — панель вернулась', после.панельВидна === true, после);
+  check('раскрыл чат — метка снята', после.hasUnseen === false, после);
+  check('и подпись вернулась к обычной', !после.aria.includes('новый ответ'), после.aria);
+
   console.log(`\n[проба] снимок: ${shotFile}`);
 
   terminals.dispose();

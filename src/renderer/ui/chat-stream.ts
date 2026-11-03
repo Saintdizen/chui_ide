@@ -420,8 +420,12 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     } finally {
       host.hidePlan(session);
       activity.dispose();
-      host.setStreaming(null);
+      // ПОРЯДОК ВАЖЕН: `setStreaming(null)` обнуляет сессию прогона, а
+      // `setBusy(false)` по ней решает, звать ли `finishRun` (заметка о конце
+      // прогона, метка в доке, заголовок окна). Поменяй местами — и `finishRun`
+      // не сработает никогда: условие `session === streamingSession` уже ложно.
       host.setBusy(false, session);
+      host.setStreaming(null);
       // Правки агента на диск не пишем: сохранение — решение человека (кнопка
       // «Сохранить» в панели изменений). Здесь только обновляем вид панели.
       host.afterStream(session);

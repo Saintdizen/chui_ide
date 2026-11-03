@@ -623,6 +623,34 @@ textarea {
   color: var(--text_color);
 }
 
+/* Метка «в чате есть непрочитанный ответ».
+   Точка, а не цифра: непрочитанное тут — один исход прогона, и число тянуло бы
+   глаз сильнее самого сообщения. Слой — абсолютный: кнопка — сетка 25×25 (см.
+   выше), и точку надо приткнуть в угол, не растягивая квадрат. */
+.icon-btn.has-unseen {
+  position: relative;
+}
+
+.icon-btn.has-unseen::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius_circle);
+  background: var(--accent_fill);
+  /* Обводка цветом панели: без неё точка сливается со значком на светлом фоне. */
+  box-shadow: 0 0 0 2px var(--panel_background);
+  pointer-events: none;
+}
+
+/* Упавший прогон — это не «есть новое», а «есть беда»: цвет другой, размер тот же
+   (менять размер значило бы, что красное важнее по величине, а не по цвету). */
+.icon-btn.has-unseen.has-unseen-error::after {
+  background: var(--text_color_error);
+}
+
 /* Кнопка-значок своей заливки не имеет: выключенную гасим целиком, а не подложкой. */
 .icon-btn:disabled {
   opacity: 0.5;

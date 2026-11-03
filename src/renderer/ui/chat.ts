@@ -157,6 +157,14 @@ export interface ChatDeps {
    */
   onRunEnd?(how: RunEnd, title: string): void;
   /**
+   * Видит ли человек ленту ПРЯМО СЕЙЧАС — панель раскрыта, окно не свёрнуто.
+   *
+   * Нужен отдельно от `document.hasFocus()`: свёрнутая правая колонка фокус не
+   * отбирает, и по одному фокусу прогон считался бы просмотренным — ответ готов,
+   * а окно пустое. Необязательно: без него считаем, что видит (старое поведение).
+   */
+  isChatVisible?(): boolean;
+  /**
    * Показать файл в экране различий против HEAD. Нужен ревью правок: блок можно
    * разглядеть только там — в попапе изменений видна только одна цифра строк.
    * Необязательно: без него пункт просто не появляется.
@@ -2354,6 +2362,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Конец прогона — конец и паузе: кнопка не должна остаться в «продолжить».
     if (!value) composer.setPaused(false);
     // Прогон кончился, а человек, может быть, ушёл в другое окно.
+    //
+    // Сверяем с `streamingSession` ДО того, как его обнулят: стрим зовёт
+    // `setStreaming(null)`, а следом `setBusy(false)` (см. `chat-stream.ts`,
+    // `finally`). Раньше порядок был обратный — к этому моменту `streamingSession`
+    // уже null, условие не срабатывало НИКОГДА, и заметка о конце прогона
+    // не выходила вовсе.
     if (!value && session === streamingSession) finishRun(session);
   }
 
@@ -2368,7 +2382,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     const how = runEnd(streamingOutcome ?? 'started');
     if (!how) return;
     const focused = document.hasFocus();
-    const seen = focused && session.id === activeId;
+    // Смотрел — значит видел ленту, а не просто «окно в фокусе»: свёрнутая правая
+    // колонка фокуса не отбирает, и без этой проверки человек не узнавал бы,
+    // что ответ пришёл в скрытый чат.
+    const seen = focused && session.id === activeId && (deps.isChatVisible?.() ?? true);
     const name = session.title?.trim() || 'Беседа';
     const message = announceMessage(how, name, tailOf(session.history), seen);
     if (message) {
