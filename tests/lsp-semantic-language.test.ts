@@ -73,11 +73,17 @@ const FAKE_SERVER = [
   '          documentSymbolProvider: true,',
   '          semanticTokensProvider: {',
   '            full: true,',
+  '            range: true,',
   "            legend: { tokenTypes: ['keyword'], tokenModifiers: [] },",
   '          },',
   '        },',
   '      },',
   '    });',
+  '    return;',
+  '  }',
+  "  if (message.method === 'textDocument/semanticTokens/range') {",
+  '    // Две строки, чтобы было что резать: строка 0 и строка 5.',
+  "    send({ jsonrpc: '2.0', id: message.id, result: { data: [0, 0, 3, 0, 0, 5, 0, 3, 0, 0] } });",
   '    return;',
   '  }',
   "  if (message.method === 'textDocument/semanticTokens/full') {",
@@ -153,5 +159,22 @@ describe('семантическая подсветка не зависит от
     const lsp = service(root, server);
     await lsp.open(file, 'typescript', 'const value = 1;\n');
     expect(await lsp.semanticTokens(file)).toHaveLength(1);
+  });
+});
+
+describe('подсветка по участку', () => {
+  it('умеющему `range` уходит запрос участка, а не файла целиком', async () => {
+    const { root, file, server } = await project();
+    const lsp = service(root, server);
+    const tokens = await lsp.semanticTokens(file, 'typescript', { startLine: 0, endLine: 10 });
+    // Заглушка на `range` отвечает двумя токенами, на `full` — одним: так видно,
+    // какой запрос ушёл на самом деле.
+    expect(tokens).toHaveLength(2);
+  });
+
+  it('вызывающему без диапазона по-прежнему отдаётся файл целиком', async () => {
+    const { root, file, server } = await project();
+    const lsp = service(root, server);
+    expect(await lsp.semanticTokens(file, 'typescript')).toHaveLength(1);
   });
 });

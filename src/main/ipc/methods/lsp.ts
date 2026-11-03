@@ -78,7 +78,12 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
   // renderer получает готовые участки и накладывает их поверх своей грамматики.
   // Язык — от вызывающего: `open` уходит `void`-запросом, и его приход не гарантирован
   // раньше этого вызова (см. `LspService.semanticTokens`).
-  router.register('lsp.semanticTokens', (params) => deps.lsp?.semanticTokens(params.path, params.languageId) ?? []);
+  // Диапазон — необязательный: у сервера может не быть `semanticTokens/range`,
+  // тогда main сам ответит файлом целиком (см. `LspService.semanticTokens`).
+  router.register(
+    'lsp.semanticTokens',
+    (params) => deps.lsp?.semanticTokens(params.path, params.languageId, params.range) ?? [],
+  );
   // Форматирование участка: сервер переписывает только выделение или вставленный кусок.
   router.register(
     'lsp.formatRange',

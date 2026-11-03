@@ -196,17 +196,35 @@ describe('didSave и наблюдение за файлами', () => {
     expect(await logOf(log)).not.toContain('textDocument/didSave');
   });
 
-  it('сохранение неоткрытого файла не шлётся даже объявившему save', async () => {
-    // Уведомление про файл, которого сервер не открывал, — ошибка протокола.
+  it('сохранение файла, закрытого в редакторе, шлётся без текста: сервер его не открывал', async () => {
+    // `didSave` про неоткрытый документ — ошибка протокола, поэтому такой файл
+    // открываем на время сохранения и закрываем сразу.
     const { root, file, log, server } = await project('save');
     const lsp = service(root, server);
     await lsp.prewarm(['typescript']);
     lsp.open(file, 'typescript', 'const value = 1;\n');
     await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
     lsp.close(file);
+    lsp.saved(file, 'const value = 2;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didSave'));
+    const text = await logOf(log);
+    // Открыт и закрыт вокруг сохранения — по порядку.
+    expect(text.lastIndexOf('textDocument/didOpen')).toBeLessThan(text.lastIndexOf('textDocument/didSave'));
+    expect(text.lastIndexOf('textDocument/didSave')).toBeLessThan(text.lastIndexOf('textDocument/didClose'));
+  });
+
+  it('сохранение неоткрытого файла без текста не шлётся', async () => {
+    // Текст не дали — открыть документ нечем, а `didSave` без `didOpen` нельзя.
+    const { root, file, log, server } = await project('save');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    lsp.open(file, 'typescript', 'const value = 1;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
+    lsp.close(file);
+    const before = (await logOf(log)).length;
     lsp.saved(file);
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(await logOf(log)).not.toContain('textDocument/didSave');
+    expect((await logOf(log)).slice(before)).not.toContain('textDocument/didSave');
   });
 
   it('изменение файла вне редактора уходит как didChangeWatchedFiles', async () => {

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { statSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PushTopic, type WorkspaceChangedPayload } from '../shared/api';
 import { folderFromCommandLine, type CommandLineFolder } from '../shared/cli';
@@ -395,7 +395,15 @@ if (!app.requestSingleInstanceLock()) {
     // Снимок прежнего содержимого перед каждой перезаписью — источник локальной
     // истории. Ошибку снимка не поднимаем: история вспомогательная, файл важнее.
     workspace.onFilesChanged = (changes) => {
-      for (const [file, kind] of changes) lsp.watchedFiles([file], kind);
+      for (const [file, kind] of changes) {
+        // Сохранение мимо редактора: файл уже на диске, текст — оттуда.
+        if (pendingSaves.delete(file)) {
+          void readFile(file, 'utf8')
+            .then((text) => lsp.saved(file, text))
+            .catch(() => lsp.saved(file));
+        }
+        lsp.watchedFiles([file], kind);
+      }
       // Создание и удаление — ещё и `didCreateFiles`/`didDeleteFiles`: сервер по ним
       // узнаёт о новом модуле сразу, а не после перезапуска (и сохраняет связь имён
       // при переименовании, где `fs.watch` видит два независимых пути).
@@ -411,6 +419,10 @@ if (!app.requestSingleInstanceLock()) {
     // должен узнать, иначе его индекс останется по старой области.
     workspace.onRootsChanged = (added, removed) => lsp.rootsChanged(added, removed);
 
+    // Файлы, которые сохранили, но чей текст ещё не прочитан: `onBeforeChange`
+    // зовётся ДО записи, а серверу нужен записанный текст.
+    const pendingSaves = new Set<string>();
+
     workspace.onBeforeChange = (file, reason) => {
       const root = workspace.rootPath();
       if (!root) return;
@@ -421,7 +433,10 @@ if (!app.requestSingleInstanceLock()) {
       // сохранении (ruff --fix, ESLint fixAll) не запускаются вовсе.
       if (reason === 'save') {
         lsp.willSave(file);
-        lsp.saved(file);
+        // Текст читаем с диска ПОСЛЕ записи (`onFilesChanged`): файл, открытый в
+        // редакторе, сервер и так знает, а сохранённый мимо него — нет, и ему нужен
+        // именно записанный текст. Здесь его ещё нет, поэтому только флаг.
+        pendingSaves.add(file);
       } else lsp.watchedFiles([file], 3);
       return captured;
     };

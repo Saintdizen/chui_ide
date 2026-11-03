@@ -366,7 +366,11 @@ export interface EditorHostOptions {
    * Семантическая подсветка файла от сервера (`semanticTokens/full`): точные роли поверх
    * своей грамматики (см. `shared/lsp-semantic-tokens.ts`). Не задано — только грамматика.
    */
-  semanticTokens?: (path: string, languageId: string) => Promise<readonly SemanticToken[]>;
+  semanticTokens?: (
+    path: string,
+    languageId: string,
+    range?: { startLine: number; endLine: number },
+  ) => Promise<readonly SemanticToken[]>;
   /**
    * Код-линзы файла от языкового сервера: путь и текст → подписи у строк (см.
    * `shared/lsp-code-lens.ts`). Не задано — линз нет вовсе.
@@ -487,7 +491,11 @@ export class EditorHost {
   private selectionRequestId = 0;
   /** Семантическая подсветка — от приложения (языковой сервер): источник и номер запроса. */
   private readonly semanticSource:
-    | ((path: string, languageId: string) => Promise<readonly SemanticToken[]>)
+    | ((
+        path: string,
+        languageId: string,
+        range?: { startLine: number; endLine: number },
+      ) => Promise<readonly SemanticToken[]>)
     | undefined;
   private semanticRequestId = 0;
   private semanticTimer: number | null = null;
@@ -650,7 +658,13 @@ export class EditorHost {
     // Прокрутили — видимое окно сменилось: подсказки-вставки спрашивались для старого
     // места, и без перезапроса новая часть файла останется без них. С паузой — чтобы
     // не дёргать сервер на каждом колесе (см. `scheduleInlayHints`).
-    this.view.onVisibleRangeChange(() => this.scheduleInlayHints());
+    this.view.onVisibleRangeChange(() => {
+      this.scheduleInlayHints();
+      // Подсветка тоже привязана к экрану: сервер, умеющий `semanticTokens/range`,
+      // отвечает только про видимое, и без перезапроса новая часть файла осталась
+      // бы с одной грамматикой — то есть сносной, но не точной.
+      this.scheduleSemanticTokens();
+    });
     this.viewport = this.view.element.querySelector<HTMLElement>('.own-editor-viewport');
     // Значок «только чтение» — поверх панели: файл большой, правки в нём выключены.
     this.readOnlyBadge = document.createElement('div');
@@ -2178,7 +2192,15 @@ export class EditorHost {
     const path = this.path;
     if (!source || !path) return;
     const id = (this.semanticRequestId += 1);
-    const tokens = await source(path, this.languageId).catch(() => []);
+    // Просим видимое (с запасом, его даёт вид): сервер не разбирает тысячу строк
+    // ради экрана. Строки у LSP с нуля, у вида — с единицы.
+    const visible = this.view.visibleRange();
+    const range = { startLine: Math.max(0, visible.first - 1), endLine: visible.last };
+    // Второй заход — без диапазона: сервер, отказавший на `range`, скорее всего его
+    // просто не умеет, а подсветка файла целиком лучше, чем никакой.
+    const tokens = await source(path, this.languageId, range).catch(() =>
+      source(path, this.languageId).catch(() => []),
+    );
     // Пока спрашивали, файл сменился — ответ уже не к месту.
     if (id !== this.semanticRequestId || this.path !== path) return;
     this.view.setSemanticTokens(tokens);

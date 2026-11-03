@@ -963,15 +963,45 @@ export class LspService {
     }
   }
 
-  /** Документ сохранён на диск — сказать серверу (`didSave`). */
-  saved(path: string): void {
-    const runtime = this.runtimeForPath(path);
-    if (!runtime || this.openedIn.get(path) !== runtime) return;
+  /**
+   * Документ сохранён на диск — сказать серверу (`didSave`).
+   *
+   * Сохранить файл можно и мимо редактора (файловый менеджер, `touch`, скрипт), и
+   * сервер об этом иначе не узнает: проверки на сохранении там тоже нужны. Такой
+   * файл сервер не видел вовсе, а `didSave` про неоткрытый документ протокол
+   * запрещает — поэтому открываем его на время сохранения и закрываем сразу.
+   * Текст берём с диска: `latestText` у неоткрытого файла пуст, а серверу нужен
+   * именно тот текст, что записали.
+   */
+  saved(path: string, text?: string): void {
+    // Язык — и из `languageOfPath`, и по расширению: файл, закрытый в редакторе,
+    // уже вычеркнут из первой карты, а сервер, который его проверяет, остался.
+    const languageId = this.languageFor(path);
+    const runtime = languageId ? (this.runtimes.get(languageId) ?? null) : null;
+    if (!runtime) return;
     const save = runtime.capabilities.textDocumentSyncSave;
     if (!save) return;
+    const uri = pathToFileURL(path).toString();
+
+    if (this.openedIn.get(path) !== runtime) {
+      if (!languageId || text === undefined) return;
+      runtime.versions.set(path, 1);
+      this.openedIn.set(path, runtime);
+      runtime.connection.notify('textDocument/didOpen', { textDocument: { uri, languageId, version: 1, text } });
+      runtime.connection.notify('textDocument/didSave', {
+        textDocument: { uri },
+        ...(save.includeText ? { text } : {}),
+      });
+      runtime.connection.notify('textDocument/didClose', { textDocument: { uri } });
+      this.openedIn.delete(path);
+      runtime.versions.delete(path);
+      return;
+    }
+
+    const current = this.latestText.get(path);
     runtime.connection.notify('textDocument/didSave', {
-      textDocument: { uri: pathToFileURL(path).toString() },
-      ...(save.includeText && this.latestText.has(path) ? { text: this.latestText.get(path) } : {}),
+      textDocument: { uri },
+      ...(save.includeText && current !== undefined ? { text: current } : {}),
     });
   }
 
@@ -1508,7 +1538,19 @@ export class LspService {
    * разбираем здесь, где легенда под рукой: renderer получает готовые участки.
    * Сервера нет, легенды нет или ответ пуст — пустой список: подсветка останется своя.
    */
-  async semanticTokens(path: string, languageId?: string): Promise<SemanticToken[]> {
+  /**
+   * Семантические токены файла или его участка.
+   *
+   * `range` — 0-based строки участка. Серверу, умеющему `semanticTokens/range`,
+   * отдаём его: большой файл не нужно разбирать целиком ради экрана. Умеющему
+   * только `full` — спрашиваем файл целиком и режем сами: подсветка вне экрана
+   * ещё пригодится при прокрутке, а лишний разговор с сервером — нет.
+   */
+  async semanticTokens(
+    path: string,
+    languageId?: string,
+    range?: { startLine: number; endLine: number },
+  ): Promise<SemanticToken[]> {
     // Язык берём у вызывающего, а не только из `languageOfPath`: туда пишет
     // `open`, а он у renderer'а уходит `void`-запросом (см. `LspClient.sendOpen`),
     // и его приход не гарантирован раньше этого вызова. Без языка `runtimeForPath`
@@ -1519,13 +1561,33 @@ export class LspService {
     await runtime.initialized.catch(() => undefined);
     const legend = semanticLegend(runtime.capabilities.semanticTokensProvider);
     if (!legend) return [];
+    const provider = runtime.capabilities.semanticTokensProvider as
+      | { range?: boolean | Record<string, unknown> }
+      | undefined;
+    const useRange = range !== undefined && provider?.range !== undefined && provider.range !== false;
     try {
+      if (useRange) {
+        const result = await runtime.connection.request(
+          'textDocument/semanticTokens/range',
+          {
+            textDocument: { uri: pathToFileURL(path).toString() },
+            range: {
+              start: { line: range.startLine, character: 0 },
+              end: { line: range.endLine, character: 0 },
+            },
+          },
+          `${path}\u0000textDocument/semanticTokens/range`,
+        );
+        return decodeSemanticTokens(result, legend);
+      }
       const result = await runtime.connection.request(
         'textDocument/semanticTokens/full',
         { textDocument: { uri: pathToFileURL(path).toString() } },
         `${path}\u0000textDocument/semanticTokens/full`,
       );
-      return decodeSemanticTokens(result, legend);
+      const tokens = decodeSemanticTokens(result, legend);
+      if (!range) return tokens;
+      return tokens.filter((token) => token.line >= range.startLine && token.line <= range.endLine);
     } catch {
       return [];
     }

@@ -574,8 +574,14 @@ export class LspFeatures {
    * кроме как отсюда не может — `lsp.open` у renderer'а уходит `void`-запросом (см.
    * `LspClient.sendOpen`), и без языка этот вызов мог обогнать его и получить пусто.
    */
-  async semanticTokens(path: string, languageId: string): Promise<SemanticToken[]> {
-    const result = await this.rpc.request('lsp.semanticTokens', { path, languageId }).catch(() => null);
+  async semanticTokens(
+    path: string,
+    languageId: string,
+    range?: { startLine: number; endLine: number },
+  ): Promise<SemanticToken[]> {
+    const result = await this.rpc
+      .request('lsp.semanticTokens', { path, languageId, ...(range ? { range } : {}) })
+      .catch(() => null);
     return Array.isArray(result) ? (result as SemanticToken[]) : [];
   }
 
