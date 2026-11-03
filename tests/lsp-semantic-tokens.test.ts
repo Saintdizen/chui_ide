@@ -3,6 +3,7 @@ import {
   STANDARD_LEGEND,
   STANDARD_TOKEN_MODIFIERS,
   STANDARD_TOKEN_TYPES,
+  applySemanticDelta,
   decodeSemanticTokens,
   semanticTokenRole,
 } from '../src/shared/lsp-semantic-tokens';
@@ -122,5 +123,65 @@ describe('semanticTokenRole', () => {
       const role = semanticTokenRole(type);
       expect(role === null || typeof role === 'string').toBe(true);
     }
+  });
+});
+
+/**
+ * `full/delta`: сервер шлёт правки к прежним числам, а не полный набор.
+ *
+ * Номера здесь в ЧИСЛАХ, не в токенах: `start: 5` — начало второй пятёрки. Спутать
+ * легко, а последствие — подсветка не по тем местам, поэтому несошедшаяся правка
+ * честно отдаёт null, и вызывающий спрашивает полный набор.
+ */
+describe('applySemanticDelta', () => {
+  const first = [0, 0, 3, 0, 0, 0, 4, 5, 1, 0];
+  const second = [0, 10, 3, 0, 0, 0, 14, 5, 1, 0];
+
+  it('полный data заменяет всё', () => {
+    expect(applySemanticDelta(first, { data: second })).toEqual(second);
+  });
+
+  it('правка вставляет пятёрки на место вырезанных', () => {
+    // Вырезать второй токен, вставить другой.
+    expect(applySemanticDelta(first, { edits: [{ start: 5, deleteCount: 5, data: [0, 14, 5, 1, 0] }] })).toEqual([
+      0, 0, 3, 0, 0, 0, 14, 5, 1, 0,
+    ]);
+  });
+
+  it('правка без data — только вырезание', () => {
+    expect(applySemanticDelta(first, { edits: [{ start: 0, deleteCount: 5 }] })).toEqual([0, 4, 5, 1, 0]);
+  });
+
+  it('пустая правка ничего не меняет', () => {
+    expect(applySemanticDelta(first, { edits: [{ start: 5, deleteCount: 0 }] })).toEqual(first);
+  });
+
+  it('номер не на границе пятёрки — null', () => {
+    expect(applySemanticDelta(first, { edits: [{ start: 3, deleteCount: 5 }] })).toBeNull();
+  });
+
+  it('номер за границей данных — null', () => {
+    expect(applySemanticDelta(first, { edits: [{ start: 10, deleteCount: 5 }] })).toBeNull();
+  });
+
+  it('deleteCount не кратен пятёрке — null', () => {
+    expect(applySemanticDelta(first, { edits: [{ start: 0, deleteCount: 3 }] })).toBeNull();
+  });
+
+  it('ни data, ни edits — null', () => {
+    expect(applySemanticDelta(first, {})).toBeNull();
+  });
+
+  it('несколько правок применяются по порядку', () => {
+    // Номера считаются по УЖЕ правленым данным, поэтому правки разнесены:
+    // первая трогает начало, вторая — то, что осталось в конце.
+    expect(
+      applySemanticDelta(first, {
+        edits: [
+          { start: 0, deleteCount: 5 },
+          { start: 5, deleteCount: 0, data: [0, 20, 2, 0, 0] },
+        ],
+      }),
+    ).toEqual([0, 4, 5, 1, 0, 0, 20, 2, 0, 0]);
   });
 });

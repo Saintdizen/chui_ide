@@ -175,3 +175,41 @@ const SEMANTIC_ROLES: Record<string, TokenKey | null> = {
 export function semanticTokenRole(type: string): TokenKey | null {
   return SEMANTIC_ROLES[type] ?? null;
 }
+
+/** Результат `full/delta`: либо новый `data` целиком, либо куски к прежнему. */
+export interface SemanticDelta {
+  /** Новый `resultId`: его же прикладываем к следующему запросу. */
+  readonly resultId?: string;
+  /** Полный набор — сервер счёл, что правок больше, чем экономии. */
+  readonly data?: number[];
+  /** Правки к прежнему `data`: вырезать `deleteCount` пятёрок с `start`, вставить `data`. */
+  readonly edits?: readonly { start: number; deleteCount: number; data?: readonly number[] }[];
+}
+
+/**
+ * Применить `full/delta` к прежнему `data`.
+ *
+ * Номера в `edits` считаются не в токенах, а в ЧИСЛАХ: `start: 5` — это начало
+ * второй пятёрки, а не второго токена. Сдвиги внутри `data` отсчитываются от
+ * предыдущего токена, поэтому правка в середине меняет и следующий за ней токен —
+ * сервер присылает его же в `data` правки, и мы ничего не пересчитываем сами.
+ *
+ * Возвращаем `null`, если правка не сходится с прежним набором (номера за
+ * границей, нечётный `start`): сделать вид, что применили, значит показать
+ * подсветку не по тем местам — лучше запросить `full` заново.
+ */
+export function applySemanticDelta(previous: readonly number[], delta: SemanticDelta): number[] | null {
+  if (delta.data) return [...delta.data];
+  if (!delta.edits) return null;
+  let data = [...previous];
+  for (const edit of delta.edits) {
+    const { start, deleteCount } = edit;
+    if (!Number.isInteger(start) || !Number.isInteger(deleteCount)) return null;
+    if (start < 0 || start % 5 !== 0 || start > data.length || deleteCount % 5 !== 0) return null;
+    if (start + deleteCount > data.length) return null;
+    const insert = edit.data ? [...edit.data] : [];
+    if (insert.length % 5 !== 0) return null;
+    data = [...data.slice(0, start), ...insert, ...data.slice(start + deleteCount)];
+  }
+  return data;
+}

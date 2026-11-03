@@ -17,7 +17,9 @@ import { parseProgress } from '../../shared/lsp-progress';
 import {
   STANDARD_TOKEN_MODIFIERS,
   STANDARD_TOKEN_TYPES,
+  applySemanticDelta,
   decodeSemanticTokens,
+  type SemanticDelta,
   type SemanticLegend,
   type SemanticToken,
 } from '../../shared/lsp-semantic-tokens';
@@ -592,6 +594,8 @@ export class LspService {
   private readonly latestText = new Map<string, string>();
   /** В каком сервере документ уже открыт (`didOpen` ушёл). Нет записи — ещё не открыт. */
   private readonly openedIn = new Map<string, ServerRuntime>();
+  /** Прежние числа семантических токенов: для `full/delta`. Сбрасывается на `close`. */
+  private readonly semanticCache = new Map<string, { resultId: string; data: number[] }>();
   /**
    * Языки, сервер которых поднять не удалось: язык → причина. Без кэша каждый файл
    * такого языка заново искал бы сервер (диск, PATH, окружения) — на пустом ответе
@@ -879,6 +883,9 @@ export class LspService {
     // Помним последний текст даже до появления сервера: если `didOpen` ещё не ушёл,
     // именно этот текст и уедет серверу (см. `open`) — правка не потеряется.
     this.latestText.set(path, text);
+    // Прежние токены — про прежний текст: дельта к ним описывала бы правку к
+    // тексту, которого больше нет. Следующий запрос пойдёт полным.
+    this.semanticCache.delete(path);
     const runtime = this.runtimeForPath(path);
     if (!runtime) return;
     // Сервер ещё не получил `didOpen` — правку отдаст он сам, актуальным текстом.
@@ -1063,6 +1070,7 @@ export class LspService {
     const runtime = this.runtimeForPath(path);
     this.languageOfPath.delete(path);
     this.latestText.delete(path);
+    this.semanticCache.delete(path);
     if (!runtime) return;
     // `didClose` только если документ и правда был открыт: иначе мы закрыли бы то,
     // чего сервер не видел (открытие ещё шло), и он потерял бы файл.
@@ -1083,6 +1091,7 @@ export class LspService {
     this.refusals.clear();
     this.scanned.clear();
     this.latestText.clear();
+    this.semanticCache.clear();
     this.openedIn.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);
   }
@@ -1580,17 +1589,51 @@ export class LspService {
         );
         return decodeSemanticTokens(result, legend);
       }
-      const result = await runtime.connection.request(
-        'textDocument/semanticTokens/full',
-        { textDocument: { uri: pathToFileURL(path).toString() } },
-        `${path}\u0000textDocument/semanticTokens/full`,
-      );
-      const tokens = decodeSemanticTokens(result, legend);
+      const data = await this.semanticData(path, runtime, provider);
+      const tokens = decodeSemanticTokens({ data }, legend);
       if (!range) return tokens;
       return tokens.filter((token) => token.line >= range.startLine && token.line <= range.endLine);
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Числа токенов файла: `full` в первый раз, дальше `full/delta`, если сервер умеет.
+   *
+   * Правка на символ перекрашивала весь файл: сервер переразбирал его и присылал
+   * полный набор. С `delta` он присылает только изменившиеся пятёрки, а прежние
+   * мы храним здесь — по пути и по `resultId`, который сервер попросил прислать
+   * в следующий раз. Смена документа `resultId` обнуляет: сервер сам скажет, если
+   * кэш не годится, и тогда ответ придёт полный.
+   */
+  private async semanticData(path: string, runtime: ServerRuntime, provider: unknown): Promise<number[]> {
+    const previous = this.semanticCache.get(path);
+    const delta = (provider as { full?: { delta?: unknown } } | undefined)?.full?.delta;
+    const uri = pathToFileURL(path).toString();
+    if (previous && delta) {
+      const result = (await runtime.connection.request(
+        'textDocument/semanticTokens/full/delta',
+        { textDocument: { uri }, previousResultId: previous.resultId },
+        `${path}\u0000textDocument/semanticTokens/full/delta`,
+      )) as SemanticDelta | null;
+      const next = result ? applySemanticDelta(previous.data, result) : null;
+      if (next) {
+        this.semanticCache.set(path, { resultId: result?.resultId ?? previous.resultId, data: next });
+        return next;
+      }
+      // Не сошлось — просим полный набор ниже: показать подсветку не по тем
+      // местам хуже, чем заплатить одним полным ответом.
+    }
+
+    const result = (await runtime.connection.request(
+      'textDocument/semanticTokens/full',
+      { textDocument: { uri } },
+      `${path}\u0000textDocument/semanticTokens/full`,
+    )) as { data?: number[]; resultId?: string } | null;
+    const data = Array.isArray(result?.data) ? result.data : [];
+    this.semanticCache.set(path, { resultId: result?.resultId ?? '', data });
+    return data;
   }
 
   /**
