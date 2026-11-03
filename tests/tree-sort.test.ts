@@ -123,3 +123,34 @@ describe('числа по-людски и регистр', () => {
     expect(names(['a_10.md', 'a_9.md'])).toEqual(['a_9.md', 'a_10.md']);
   });
 });
+
+describe('режим «по типу»: папки не сваливаются в одну кучу', () => {
+  const opts = { foldersFirst: true, sort: 'type' as const };
+  const dir = (name: string): DirEntry =>
+    ({
+      name,
+      path: `/p/${name}`,
+      kind: 'directory',
+      size: 0,
+      mtimeMs: 0,
+    }) as unknown as DirEntry;
+  const file = (name: string): DirEntry => ({ ...dir(name), kind: 'file' }) as unknown as DirEntry;
+
+  it('папки идут по имени, а не все перед файлами без разбора', () => {
+    // У папки расширения нет, `extensionOf` даёт ''. При простом сравнении
+    // строк все папки сваливались бы в кучу перед любым `.ts` — но главное,
+    // между собой они должны идти по ИМЕНИ.
+    const sorted = sortTree([dir('zeta'), dir('alpha'), file('b.ts')], opts).map((entry) => entry.name);
+    expect(sorted).toEqual(['alpha', 'zeta', 'b.ts']);
+  });
+
+  it('файлы внутри типа сортируются по имени', () => {
+    const sorted = sortTree([file('b.ts'), file('a.ts'), file('c.js')], opts).map((entry) => entry.name);
+    expect(sorted).toEqual(['c.js', 'a.ts', 'b.ts']);
+  });
+
+  it('папки-соседи не перебивают порядок файлов по расширению', () => {
+    const sorted = sortTree([file('a.ts'), dir('m'), file('a.css')], opts).map((entry) => entry.name);
+    expect(sorted).toEqual(['m', 'a.css', 'a.ts']);
+  });
+});

@@ -61,7 +61,14 @@ export function sortTree(entries: readonly DirEntry[], options: SortOptions): Di
     if (byKind !== 0) return byKind;
 
     if (options.sort === 'type') {
-      const byType = extensionOf(a.name).localeCompare(extensionOf(b.name));
+      // У ПАПОК расширения нет (`extensionOf` даёт `''`), и при простом сравнении
+      // строк все папки сваливались в одну кучу перед любым `.ts`: `src`, `docs`,
+      // затем `a.ts`, `b.css` — хотя по типу папки должны идти по ИМЕНИ между
+      // собой. Сравниваем расширение только у файлов, у папок — пустая строка
+      // с обеих сторон, и порядок решает имя в конце.
+      const left = entryIsDirectory(a) ? '' : extensionOf(a.name);
+      const right = entryIsDirectory(b) ? '' : extensionOf(b.name);
+      const byType = left === right ? 0 : left.localeCompare(right);
       if (byType !== 0) return byType;
     } else if (options.sort === 'modified') {
       // Свежее — выше: только что правленное обычно и нужно.
