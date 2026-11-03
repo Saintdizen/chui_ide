@@ -10,7 +10,7 @@ import { isNodeTestFile, type ProjectScan } from '../../shared/project-scan';
 import { pluginBlockArgs } from '../../shared/python-tests';
 import { resultMarkerCommand } from '../../shared/test-model';
 import type { ProjectTools } from './project-tools';
-import { shellQuote } from './project-tools';
+import { shellQuote } from '../../shared/shell-quote';
 
 /**
  * Что можно запустить прямо сейчас.
@@ -31,7 +31,7 @@ export interface RunTarget {
   command: string;
   /** Строка файла, с которой связано «запускаемое» место (для значка ▶ в жёлобе). */
   line?: number;
-  source: 'file' | 'script' | 'test';
+  source: 'file' | 'script' | 'task' | 'test';
 }
 
 export interface RunnableFile {
@@ -114,15 +114,21 @@ export function fileRunTarget(file: RunnableFile, tools: ProjectTools): RunTarge
   return null;
 }
 
-/** Задачи из package.json: `npm run dev`, `pnpm run test` и прочее. */
+/**
+ * Задачи проекта: `.vscode/tasks.json` и `scripts` из `package.json`.
+ *
+ * Источник разный (`task` или `script`), а строя в меню — одна. Чужой репозиторий
+ * без `scripts`, но с `tasks.json` раньше не давал запустить ничего.
+ */
 export function scriptRunTargets(tools: ProjectTools): RunTarget[] {
-  if (!tools.hasPackageJson || tools.scripts.length === 0) return [];
-  return tools.scripts.map((script) => ({
-    id: `script:${script.name}`,
-    label: `${tools.packageManager} run ${script.name}`,
-    detail: script.command,
-    command: `${tools.packageManager} run ${script.name}`,
-    source: 'script' as const,
+  return tools.tasks.map((task) => ({
+    // Ключ включает источник: у `build` из tasks.json и из scripts он разный,
+    // иначе значок запуска у одного подсвечивал бы оба.
+    id: `${task.source}:${task.label}`,
+    label: task.label,
+    detail: task.command,
+    command: task.command,
+    source: task.source === 'tasks-json' ? ('task' as const) : ('script' as const),
   }));
 }
 

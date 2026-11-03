@@ -10,6 +10,7 @@ const base: ProjectTools = {
   pythonFromProject: true,
   nodeVersion: '20.11.0',
   scripts: [],
+  tasks: [],
   hasPackageJson: true,
   tsRunner: null,
   tsRunnerFrom: null,

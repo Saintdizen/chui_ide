@@ -22,6 +22,7 @@ const tools: ProjectTools = {
   pythonFromProject: true,
   nodeVersion: null,
   scripts: [],
+  tasks: [],
   hasPackageJson: false,
   tsRunner: null,
   tsRunnerFrom: null,

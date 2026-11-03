@@ -1,4 +1,6 @@
 import type { RunSettings } from '../../shared/api';
+import { shellQuote } from '../../shared/shell-quote';
+import { mergeTasks, type ProjectTask, tasksFromScripts, tasksFromTasksJson } from '../../shared/tasks-json';
 import { nodeTypeStripCommand } from '../../shared/node-env';
 import { nodeTestRunnerFrom, type DeclaredNodeRunner } from '../../shared/node-tests';
 import type { RpcClient } from './rpc';
@@ -34,6 +36,13 @@ export interface ProjectTools {
   nodeVersion: string | null;
   /** Задачи из `scripts` в package.json. */
   scripts: readonly ProjectScript[];
+  /**
+   * Задачи для панели: `.vscode/tasks.json`, затем скрипты.
+   *
+   * Одно место вместо двух: чужие репозитории описывают сборку в tasks.json,
+   * и человеку не важно, откуда строка, — важно, что она запускается.
+   */
+  tasks: readonly ProjectTask[];
   /** Найден ли package.json: без него задач Node нет. */
   hasPackageJson: boolean;
   /**
@@ -59,6 +68,7 @@ const EMPTY: ProjectTools = {
   pythonFromProject: false,
   nodeVersion: null,
   scripts: [],
+  tasks: [],
   hasPackageJson: false,
   tsRunner: null,
   tsRunnerFrom: null,
@@ -118,11 +128,12 @@ export class ProjectToolsModel {
   }
 
   private async detect(root: string): Promise<void> {
-    const [manifest, hasPackageJson, python, nodeVersion] = await Promise.all([
+    const [manifest, hasPackageJson, python, nodeVersion, declared] = await Promise.all([
       this.readManifest(root),
       this.exists(`${root}/package.json`),
       this.detectPython(root),
       this.detectNodeVersion(),
+      this.readTasksJson(root),
     ]);
 
     // Раннер проекта важнее встроенного: он выбран осознанно и умеет больше
@@ -140,6 +151,7 @@ export class ProjectToolsModel {
       packageManager,
       hasPackageJson,
       scripts: manifest.scripts,
+      tasks: mergeTasks(declared, tasksFromScripts(manifest.scripts, packageManager)),
       tsRunner: manifest.tsRunner ?? builtinTs,
       tsRunnerFrom: manifest.tsRunner ? 'project' : builtinTs ? 'node' : null,
       testRunner: manifest.testRunner,
@@ -208,6 +220,21 @@ export class ProjectToolsModel {
     return { scripts, packageManager, tsRunner, testRunner: nodeTestRunnerFrom(Object.keys(dependencies)) };
   }
 
+  /**
+   * Задачи из `.vscode/tasks.json`.
+   *
+   * Читаем как есть и разбираем терпимо: это чужой файл с комментариями и
+   * переменными. Нет файла или он битый — пусто, панель не наша забота.
+   */
+  private async readTasksJson(root: string): Promise<ProjectTask[]> {
+    try {
+      const file = await this.rpc.request('workspace.readFile', { path: `${root}/.vscode/tasks.json` });
+      return tasksFromTasksJson(file.text);
+    } catch {
+      return [];
+    }
+  }
+
   private async readJson(target: string): Promise<Record<string, unknown> | null> {
     try {
       const file = await this.rpc.request('workspace.readFile', { path: target });
@@ -255,11 +282,4 @@ export class ProjectToolsModel {
     const fallback = this.platform === 'win32' ? 'python' : 'python3';
     return { pythonCommand: fallback, pythonLabel: `${fallback} (системный)`, pythonFromProject: false };
   }
-}
-
-/** Путь с пробелами ломает команду в терминале: оборачиваем в кавычки. */
-export function shellQuote(value: string): string {
-  if (!/[^A-Za-z0-9_./:@%+-]/.test(value)) return value;
-  if (value.includes("'")) return `"${value.replace(/"/g, '\\"')}"`;
-  return `'${value}'`;
 }

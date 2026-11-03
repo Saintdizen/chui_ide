@@ -11,6 +11,7 @@ const tools = (over: Partial<ProjectTools> = {}): ProjectTools =>
     pythonFromProject: false,
     nodeVersion: '20.11.0',
     scripts: [],
+    tasks: [],
     hasPackageJson: true,
     tsRunner: null,
     ...over,

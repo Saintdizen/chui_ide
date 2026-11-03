@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ProjectToolsModel, shellQuote } from '../src/renderer/core/project-tools';
+import { ProjectToolsModel } from '../src/renderer/core/project-tools';
+import { shellQuote } from '../src/shared/shell-quote';
 
 /**
- * Кавычки для пути в команде терминала (`renderer/core/project-tools.ts`).
+ * Кавычки для пути в команде терминала (`shared/shell-quote.ts`).
  *
  * От этой функции зависит, переживёт ли запуск путь с пробелом или апострофом.
  * Ошибка здесь выглядит как «команда не найдена» у человека, а не у нас, поэтому
