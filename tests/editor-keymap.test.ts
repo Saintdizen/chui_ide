@@ -69,6 +69,13 @@ describe('правки', () => {
     expect(resolveKey({ key: 't', ctrl: true })).toEqual({ kind: 'swallow' });
   });
 
+  it('Shift+Alt+A — блочный комментарий, Ctrl+/ — построчный', () => {
+    // Shift+Alt+A — единственное дело Alt+A; без Shift это обычная буква «A» в тексте.
+    expect(resolveKey({ key: 'a', alt: true, shift: true })).toEqual({ kind: 'edit', edit: 'toggleBlockComment' });
+    expect(resolveKey({ key: 'a', alt: true })).toBeNull();
+    expect(resolveKey({ key: '/', ctrl: true })).toEqual({ kind: 'edit', edit: 'toggleComment' });
+  });
+
   it('Shift+Alt+→/← — выделить по структуре шире и уже', () => {
     expect(resolveKey({ key: 'ArrowRight', alt: true, shift: true })).toEqual({
       kind: 'edit',
