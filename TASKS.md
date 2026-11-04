@@ -6,7 +6,7 @@
 
 Пункты пронумерованы сквозно (1..N) — на номер ссылаемся в коммитах.
 Внутри каждой области они идут группами от простого к сложному. У каждого —
-источник: по нему пункт сверен. Свод по четырём областям собран из корпуса
+источник: по нему пункт сверен. Свод по пяти областям собран из корпуса
 `.log/` (VS Code, Zed, JetBrains, Sublime, Neovim, Microsoft Writing Style),
 сверен по коду.
 
@@ -24,33 +24,6 @@
   status-bar-widgets, progress-indicators, action-system, tool-window,
   how-to-write-guidelines), Microsoft Writing Style, Neovim (editing,
   windows, undo, tagsrch).
-
-## «Уже работает» — не повторять
-
-Сверено по коду и покрыто тестами, сюда больше не попадает: множественный
-выбор в дереве (`core/tree-selection.ts`), конфликт правки файла снаружи
-(`core/disk-conflict.ts`), отказы ФС по кодам (`core/file-errors.ts`),
-хвостовые пробелы, связанные теги, отмена правки вставки (`formatOnPaste`),
-каллиграфия стрима (шаги, пауза, вмешательство, Alt+Enter), очередь в ленте
-(с перетаскиванием и «отменить всё»), уведомления с ключом и счётчиком,
-провенанс ответа, переезд `aside`, `sticky scroll`, миникарта, хлебные
-крошки, иерархия вызовов (`core/call-hierarchy.ts`), worktrees
-(`shared/git-worktrees.ts`), сортировка и мультивыбор в проводнике,
-drag&drop с защитой от «себя», удаление в корзину (`workspace.trash`),
-fuzzy-оценка (`editor/complete/fuzzy.ts`), LSP: definition, references,
-hover, signatureHelp, completion + resolve, codeAction, codeLens, inlayHint,
-inlineCompletion, documentSymbol, workspace symbol + resolve, selectionRange,
-foldingRange, formatting, rangeFormatting, rename + prepareRename,
-publishDiagnostics, pull-diagnostics, semanticTokens (full/range),
-typeDefinition, implementation, declaration (всё в `src/main/lsp/lsp.ts`),
-peek-определение (`editor.peekDefinition`, Ctrl+Shift+F12) через
-`editor/host/peek-controller.ts`, поиск по ленте чата (`ui/chat-find-bar.ts`
-+ `shared/chat-find.ts`), постоянная панель «Структура» (`ui/outline.ts`
-в доке), сворачивание по отступу (`indentFoldRanges` в `shared/fold-ranges.ts`),
-мультикурсор `Ctrl+D`/`Ctrl+Shift+L` (`selectNextOccurrence`/
-`selectAllOccurrences`), переход к строке (`GotoLineWidget`), подсветка
-вхождений символа (`documentHighlight` → `lsp-document-highlight.ts`),
-хлебные крошки с выпадающим списком символов (`widgets/breadcrumbs-widget.ts`).
 
 ---
 
@@ -520,11 +493,14 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     Источник: VS Code `edit-evolved` (symbol navigation),
     Zed `finding-navigating`.
 
-81. **Позиции и кодировки — без сдвигов.** Запросы/ответы переводят UTF-16
-    offset ↔ UTF-32/ASCII по `positionEncoding`; ломающиеся символы (CRLF,
-    суррогатные пары, emoji) не сдвигают курсор и диагностику. Тест на каждую
-    кодировку. Источник: LSP-спецификация (positionEncoding),
-    Neovim `editing.txt`.
+81. **Позиции и кодировки — без сдвигов: ОТВЕТЫ сервера.** Запросы уже
+    пересчитываются по `positionEncoding` (`shared/position-encoding.ts` +
+    `positionOf` в `lsp.ts`). Осталось обратное направление:
+    `shared/lsp-locations.ts`, `shared/lsp-document-highlight.ts` и разбор
+    диагностик прибавляют «1» к `character` без текста строки — у utf-32-сервера
+    после эмодзи подсветка/переход съезжают. Нужен текст строки в этих разборщиках
+    (или клиентский пересчёт по документу) и тест на CRLF/суррогаты/emoji в обе
+    стороны. Источник: LSP-спецификация (positionEncoding), Neovim `editing.txt`.
 
 82. **Изменения атомарны и отменяемы.** Правка из code action/rename/format
     применяется целиком или никак; `documentChanges` с versioned edit
