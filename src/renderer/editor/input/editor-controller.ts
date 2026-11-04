@@ -111,7 +111,7 @@ interface Cursor {
 
 export class EditorController {
   private buffer: TextBuffer;
-  private readonly history: EditHistory;
+  private history: EditHistory;
   private readonly listeners = new Set<(change: EditorChange) => void>();
   private tabSize: number;
   /**
@@ -353,16 +353,21 @@ export class EditorController {
   }
 
   /**
-   * Сменить документ: открыли другой файл в этой же панели. Курсор встаёт в начало,
-   * история правок очищается — отменять правки ПРОШЛОГО файла в новом было бы странно,
-   * и ни один редактор так не делает.
+   * Сменить документ: открыли другой файл в этой же панели. Курсор встаёт в начало.
+   *
+   * `history` — история отмены ЭТОГО файла. Её присылает реестр документов
+   * (`DocumentRegistry.historyFor`), потому что история живёт дольше вкладки: закрыл
+   * файл и открыл снова — `Ctrl+Z` ещё работает. Без аргумента историю чистим, как
+   * прежне: отменять правки ПРОШЛОГО файла в новом было бы странно.
    */
-  setBuffer(buffer: TextBuffer, selection: Selection = { anchor: 0, active: 0 }): void {
+  setBuffer(buffer: TextBuffer, selection: Selection = { anchor: 0, active: 0 }, history?: EditHistory): void {
     this.buffer = buffer;
     this.linked = null;
     this.restoreCursors([selection]);
-    // Новая смена документа — новая история: и правки, и каретки сбрасываются.
-    this.history.clear();
+    // История: пришла от реестра — переключаемся на неё как есть; нет — берём
+    // свежую (НЕ `clear` на текущей: текущая может быть общим экземпляром реестра,
+    // и чистить её значило бы стирать отмену этого файла у всех панелей).
+    this.history = history ?? new EditHistory();
     this.ledger.clear();
     this.cursorHistory.length = 0;
     this.emit('selection', this.caret);

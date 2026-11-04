@@ -20,10 +20,27 @@
 import type { TextDocument } from '../../core/document';
 import type { DocumentStore } from '../../core/document-store';
 import { Emitter } from '../../core/events';
+import { EditHistory } from '../core/history';
 import { TextBuffer } from '../core/text-buffer';
+
+/**
+ * Сколько закрытых файлов помнят историю отмены.
+ *
+ * История держится НЕ контроллером (он гибнет вместе с вкладкой), а реестром —
+ * по пути. Закрыл вкладку и открыл снова — `Ctrl+Z` возвращает прежние правки,
+ * пока файл не вытеснен из этого предела. 32 — как у соседей: дальше выгода
+ * меньше стоимости памяти, а жест «закрыл и вернулся» живёт минуты, не часы.
+ */
+const HISTORY_RETENTION = 32;
 
 export class DocumentRegistry {
   private readonly buffers = new Map<string, TextBuffer>();
+  /**
+   * История отмены по пути. Переживает `dispose` буфера: закрыл вкладку — правки
+   * ещё можно вернуть. Порядок вставки в Map — порядок LRU: трогая запись, переставляем
+   * её в конец, а вытесняем самую старую.
+   */
+  private readonly histories = new Map<string, EditHistory>();
   private readonly disposeEmitter = new Emitter<string>();
   /** Буфер файла утилизирован: слушатели снимают то, что по нему рисовали. */
   readonly onDidDispose = this.disposeEmitter.event;
@@ -92,14 +109,47 @@ export class DocumentRegistry {
     return document.setText(buffer.text, 'user');
   }
 
+  /**
+   * История отмены файла — одна на путь, живущая дольше вкладки.
+   *
+   * Именно здесь, а не в контроллере: `EditorController` создаётся на открытие
+   * вкладки и умирает на закрытие, а человек ждёт, что вернувшийся файл сохранит
+   * `Ctrl+Z`. Предел `limit` применяется только к новой истории; у существующей он
+   * уже задан при создании (смена предела на лету не нужна и путана).
+   */
+  historyFor(path: string, limit?: number): EditHistory {
+    const existing = this.histories.get(path);
+    if (existing) {
+      // Тронули — запись свежая: переставляем в конец (LRU).
+      this.histories.delete(path);
+      this.histories.set(path, existing);
+      return existing;
+    }
+    const created = new EditHistory(limit);
+    this.histories.set(path, created);
+    if (this.histories.size > HISTORY_RETENTION) {
+      const oldest = this.histories.keys().next().value;
+      if (oldest !== undefined) this.histories.delete(oldest);
+    }
+    return created;
+  }
+
+  /** Забыть историю файла навсегда: файл удалён или переименован, отменять нечего. */
+  forgetHistory(path: string): void {
+    this.histories.delete(path);
+  }
+
   /** Утилизировать буфер файла. Слушатели `onDidDispose` снимут своё по этому пути. */
   dispose(path: string): void {
     if (!this.buffers.delete(path)) return;
+    // ИСТОРИЮ ЗДЕСЬ НЕ ЧИСТИМ: закрытие вкладки не повод терять отмену. Живёт до
+    // вытеснения из `histories` (см. `historyFor`) или явного `forgetHistory`.
     this.disposeEmitter.fire(path);
   }
 
   /** Забыть всё: закрытие проекта. */
   clear(): void {
     for (const path of [...this.buffers.keys()]) this.dispose(path);
+    this.histories.clear();
   }
 }

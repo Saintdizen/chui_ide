@@ -1043,7 +1043,7 @@ export class EditorHost {
       this.view.setInlayHints([]);
       this.codeLenses.delete(document.path);
     }
-    this.controller.setBuffer(buffer, selection);
+    this.controller.setBuffer(buffer, selection, this.registry.historyFor(document.path));
     // Место на экране из прошлого раза — но только когда файл открывают не ради
     // конкретной строки: переход (ссылка, поиск, отладчик) важнее старой прокрутки.
     if (!position) {

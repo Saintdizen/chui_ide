@@ -159,4 +159,31 @@ describe('DocumentRegistry', () => {
     registry.resolve(documents.open('/p/a.ts', 'один'));
     expect([...registry.entries()].map(([path]) => path)).toEqual(['/p/a.ts']);
   });
+
+  it('история отмены живёт дольше вкладки: закрыл и открыл — тот же экземпляр', () => {
+    const { registry } = setup();
+    const first = registry.historyFor('/p/a.ts');
+    // Вкладку закрыли: буфер утилизирован, но история не должна пропасть.
+    registry.dispose('/p/a.ts');
+    expect(registry.historyFor('/p/a.ts')).toBe(first);
+  });
+
+  it('у каждого пути своя история: чужой файл не видит отмену', () => {
+    const { registry } = setup();
+    expect(registry.historyFor('/p/a.ts')).not.toBe(registry.historyFor('/p/b.ts'));
+  });
+
+  it('forgetHistory стирает отмену: удалённый файл отменять нечем', () => {
+    const { registry } = setup();
+    const first = registry.historyFor('/p/a.ts');
+    registry.forgetHistory('/p/a.ts');
+    expect(registry.historyFor('/p/a.ts')).not.toBe(first);
+  });
+
+  it('clear забывает и буферы, и историю', () => {
+    const { registry } = setup();
+    const first = registry.historyFor('/p/a.ts');
+    registry.clear();
+    expect(registry.historyFor('/p/a.ts')).not.toBe(first);
+  });
 });
