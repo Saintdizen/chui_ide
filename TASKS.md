@@ -493,15 +493,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     Источник: VS Code `edit-evolved` (symbol navigation),
     Zed `finding-navigating`.
 
-81. **Позиции и кодировки — без сдвигов: ОТВЕТЫ сервера.** Запросы уже
-    пересчитываются по `positionEncoding` (`shared/position-encoding.ts` +
-    `positionOf` в `lsp.ts`). Осталось обратное направление:
-    `shared/lsp-locations.ts`, `shared/lsp-document-highlight.ts` и разбор
-    диагностик прибавляют «1» к `character` без текста строки — у utf-32-сервера
-    после эмодзи подсветка/переход съезжают. Нужен текст строки в этих разборщиках
-    (или клиентский пересчёт по документу) и тест на CRLF/суррогаты/emoji в обе
-    стороны. Источник: LSP-спецификация (positionEncoding), Neovim `editing.txt`.
-
 ---
 
 ## Правила работы со списком

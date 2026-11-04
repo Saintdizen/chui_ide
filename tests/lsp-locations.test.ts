@@ -87,6 +87,16 @@ describe('formatLocations', () => {
     expect(report.summary).toBe('определение Y: мест 1 в 1 файле');
   });
 
+  it('remap пересчитывает колонку utf-32 → utf-16', () => {
+    const raw = { uri: 'file:///proj/a.ts', range: { start: { line: 0, character: 1 } } };
+    const locs = toLocations(
+      raw,
+      (u) => u.replace('file://', ''),
+      (path, _line, character) => (path === '/proj/a.ts' && character === 1 ? 2 : character),
+    );
+    expect(locs[0]).toEqual({ path: '/proj/a.ts', line: 1, column: 3 });
+  });
+
   it('длинный список обрезается, но число мест названо', () => {
     const locations = Array.from({ length: 105 }, (_value, index) => ({
       path: `/proj/a.ts`,

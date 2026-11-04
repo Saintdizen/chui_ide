@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -14,7 +14,12 @@ import { listProjectFiles } from '../project/scan';
 import { prewarmLanguages, serverCandidates } from '../../shared/lsp-bundled';
 import { toLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { parseProgress } from '../../shared/lsp-progress';
-import { negotiateEncoding, toServerColumn, type PositionEncoding } from '../../shared/position-encoding';
+import {
+  fromServerColumn,
+  negotiateEncoding,
+  toServerColumn,
+  type PositionEncoding,
+} from '../../shared/position-encoding';
 import {
   STANDARD_TOKEN_MODIFIERS,
   STANDARD_TOKEN_TYPES,
@@ -648,6 +653,124 @@ function positionOf(
   if (runtime.positionEncoding === 'utf-16') return { line: zeroLine, character: utf16 };
   const lineText = text.split('\n')[zeroLine] ?? '';
   return { line: zeroLine, character: toServerColumn(lineText, utf16, 'utf-32') };
+}
+
+/** Методы, чей ответ — Location/LocationLink: колонку надо перевести из кодировки сервера. */
+const LOCATION_METHODS = new Set([
+  'textDocument/definition',
+  'textDocument/declaration',
+  'textDocument/typeDefinition',
+  'textDocument/implementation',
+  'textDocument/references',
+  'callHierarchy/incomingCalls',
+  'callHierarchy/outgoingCalls',
+]);
+
+/**
+ * Пересчёт колонок в ответе сервера с `utf-32` в наши `utf-16` (0-based).
+ * Нужен тексты строк целевых файлов: берём из `latestText` (открыт), иначе с диска.
+ * Не смогли прочитать строку — оставляем как есть: лучше неточная колонка, чем сбой.
+ */
+function remapLocationColumns(result: unknown, encoding: PositionEncoding, latestText: Map<string, string>): unknown {
+  if (encoding === 'utf-16' || !result) return result;
+  const lineCache = new Map<string, string[]>();
+  const linesOf = (file: string): string[] => {
+    const cached = lineCache.get(file);
+    if (cached) return cached;
+    const text = latestText.get(file) ?? safeRead(file);
+    const lines = text.split('\n');
+    lineCache.set(file, lines);
+    return lines;
+  };
+  const fixRange = (range: unknown, file: string): void => {
+    if (!range || typeof range !== 'object') return;
+    const lines = linesOf(file);
+    for (const key of ['start', 'end'] as const) {
+      const point = (range as Record<string, { line?: unknown; character?: unknown } | undefined>)[key];
+      if (!point || typeof point.character !== 'number' || typeof point.line !== 'number') continue;
+      const lineText = lines[point.line] ?? '';
+      point.character = fromServerColumn(lineText, point.character, encoding);
+    }
+  };
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    const object = node as Record<string, unknown>;
+    // Location: { uri/targetUri, range/targetRange }
+    const uri =
+      typeof object.uri === 'string' ? object.uri : typeof object.targetUri === 'string' ? object.targetUri : null;
+    if (uri) {
+      const file = fileURLToPathSafe(uri);
+      if (file) {
+        fixRange(object.range ?? object.targetRange, file);
+        fixRange(object.targetSelectionRange, file);
+      }
+    }
+    for (const value of Object.values(object)) {
+      if (Array.isArray(value)) for (const item of value) visit(item);
+      else if (value && typeof value === 'object') visit(value);
+    }
+  };
+  visit(result);
+  return result;
+}
+
+function safeRead(file: string): string {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function fileURLToPathSafe(uri: string): string | null {
+  try {
+    return fileURLToPath(uri);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Пересчёт колонки одной диагностики из кодировки сервера в наши `utf-16`.
+ * Строка — из `latestText` (открыт) или с диска; не прочли — как есть.
+ */
+function diagnosticRemap(
+  encoding: PositionEncoding,
+  file: string | null,
+  latestText: Map<string, string>,
+): ((line: number, character: number) => number) | undefined {
+  if (encoding === 'utf-16') return undefined;
+  let lines: string[] | null = null;
+  return (line, character) => {
+    if (!lines) lines = (file ? (latestText.get(file) ?? safeRead(file)) : '').split('\n');
+    const lineText = lines[line] ?? '';
+    return fromServerColumn(lineText, character, encoding);
+  };
+}
+
+/**
+ * Входящая сторона: наша `utf-16`-колонка → колонка сервера. Параметры запроса
+ * (position/range) правятся на месте копии. Без текста строки не пересчитать —
+ * поэтому при utf-32 читаем документ (`latestText`/диск); не прочли — как есть.
+ */
+function remapRequestPositions(params: unknown, encoding: PositionEncoding, text: string | null): unknown {
+  if (encoding === 'utf-16' || !params || typeof params !== 'object') return params;
+  const lines = (text ?? '').split('\n');
+  const col = (line0: number, utf16: number): number => toServerColumn(lines[line0] ?? '', utf16, encoding);
+  const fixPos = (pos: { line?: unknown; character?: unknown } | null | undefined) => {
+    if (!pos || typeof pos.line !== 'number' || typeof pos.character !== 'number') return;
+    pos.character = col(pos.line, pos.character);
+  };
+  const fixRange = (range: { start?: unknown; end?: unknown } | null | undefined) => {
+    if (!range) return;
+    fixPos(range.start as { line?: unknown; character?: unknown });
+    fixPos(range.end as { line?: unknown; character?: unknown });
+  };
+  const clone = JSON.parse(JSON.stringify(params)) as Record<string, unknown>;
+  fixPos(clone.position as { line?: unknown; character?: unknown });
+  fixRange(clone.range as { start?: unknown; end?: unknown });
+  if (Array.isArray(clone.ranges)) for (const r of clone.ranges) fixRange(r);
+  return clone;
 }
 
 /** Подсказки вперёд: `insertText` строкой или `StringValue`, с откатом на `label`. */
@@ -1317,6 +1440,11 @@ export class LspService {
     return this.runtimes.get(this.keyFor(language, this.rootForPath(path))) ?? null;
   }
 
+  /** Кодировка позиций сервера для файла (utf-16 — нативная, ничего не пересчитываем). */
+  private encodingOf(path: string): PositionEncoding {
+    return this.runtimeForPath(path)?.positionEncoding ?? 'utf-16';
+  }
+
   /**
    * Сервер поднимается лениво, при первом открытии файла этого языка.
    *
@@ -1729,7 +1857,13 @@ export class LspService {
     // Ключ отмены — «этот файл, этот вид запроса»: свежий вытесняет устаревший.
     const cancelKey = CANCELLABLE_METHODS.has(method) ? `${path}\u0000${method}` : undefined;
     try {
-      return await runtime.connection.request(method, params, cancelKey);
+      // Входящая сторона: наши `utf-16`-колонки → колонки сервера (utf-32 — пересчёт).
+      const outgoing = remapRequestPositions(params, runtime.positionEncoding, this.latestText.get(path) ?? null);
+      const result = await runtime.connection.request(method, outgoing, cancelKey);
+      // Исходящая сторона: у Location-методов вернуть колонки к нашим `utf-16`.
+      return LOCATION_METHODS.has(method)
+        ? remapLocationColumns(result, runtime.positionEncoding, this.latestText)
+        : result;
     } catch {
       return null;
     }
@@ -2059,7 +2193,9 @@ export class LspService {
       this.pullState.set(path, { resultId, items: previous.items });
       return previous.items;
     }
-    const items = Array.isArray(value.items) ? toDiagnostics(value.items) : [];
+    const items = Array.isArray(value.items)
+      ? toDiagnostics(value.items, diagnosticRemap(this.encodingOf(path), path, this.latestText))
+      : [];
     this.pullState.set(path, { resultId, items });
     // `relatedDocuments` — пометки про ДРУГИЕ файлы, от которых пришла ошибка.
     // Отдаём обычной публикацией: в редакторе это те же пометки.
@@ -2067,7 +2203,13 @@ export class LspService {
       for (const [uri, document] of Object.entries(value.relatedDocuments as Record<string, unknown>)) {
         const doc = document as { kind?: unknown; items?: unknown } | null;
         if (doc?.kind !== 'full' || !Array.isArray(doc.items)) continue;
-        this.publish(PushTopic.LspDiagnostics, { path: fileURLToPath(uri), diagnostics: toDiagnostics(doc.items) });
+        this.publish(PushTopic.LspDiagnostics, {
+          path: fileURLToPath(uri),
+          diagnostics: toDiagnostics(
+            doc.items,
+            diagnosticRemap(this.encodingOf(fileURLToPath(uri)), fileURLToPath(uri), this.latestText),
+          ),
+        });
       }
     }
     return items;
@@ -2133,7 +2275,7 @@ export class LspService {
           // видны, не дожидаясь конца поиска (см. `JsonRpcConnection.request`).
           { partial: true },
         )
-        .then((raw) => toLocations(raw, fileURLToPath))
+        .then((raw) => toLocations(remapLocationColumns(raw, runtime.positionEncoding, this.latestText), fileURLToPath))
         // Как у скелета: не ответил — `null`, а не пусто. `[]` значило бы «искал,
         // не нашёл», и агент сделал бы из этого вывод об устаревании символа.
         .catch(() => null as SymbolLocation[] | null),
@@ -2189,7 +2331,7 @@ export class LspService {
           textDocument: { uri },
           position: positionOf(runtime, text, line, column),
         })
-        .then((raw) => toLocations(raw, fileURLToPath))
+        .then((raw) => toLocations(remapLocationColumns(raw, runtime.positionEncoding, this.latestText), fileURLToPath))
         .catch(() => null as SymbolLocation[] | null),
     );
   }
@@ -2211,7 +2353,7 @@ export class LspService {
           textDocument: { uri },
           position: positionOf(runtime, text, line, column),
         })
-        .then((raw) => toLocations(raw, fileURLToPath))
+        .then((raw) => toLocations(remapLocationColumns(raw, runtime.positionEncoding, this.latestText), fileURLToPath))
         // Не ответил — `null`, не пусто: «определение не найдено» и «спросить негде»
         // — разные ответы, и второй не должен притворяться первым.
         .catch(() => null as SymbolLocation[] | null),
@@ -2411,7 +2553,10 @@ export class LspService {
       const known = runtime.versions.get(path);
       if (known !== undefined && payload.version < known) return;
     }
-    const diagnostics = toDiagnostics(payload.diagnostics);
+    const diagnostics = toDiagnostics(
+      payload.diagnostics,
+      diagnosticRemap(runtime?.positionEncoding ?? 'utf-16', path, this.latestText),
+    );
     this.publish(PushTopic.LspDiagnostics, { path, diagnostics });
     // Обход проекта берёт пометки тем же окном `didOpen` (см. `collectDiagnostics`).
     // Открытые в редакторе файлы туда не идут: их пометки и так приходят своим путём,
@@ -2655,7 +2800,7 @@ function codeOf(raw: unknown): string | undefined {
 }
 
 /** LSP-диагностика (0-based, severity 1..4) → наш формат (1-based, текстом). */
-function toDiagnostics(raw: unknown): LspDiagnostic[] {
+function toDiagnostics(raw: unknown, remap?: (line: number, character: number) => number): LspDiagnostic[] {
   if (!Array.isArray(raw)) return [];
   const out: LspDiagnostic[] = [];
   for (const item of raw) {
@@ -2676,9 +2821,14 @@ function toDiagnostics(raw: unknown): LspDiagnostic[] {
     out.push({
       severity: downgradeSeverity(SEVERITY[value.severity ?? 3] ?? 'info', codeOf(value.code)),
       line: start.line + 1,
-      column: start.character + 1,
+      column: remap ? remap(start.line, start.character) + 1 : start.character + 1,
       endLine: typeof end?.line === 'number' ? end.line + 1 : start.line + 1,
-      endColumn: typeof end?.character === 'number' ? end.character + 1 : start.character + 1,
+      endColumn:
+        typeof end?.character === 'number'
+          ? (remap ? remap(end.line ?? start.line, end.character) : end.character) + 1
+          : remap
+            ? remap(start.line, start.character) + 1
+            : start.character + 1,
       message: typeof value.message === 'string' ? value.message : String(value.message ?? ''),
       source: typeof value.source === 'string' ? value.source : undefined,
       ...(codeOf(value.code) ? { code: codeOf(value.code) } : {}),

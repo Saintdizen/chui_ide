@@ -10,6 +10,9 @@
  * утилиты Node), сюда его передают функцией — так разбор остаётся чистым.
  */
 
+/** Пересчёт колонки ответа: (path, line0, character) → 0-based UTF-16 колонка. */
+export type ColumnRemap = (path: string, line: number, character: number) => number;
+
 /** Место в коде: путь и позиция. Строка и столбец — 1-based, как их показывает IDE. */
 export interface SymbolLocation {
   path: string;
@@ -17,8 +20,12 @@ export interface SymbolLocation {
   column: number;
 }
 
-/** Локации из ответа сервера. `toPath` превращает ссылку в путь; битые пропускаем. */
-export function toLocations(raw: unknown, toPath: (uri: string) => string): SymbolLocation[] {
+/**
+ * Локации из ответа сервера. `toPath` превращает ссылку в путь; битые пропускаем.
+ * `remap` — пересчёт колонки по `positionEncoding` (utf-32-сервер считает коды,
+ * а не единицы UTF-16): без него колонки после эмодзи съезжают. Не задан — старое поведение.
+ */
+export function toLocations(raw: unknown, toPath: (uri: string) => string, remap?: ColumnRemap): SymbolLocation[] {
   if (!raw) return [];
   const list = Array.isArray(raw) ? raw : [raw];
 
@@ -32,7 +39,7 @@ export function toLocations(raw: unknown, toPath: (uri: string) => string): Symb
     if (typeof uri !== 'string') continue;
 
     const path = safePath(uri, toPath);
-    const start = startOf(range);
+    const start = startOf(range, remap, path);
     if (!path || !start) continue;
     locations.push({ path, line: start.line, column: start.column });
   }
@@ -40,14 +47,14 @@ export function toLocations(raw: unknown, toPath: (uri: string) => string): Symb
 }
 
 /** Начало диапазона в 1-based виде; нет диапазона или он битый — null. */
-function startOf(range: unknown): { line: number; column: number } | null {
+function startOf(range: unknown, remap?: ColumnRemap, path?: string | null): { line: number; column: number } | null {
   if (!range || typeof range !== 'object') return null;
   const start = (range as { start?: { line?: unknown; character?: unknown } }).start;
   if (typeof start?.line !== 'number') return null;
-  return {
-    line: start.line + 1,
-    column: typeof start.character === 'number' ? start.character + 1 : 1,
-  };
+  const character = typeof start.character === 'number' ? start.character : 0;
+  // utf-32-сервер: character — это коды, переводим в единицы UTF-16 по строке файла.
+  const column = remap && path ? remap(path, start.line, character) + 1 : character + 1;
+  return { line: start.line + 1, column };
 }
 
 function safePath(uri: string, toPath: (uri: string) => string): string | null {

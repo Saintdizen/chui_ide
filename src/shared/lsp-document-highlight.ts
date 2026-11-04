@@ -41,7 +41,10 @@ const KIND_BY_CODE: Readonly<Record<number, HighlightKind>> = { 1: 'text', 2: 'r
  * Код `kind` по LSP: 1 — Text, 2 — Read, 3 — Write. Неизвестный или отсутствующий
  * код — `text`: так подсветка просто не выделяет запись среди чтений, но показывает место.
  */
-export function toDocumentHighlights(raw: unknown): DocumentHighlightSpan[] {
+export function toDocumentHighlights(
+  raw: unknown,
+  remap?: (line: number, character: number) => number,
+): DocumentHighlightSpan[] {
   if (!Array.isArray(raw)) return [];
   const spans: DocumentHighlightSpan[] = [];
   for (const entry of raw) {
@@ -55,14 +58,17 @@ export function toDocumentHighlights(raw: unknown): DocumentHighlightSpan[] {
     const endChar = range?.end?.character;
     if (typeof startLine !== 'number' || typeof startChar !== 'number' || typeof endChar !== 'number') continue;
     // Сервер отдаёт 0-based; у нас везде 1-based — переводим на границе, дальше забыли.
-    const column = startChar + 1;
-    const length = endChar - startChar;
+    // utf-32-сервер: start/end `character` — коды, переводим в UTF-16 по строке.
+    const start = remap ? remap(startLine, startChar) : startChar;
+    const end = remap ? remap(startLine, endChar) : endChar;
+    const column = start + 1;
+    const length = end - start;
     if (!Number.isFinite(column) || !Number.isFinite(length) || length < 1) continue;
     const code = typeof value.kind === 'number' ? value.kind : 1;
     spans.push({
       line: startLine + 1,
       column,
-      endColumn: endChar + 1,
+      endColumn: end + 1,
       length,
       kind: KIND_BY_CODE[code] ?? 'text',
     });

@@ -35,6 +35,13 @@ describe('toDocumentHighlights: где ещё встречается симво�
     expect(spans[0]?.line).toBe(3);
   });
 
+  it('remap пересчитывает границы utf-32 → utf-16', () => {
+    // Эмодзи перед словом: utf-32 колонка 1 = utf-16 колонка 2.
+    const entry = { range: { start: { line: 0, character: 1 }, end: { line: 0, character: 4 } } };
+    const spans = toDocumentHighlights([entry], (_line, character) => character + 1);
+    expect(spans[0]).toMatchObject({ line: 1, column: 3, endColumn: 6 });
+  });
+
   it('не массив — пусто, а не падение', () => {
     expect(toDocumentHighlights(null)).toEqual([]);
     expect(toDocumentHighlights({})).toEqual([]);
