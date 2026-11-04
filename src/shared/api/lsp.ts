@@ -37,6 +37,14 @@ export interface LspSettings {
    * или не знает метода). Нет значения — 30 с (см. `DEFAULT_REQUEST_TIMEOUT_MS`).
    */
   requestTimeoutMs?: number;
+  /**
+   * Языки, в которых подсказки-вставки (inlay hints) выключены. Без записи — включены
+   * всюду: подсказки рисуются только по видимой части, но в больших файлах тулза
+   * мешает читать, и отключать их хочется точечно, а не везде.
+   */
+  inlayHintsOff?: string[];
+  /** Языки, в которых код-линзы выключены (те же причины, что у inlay hints). */
+  codeLensOff?: string[];
   servers: LspServerConfig[];
 }
 

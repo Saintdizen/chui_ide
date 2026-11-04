@@ -481,11 +481,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     Источник: VS Code `default-keys` (проблемы),
     JetBrains `progress-indicators`.
 
-79. **Inlay hints и code lens можно выключить по серверу.** Inlay hints
-    (типы/параметры) и code lens (ссылки, тесты) показываются, но настройка
-    общая; нужен переключатель по языку и «показывать при прокрутке».
-    Источник: VS Code `settings` (inlayHints/codeLens), Zed `editing-code`.
-
 ---
 
 ## Правила работы со списком

@@ -263,6 +263,18 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     return h('div', { class: 'field' }, h('span', {}, label), ...controls);
   }
 
+  /** «python, TS, python» -> ['python','ts']: список языков из одного поля ввода. */
+  function splitLanguages(value: string): string[] {
+    return [
+      ...new Set(
+        value
+          .split(',')
+          .map((item) => item.trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    ];
+  }
+
   function textInput(value: string, onCommit: (next: string) => void): HTMLInputElement {
     const input = h('input', { class: 'field-input', type: 'text', spellcheck: false });
     input.value = value;
@@ -2084,13 +2096,23 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'Пишет все сообщения обмена с серверами в файл lsp-trace.log в папке пользовательских данных. ' +
           'Помогает понять, почему сервер молчит или отвечает пусто. Работает сразу, перезапуск не нужен.',
       ),
-      switchRow('Журнал обмена с серверами (отладка)', lsp.trace, (value) => void patch({ lsp: { trace: value } })),
+      field(
+        'Без inlay hints (языки)',
+        textInput(
+          (lsp.inlayHintsOff ?? []).join(', '),
+          (v) => void patch({ lsp: { inlayHintsOff: splitLanguages(v) } }),
+        ),
+      ),
       h(
         'div',
         { class: 'field-hint' },
-        'Пишет все сообщения обмена с серверами в файл lsp-trace.log в папке пользовательских данных. ' +
-          'Помогает понять, почему сервер молчит или отвечает пусто. Работает сразу, перезапуск не нужен.',
+        'Языки вроде «python, typescript», где подсказки-вставки типов мешают. Пусто — всюду.',
       ),
+      field(
+        'Без code lens (языки)',
+        textInput((lsp.codeLensOff ?? []).join(', '), (v) => void patch({ lsp: { codeLensOff: splitLanguages(v) } })),
+      ),
+      h('div', { class: 'field-hint' }, 'Языки, где код-линзы («3 ссылки» над объявлением) не нужны.'),
       field('Серверы (JSON)', servers),
       languages
         ? h(

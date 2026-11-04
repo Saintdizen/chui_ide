@@ -109,6 +109,7 @@ import { createFileWrite } from './core/file-write';
 import { createInstallActions } from './core/install-actions';
 import { isNodeLanguage } from '../shared/languages';
 import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
+import { featureOff } from '../shared/lsp-visibility';
 import { surroundOptions } from './editor/input/surround';
 import { semanticFoldRanges } from './editor/highlight/folds';
 import { languageGrammar } from './editor/highlight/lazy-registry';
@@ -662,11 +663,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     },
     // Код-линзы: подписи-действия у объявлений («3 ссылки», «Запустить тест»). Клик
     // исполняет команду сервера, а его правки (если вернёт) применяем обычным путём.
-    codeLenses: (path) => lsp.codeLenses(path),
+    codeLenses: (path) => (featureOff(settings, 'codeLensOff', path) ? Promise.resolve([]) : lsp.codeLenses(path)),
     lensCommand: (path, command) => void runLensCommand(path, command),
     // Подсказки-вставки: тип переменной, имя параметра — прямо в коде. Серверу нужен
     // диапазон, и спрашиваем только видимую часть файла (см. `inlayWindow` в editor-host).
-    inlayHints: (path, end, start) => lsp.inlayHints(path, end, start),
+    inlayHints: (path, end, start) =>
+      featureOff(settings, 'inlayHintsOff', path) ? Promise.resolve([]) : lsp.inlayHints(path, end, start),
     // Плашки цветов: сервер CSS/SCSS/LESS знает, что `#3b82f6` и `rgb(...)` — цвет.
     documentColors: (path) => lsp.documentColors(path),
     // Вхождения символа: сервер знает области видимости, свой поиск по тексту — нет.

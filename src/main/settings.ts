@@ -532,6 +532,9 @@ export class SettingsStore {
       lsp: {
         enabled: this.data.lsp.enabled,
         trace: this.data.lsp.trace,
+        requestTimeoutMs: this.data.lsp.requestTimeoutMs,
+        inlayHintsOff: [...(this.data.lsp.inlayHintsOff ?? [])],
+        codeLensOff: [...(this.data.lsp.codeLensOff ?? [])],
         servers: this.data.lsp.servers.map((server) => ({ ...server, args: [...server.args] })),
       },
       // Копия: снимок настроек не должен меняться вслед за правкой списка.
@@ -1247,7 +1250,25 @@ function sanitizeLsp(value: LspSettings): LspSettings {
     : [];
   // Выключено только явным `false`: отсутствие поля читаем как «включено» — серверы
   // из поставки должны работать сразу после установки, без похода в настройки.
-  return { enabled: value.enabled !== false, trace: value.trace === true, servers };
+  // Языки без inlay hints/code lens: строки в нижнем регистре, без повторов.
+  const normalizeLanguages = (value: unknown): string[] =>
+    Array.isArray(value)
+      ? [
+          ...new Set(
+            value
+              .filter((item): item is string => typeof item === 'string')
+              .map((item) => item.trim().toLowerCase())
+              .filter(Boolean),
+          ),
+        ]
+      : [];
+  return {
+    enabled: value.enabled !== false,
+    trace: value.trace === true,
+    inlayHintsOff: normalizeLanguages(value.inlayHintsOff),
+    codeLensOff: normalizeLanguages(value.codeLensOff),
+    servers,
+  };
 }
 
 /** Запись «строка → строка»: так приходит окружение сервера из файла настроек. */
