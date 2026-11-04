@@ -14,6 +14,7 @@ import { listProjectFiles } from '../project/scan';
 import { prewarmLanguages, serverCandidates } from '../../shared/lsp-bundled';
 import { toLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { parseProgress } from '../../shared/lsp-progress';
+import { negotiateEncoding, toServerColumn, type PositionEncoding } from '../../shared/position-encoding';
 import {
   STANDARD_TOKEN_MODIFIERS,
   STANDARD_TOKEN_TYPES,
@@ -437,10 +438,21 @@ interface ServerRuntime {
   readonly versions: Map<string, number>;
   /** Что сервер умеет: спрашивать то, чего нет, бессмысленно и вредно. */
   capabilities: LspCapabilities;
+  /**
+   * В чём сервер считает колонки: `utf-16` по умолчанию, `utf-32` — если он его
+   * потребовал. Ставится после `initialize` (см. `negotiateEncoding`) и
+   * применяется при переводе колонок (см. `toServerColumn`/`fromServerColumn`).
+   */
+  positionEncoding: PositionEncoding;
 }
 
 /** Подмножество возможностей сервера, по которым решаем, что у него просить. */
 interface LspCapabilities {
+  /**
+   * В чём сервер считает колонки в позициях. По протоколу — строка или список
+   * (старые серверы отвечают массивом). Нет поля — utf-16.
+   */
+  positionEncoding?: string | string[];
   completionProvider?: {
     /** По каким знакам сервер сам готов открывать список подсказок (`.` в TS, `@` в CSS, `:` в JSON Schema). */
     triggerCharacters?: string[];
@@ -551,6 +563,28 @@ function insertTextOf(value: unknown): string {
   if (typeof value === 'string') return value;
   const text = (value as { value?: unknown } | null)?.value;
   return typeof text === 'string' ? text : '';
+}
+
+/**
+ * Позиция для запроса к серверу: строка 0-based и `character` в ТОЙ кодировке,
+ * о которой договорились при `initialize`.
+ *
+ * Редактор присылает колонку 1-based в UTF-16-единицах. Для `utf-16` это уже
+ * готовое число (`column - 1`); для `utf-32` — пересчитываем по тексту строки:
+ * улыбка перед курсом занимает в UTF-16 два знака, а сервер ждёт один код.
+ * Строку берём из присланного текста — она уже под рукой у каждого вызова.
+ */
+function positionOf(
+  runtime: ServerRuntime,
+  text: string,
+  line: number,
+  column: number,
+): { line: number; character: number } {
+  const zeroLine = Math.max(line - 1, 0);
+  const utf16 = Math.max(column - 1, 0);
+  if (runtime.positionEncoding === 'utf-16') return { line: zeroLine, character: utf16 };
+  const lineText = text.split('\n')[zeroLine] ?? '';
+  return { line: zeroLine, character: toServerColumn(lineText, utf16, 'utf-32') };
 }
 
 /** Подсказки вперёд: `insertText` строкой или `StringValue`, с откатом на `label`. */
@@ -1293,6 +1327,7 @@ export class LspService {
       connection,
       versions: new Map(),
       capabilities: {},
+      positionEncoding: 'utf-16',
       initialized: Promise.resolve(),
     };
     // Инициализацию не ждём синхронно: didOpen уедет после неё (см. open()).
@@ -1448,6 +1483,11 @@ export class LspService {
         // Путь к питону передаём сразу: pyright берёт его отсюда, иначе не видит
         // пакеты окружения и подсказки по импортам не поднимаются. Свои доводы
         // сервера (например, путь к `tsserver.js`) идут следом и дополняют их.
+        // Кодировка позиций: протокол по умолчанию — utf-16 (наш нативный).
+        // Объявляем ОБЕ: если сервер требует utf-32 (русский текст плюс эмодзи
+        // иначе сдвигает его подсказки), он выберет его сам и ответит одним из
+        // списка; смотреть ответ будем ниже (`negotiateEncoding`).
+        general: { positionEncodings: ['utf-16', 'utf-32'] },
         initializationOptions: buildInitializationOptions(runtime, python),
       }),
       INITIALIZE_TIMEOUT_MS,
@@ -1464,6 +1504,10 @@ export class LspService {
 
     // Возможности решают, что можно спрашивать: их отсутствие — не ошибка.
     runtime.capabilities = withSyncCapabilities(result?.capabilities);
+    // Кодировку берём из ОТВЕТА сервера: он мог потребовать utf-32, и тогда все
+    // колонки придётся пересчитывать (см. `position-encoding.ts`). Ответ без поля —
+    // стандартный utf-16.
+    runtime.positionEncoding = negotiateEncoding(result?.capabilities?.positionEncoding);
     runtime.connection.notify('initialized', {});
     // Трассировка — уведомление КЛИЕНТА серверу: включаем, если человек просил.
     if (this.settings().trace) runtime.connection.notify('$/setTrace', { value: 'verbose' });
@@ -1529,6 +1573,9 @@ export class LspService {
     try {
       const result = await runtime.connection.request('textDocument/rangeFormatting', {
         textDocument: { uri },
+        // Текст сюда не приходит (только границы), поэтому пересчёт колонок для
+        // utf-32 серверов недоступен: шлём UTF-16-колонки как есть. Форматирование
+        // блока с эмодзи у utf-32-сервера может съехать — редкий путь, отмечено в TASKS.
         range: {
           start: {
             line: Math.max(0, range.startLine - 1),
@@ -1861,10 +1908,7 @@ export class LspService {
       runtime.connection
         .request('textDocument/inlineCompletion', {
           textDocument: { uri },
-          position: {
-            line: Math.max(line - 1, 0),
-            character: Math.max(column - 1, 0),
-          },
+          position: positionOf(runtime, text, line, column),
           context: { triggerKind: 2 },
         })
         .catch(() => null),
@@ -1897,10 +1941,7 @@ export class LspService {
           'textDocument/references',
           {
             textDocument: { uri },
-            position: {
-              line: Math.max(line - 1, 0),
-              character: Math.max(column - 1, 0),
-            },
+            position: positionOf(runtime, text, line, column),
             context: { includeDeclaration },
           },
           `references-${path}`,
@@ -1962,7 +2003,7 @@ export class LspService {
       runtime.connection
         .request(method, {
           textDocument: { uri },
-          position: { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) },
+          position: positionOf(runtime, text, line, column),
         })
         .then((raw) => toLocations(raw, fileURLToPath))
         .catch(() => null as SymbolLocation[] | null),
@@ -1984,10 +2025,7 @@ export class LspService {
       runtime.connection
         .request('textDocument/definition', {
           textDocument: { uri },
-          position: {
-            line: Math.max(line - 1, 0),
-            character: Math.max(column - 1, 0),
-          },
+          position: positionOf(runtime, text, line, column),
         })
         .then((raw) => toLocations(raw, fileURLToPath))
         // Не ответил — `null`, не пусто: «определение не найдено» и «спросить негде»
@@ -2016,7 +2054,7 @@ export class LspService {
   ): Promise<{ word: string; message: string | null } | null> {
     const runtime = await this.runtimeForDocument(path, languageId);
     if (!runtime?.capabilities.renameProvider) return null;
-    const position = { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) };
+    const position = positionOf(runtime, text, line, column);
     return this.withDocument(runtime, path, languageId, text, (uri) =>
       runtime.connection
         .request('textDocument/prepareRename', { textDocument: { uri }, position })
@@ -2039,10 +2077,7 @@ export class LspService {
       runtime.connection
         .request('textDocument/rename', {
           textDocument: { uri },
-          position: {
-            line: Math.max(line - 1, 0),
-            character: Math.max(column - 1, 0),
-          },
+          position: positionOf(runtime, text, line, column),
           newName,
         })
         .then((raw) => toWorkspaceFileEdits(raw, fileURLToPath))
