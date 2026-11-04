@@ -11,7 +11,7 @@
  * редактора (`assistant.ts`). Поэтому модуль чистый и проверяется без окна.
  */
 
-import { matchScore } from './fuzzy';
+import { matchScore } from '../../../shared/fuzzy';
 
 /** Один шаблон: слово после точки и тело, в которое встанет выражение. */
 export interface PostfixTemplate {

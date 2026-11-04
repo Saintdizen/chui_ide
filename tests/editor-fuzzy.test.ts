@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchScore } from '../src/renderer/editor/complete/fuzzy';
+import { matchScore } from '../src/shared/fuzzy';
 
 /** Совпало ли имя с набранным (без разбора оценки). */
 const matches = (name: string, pattern: string): boolean => matchScore(name, pattern) !== null;

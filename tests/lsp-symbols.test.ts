@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { filterSymbols, mergeSymbols, toProjectSymbols, type ProjectSymbol } from '../src/shared/lsp-symbols';
+import {
+  filterSymbols,
+  flattenFileSymbols,
+  mergeSymbols,
+  toProjectSymbols,
+  type FileSymbol,
+  type ProjectSymbol,
+} from '../src/shared/lsp-symbols';
 
 /** Маппер ссылки в путь: в main это `fileURLToPath`, в тесте — простая замена. */
 const toPath = (uri: string): string => decodeURIComponent(uri.replace('file://', ''));
@@ -53,6 +60,21 @@ describe('toProjectSymbols', () => {
   });
 });
 
+describe('flattenFileSymbols', () => {
+  const sym = (name: string, line: number, children: FileSymbol[] = []): FileSymbol =>
+    ({ name, kind: 'функция', line, endLine: line, children }) as unknown as FileSymbol;
+
+  it('раскладывает дерево в плоский список с хлебной тропой', () => {
+    const tree = [sym('Класс', 1, [sym('Метод', 3)])];
+    const flat = flattenFileSymbols(tree, '/p/a.ts');
+    expect(flat.map((s) => [s.name, s.container, s.line])).toEqual([
+      ['Класс', null, 1],
+      ['Метод', 'Класс', 3],
+    ]);
+    expect(flat[1]?.path).toBe('/p/a.ts');
+  });
+});
+
 describe('filterSymbols', () => {
   const symbols: ProjectSymbol[] = [
     { name: 'Session', kind: 'класс', container: null, path: '/p/a.py', line: 10, column: 7 },
@@ -61,8 +83,26 @@ describe('filterSymbols', () => {
     { name: 'Other', kind: 'класс', container: null, path: '/p/b.py', line: 3, column: 1 },
   ];
 
-  it('фильтрует по подстроке без учёта регистра', () => {
-    expect(filterSymbols(symbols, 'sess').map((s) => s.name)).toEqual(['Session', 'session_open']);
+  it('фильтрует без учёта регистра и ранжирует по близости', () => {
+    // Нечёткий сорт: 'session_open' совпадает плотнее ('session' в начале), поэтому выше.
+    expect(filterSymbols(symbols, 'sess').map((s) => s.name)).toEqual(['session_open', 'Session']);
+  });
+
+  it('нечёткий поиск: «горбы» находят символ', () => {
+    const list: ProjectSymbol[] = [
+      { name: 'getTitle', kind: 'функция', container: null, path: '/p/a.ts', line: 1, column: 1 },
+      { name: 'getBody', kind: 'функция', container: null, path: '/p/a.ts', line: 9, column: 1 },
+    ];
+    // gT — заглавные буквы имени, идут подряд-подпоследовательностью.
+    expect(filterSymbols(list, 'gT').map((s) => s.name)).toEqual(['getTitle']);
+  });
+
+  it('совпавшие сортируются по оценке: точнее — выше', () => {
+    const list: ProjectSymbol[] = [
+      { name: 'sessionOpenLater', kind: 'функция', container: null, path: '/p/a.ts', line: 1, column: 1 },
+      { name: 'session', kind: 'функция', container: null, path: '/p/a.ts', line: 2, column: 1 },
+    ];
+    expect(filterSymbols(list, 'session').map((s) => s.name)[0]).toBe('session');
   });
 
   it('убирает повторы одного символа', () => {

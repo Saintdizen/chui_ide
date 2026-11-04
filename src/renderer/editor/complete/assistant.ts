@@ -36,7 +36,7 @@ import type { EditorView } from '../view/editor-view';
 export type { ImportAlias };
 import { allCompletions, buildCompletions, DEFAULT_LIMIT, type CompletionItem } from './completions';
 import { expectedAt, filterByExpectation, type Expectation } from './expectation';
-import { EXTERNAL_BONUS, matchScore } from './fuzzy';
+import { EXTERNAL_BONUS, matchScore } from '../../../shared/fuzzy';
 import { importPathAt, importPathItems, type ImportPathContext } from './import-path';
 import { expandPostfix, postfixAt, postfixOffers } from './postfix';
 import { callContextAt, namedArgumentItems } from './named-args';

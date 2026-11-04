@@ -16,7 +16,7 @@
  */
 
 import { declarationOf, paramsOf } from './override';
-import { matchScore } from './fuzzy';
+import { matchScore } from '../../../shared/fuzzy';
 import type { CompletionItem } from './completions';
 
 /** Где стоит каретка: какой вызов вокруг и что в нём уже набрано. */

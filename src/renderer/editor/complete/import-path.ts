@@ -12,7 +12,7 @@
  * строки и список файлов на входе, подсказки на выходе — поэтому проверяется тестами.
  */
 
-import { matchScore } from './fuzzy';
+import { matchScore } from '../../../shared/fuzzy';
 import type { CompletionItem } from './completions';
 
 /** Языки, у которых спецификатор пишется строкой в кавычках (`./путь`). */

@@ -34,6 +34,7 @@ export interface AppViewDeps {
   palette: { open(): void };
   quickOpen: { open(query: string): Promise<unknown> };
   symbolPicker: { open(): void };
+  documentSymbolPicker: { open(): void };
 }
 
 export function registerAppViewCommands(define: DefineCommand, deps: AppViewDeps): void {
@@ -95,7 +96,7 @@ export function registerAppViewCommands(define: DefineCommand, deps: AppViewDeps
   // Необязательный аргумент — начальный отбор: крошки и статусбар передают путь
   // папки, чтобы палитра сразу показала файлы рядом, а не весь проект.
   define(
-    { id: 'file.quickOpen', title: 'Быстрое открытие файла', category: 'Навигация', keybinding: 'Ctrl+Shift+O' },
+    { id: 'file.quickOpen', title: 'Быстрое открытие файла', category: 'Навигация', keybinding: 'Ctrl+P' },
     (query) => {
       void deps.quickOpen.open(typeof query === 'string' ? query : '');
     },
@@ -110,5 +111,17 @@ export function registerAppViewCommands(define: DefineCommand, deps: AppViewDeps
       keywords: ['symbol', 'символ', 'класс', 'функция'],
     },
     () => deps.symbolPicker.open(),
+  );
+
+  // Символы ОТКРЫТОГО файла (Ctrl+Shift+O, как VS Code): быстрый переход по структуре.
+  define(
+    {
+      id: 'navigate.documentSymbol',
+      title: 'Перейти к символу в файле',
+      category: 'Навигация',
+      keybinding: 'Ctrl+Shift+O',
+      keywords: ['symbol', 'символ', 'структура', 'outline'],
+    },
+    () => deps.documentSymbolPicker.open(),
   );
 }

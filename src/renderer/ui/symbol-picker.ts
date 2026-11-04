@@ -17,8 +17,25 @@ import { clear, h, svgIcon } from './dom';
 
 export interface SymbolPickerDeps {
   rpc: RpcClient;
-  /** Открыть файл символа и встать на его позицию. */
-  openSymbol(symbol: ProjectSymbol): void;
+  /** Открыть файл символа и встать на его позицию. `side` — в соседнюю панель. */
+  openSymbol(symbol: ProjectSymbol, side?: boolean): void;
+  /**
+   * Источник символов. Нет — символы всего проекта через `lsp.symbols` (Ctrl+T).
+   * Задан — палитра работает по нему же: символы ОДНОГО файла и т.п.
+   */
+  source?: SymbolPickerSource;
+}
+
+/** Откуда брать символы и как их подписывать. */
+export interface SymbolPickerSource {
+  /** Подсказка в поле ввода. */
+  placeholder: string;
+  /** Получить символы по запросу (уже отсортированный/отфильтрованный сервером). */
+  load(query: string): Promise<ProjectSymbol[]>;
+  /** Считать `container` хлебной тропой (вложенность), а не «местом». */
+  breadcrumb?: boolean;
+  /** С какой длины запроса спрашивать. 0 — показать всё сразу (символы файла). */
+  minQuery?: number;
 }
 
 export interface SymbolPickerView {
@@ -36,7 +53,7 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
   const input = h('input', {
     class: 'palette-input',
     type: 'text',
-    placeholder: 'Имя символа — класс, функция, переменная…',
+    placeholder: deps.source?.placeholder ?? 'Имя символа — класс, функция, переменная…',
     spellcheck: false,
   });
   const list = h('div', { class: 'palette-list' });
@@ -49,9 +66,9 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
   let requestId = 0;
   let loading = false;
 
-  function run(symbol: ProjectSymbol): void {
+  function run(symbol: ProjectSymbol, side = false): void {
     close();
-    deps.openSymbol(symbol);
+    deps.openSymbol(symbol, side);
   }
 
   function render(): void {
@@ -64,8 +81,9 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
     }
 
     const query = input.value.trim();
-    if (query.length < MIN_QUERY) {
-      list.appendChild(h('div', { class: 'palette-empty' }, `Введите хотя бы ${MIN_QUERY} символа`));
+    const minQuery = deps.source?.minQuery ?? MIN_QUERY;
+    if (query.length < minQuery) {
+      list.appendChild(h('div', { class: 'palette-empty' }, `Введите хотя бы ${minQuery} символа`));
       return;
     }
 
@@ -78,9 +96,13 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
       const dir = symbol.path.slice(0, Math.max(symbol.path.length - basename(symbol.path).length - 1, 0));
       // У символа из зависимости вместо пути проекта — пакет: `requests` говорит о месте
       // больше, чем `…/site-packages/requests/sessions.py`.
-      const category = symbol.package
-        ? `${symbol.package}${symbol.container ? ` · ${symbol.container}` : ''}`
-        : (symbol.container ?? dir);
+      // Хлебная тропа: `container` — это вложенность (класс › метод), а не место файла.
+      const breadcrumb = deps.source?.breadcrumb;
+      const category = breadcrumb
+        ? (symbol.container ?? symbol.path)
+        : symbol.package
+          ? `${symbol.package}${symbol.container ? ` · ${symbol.container}` : ''}`
+          : (symbol.container ?? dir);
       const item = h(
         'button',
         { class: `palette-item${index === cursor ? ' is-active' : ''}`, type: 'button' },
@@ -103,11 +125,17 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
     const id = (requestId += 1);
     loading = true;
     render();
-    const found = await deps.rpc.request('lsp.symbols', { query }).catch(() => []);
+    const found = deps.source
+      ? await deps.source.load(query).catch(() => [])
+      : await deps.rpc.request('lsp.symbols', { query }).catch(() => []);
     // Пока ходили, запрос или текст могли смениться — тогда ответ уже не нужен.
     if (id !== requestId) return;
     loading = false;
-    matches = filterSymbols(found, query);
+    // Фильтр по виду символа: `@метод` (женский/мужской падеж — по началу слова).
+    const kindQuery = /@(\S+)/.exec(query)?.[1];
+    const text = query.replace(/@\S*/, '').trim();
+    const byKind = kindQuery ? found.filter((s) => s.kind.toLowerCase().startsWith(kindQuery.toLowerCase())) : found;
+    matches = filterSymbols(byKind, text);
     render();
   }
 
@@ -142,7 +170,8 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
     } else if (event.key === 'Enter') {
       event.preventDefault();
       const target = matches[cursor];
-      if (target) run(target);
+      // Ctrl+Enter — в соседнюю панель (как VS Code): сравнить, не теряя текущий вид.
+      if (target) run(target, event.ctrlKey || event.metaKey);
     } else if (event.key === 'Escape') {
       event.preventDefault();
       close();
@@ -170,6 +199,8 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
       loading = false;
       render();
       input.focus();
+      // Символы открытого файла: показываем сразу всё, без ожидания ввода.
+      if ((deps.source?.minQuery ?? MIN_QUERY) === 0) void ask('');
     },
     close,
   };

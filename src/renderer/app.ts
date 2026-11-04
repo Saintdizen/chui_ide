@@ -152,7 +152,7 @@ import { createRecentCommands } from './core/recent-commands';
 import { createPythonEnvPopover } from './ui/python-env-popover';
 import { createLazyPopover } from './ui/lazy-popover';
 import type { SearchHit } from '../shared/api';
-import type { ProjectSymbol } from '../shared/lsp-symbols';
+import { flattenFileSymbols, filterSymbols, type ProjectSymbol } from '../shared/lsp-symbols';
 import { combineMeaning, meaningRegex, selectPlaces } from '../shared/meaning-search';
 import { createMeaningSearch } from './ui/meaning-search';
 import { createQuickOpen } from './ui/quick-open';
@@ -2490,11 +2490,36 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // а затем встаём на строку объявления.
   const symbolPicker = createSymbolPicker({
     rpc,
-    openSymbol: (symbol) => {
+    openSymbol: (symbol, side) => {
+      // Ctrl+Enter: сначала разделить (если ещё нет), потом открыть — файл уйдёт
+      // в ставшую активной правую панель.
+      if (side && !editors.isSplit) editors.splitEditor();
       void openPath(symbol.path).then(() => editors.reveal(symbol.path, symbol.line, symbol.column));
     },
   });
   document.body.appendChild(symbolPicker.element);
+
+  // Символы ОТКРЫТОГО файла (Ctrl+Shift+O): в одном списке — структура файла,
+  // `container` показываем хлебной тропой. Источник — скелет текущего документа.
+  const documentSymbolPicker = createSymbolPicker({
+    rpc,
+    openSymbol: (symbol, side) => {
+      if (side && !editors.isSplit) editors.splitEditor();
+      void openPath(symbol.path).then(() => editors.reveal(symbol.path, symbol.line, symbol.column));
+    },
+    source: {
+      placeholder: 'Символ в файле — класс, метод, функция…',
+      breadcrumb: true,
+      minQuery: 0,
+      load: async (query) => {
+        const path = editors.currentPath;
+        if (!path) return [];
+        const symbols = await lsp.documentSymbols(path);
+        return filterSymbols(flattenFileSymbols(symbols, path), query);
+      },
+    },
+  });
+  document.body.appendChild(documentSymbolPicker.element);
 
   // Поиск по смыслу: запрос словами, а не точной строкой. Источники те же, что у
   // поиска агента — имена символов и текстовые строки, — но список собирается тут,
@@ -3192,6 +3217,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     palette,
     quickOpen,
     symbolPicker,
+    documentSymbolPicker,
   });
 
   // Семь домов git (запись, сообщение коммита, показ, панель, инструменты, история,

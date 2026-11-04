@@ -59,7 +59,9 @@ const FILE: MenuNode = {
     { label: 'Закрыть вкладку', accelerator: 'Ctrl+W', command: 'file.close' },
     { separator: true },
     { label: 'Обновить дерево', command: 'workspace.refresh' },
-    { label: 'Быстрое открытие файла…', accelerator: 'Ctrl+Shift+O', command: 'file.quickOpen' },
+    { label: 'Быстрое открытие файла…', accelerator: 'Ctrl+P', command: 'file.quickOpen' },
+    { label: 'Символ в файле…', accelerator: 'Ctrl+Shift+O', command: 'navigate.documentSymbol' },
+    { label: 'Символ в проекте…', accelerator: 'Ctrl+T', command: 'navigate.symbol' },
     { separator: true },
     // Настройки — только здесь: кнопки в шапке нет, это редкое действие, а не работа.
     { label: 'Настройки…', accelerator: 'Ctrl+,', command: 'settings.open' },

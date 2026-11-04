@@ -21,7 +21,7 @@
  * что написано раньше, то уже «своё».
  */
 
-import { matchScore } from './fuzzy';
+import { matchScore } from '../../../shared/fuzzy';
 
 /** Минимальная длина слова, попадающего в словарь: короткие — шум и почти всегда не нужны. */
 const MIN_WORD_LENGTH = 2;

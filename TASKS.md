@@ -486,13 +486,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     общая; нужен переключатель по языку и «показывать при прокрутке».
     Источник: VS Code `settings` (inlayHints/codeLens), Zed `editing-code`.
 
-80. **Символы документа и проекта — нечёткий поиск и подсветка.** `Ctrl+Shift+O`
-    (документ) и `Ctrl+T` (проект): хлебная навигация по вложенности, фильтр по
-    `kind`, `Enter` переходит, `Ctrl+Enter` открывает рядом; `workspace/symbol`
-    с `resolve` для локации, если сервер её не дал.
-    Источник: VS Code `edit-evolved` (symbol navigation),
-    Zed `finding-navigating`.
-
 ---
 
 ## Правила работы со списком

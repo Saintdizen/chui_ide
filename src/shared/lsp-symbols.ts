@@ -14,6 +14,8 @@
  * всегда. Всё это сводим к одной форме.
  */
 
+import { matchScore } from './fuzzy';
+
 /** Один символ проекта в нашей форме: путь + позиция + подпись. */
 export interface ProjectSymbol {
   name: string;
@@ -258,6 +260,30 @@ export function symbolPathAt(symbols: readonly FileSymbol[], line: number): File
   }
 }
 
+/**
+ * Сплющить дерево символов файла в плоский список для палитры. `container` —
+ * хлебная тропа предков через ` › ` (`Класс › Метод`), чтобы видеть вложенность,
+ * не раскрывая дерево. Колонка — 1: `FileSymbol` её не несёт, а переход идёт по строке.
+ */
+export function flattenFileSymbols(symbols: readonly FileSymbol[], path: string): ProjectSymbol[] {
+  const out: ProjectSymbol[] = [];
+  const walk = (level: readonly FileSymbol[], trail: string): void => {
+    for (const symbol of level) {
+      out.push({
+        name: symbol.name,
+        kind: symbol.kind,
+        container: trail || null,
+        path,
+        line: symbol.line,
+        column: 1,
+      });
+      if (symbol.children.length > 0) walk(symbol.children, trail ? `${trail} › ${symbol.name}` : symbol.name);
+    }
+  };
+  walk(symbols, '');
+  return out;
+}
+
 /** Предел строк вывода: скелет огромного файла не должен вытеснить беседу. */
 const MAX_OUTLINE_LINES = 200;
 
@@ -364,23 +390,29 @@ function symbolKey(symbol: ProjectSymbol): string {
 /**
  * Оставить символы, подходящие под запрос, и убрать лишние повторы.
  *
- * Фильтр по подстроке без учёта регистра: сервер уже отсортировал по релевантности,
- * и переупорядочивать его выдачу значило бы спорить с ним. Повторы убираем —
- * один и тот же символ может прийти и как «объявление», и как «реализация».
+ * Поиск НЕЧЁТКИЙ: тот же `matchScore`, что у подсказок (`shared/fuzzy.ts`) — можно
+ * набирать «горбы» (`gT` → `getTitle`). Совпавшие сортируем по оценке (лучший —
+ * первым), повторы убираем: один символ приходит и как объявление, и как реализация.
  */
 export function filterSymbols(symbols: readonly ProjectSymbol[], query: string, limit = 50): ProjectSymbol[] {
-  const needle = query.trim().toLowerCase();
+  const needle = query.trim();
   const seen = new Set<string>();
-  const result: ProjectSymbol[] = [];
+  const scored: { symbol: ProjectSymbol; score: number }[] = [];
 
   for (const symbol of symbols) {
-    if (needle && !symbol.name.toLowerCase().includes(needle)) continue;
+    let score = 0;
+    if (needle) {
+      const match = matchScore(symbol.name, needle);
+      if (!match) continue;
+      score = match.score;
+    }
     const key = `${symbol.name}|${symbol.path}|${symbol.line}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push(symbol);
-    if (result.length >= limit) break;
+    scored.push({ symbol, score });
   }
 
-  return result;
+  // Устойчивая сортировка: без запроса (все score=0) порядок сервера сохраняется.
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((entry) => entry.symbol);
 }

@@ -24,7 +24,7 @@
 import type { TextEdit } from '../../../shared/edits';
 import { CODE_GRAMMARS } from '../highlight/languages/code';
 import type { Snippet } from '../../../shared/snippets';
-import { EXTERNAL_BONUS, matchScore } from './fuzzy';
+import { EXTERNAL_BONUS, matchScore } from '../../../shared/fuzzy';
 import type { Expectation } from './expectation';
 import type { WordIndex } from './word-index';
 
