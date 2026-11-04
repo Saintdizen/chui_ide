@@ -108,6 +108,14 @@ const SWEEP_MAX_FILES = 4_000;
 const SWEEP_MAX_BYTES = 2_000_000;
 
 /**
+ * Сколько ждём ответа сервера, прежде чем отменить запрос. Молча висящая подсказка
+ * — то же, что поломка: без сторожа обещание не разрешится никогда (сервер
+ * завис или не знает метода). 30 с — вдоволь для тяжёлых ответов вроде
+ * `workspace/symbol` и мало чтобы посчитать редактор зависшим навсегда.
+ */
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
  * Запросы к документу, у которых свежий запрос вытесняет устаревший. Набор идёт быстрее,
  * чем отвечает сервер, и досказывать то, что уже не нужно, — трата сил сервера. Прочие
  * запросы (initialize, rename, форматирование) не отменяем: у них результат нужен.
@@ -202,6 +210,8 @@ class JsonRpcConnection {
       partial?: string;
       /** Токен индикатора прогресса, открытого сервером под этот запрос. */
       progress?: string | number;
+      /** Сторожевой таймаут: снимаем при ответе/отмене, иначе он сработает впустую. */
+      timer?: ReturnType<typeof setTimeout>;
     }
   >();
   /** Номер запроса по ключу «вид запроса»: по нему отменяем устаревшие (см. `request`). */
@@ -218,6 +228,11 @@ class JsonRpcConnection {
     private readonly onRequest: RequestHandler,
     /** Куда отдавать весь обмен (для журнала трассировки). Не задано — журнал выключен. */
     private readonly onTraffic?: (direction: 'client' | 'server', message: unknown) => void,
+    /**
+     * Срок ожидания ответа, мс. Спрашиваем при каждом запросе: настройку
+     * можно поменять на лету. Нет — `DEFAULT_REQUEST_TIMEOUT_MS`.
+     */
+    private readonly timeoutMs: () => number = () => DEFAULT_REQUEST_TIMEOUT_MS,
   ) {
     child.stdout.on('data', (chunk: Buffer) => this.feed(chunk));
   }
@@ -226,7 +241,12 @@ class JsonRpcConnection {
     this.send({ jsonrpc: '2.0', method, params });
   }
 
-  request(method: string, params: unknown, cancelKey?: string, options: { partial?: boolean } = {}): Promise<unknown> {
+  request(
+    method: string,
+    params: unknown,
+    cancelKey?: string,
+    options: { partial?: boolean; timeoutMs?: number } = {},
+  ): Promise<unknown> {
     // Новый запрос того же вида по тому же файлу отменяет прежде начатый: набор идёт
     // быстрее, чем отвечает сервер, и досказывать то, что уже не нужно, незачем.
     if (cancelKey) {
@@ -258,9 +278,23 @@ class JsonRpcConnection {
     }
 
     return new Promise((resolve, reject) => {
+      // Сторожевой таймаут: сервер может не ответить вовсе (умер, завис, не знает
+      // метода). Без него обещание висело бы вечно — а редактор ждёт подсказку.
+      // По истечении СНАЧАЛА шлём `$/cancelRequest` (сервер перестанет считать) и
+      // только потом отказываем: иначе его работа шла бы впустую до конца.
+      const timeoutMs = options.timeoutMs ?? this.timeoutMs();
+      const timer = setTimeout(() => {
+        if (!this.pending.has(id)) return;
+        // Ошибка — в журнал обмена (если включён), а не всплывающим окном.
+        this.onTraffic?.('server', { at: new Date().toISOString(), error: `таймаут ${method}`, id });
+        this.cancel(id);
+        reject(new Error(`Таймаут запроса ${method}`));
+      }, timeoutMs);
+      (timer as { unref?: () => void }).unref?.();
       this.pending.set(id, {
         resolve,
         reject,
+        timer,
         ...(partial ? { partial } : {}),
         ...(workDone ? { progress: workDone } : {}),
       });
@@ -276,6 +310,7 @@ class JsonRpcConnection {
     const pending = this.pending.get(id);
     if (!pending) return;
     this.pending.delete(id);
+    if (pending.timer) clearTimeout(pending.timer);
     if (pending.partial) this.partials.delete(pending.partial);
     this.forgetKey(id);
     this.send({ jsonrpc: '2.0', method: '$/cancelRequest', params: { id } });
@@ -332,7 +367,10 @@ class JsonRpcConnection {
   }
 
   dispose(): void {
-    for (const pending of this.pending.values()) pending.reject(new Error('Соединение закрыто'));
+    for (const pending of this.pending.values()) {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.reject(new Error('Соединение закрыто'));
+    }
     this.pending.clear();
     this.pendingByKey.clear();
     this.partials.clear();
@@ -382,9 +420,13 @@ class JsonRpcConnection {
       const pending = typeof message.id === 'number' ? this.pending.get(message.id) : undefined;
       if (!pending) return;
       this.pending.delete(message.id as number);
+      if (pending.timer) clearTimeout(pending.timer);
       if (typeof message.id === 'number') this.forgetKey(message.id);
       if (message.error) {
         if (pending.partial) this.partials.delete(pending.partial);
+        // Отказ сервера — тоже в журнал обмена, а не молчаливым `null` для того,
+        // кому он важен (rename, форматирование): иначе не отличить «нет ответа» от сбоя.
+        this.onTraffic?.('server', { at: new Date().toISOString(), error: message.error, id: message.id });
         pending.reject(new Error(message.error.message));
         return;
       }
@@ -1303,6 +1345,9 @@ export class LspService {
       // Журнал обмена: пишем только когда человек включил трассировку. Проверку делаем
       // на каждом сообщении — тумблер можно переключить и посреди работы.
       (direction, message) => this.trace(direction, message),
+      // Срок ждать ответа — из настроек, чтобы зависший сервер не держал подсказку
+      // вечно, а человек мог убавить срок в settings.
+      () => this.settings().requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     );
 
     // Сервер упал или завершился — забываем про него, при следующем файле поднимем снова.
@@ -1339,157 +1384,164 @@ export class LspService {
     const python = this.pythonPath();
     const rootUri = pathToFileURL(cwd).toString();
     const result = (await withTimeout(
-      runtime.connection.request('initialize', {
-        processId: process.pid,
-        // Корень проекта называем ТРЕМЯ способами, и это не избыточность: разные
-        // серверы слушают разное поле. `workspaceFolders` — современный способ, но
-        // его игнорируют серверы постарше; `rootUri` и `rootPath` — старые, но их
-        // игнорирует Pyright (без них он считает корнем `/<default workspace root>`
-        // и не разрешает импорты вида `tests.v2.page`, оставляя подсказки пустыми).
-        rootUri,
-        rootPath: cwd,
-        workspaceFolders: [{ uri: rootUri, name: path.basename(cwd) }],
-        clientInfo: { name: 'chui_iDE' },
-        // Возможности клиента — это РАЗРЕШЕНИЕ серверу отдать больше. Чего здесь нет,
-        // того сервер прислать не вправе: без `documentationFormat` не будет описаний,
-        // без `tagSupport` — пометки «устарело», без `snippetSupport` — заготовок.
-        // Поэтому список полный — но ровно из того, что мы умеем показать: объявлять
-        // `resolveSupport` и при этом не звать `completionItem/resolve` значило бы
-        // попросить сервер прислать голый `label` — то самое «пусто после точки».
-        capabilities: {
-          textDocument: {
-            synchronization: {},
-            completion: {
-              completionItem: {
-                // Заготовки: разметку `${1:…}` раскрывает наш редактор (expandSnippet).
-                snippetSupport: true,
-                // Знаки «принять» от сервера (Enter, Tab, у части серверов — `.`).
-                commitCharactersSupport: true,
-                documentationFormat: ['markdown', 'plaintext'],
-                deprecatedSupport: true,
-                preselectSupport: true,
-                // Пометка «устарело» в новой форме (`tags: [Deprecated]`).
-                tagSupport: { valueSet: [1] },
-                insertReplaceSupport: true,
-                labelDetailsSupport: true,
-                // Объявляем ТОЛЬКО то, что действительно доводим: список зовёт
-                // `completionItem/resolve` и берёт оттуда `documentation` и `detail`.
-                // `additionalTextEdits` тут НАМЕРЕННО нет: авто-импорт мы применяем
-                // из первого ответа, а заявив его здесь, потеряли бы его у тех
-                // серверов, что перенесли правки в resolve.
-                resolveSupport: { properties: ['documentation', 'detail'] },
-              },
-            },
-            hover: { contentFormat: ['markdown', 'plaintext'] },
-            signatureHelp: {
-              signatureInformation: {
-                documentationFormat: ['markdown', 'plaintext'],
-                parameterInformation: { labelOffsetSupport: true },
-              },
-            },
-            definition: { linkSupport: true },
-            // Диагностика — по этому ключу серверы решают, слать ли `publishDiagnostics`
-            // вообще: `typescript-language-server` v6 читает его как `diagnosticsSupport`
-            // и без объявления молчит совсем — ни пометок открытого файла, ни обхода
-            // проекта. Объявляем то, что умеем: `version` отбрасываем, если он старше
-            // нашей правки (см. обработчик `publishDiagnostics`).
-            publishDiagnostics: { versionSupport: true },
-            // Диагностика по запросу. Объявляем, чтобы сервер, умеющий
-            // `textDocument/diagnostic`, мог ответить о файле, которого не открывал.
-            // `relatedInformation` — не нужен от клиента, поэтому не заявляем.
-            diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false },
-            // Дерево символов файла: у объявления появляются дети — так и показываем.
-            documentSymbol: { hierarchicalDocumentSymbolSupport: true },
-            rename: { prepareSupport: true },
-            foldingRange: { lineFoldingOnly: true },
-            // Выделение по структуре: сервер отдаёт цепочку участков вокруг места —
-            // слово, выражение, строка, блок (см. `LspFeatures.selectionRanges`).
-            selectionRange: {},
-            codeLens: { dynamicRegistration: false },
-            codeAction: {
-              isPreferredSupport: true,
-              codeActionLiteralSupport: {
-                codeActionKind: {
-                  valueSet: [
-                    '',
-                    'quickfix',
-                    'refactor',
-                    'refactor.extract',
-                    'refactor.inline',
-                    'refactor.rewrite',
-                    'source',
-                    'source.organizeImports',
-                    'source.fixAll',
-                  ],
+      runtime.connection.request(
+        'initialize',
+        {
+          processId: process.pid,
+          // Корень проекта называем ТРЕМЯ способами, и это не избыточность: разные
+          // серверы слушают разное поле. `workspaceFolders` — современный способ, но
+          // его игнорируют серверы постарше; `rootUri` и `rootPath` — старые, но их
+          // игнорирует Pyright (без них он считает корнем `/<default workspace root>`
+          // и не разрешает импорты вида `tests.v2.page`, оставляя подсказки пустыми).
+          rootUri,
+          rootPath: cwd,
+          workspaceFolders: [{ uri: rootUri, name: path.basename(cwd) }],
+          clientInfo: { name: 'chui_iDE' },
+          // Возможности клиента — это РАЗРЕШЕНИЕ серверу отдать больше. Чего здесь нет,
+          // того сервер прислать не вправе: без `documentationFormat` не будет описаний,
+          // без `tagSupport` — пометки «устарело», без `snippetSupport` — заготовок.
+          // Поэтому список полный — но ровно из того, что мы умеем показать: объявлять
+          // `resolveSupport` и при этом не звать `completionItem/resolve` значило бы
+          // попросить сервер прислать голый `label` — то самое «пусто после точки».
+          capabilities: {
+            textDocument: {
+              synchronization: {},
+              completion: {
+                completionItem: {
+                  // Заготовки: разметку `${1:…}` раскрывает наш редактор (expandSnippet).
+                  snippetSupport: true,
+                  // Знаки «принять» от сервера (Enter, Tab, у части серверов — `.`).
+                  commitCharactersSupport: true,
+                  documentationFormat: ['markdown', 'plaintext'],
+                  deprecatedSupport: true,
+                  preselectSupport: true,
+                  // Пометка «устарело» в новой форме (`tags: [Deprecated]`).
+                  tagSupport: { valueSet: [1] },
+                  insertReplaceSupport: true,
+                  labelDetailsSupport: true,
+                  // Объявляем ТОЛЬКО то, что действительно доводим: список зовёт
+                  // `completionItem/resolve` и берёт оттуда `documentation` и `detail`.
+                  // `additionalTextEdits` тут НАМЕРЕННО нет: авто-импорт мы применяем
+                  // из первого ответа, а заявив его здесь, потеряли бы его у тех
+                  // серверов, что перенесли правки в resolve.
+                  resolveSupport: { properties: ['documentation', 'detail'] },
                 },
               },
+              hover: { contentFormat: ['markdown', 'plaintext'] },
+              signatureHelp: {
+                signatureInformation: {
+                  documentationFormat: ['markdown', 'plaintext'],
+                  parameterInformation: { labelOffsetSupport: true },
+                },
+              },
+              definition: { linkSupport: true },
+              // Диагностика — по этому ключу серверы решают, слать ли `publishDiagnostics`
+              // вообще: `typescript-language-server` v6 читает его как `diagnosticsSupport`
+              // и без объявления молчит совсем — ни пометок открытого файла, ни обхода
+              // проекта. Объявляем то, что умеем: `version` отбрасываем, если он старше
+              // нашей правки (см. обработчик `publishDiagnostics`).
+              publishDiagnostics: { versionSupport: true },
+              // Диагностика по запросу. Объявляем, чтобы сервер, умеющий
+              // `textDocument/diagnostic`, мог ответить о файле, которого не открывал.
+              // `relatedInformation` — не нужен от клиента, поэтому не заявляем.
+              diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false },
+              // Дерево символов файла: у объявления появляются дети — так и показываем.
+              documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+              rename: { prepareSupport: true },
+              foldingRange: { lineFoldingOnly: true },
+              // Выделение по структуре: сервер отдаёт цепочку участков вокруг места —
+              // слово, выражение, строка, блок (см. `LspFeatures.selectionRanges`).
+              selectionRange: {},
+              codeLens: { dynamicRegistration: false },
+              codeAction: {
+                isPreferredSupport: true,
+                codeActionLiteralSupport: {
+                  codeActionKind: {
+                    valueSet: [
+                      '',
+                      'quickfix',
+                      'refactor',
+                      'refactor.extract',
+                      'refactor.inline',
+                      'refactor.rewrite',
+                      'source',
+                      'source.organizeImports',
+                      'source.fixAll',
+                    ],
+                  },
+                },
+              },
+              callHierarchy: {},
+              // Иерархия типов: надтипы и подтипы (команды «Иерархия типов» в палитре).
+              typeHierarchy: {},
+              // Ссылки в коде: подчёркнутые кликабельные участки (пути в import, адреса).
+              // tooltipSupport — сервер вправе дать подпись наведения к ссылке.
+              documentLink: { tooltipSupport: true },
+              // Связанные участки: имена парных тегов правятся вместе (открывающий и
+              // закрывающий тег). Правим все участки сразу — своей правкой на каждый.
+              linkedEditingRange: {},
+              // Моникеры: устойчивое имя символа — связать его с тем же символом в других
+              // инструментах. Показываем по команде (см. `LspFeatures.monikers`).
+              moniker: {},
+              // Значения переменных в коде при отладке: сервер помечает участки, а значения
+              // берём у отладчика (см. `LspFeatures.inlineValues`). Объявляем без динамической
+              // регистрации — её мы не поддерживаем.
+              inlineValue: {},
+              // Семантическая подсветка: точные роли поверх своей грамматики. Объявляем и
+              // `range`: большой файл не нужно разбирать целиком ради экрана (см.
+              // `semanticTokens`). Типы и модификаторы объявляем стандартные: сервер вернёт
+              // их индексами в легенде, а мы сопоставим с ролями палитры.
+              semanticTokens: {
+                requests: { full: true, range: true },
+                tokenTypes: [...STANDARD_TOKEN_TYPES],
+                tokenModifiers: [...STANDARD_TOKEN_MODIFIERS],
+              },
             },
-            callHierarchy: {},
-            // Иерархия типов: надтипы и подтипы (команды «Иерархия типов» в палитре).
-            typeHierarchy: {},
-            // Ссылки в коде: подчёркнутые кликабельные участки (пути в import, адреса).
-            // tooltipSupport — сервер вправе дать подпись наведения к ссылке.
-            documentLink: { tooltipSupport: true },
-            // Связанные участки: имена парных тегов правятся вместе (открывающий и
-            // закрывающий тег). Правим все участки сразу — своей правкой на каждый.
-            linkedEditingRange: {},
-            // Моникеры: устойчивое имя символа — связать его с тем же символом в других
-            // инструментах. Показываем по команде (см. `LspFeatures.monikers`).
-            moniker: {},
-            // Значения переменных в коде при отладке: сервер помечает участки, а значения
-            // берём у отладчика (см. `LspFeatures.inlineValues`). Объявляем без динамической
-            // регистрации — её мы не поддерживаем.
-            inlineValue: {},
-            // Семантическая подсветка: точные роли поверх своей грамматики. Объявляем и
-            // `range`: большой файл не нужно разбирать целиком ради экрана (см.
-            // `semanticTokens`). Типы и модификаторы объявляем стандартные: сервер вернёт
-            // их индексами в легенде, а мы сопоставим с ролями палитры.
-            semanticTokens: {
-              requests: { full: true, range: true },
-              tokenTypes: [...STANDARD_TOKEN_TYPES],
-              tokenModifiers: [...STANDARD_TOKEN_MODIFIERS],
+            window: {
+              // Сервер вправе сообщать, чем занят, и просить создать свой индикатор: без
+              // этой возможности долгая индексация шла бы «молча» (см. `$/progress`).
+              workDoneProgress: true,
+            },
+            workspace: {
+              // Серверы (pylsp, pyright) спрашивают настройки этим запросом.
+              configuration: true,
+              workspaceFolders: true,
+              // Файлы поменялись мимо редактора: без этого объявления сервер не ждёт
+              // `didChangeWatchedFiles`, и наш отказ (`workspaceWatchedFiles` выше) всегда ложен.
+              didChangeWatchedFiles: { dynamicRegistration: false },
+              symbol: {},
+              // Правки сервера (переименование) приходят с `documentChanges` — разбираем.
+              // Заодно умеем операции с файлами: создать, переименовать, удалить (их применяет
+              // приложение). Без этого объявления сервер их не пришлёт (см. capabilities).
+              workspaceEdit: {
+                documentChanges: true,
+                resourceOperations: ['create', 'rename', 'delete'],
+              },
+              // Операции с файлами, сделанные руками (проводник, терминал, `mv`):
+              // без объявления сервер не ждёт `didCreateFiles` и родни, и новый модуль
+              // остаётся невидимым, пока сервер не перезапустят.
+              fileOperations: {
+                didCreate: { filters: [UNFILTERED_FILE_OPERATION] },
+                didRename: { filters: [UNFILTERED_FILE_OPERATION] },
+                didDelete: { filters: [UNFILTERED_FILE_OPERATION] },
+              },
             },
           },
-          window: {
-            // Сервер вправе сообщать, чем занят, и просить создать свой индикатор: без
-            // этой возможности долгая индексация шла бы «молча» (см. `$/progress`).
-            workDoneProgress: true,
-          },
-          workspace: {
-            // Серверы (pylsp, pyright) спрашивают настройки этим запросом.
-            configuration: true,
-            workspaceFolders: true,
-            // Файлы поменялись мимо редактора: без этого объявления сервер не ждёт
-            // `didChangeWatchedFiles`, и наш отказ (`workspaceWatchedFiles` выше) всегда ложен.
-            didChangeWatchedFiles: { dynamicRegistration: false },
-            symbol: {},
-            // Правки сервера (переименование) приходят с `documentChanges` — разбираем.
-            // Заодно умеем операции с файлами: создать, переименовать, удалить (их применяет
-            // приложение). Без этого объявления сервер их не пришлёт (см. capabilities).
-            workspaceEdit: {
-              documentChanges: true,
-              resourceOperations: ['create', 'rename', 'delete'],
-            },
-            // Операции с файлами, сделанные руками (проводник, терминал, `mv`):
-            // без объявления сервер не ждёт `didCreateFiles` и родни, и новый модуль
-            // остаётся невидимым, пока сервер не перезапустят.
-            fileOperations: {
-              didCreate: { filters: [UNFILTERED_FILE_OPERATION] },
-              didRename: { filters: [UNFILTERED_FILE_OPERATION] },
-              didDelete: { filters: [UNFILTERED_FILE_OPERATION] },
-            },
-          },
+          // Путь к питону передаём сразу: pyright берёт его отсюда, иначе не видит
+          // пакеты окружения и подсказки по импортам не поднимаются. Свои доводы
+          // сервера (например, путь к `tsserver.js`) идут следом и дополняют их.
+          // Кодировка позиций: протокол по умолчанию — utf-16 (наш нативный).
+          // Объявляем ОБЕ: если сервер требует utf-32 (русский текст плюс эмодзи
+          // иначе сдвигает его подсказки), он выберет его сам и ответит одним из
+          // списка; смотреть ответ будем ниже (`negotiateEncoding`).
+          general: { positionEncodings: ['utf-16', 'utf-32'] },
+          initializationOptions: buildInitializationOptions(runtime, python),
+          // Внутренний таймаут `request` не должен сработать раньше внешнего:
+          // инициализация — долгий старт (индекс, окружение), ей даём тот же срок.
         },
-        // Путь к питону передаём сразу: pyright берёт его отсюда, иначе не видит
-        // пакеты окружения и подсказки по импортам не поднимаются. Свои доводы
-        // сервера (например, путь к `tsserver.js`) идут следом и дополняют их.
-        // Кодировка позиций: протокол по умолчанию — utf-16 (наш нативный).
-        // Объявляем ОБЕ: если сервер требует utf-32 (русский текст плюс эмодзи
-        // иначе сдвигает его подсказки), он выберет его сам и ответит одним из
-        // списка; смотреть ответ будем ниже (`negotiateEncoding`).
-        general: { positionEncodings: ['utf-16', 'utf-32'] },
-        initializationOptions: buildInitializationOptions(runtime, python),
-      }),
+        undefined,
+        { timeoutMs: INITIALIZE_TIMEOUT_MS },
+      ),
       INITIALIZE_TIMEOUT_MS,
       `initialize: ${runtime.config.command}`,
     )) as {
