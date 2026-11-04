@@ -123,6 +123,8 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
  */
 const RESTART_BASE_DELAY_MS = 1_000;
 const MAX_RESTART_ATTEMPTS = 3;
+/** Потолок одновременных экземпляров (мультикорень × языки) — защита от лавины процессов. */
+const MAX_SERVER_INSTANCES = 8;
 
 /**
  * Запросы к документу, у которых свежий запрос вытесняет устаревший. Набор идёт быстрее,
@@ -483,6 +485,8 @@ class JsonRpcConnection {
 
 interface ServerRuntime {
   readonly config: LspServerConfig;
+  /** Корень области, под который запущен этот экземпляр (п.85: свой на каждой корень). */
+  readonly root: string;
   readonly child: ChildProcessWithoutNullStreams;
   readonly connection: JsonRpcConnection;
   readonly initialized: Promise<void>;
@@ -795,7 +799,45 @@ export class LspService {
      */
     private readonly seedDocument: (language: string) => Promise<{ path: string; text: string } | null> = async () =>
       null,
+    private readonly roots: () => string[] = () => [],
   ) {}
+
+  /** Все корни области; пусто — только активный `root`. */
+  private allRoots(): string[] {
+    const list = this.roots().filter(Boolean);
+    if (list.length > 0) return list;
+    const one = this.root();
+    return one ? [one] : [];
+  }
+
+  /** Корень, которому принадлежит файл (самый длинный из содержащих его). */
+  private rootForPath(path: string): string | null {
+    const target = path.replace(/\\/g, '/');
+    let best: string | null = null;
+    for (const root of this.allRoots()) {
+      const normalized = root.replace(/\\/g, '/').replace(/\/$/, '');
+      if (target === normalized || target.startsWith(`${normalized}/`)) {
+        if (!best || normalized.length > best.length) best = normalized;
+      }
+    }
+    return best ?? this.root();
+  }
+
+  /**
+   * Ключ экземпляра в картах жизненного цикла. Один корень — просто язык
+   * (старое поведение и старые ключи); несколько — `язык@@корень`, чтобы
+   * один и тот же язык в двух проектах не делил ни процессы, ни негативный кэш.
+   */
+  private keyFor(language: string, root: string | null): string {
+    return this.allRoots().length <= 1 ? language : `${language}@@${root ?? this.root() ?? ''}`;
+  }
+
+  /** Обратно ключу: `язык@@корень` → язык и корень; без `@@` — язык, корень null. */
+  private keyParts(key: string): { language: string; root: string | null } {
+    const at = key.indexOf('@@');
+    if (at < 0) return { language: key, root: null };
+    return { language: key.slice(0, at), root: key.slice(at + 2) || null };
+  }
 
   /**
    * Состояние серверов: какие языки запущены, ЧТО за сервер и откуда он взят, и что
@@ -809,7 +851,7 @@ export class LspService {
       origin: this.originOf(runtime.config),
     }));
     return {
-      running: [...this.runtimes.keys()],
+      running: [...this.runtimes.values()].map((runtime) => this.keyFor(runtime.config.language, runtime.root)),
       servers,
       failed: [...this.failed.entries()].map(([language, reason]) => ({
         language,
@@ -863,18 +905,17 @@ export class LspService {
     // Повторный прогрев безопасен: уже поднятый сервер отдаётся как есть, а два
     // одновременных вызова одного языка ждут один и тот же подъём (см. `starting`).
     await Promise.all(
-      wanted.map(async (language) => {
-        const runtime = await this.runtimeFor(language).catch(() => null);
-        // Подняли впервые — сразу просим сервер обойти проект: с этого момента индекс
-        // готов, и поиск по символам не ждёт первого запроса человека.
-        if (runtime) {
-          await this.scanProject(runtime);
-          // Пометки — сразу после обхода и в фоне: счётчик ошибок и предупреждений
-          // в строке состояния должен быть заполнен, пока человек ещё ничего не открыл.
-          const root = this.root();
-          if (root) void this.sweepDiagnostics(runtime, root).catch(() => undefined);
-        }
-      }),
+      wanted.flatMap((language) =>
+        this.allRoots().map(async (root) => {
+          const runtime = await this.runtimeFor(language, root).catch(() => null);
+          if (runtime) {
+            await this.scanProject(runtime);
+            // Пометки — сразу после обхода и в фоне: счётчик ошибок и предупреждений
+            // в строке состояния должен быть заполнен, пока человек ещё ничего не открыл.
+            void this.sweepDiagnostics(runtime, runtime.root).catch(() => undefined);
+          }
+        }),
+      ),
     );
   }
 
@@ -908,12 +949,12 @@ export class LspService {
    * настоящем запросе индекс дособерётся сам.
    */
   private async scanProject(runtime: ServerRuntime): Promise<void> {
-    const language = runtime.config.language;
-    if (this.scanned.has(language)) return;
+    const scanKey = this.keyFor(runtime.config.language, runtime.root);
+    if (this.scanned.has(scanKey)) return;
     await runtime.initialized.catch(() => undefined);
     // Отмечаем ДО запросов: два прогрева одного языка, пришедшие разом, не должны
     // запустить два обхода — сервер прочитал бы проект дважды.
-    this.scanned.add(language);
+    this.scanned.add(scanKey);
     await this.seed(runtime);
     if (!runtime.capabilities.workspaceSymbolProvider) return;
     // Повтор: сервер мог ещё подхватывать затравку, а обход до этого — не знать
@@ -983,7 +1024,7 @@ export class LspService {
     // а `didOpen` уедет только после `initialize`.
     this.languageOfPath.set(path, languageId);
     this.latestText.set(path, text);
-    const runtime = await this.runtimeFor(languageId);
+    const runtime = await this.runtimeFor(languageId, this.rootForPath(path));
     if (!runtime) {
       // Сервера нет — молчим, но язык и текст НЕ забываем: файл открыт в редакторе,
       // и знание о нём нужно следующему `open` (перезапуск сервера) и `change`.
@@ -1271,7 +1312,9 @@ export class LspService {
     // файлов, а если файла там ещё нет — по расширению. Иначе первый же запрос,
     // пришедший раньше `didOpen`, молча получал `null` и подсказок не было вовсе.
     const language = this.languageFor(path);
-    return language ? (this.runtimes.get(language) ?? null) : null;
+    if (!language) return null;
+    // Файл в добавленном корне — ему нужен экземпляр ЭТОГО корня, а не активного.
+    return this.runtimes.get(this.keyFor(language, this.rootForPath(path))) ?? null;
   }
 
   /**
@@ -1282,34 +1325,42 @@ export class LspService {
    * по серверу — лишний остался бы висеть процессом. Поэтому второй ждёт тот же
    * незавершённый подъём.
    */
-  private async runtimeFor(language: string): Promise<ServerRuntime | null> {
-    const existing = this.runtimes.get(language);
+  private async runtimeFor(language: string, root: string | null = this.root()): Promise<ServerRuntime | null> {
+    const key = this.keyFor(language, root);
+    const existing = this.runtimes.get(key);
     if (existing) return existing;
 
     // Уже пробовали и не смогли: повторять поиск сервера (диск, PATH) на каждый файл
     // незачем — иначе «почему нет подсказок» станет вечным шумом. Снять можно
     // перезапуском (он же — кнопка в попапе языковых серверов).
-    if (this.failed.has(language)) return null;
+    if (this.failed.has(key)) return null;
 
-    const inFlight = this.starting.get(language);
+    const inFlight = this.starting.get(key);
     if (inFlight) return inFlight;
 
-    const pending = this.startLanguage(language).finally(() => this.starting.delete(language));
-    this.starting.set(language, pending);
+    const pending = this.startLanguage(language, root).finally(() => this.starting.delete(key));
+    this.starting.set(key, pending);
     return pending;
   }
 
-  private async startLanguage(language: string): Promise<ServerRuntime | null> {
+  private async startLanguage(language: string, root: string | null): Promise<ServerRuntime | null> {
     if (!this.settings().enabled) return null;
+    const runtimeKey = this.keyFor(language, root);
+    // Потолок экземпляров: не стартуем новый, если уже много — отказываем понятной
+    // причиной, а не плодим процессы. Уже поднятые продолжают работать как есть.
+    if (this.runtimes.size + this.starting.size >= MAX_SERVER_INSTANCES) {
+      this.failed.set(runtimeKey, `достигнут потолок серверов (${MAX_SERVER_INSTANCES})`);
+      return null;
+    }
 
     const generation = this.generation;
     const tried = new Set<string>();
-    const key = (server: LspServerConfig): string => [server.command, ...server.args].join(' ');
+    const configKey = (server: LspServerConfig): string => [server.command, ...server.args].join(' ');
     const attempt = async (list: readonly LspServerConfig[]): Promise<ServerRuntime | null> => {
       for (const config of list) {
-        if (tried.has(key(config))) continue;
-        tried.add(key(config));
-        const runtime = await this.tryStart(config, generation);
+        if (tried.has(configKey(config))) continue;
+        tried.add(configKey(config));
+        const runtime = await this.tryStart(config, generation, root);
         if (runtime) return runtime;
       }
       return null;
@@ -1319,22 +1370,19 @@ export class LspService {
     const configured = serverCandidates(this.settings().servers, [], language);
     const chosen = await attempt(configured);
     if (chosen) {
-      this.failed.delete(language);
+      this.failed.delete(runtimeKey);
       return chosen;
     }
     const alternates = serverCandidates([], await this.alternates(language), language);
     const fallback = await attempt(alternates);
     if (fallback) {
-      this.failed.delete(language);
+      this.failed.delete(runtimeKey);
       return fallback;
     }
     // Ничего не вышло — запоминаем причину, чтобы человек видел её, а не искал наугад.
-    // Сервер, который отказал на `initialize`, называет причину сам («TypeScript 7
-    // provides no tsserver.js»): она точнее нашего «не поднялся» и сразу указывает
-    // на виновника, поэтому идёт первой.
     const refusal = this.refusals.get(language);
     this.failed.set(
-      language,
+      runtimeKey,
       refusal ?? (configured.length === 0 && alternates.length === 0 ? 'сервер не найден' : 'сервер не поднялся'),
     );
     return null;
@@ -1346,10 +1394,14 @@ export class LspService {
    * этого сломанный сервер (или молчащий на `initialize`) оставил бы язык без
    * подсказок, хотя рабочий сервер в системе есть.
    */
-  private async tryStart(config: LspServerConfig, generation: number): Promise<ServerRuntime | null> {
+  private async tryStart(
+    config: LspServerConfig,
+    generation: number,
+    root: string | null,
+  ): Promise<ServerRuntime | null> {
     let runtime: ServerRuntime;
     try {
-      runtime = await this.start(config);
+      runtime = await this.start(config, root);
     } catch {
       return null; // сервера нет в PATH — это не повод падать IDE
     }
@@ -1370,11 +1422,11 @@ export class LspService {
       this.kill(runtime);
       return null;
     }
-    this.runtimes.set(runtime.config.language, runtime);
+    this.runtimes.set(this.keyFor(runtime.config.language, runtime.root), runtime);
     // Сервер поднялся и принят — путь к успеху был. Счётчик попыток перезапуска
     // обнуляем: следующий случайный крах — снова «первая попытка», а не продолжение
     // старой серии. Иначе один сбой в начале работы съел бы весь запас попыток.
-    this.restartAttempts.delete(runtime.config.language);
+    this.restartAttempts.delete(this.keyFor(runtime.config.language, runtime.root));
     return runtime;
   }
 
@@ -1387,8 +1439,12 @@ export class LspService {
     }
   }
 
-  private async start(config: LspServerConfig): Promise<ServerRuntime> {
-    const cwd = this.root() ?? process.cwd();
+  private async start(config: LspServerConfig, root: string | null): Promise<ServerRuntime> {
+    // Каждый экземпляр — в своём корне: мультикорень запускает отдельный процесс на
+    // (язык, корень), и cwd/`initialize`-корень — корень ЭТОГО файла, а не активного:
+    // иначе сервер второго проекта видит чужой tsconfig и отвечает чужим.
+    const instanceRoot = root ?? this.root() ?? process.cwd();
+    const cwd = instanceRoot;
     // Языковой сервер видит `.env` проекта — тем же путём, что терминал и запуск.
     // Своё окружение конфига идёт последним: серверам из поставки нужен режим Node
     // (`ELECTRON_RUN_AS_NODE`), и проектное `.env` его перебивать не должно.
@@ -1420,15 +1476,16 @@ export class LspService {
     // и человек видел «чип пропал и подсказок нет» без единого слова почему.
     const forget = (code: number | null, signal: string | null): void => {
       connection.dispose();
-      const current = this.runtimes.get(config.language);
+      const runtimeKey = this.keyFor(config.language, instanceRoot);
+      const current = this.runtimes.get(runtimeKey);
       if (current?.connection !== connection) return;
-      this.runtimes.delete(config.language);
-      this.failed.set(config.language, exitReason(code, signal));
+      this.runtimes.delete(runtimeKey);
+      this.failed.set(runtimeKey, exitReason(code, signal));
       // Сервер ушёл ПОСЛЕ того, как был принят в работу (иначе `current` не совпал бы
       // с этим соединением и мы бы вернулись раньше): это падение, а не штатное
       // завершение. Поднимаем сами с нарастающей паузой, иначе подсказки пропадают
       // молча до следующего файла или ручного перезапуска.
-      this.scheduleRestart(config.language);
+      this.scheduleRestart(runtimeKey);
       this.publish(PushTopic.LspServers, this.status());
     };
     child.on('exit', forget);
@@ -1438,6 +1495,7 @@ export class LspService {
 
     const runtime: ServerRuntime = {
       config,
+      root: instanceRoot,
       child,
       connection,
       versions: new Map(),
@@ -1665,7 +1723,7 @@ export class LspService {
     await this.opening.get(path)?.catch(() => undefined);
     // Сервер поднимаем тут же, если его ещё нет: `open` и запрос идут от renderer
     // разными запросами, и порядок между ними не гарантирован.
-    const runtime = await this.runtimeFor(language);
+    const runtime = await this.runtimeFor(language, this.rootForPath(path));
     if (!runtime) return null;
     await runtime.initialized.catch(() => undefined);
     // Ключ отмены — «этот файл, этот вид запроса»: свежий вытесняет устаревший.
@@ -2213,7 +2271,7 @@ export class LspService {
 
   /** Сервер для файла: уже открытый в редакторе или поднятый по языку. */
   private async runtimeForDocument(path: string, languageId: string): Promise<ServerRuntime | null> {
-    return this.runtimeForPath(path) ?? (await this.runtimeFor(languageId));
+    return this.runtimeForPath(path) ?? (await this.runtimeFor(languageId, this.rootForPath(path)));
   }
 
   /**
@@ -2541,12 +2599,13 @@ export class LspService {
     this.restartAttempts.set(language, attempts);
 
     const delay = RESTART_BASE_DELAY_MS * 2 ** (attempts - 1);
+    const { language: restartLanguage, root: restartRoot } = this.keyParts(language);
     const timer = setTimeout(() => {
       this.restartTimers.delete(language);
       // `failed` держало бы `runtimeFor` в отказе — снимаем, иначе старт не пойдёт.
       this.failed.delete(language);
       this.publish(PushTopic.LspServers, this.status());
-      void this.startLanguage(language).catch(() => {
+      void this.startLanguage(restartLanguage, restartRoot).catch(() => {
         // Непредвиденное при повторном старте: состояние покажет `publish`.
       });
     }, delay);
@@ -2554,10 +2613,11 @@ export class LspService {
     this.restartTimers.set(language, timer);
   }
 
-  private stop(language: string): void {
-    const runtime = this.runtimes.get(language);
+  private stop(key: string): void {
+    const runtime = this.runtimes.get(key);
     if (!runtime) return;
-    this.runtimes.delete(language);
+    this.runtimes.delete(key);
+    const language = this.keyParts(key).language;
     // Следующий заход — уже на новом сервере, старые отметки обхода не в счёт.
     // Только своих: у другого языка сервер жив и его заход продолжается.
     for (const mark of [...this.swept]) if (mark.endsWith(`\u0000${language}`)) this.swept.delete(mark);

@@ -139,7 +139,18 @@ const FAKE_SERVER = [
 ].join('\n');
 
 async function project(
-  mode: 'save' | 'watch' | 'plain' | 'symbols' | 'fileops' | 'cfg' | 'progress' | 'folders' | 'inline' | 'ranges' | 'willrename',
+  mode:
+    | 'save'
+    | 'watch'
+    | 'plain'
+    | 'symbols'
+    | 'fileops'
+    | 'cfg'
+    | 'progress'
+    | 'folders'
+    | 'inline'
+    | 'ranges'
+    | 'willrename',
 ): Promise<{ root: string; file: string; log: string; server: FakeServer }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-lsp-save-'));
   dirs.push(root);
