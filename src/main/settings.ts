@@ -366,6 +366,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     dockSize: 260,
     sidebarVisible: true,
     rightVisible: true,
+    // Боковая панель по умолчанию слева: привычный порядок «дерево · код · чат».
+    sidebarPosition: 'left',
     dockVisible: false,
     editorVisible: true,
   },
@@ -1199,6 +1201,9 @@ function sanitizeLayout(value: LayoutSettings): LayoutSettings {
     dockSize: size(value.dockSize, DEFAULT_SETTINGS.layout.dockSize),
     sidebarVisible: flag(value.sidebarVisible, DEFAULT_SETTINGS.layout.sidebarVisible),
     rightVisible: flag(value.rightVisible, DEFAULT_SETTINGS.layout.rightVisible),
+    // Чужое значение (опечатка, старая версия) — как «слева»: молча ставим панель
+    // на место, а не роняем весь макет.
+    sidebarPosition: value.sidebarPosition === 'right' ? 'right' : 'left',
     dockVisible: flag(value.dockVisible, DEFAULT_SETTINGS.layout.dockVisible),
     editorVisible: flag(value.editorVisible, DEFAULT_SETTINGS.layout.editorVisible),
   };

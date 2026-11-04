@@ -1,3 +1,5 @@
+import type { SidebarPosition } from '../../shared/api/settings';
+
 /**
  * Адаптивная раскладка панелей: какие из них показывать при заданной ширине окна.
  *
@@ -37,6 +39,19 @@ export type PanelBand = 'compact' | 'regular' | 'wide';
 export interface PanelVisibility {
   sidebar: boolean;
   right: boolean;
+}
+
+/**
+ * Порядок панелей в ряду: где стоит боковая и что идёт от редактора к правой.
+ *
+ * Размеры дорожек при переезде не меняются — меняется только их порядок, поэтому
+ * переезд описывается именем раскладки, а не набором правил в CSS на каждый случай:
+ * `sidebar → editor → right` (по умолчанию) или `editor → right → sidebar`.
+ * Неизменная часть вынесена отдельно: без неё каждый перенос пришлось бы
+ * дублировать в таблице стилей.
+ */
+export function panelOrder(position: SidebarPosition): 'sidebar-first' | 'sidebar-last' {
+  return position === 'right' ? 'sidebar-last' : 'sidebar-first';
 }
 
 /** Видимость трёх панелей, между которыми делится ширина окна. */

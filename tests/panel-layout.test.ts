@@ -4,8 +4,18 @@ import {
   autoPanels,
   applyPanelIntent,
   panelBand,
+  panelOrder,
   type PanelState,
 } from '../src/renderer/core/panel-layout';
+
+describe('panelOrder', () => {
+  it('переезд боковой панели меняет только порядок дорожек, не их размеры', () => {
+    // Порядок — имя раскладки, а не набор CSS-правил на каждый случай: разметка
+    // и содержимое панели при переезде не пересобираются (см. `is-sidebar-right`).
+    expect(panelOrder('left')).toBe('sidebar-first');
+    expect(panelOrder('right')).toBe('sidebar-last');
+  });
+});
 
 describe('panelBand', () => {
   it('делит ширину на узкую, обычную и широкую полосы по порогам', () => {

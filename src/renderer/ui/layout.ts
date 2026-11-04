@@ -1,5 +1,6 @@
 import { clear, h } from './dom';
-import { applyPanelIntent, type PanelState } from '../core/panel-layout';
+import { applyPanelIntent, type PanelState, panelOrder } from '../core/panel-layout';
+import type { SidebarPosition } from '../../shared/api/settings';
 
 /**
  * Каркас в духе современных IDE: фон приложения темнее панелей, панели —
@@ -35,6 +36,13 @@ export interface Layout {
   setSidebarSize(size: number): void;
   setRightSize(size: number): void;
   setDockSize(size: number): void;
+  /**
+   * С какой стороны стоит боковая панель. Переезд — это класс на корне и порядок
+   * элементов сетки, а не пересборка DOM: содержимое панели живёт в `sidebarBody`
+   * и переезжает вместе с ней (см. `SidebarPosition`).
+   */
+  readonly sidebarPosition: SidebarPosition;
+  setSidebarPosition(position: SidebarPosition): void;
 }
 
 export function createLayout(mount: HTMLElement, options: { onChange?: () => void } = {}): Layout {
@@ -84,12 +92,18 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
   // его наполовину.
   let panels: PanelState = { sidebar: true, right: true, editor: true };
   let dockVisible = false;
+  // Сторона, с которой стоит боковая панель. Хранится классом на корне и порядком
+  // элементов сетки — так содержимое панели переезжает, не теряя состояния
+  // (открытые блоки, прокрутка, фокус), и не нужно пересобирать DOM.
+  let sidebarPosition: SidebarPosition = 'left';
 
   const apply = (): void => {
     root.classList.toggle('is-sidebar-hidden', !panels.sidebar);
     root.classList.toggle('is-right-hidden', !panels.right);
     root.classList.toggle('is-editor-hidden', !panels.editor);
     root.classList.toggle('is-dock-hidden', !dockVisible);
+    // Имя раскладки берём из чистой функции — тест проверяет её, а не строку в CSS.
+    root.classList.toggle('is-sidebar-right', panelOrder(sidebarPosition) === 'sidebar-last');
   };
 
   clear(mount);
@@ -197,6 +211,15 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     },
     setDockSize(size: number) {
       root.style.setProperty('--dock-size', `${Math.round(size)}px`);
+    },
+    get sidebarPosition() {
+      return sidebarPosition;
+    },
+    setSidebarPosition(position: SidebarPosition) {
+      if (position === sidebarPosition) return;
+      sidebarPosition = position;
+      apply();
+      options.onChange?.();
     },
   };
 }

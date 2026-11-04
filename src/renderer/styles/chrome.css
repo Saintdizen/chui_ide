@@ -169,6 +169,39 @@ textarea {
 /* Сворачивание панелей — мгновенное, без анимации: панели меняют ширину дорожки
    сетки, а анимировать раскладку нельзя (см. `tests/motion.test.ts`). Ступень
    Normal из шкалы движения сюда не применяется намеренно. */
+.app.is-sidebar-right {
+  /* Панель переехала вправо: её дорожка (размер + зазор) ушла в конец ряда,
+     а на её месте — свободное место редактора. Дорожки те же, меняется только
+     их порядок: содержимое панели остаётся в своём единственном `aside`. */
+  grid-template-columns:
+    6px var(--editor-width) var(--right-gap) var(--right-width) var(--sidebar-gap) var(--sidebar-width)
+    6px;
+}
+
+/* Вправо переехали и сами панели с ручками: та же последовательность
+   «6px · панель · зазор · редактор · зазор · панель · 6px». */
+.app.is-sidebar-right .sidebar {
+  grid-column: 6;
+}
+
+.app.is-sidebar-right .right-panel {
+  grid-column: 4;
+}
+
+.app.is-sidebar-right .splitter-left {
+  grid-column: 5;
+}
+
+.app.is-sidebar-right .splitter-right {
+  grid-column: 3;
+}
+
+.app.is-sidebar-right > .center,
+.app.is-sidebar-right .dock-wrap {
+  /* Редактор теперь второй в ряду. */
+  grid-column: 2;
+}
+
 .app.is-sidebar-hidden {
   --sidebar-width: 0px;
   --sidebar-gap: 0px;

@@ -309,6 +309,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
           dockSize: layout.dockSize,
           sidebarVisible: layout.sidebarVisible,
           rightVisible: layout.rightVisible,
+          sidebarPosition: layout.sidebarPosition,
           dockVisible: layout.dockVisible,
           editorVisible: layout.editorVisible,
         },
@@ -333,6 +334,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       layout.setSidebarSize(saved.sidebarSize);
       layout.setRightSize(saved.rightSize);
       layout.setDockSize(saved.dockSize);
+      layout.setSidebarPosition(saved.sidebarPosition);
       layout.setSidebarVisible(saved.sidebarVisible);
       layout.setRightVisible(saved.rightVisible);
       layout.setDockVisible(saved.dockVisible);

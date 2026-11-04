@@ -1,4 +1,5 @@
 import { stepUiScale, uiScaleLabel } from '../../shared/ui-scale';
+import type { SidebarPosition } from '../../shared/api/settings';
 import type { ToastKind, ToastOptions } from '../ui/toast';
 import type { DefineCommand } from './command-args';
 
@@ -16,6 +17,9 @@ export interface ViewLayout {
   readonly dockVisible: boolean;
   readonly editorVisible: boolean;
   setSidebarVisible(on: boolean): void;
+  /** Сторона, с которой стоит боковая панель: содержимое переезжает вместе с ней. */
+  readonly sidebarPosition: SidebarPosition;
+  setSidebarPosition(position: SidebarPosition): void;
   setRightVisible(on: boolean): void;
   setDockVisible(on: boolean): void;
   setEditorVisible(on: boolean): void;
@@ -93,6 +97,24 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
     layout.setSidebarVisible(!layout.sidebarVisible);
     syncViewButtons();
   });
+
+  // Сторона боковой панели — часть макета, как её ширина и видимость, поэтому
+  // правка сразу уходит в настройки (см. `persistLayout`). Одна команда на обе
+  // стороны: палитра по ней видит текущее положение и переключает его.
+  define(
+    {
+      id: 'view.sidebarPosition',
+      title: 'Боковая панель: переставить вправо/влево',
+      category: 'Вид',
+      keywords: ['layout', 'макет', 'сторона', 'переставить'],
+    },
+    () => {
+      const next: SidebarPosition = layout.sidebarPosition === 'left' ? 'right' : 'left';
+      layout.setSidebarPosition(next);
+      showToast(next === 'right' ? 'Боковая панель справа' : 'Боковая панель слева');
+      syncViewButtons();
+    },
+  );
 
   // Область редактора — такая же часть макета, как панели: кто-то работает только
   // с чатом и деревом, кто-то — только с терминалом. Свёрнутость — осознанный выбор

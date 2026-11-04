@@ -97,6 +97,9 @@ const VIEW: MenuNode = {
   label: 'Вид',
   children: [
     { label: 'Боковая панель', accelerator: 'Ctrl+B', command: 'view.toggleSidebar' },
+    // Без сочетания намеренно: это редкая правка макета, а не рабочее действие,
+    // и лишний глобальный аккорд отнимал бы клавишу у редактора.
+    { label: 'Боковая панель справа/слева', command: 'view.sidebarPosition' },
     { label: 'Панель редактора', accelerator: 'Ctrl+Alt+E', command: 'view.toggleEditor' },
     { label: 'Нижняя панель', accelerator: 'Alt+F12', command: 'view.toggleDock' },
     { label: 'Панель AI', accelerator: 'Ctrl+Shift+A', command: 'ai.toggle' },

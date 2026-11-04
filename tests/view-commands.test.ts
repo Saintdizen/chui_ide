@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DefineCommand } from '../src/renderer/core/command-args';
+import type { SidebarPosition } from '../src/shared/api/settings';
 import { registerViewCommands, type ViewCommandDeps, type ZenSnapshot } from '../src/renderer/core/view-commands';
 
 type Run = (...args: unknown[]) => unknown;
@@ -14,6 +15,7 @@ function setup(opts: { active?: { path: string } | null } = {}) {
   /** Классы, реально висящие на корне: `contains` обязан отвечать правдой. */
   const zenClass = new Set<string>();
   const visible = { sidebar: true, right: true, dock: true, editor: true, minimap: true };
+  let sidebarPosition: SidebarPosition = 'left';
   const deps = {
     layout: {
       root: {
@@ -54,6 +56,13 @@ function setup(opts: { active?: { path: string } | null } = {}) {
       setEditorVisible: (on: boolean) => {
         visible.editor = on;
         log.push(`editor:${on}`);
+      },
+      get sidebarPosition() {
+        return sidebarPosition;
+      },
+      setSidebarPosition: (position: SidebarPosition) => {
+        sidebarPosition = position;
+        log.push(`position:${position}`);
       },
     },
     dock: {
@@ -137,6 +146,18 @@ describe('registerViewCommands', () => {
     expect(f.log).toEqual(['editor:false', 'sync']);
     run(f, 'view.toggleEditor');
     expect(f.log).toEqual(['editor:false', 'sync', 'editor:true', 'sync']);
+  });
+
+  it('переезд боковой панели — тумблер из «слева» в «справа» и обратно', () => {
+    // Сторона панели — часть макета (см. `persistLayout`): команда обязана поменять
+    // саму позицию и сказать об этом, иначе человек не поймёт, где теперь смотреть.
+    const f = setup();
+    run(f, 'view.sidebarPosition');
+    expect(f.log).toEqual(['position:right', 'sync']);
+    expect(f.toasts.at(-1)).toContain('справа');
+    run(f, 'view.sidebarPosition');
+    expect(f.log).toEqual(['position:right', 'sync', 'position:left', 'sync']);
+    expect(f.toasts.at(-1)).toContain('слева');
   });
 
   it('панели просят перерисовать кнопки — иначе кнопка соврёт', () => {
