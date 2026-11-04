@@ -804,6 +804,7 @@ export interface ChuiMethods {
    * сервер видел другой текст, он честно вернёт пусто.
    */
   'lsp.willSaveWaitUntil': { params: { path: string; text: string }; result: TextEdit[] };
+  'lsp.willRenameFiles': { params: { oldPath: string; newPath: string }; result: FileEdit[] | null };
   'lsp.restart': { params: void; result: LspStatus };
   'lsp.status': { params: void; result: LspStatus };
   /**

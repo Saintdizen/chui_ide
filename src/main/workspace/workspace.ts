@@ -39,6 +39,7 @@ import type { ExportsQuery, ExportsResult } from '../../shared/symbol-exports';
 import { MAX_VIEW_IMAGE_BYTES, imageMimeType } from '../../shared/images';
 import type { InheritanceQuery, InheritanceResult } from '../../shared/type-inheritance';
 import { MAX_OPEN_BYTES, isReadOnlySize, withinOpenLimit } from '../../shared/large-file';
+import { applyTextEdits, type FileEdit } from '../../shared/edits';
 import { buildFolderDiff, splitFolderLists, type FolderCompareResult } from '../../shared/folder-compare';
 import {
   isDocPath,
@@ -255,6 +256,13 @@ export class WorkspaceService {
    * файл под новым именем, а не «удалился старый и появился незнакомый новый».
    */
   onFileRenamed: ((from: string, to: string) => void) | null = null;
+
+  /**
+   * Спросить языковой сервер, как поправить импорты при переименовании
+   * (`workspace/willRenameFiles`). Ставит `main/index.ts` из `LspService`. Без него
+   * `updateImports` переписывает импорты своим regex — грубее, но без сервера.
+   */
+  onWillRenameFiles: ((from: string, to: string) => Promise<FileEdit[] | null>) | null = null;
 
   /**
    * Список корней области поменялся (`addRoot`/`removeRoot`). Языковому серверу
@@ -1187,6 +1195,15 @@ export class WorkspaceService {
    */
   async updateImports(oldPath: string, newPath: string): Promise<{ files: string[] }> {
     const root = this.requireRoot();
+    // Сначала спрашиваем языковой сервер (`workspace/willRenameFiles`): он знает
+    // реэкспорты, алиасы и пути из `tsconfig`, которые regex пропустит. Сервер
+    // ответил правками — применяем и закончили; иначе — старое текстовое.
+    const fromServer = await this.onWillRenameFiles?.(oldPath, newPath).catch(() => null);
+    if (fromServer && fromServer.length > 0) {
+      const touched = await this.applyServerImportEdits(fromServer);
+      if (touched.length > 0) return { files: touched };
+    }
+
     const oldTarget = path.relative(root, path.resolve(oldPath)).split(path.sep).join('/');
     const newTarget = path.relative(root, path.resolve(newPath)).split(path.sep).join('/');
     const changed: string[] = [];
@@ -1222,6 +1239,37 @@ export class WorkspaceService {
     }
 
     return { files: changed };
+  }
+
+  /** Применить правки импортов от сервера (`workspace/willRenameFiles`). */
+  private async applyServerImportEdits(files: readonly FileEdit[]): Promise<string[]> {
+    const root = this.requireRoot();
+    const changed: string[] = [];
+    for (const fileEdit of files) {
+      if (!fileEdit.path || fileEdit.edits.length === 0) continue;
+      const relative = path.relative(root, path.resolve(fileEdit.path));
+      if (relative.startsWith('..') || path.isAbsolute(relative)) continue;
+      const stat = await fs.stat(fileEdit.path).catch(() => null);
+      if (!stat || stat.size > MAX_FILE_BYTES) continue;
+      const raw = await fs.readFile(fileEdit.path, 'utf8').catch(() => null);
+      if (raw === null) continue;
+      const crlf = raw.includes('\r\n');
+      const text = crlf ? raw.replace(/\r\n/g, '\n') : raw;
+      let next: string;
+      try {
+        next = applyTextEdits(text, fileEdit.edits);
+      } catch {
+        continue;
+      }
+      if (next === text) continue;
+      const output = crlf ? next.replace(/\n/g, '\r\n') : next;
+      await this.onBeforeChange?.(fileEdit.path, 'save');
+      await fs.writeFile(fileEdit.path, await this.savedText(fileEdit.path, output), 'utf8');
+      this.contents.invalidate(fileEdit.path);
+      this.notifyChanged(fileEdit.path);
+      changed.push(fileEdit.path);
+    }
+    return changed;
   }
 
   dispose(): void {

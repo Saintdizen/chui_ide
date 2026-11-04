@@ -415,6 +415,7 @@ if (!app.requestSingleInstanceLock()) {
     // Переименование — своим уведомлением: сервер переносит состояние файла,
     // а не считает старый удалённым, а новый незнакомым.
     workspace.onFileRenamed = (from, to) => lsp.fileOperation('rename', [to], from);
+    workspace.onWillRenameFiles = (from, to) => lsp.willRenameFiles(from, to);
     // Корни задают область проекта: сервер получает их при `initialize`, и о смене
     // должен узнать, иначе его индекс останется по старой области.
     workspace.onRootsChanged = (added, removed) => lsp.rootsChanged(added, removed);

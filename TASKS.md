@@ -502,11 +502,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     (или клиентский пересчёт по документу) и тест на CRLF/суррогаты/emoji в обе
     стороны. Источник: LSP-спецификация (positionEncoding), Neovim `editing.txt`.
 
-84. **Файлы и папки сообщаются серверу.** `didChangeWatchedFiles`,
-    `workspace/didCreateFiles`/`didRenameFiles`/`didDeleteFiles`,
-    `willRenameFiles` — при операциях проводника сервер не «слепнет».
-    Источник: LSP (file operations), VS Code `settings`.
-
 85. **Один сервер на корень, несколько проектов — без конфликта.** Для
     мультикорня/вложенных проектов — отдельный инстанс на корень, ограничение
     по числу и памяти; один язык в двух корнях не смешивает ответы.

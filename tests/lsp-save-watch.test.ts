@@ -61,6 +61,7 @@ const FAKE_SERVER = [
   "const SYMBOLS = process.argv[3] === 'symbols';",
   "const WATCH = process.argv[3] === 'watch';",
   "const FILEOPS = process.argv[3] === 'fileops';",
+  "const WILLRENAME = process.argv[3] === 'willrename';",
   "const CFG = process.argv[3] === 'cfg';",
   "const PROGRESS = process.argv[3] === 'progress';",
   "const FOLDERS = process.argv[3] === 'folders';",
@@ -83,6 +84,7 @@ const FAKE_SERVER = [
   '            : { openClose: true, change: 1 },',
   '          ...(WATCH ? { workspace: { didChangeWatchedFiles: {} } } : {}),',
   '          ...(FILEOPS ? { workspace: { fileOperations: { didCreate: { filters: [] } } } } : {}),',
+  '          ...(WILLRENAME ? { workspace: { fileOperations: { willRename: { filters: [] } } } } : {}),',
   '          ...(CFG ? { workspace: { didChangeConfiguration: { dynamicRegistration: false } } } : {}),',
   '          ...(PROGRESS ? { referencesProvider: true } : {}),',
   '          ...(FOLDERS ? { workspace: { workspaceFolders: true } } : {}),',
@@ -109,6 +111,9 @@ const FAKE_SERVER = [
   "      send({ jsonrpc: '2.0', method: '$/progress', params: { token: 'srv-1', value: { kind: 'begin', title: 'Ищу ссылки' } } });",
   '      return;',
   '    }',
+  "    if (message.method === 'workspace/willRenameFiles' && WILLRENAME) {",
+  "      return send({ jsonrpc: '2.0', id: message.id, result: { changes: { [process.argv[4]]: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } }, newText: 'const' }] } } });",
+  '    }',
   "    if (message.method === 'workspaceSymbol/resolve')",
   "      return send({ jsonrpc: '2.0', id: message.id, result: { name: 'widget', kind: 12, location: { uri: process.argv[4], range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } } } } });",
   '    return;',
@@ -134,7 +139,7 @@ const FAKE_SERVER = [
 ].join('\n');
 
 async function project(
-  mode: 'save' | 'watch' | 'plain' | 'symbols' | 'fileops' | 'cfg' | 'progress' | 'folders' | 'inline' | 'ranges',
+  mode: 'save' | 'watch' | 'plain' | 'symbols' | 'fileops' | 'cfg' | 'progress' | 'folders' | 'inline' | 'ranges' | 'willrename',
 ): Promise<{ root: string; file: string; log: string; server: FakeServer }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-lsp-save-'));
   dirs.push(root);
@@ -296,6 +301,18 @@ describe('didSave и наблюдение за файлами', () => {
     lsp.fileOperation('create', [path.join(root, 'new.ts')]);
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(await logOf(log)).not.toContain('workspace/didCreateFiles');
+  });
+
+  it('willRenameFiles спрашивает сервер и отдаёт его правки импортов', async () => {
+    const { root, file, log, server } = await project('willrename');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    lsp.open(file, 'typescript', 'const value = 1;\n');
+    await until(async () => (await logOf(log)).includes('textDocument/didOpen'));
+    const edits = await lsp.willRenameFiles(file, path.join(root, 'renamed.ts'));
+    expect(await logOf(log)).toContain('workspace/willRenameFiles');
+    expect(edits?.[0]?.path).toBe(file);
+    expect(edits?.[0]?.edits[0]?.newText).toBe('const');
   });
 
   it('правка настроек уходит как didChangeConfiguration', async () => {

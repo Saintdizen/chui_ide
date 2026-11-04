@@ -530,6 +530,12 @@ interface LspCapabilities {
   workspaceWatchedFiles?: boolean;
   /** Сервер попросил уведомлять его об операциях с файлами (`workspace.fileOperations`). */
   workspaceFileOperations?: boolean;
+  /**
+   * Сервер хочет править импорты ПЕРЕД переименованием файла
+   * (`workspace.fileOperations.willRename`). Спрашиваем `workspace/willRenameFiles`;
+   * ответ — правки в других файлах, которые наш regex по импортам не осилил бы.
+   */
+  workspaceWillRenameFiles?: boolean;
   /** Сервер просит присылать `workspace/didChangeConfiguration`. */
   workspaceConfiguration?: boolean;
   /** Сервер умеет многокорневую область (`workspace.workspaceFolders`). */
@@ -579,7 +585,7 @@ function withSyncCapabilities(capabilities: unknown): LspCapabilities {
         workspaceFolders?: unknown;
       }
     | undefined;
-  const operations = workspace?.fileOperations as { didCreate?: unknown } | undefined;
+  const operations = workspace?.fileOperations as { didCreate?: unknown; willRename?: unknown } | undefined;
   const save = sync && typeof sync === 'object' ? sync.save : undefined;
   const syncSave =
     save === true
@@ -597,6 +603,8 @@ function withSyncCapabilities(capabilities: unknown): LspCapabilities {
     ),
     workspaceWatchedFiles: Boolean(workspace?.didChangeWatchedFiles),
     workspaceFileOperations: Boolean(operations?.didCreate),
+    // `willRename` может быть булевым или объектом фильтров — важен сам факт.
+    workspaceWillRenameFiles: Boolean(operations?.willRename),
     workspaceConfiguration: workspace?.didChangeConfiguration !== undefined,
     workspaceFolders: workspace?.workspaceFolders === true,
   };
@@ -1193,6 +1201,33 @@ export class LspService {
       }
     }
   }
+  /**
+   * Спросить сервер ДО переименования файла: правки импортов в ДРУГИХ файлах
+   * (`workspace/willRenameFiles`).
+   *
+   * Преимущество над своим regex-переписыванием (`workspace.updateImports`): сервер
+   * знает реэкспорты, алиасы и пути из `tsconfig`, которые текстовый поиск пропускает.
+   * Возвращаем один набор правок (`FileEdit[]`) — их применяет документная модель
+   * renderer'а до `fs.rename`; `null` — нет провайдера или сервер не ответил.
+   *
+   * Спрашиваем только у сервера того языка, что знает файл: у чужого с тем же корнем
+   * ответ был бы про другой проект.
+   */
+  async willRenameFiles(oldPath: string, newPath: string): Promise<FileEdit[] | null> {
+    const runtime = this.runtimeForPath(oldPath);
+    if (!runtime || !runtime.capabilities.workspaceWillRenameFiles) return null;
+    const raw = await runtime.connection
+      .request('workspace/willRenameFiles', {
+        files: [
+          {
+            oldUri: pathToFileURL(oldPath).toString(),
+            newUri: pathToFileURL(newPath).toString(),
+          },
+        ],
+      })
+      .catch(() => null);
+    return toWorkspaceFileEdits(raw, fileURLToPath);
+  }
 
   close(path: string): void {
     const runtime = this.runtimeForPath(path);
@@ -1559,6 +1594,10 @@ export class LspService {
                 didCreate: { filters: [UNFILTERED_FILE_OPERATION] },
                 didRename: { filters: [UNFILTERED_FILE_OPERATION] },
                 didDelete: { filters: [UNFILTERED_FILE_OPERATION] },
+                // Спрашивать сервер ДО переименования: он вернёт правки импортов
+                // в других файлах, которые не заметит наш regex (реэкспорты,
+                // алиасы, пути из `tsconfig`). См. `willRenameFiles`.
+                willRename: { filters: [UNFILTERED_FILE_OPERATION] },
               },
             },
           },

@@ -25,6 +25,9 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
   });
   // Форматирование при сохранении: сервер говорит, что записать вместо файла.
   router.register('lsp.willSaveWaitUntil', (params) => deps.lsp?.willSaveWaitUntil(params.path, params.text) ?? []);
+  // Переименование файла: сервер заранее говорит, как поправить импорты в других
+  // файлах (`workspace/willRenameFiles`). Применяет их renderer до `fs.rename`.
+  router.register('lsp.willRenameFiles', (params) => deps.lsp?.willRenameFiles(params.oldPath, params.newPath) ?? null);
   router.register('lsp.restart', () => deps.lsp?.restart() ?? NO_LSP_STATUS);
   router.register('lsp.status', () => deps.lsp?.status() ?? NO_LSP_STATUS);
   // Прогрев: поднять серверы языков проекта, не дожидаясь открытия файлов.
