@@ -502,11 +502,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     (или клиентский пересчёт по документу) и тест на CRLF/суррогаты/emoji в обе
     стороны. Источник: LSP-спецификация (positionEncoding), Neovim `editing.txt`.
 
-83. **Сервер упал — авто-перезапуск с backoff.** Упавший сервер поднимается сам:
-    паузы 1/2/4с, отказ после N попыток (битый конфиг не крутит процессы),
-    статус — в чипе. Сейчас подъём только ручной или на следующем файле.
-    Источник: VS Code `edit-evolved`, Zed `configuring-languages`.
-
 84. **Файлы и папки сообщаются серверу.** `didChangeWatchedFiles`,
     `workspace/didCreateFiles`/`didRenameFiles`/`didDeleteFiles`,
     `willRenameFiles` — при операциях проводника сервер не «слепнет».

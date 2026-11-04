@@ -116,6 +116,15 @@ const SWEEP_MAX_BYTES = 2_000_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
+ * Авто-перезапуск упавшего сервера (см. `scheduleRestart`). Пауза растёт вдвое:
+ * 1с, 2с, 4с — с запасом на медленный старт, но без бесконечного круга: битый
+ * конфиг/несовместимая версия падают на каждом старте, и плодить процессы — вред.
+ * После `MAX_RESTART_ATTEMPTS` подряд сервер остаётся в `failed` до ручного перезапуска.
+ */
+const RESTART_BASE_DELAY_MS = 1_000;
+const MAX_RESTART_ATTEMPTS = 3;
+
+/**
  * Запросы к документу, у которых свежий запрос вытесняет устаревший. Набор идёт быстрее,
  * чем отвечает сервер, и досказывать то, что уже не нужно, — трата сил сервера. Прочие
  * запросы (initialize, rename, форматирование) не отменяем: у них результат нужен.
@@ -711,6 +720,14 @@ export class LspService {
    * Сбрасывается перезапуском: у нового процесса индекса нет.
    */
   private readonly scanned = new Set<string>();
+  /**
+   * Сколько раз уже пытались поднять сервер этого языка после падения (см.
+   * `scheduleRestart`). Сбрасывается, когда сервер успешно отработал (`adopt`) или
+   * его перезапустили руками. Без потолка битый сервер крутил бы процессы вечно.
+   */
+  private readonly restartAttempts = new Map<string, number>();
+  /** Отложенные перезапуски упавших серверов (язык → таймер). */
+  private readonly restartTimers = new Map<string, NodeJS.Timeout>();
 
   /** Карта символов проекта: второй источник объявлений (см. `SymbolIndexSource`). */
   private indexSource: SymbolIndexSource | null = null;
@@ -806,6 +823,10 @@ export class LspService {
     this.refusals.clear();
     // Новые процессы проекта ещё не читали: при следующем прогреве обойдут заново.
     this.scanned.clear();
+    // Ручной перезапуск отменяет отложенные авто-перезапуски и обнуляет их счётчики.
+    for (const timer of this.restartTimers.values()) clearTimeout(timer);
+    this.restartTimers.clear();
+    this.restartAttempts.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);
     return this.status();
   }
@@ -1202,6 +1223,11 @@ export class LspService {
     this.semanticCache.clear();
     this.pullState.clear();
     this.openedIn.clear();
+    // При закрытии рабочего места отложенные авто-перезапуски не нужны: иначе таймер
+    // поднял бы сервер уже после `dispose` — процесс-сирота без учёта.
+    for (const timer of this.restartTimers.values()) clearTimeout(timer);
+    this.restartTimers.clear();
+    this.restartAttempts.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);
   }
 
@@ -1310,6 +1336,10 @@ export class LspService {
       return null;
     }
     this.runtimes.set(runtime.config.language, runtime);
+    // Сервер поднялся и принят — путь к успеху был. Счётчик попыток перезапуска
+    // обнуляем: следующий случайный крах — снова «первая попытка», а не продолжение
+    // старой серии. Иначе один сбой в начале работы съел бы весь запас попыток.
+    this.restartAttempts.delete(runtime.config.language);
     return runtime;
   }
 
@@ -1359,6 +1389,11 @@ export class LspService {
       if (current?.connection !== connection) return;
       this.runtimes.delete(config.language);
       this.failed.set(config.language, exitReason(code, signal));
+      // Сервер ушёл ПОСЛЕ того, как был принят в работу (иначе `current` не совпал бы
+      // с этим соединением и мы бы вернулись раньше): это падение, а не штатное
+      // завершение. Поднимаем сами с нарастающей паузой, иначе подсказки пропадают
+      // молча до следующего файла или ручного перезапуска.
+      this.scheduleRestart(config.language);
       this.publish(PushTopic.LspServers, this.status());
     };
     child.on('exit', forget);
@@ -2439,6 +2474,45 @@ export class LspService {
       return items.map((item) => (item.section === 'python' && python ? { pythonPath: python } : null));
     }
     throw new RpcRequestError(-32601, `Метод не поддерживается: ${method}`);
+  }
+
+  /**
+   * Поднять упавший сервер сам (зов из `forget`). Пауза растёт вдвое: 1с, 2с, 4с.
+   * После MAX_RESTART_ATTEMPTS подряд сдаёмся: сервер остаётся в `failed` до ручного
+   * перезапуска. Потолок нужен — битый конфиг падает на каждом старте, без него мы
+   * бесконечно крутили бы процессы. Счётчик сбрасывает `adopt` (сервер, что
+   * отработал после старта, здоров; следующий случайный крах — снова первая попытка).
+   */
+  private scheduleRestart(language: string): void {
+    const previous = this.restartTimers.get(language);
+    if (previous) clearTimeout(previous);
+
+    const attempts = (this.restartAttempts.get(language) ?? 0) + 1;
+    if (attempts > MAX_RESTART_ATTEMPTS) {
+      this.restartAttempts.set(language, attempts);
+      const reason = this.failed.get(language);
+      this.failed.set(
+        language,
+        `не удалось перезапустить (${MAX_RESTART_ATTEMPTS} попыток)${reason ? `: ${reason}` : ''}`,
+      );
+      this.restartTimers.delete(language);
+      this.publish(PushTopic.LspServers, this.status());
+      return;
+    }
+    this.restartAttempts.set(language, attempts);
+
+    const delay = RESTART_BASE_DELAY_MS * 2 ** (attempts - 1);
+    const timer = setTimeout(() => {
+      this.restartTimers.delete(language);
+      // `failed` держало бы `runtimeFor` в отказе — снимаем, иначе старт не пойдёт.
+      this.failed.delete(language);
+      this.publish(PushTopic.LspServers, this.status());
+      void this.startLanguage(language).catch(() => {
+        // Непредвиденное при повторном старте: состояние покажет `publish`.
+      });
+    }, delay);
+    timer.unref?.();
+    this.restartTimers.set(language, timer);
   }
 
   private stop(language: string): void {
