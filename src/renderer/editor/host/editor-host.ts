@@ -1103,6 +1103,15 @@ export class EditorHost {
   }
 
   /**
+   * Сухой прогон `applyEdits`: перевод правок на текущем буфере БЕЗ правки текста
+   * и истории отмены. Нужен для атомарности пачки (см. `EditService.applyFileEdits`).
+   */
+  previewEdits(document: TextDocument, edits: readonly TextEdit[]): TranslatedEdits {
+    if (document.readOnly) return { changes: [], skipped: [] };
+    return translateEdits(this.registry.resolve(document), edits);
+  }
+
+  /**
    * Позиции курсоров по файлам — их берёт сессия проекта. Активный файл читаем «живьём»:
    * его позиция могла измениться не через событие (например, переходом).
    */

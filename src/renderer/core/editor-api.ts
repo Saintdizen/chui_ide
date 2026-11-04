@@ -27,6 +27,13 @@ export interface EditorApi {
    * редактор сам решает, какие правки годятся, — по его ответу видно, что пропало.
    */
   applyEdits(document: TextDocument, edits: readonly TextEdit[], source?: EditSource): TranslatedEdits;
+  /**
+   * Сухой прогон: что дало бы `applyEdits`, НЕ трогая текст и историю отмены.
+   * Нужен для атомарности пачки правок: сперва узнать, что всё сойдётся, и лишь
+   * потом применять — иначе половина файлов уже правлена, а половина отказала.
+   * Необязателен: без него `applyFileEdits` идёт старым путём (по файлу за раз).
+   */
+  previewEdits?(document: TextDocument, edits: readonly TextEdit[]): TranslatedEdits;
   /** Позиции курсоров по файлам — их берёт сессия проекта. */
   cursorPositions(): Record<string, CursorPosition>;
   /** Раздать позиции курсоров: панели подхватят их при открытии файла. */

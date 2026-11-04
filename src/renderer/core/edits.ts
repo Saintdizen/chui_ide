@@ -138,9 +138,25 @@ export class EditService {
   }
 
   async applyFileEdits(fileEdits: readonly FileEdit[], source: EditSource = 'programmatic'): Promise<ApplyResult> {
+    // Стенды и сторонние реализации могут не уметь сухой прогон: тогда честная
+    // атомарность недостижима (не узнать заранее, сойдётся ли якорь), и мы ведём
+    // себя как раньше — по файлу за раз. В бою `EditorWorkspace.previewEdits` есть.
+    if (!this.deps.editors.previewEdits) return this.applyFileEditsOneByOne(fileEdits, source);
+
     const reports: ApplyReport[] = [];
     const failed: ApplyFailure[] = [];
 
+    // ── Фаза 1: проверить ВСЕ файлы, ничего не меняя ────────────────────────
+    // Пачка правок из rename/форматирования должна лечь целиком или никак:
+    // иначе сдавший третий файл оставит первые два правлеными, а «Отменить»
+    // придётся жать по разу на файл. Перевод (translateEdits) — сухой прогон:
+    // текст и история отмены не трогаются.
+    const prepared: {
+      file: FileEdit;
+      document: TextDocument;
+      applied: number;
+      skipped: ApplyFailure[];
+    }[] = [];
     for (const file of fileEdits) {
       try {
         const document = await this.ensureDocument(file.path);
@@ -153,15 +169,64 @@ export class EditService {
         if (!refreshed && file.expectedVersion !== undefined && file.expectedVersion !== document.version) {
           throw new Error(`Версия документа устарела: ожидалась ${file.expectedVersion}, текущая ${document.version}`);
         }
+        const preview = this.deps.editors.previewEdits(document, file.edits);
+        if (preview.changes.length === 0) {
+          // Разбор прошёл, но текст не изменится: позиции указывают не туда.
+          // «применено 0» без объяснения модель читает как успех и повторяет ошибку.
+          const reason = preview.skipped[0]?.reason;
+          throw new Error(
+            reason
+              ? `правки не изменили документ: ${reason} — перечитай файл и повтори`
+              : 'правки не изменили документ: позиции не совпали с содержимым файла — перечитай файл и повтори',
+          );
+        }
+        // Пропущенная правка не молчит: о ней скажем отдельно рядом с применёнными.
+        const skipped: ApplyFailure[] = preview.skipped.map((skip) => ({
+          path: file.path,
+          message: `правка пропущена: ${skip.reason}`,
+        }));
+        prepared.push({ file, document, applied: preview.changes.length, skipped });
+      } catch (error) {
+        failed.push({ path: file.path, message: error instanceof Error ? error.message : String(error) });
+      }
+    }
 
-        // Применяет кто-то ОДИН — редактор для открытого файла, документ для файла за кадром
-        // (см. `EditorHost.applyEdits`). Раньше обе ступени шли подряд, и до второй текст
-        // доезжал уже применённым — правка ложилась ещё раз, а совпавший `oldText` повтор
-        // не отсекал: от этого в файлах задваивались строки.
+    // Хоть один файл не сошёлся — не применяем НИЧЕГО: пачка атомарна.
+    if (failed.length > 0) return { reports: [], failed };
+
+    // ── Фаза 2: применить проверенное ───────────────────────────────────────
+    for (const entry of prepared) {
+      // Применяет кто-то ОДИН — редактор для открытого файла, документ для файла за кадром
+      // (см. `EditorHost.applyEdits`). Раньше обе ступени шли подряд, и до второй текст
+      // доезжал уже применённым — правка ложилась ещё раз, а совпавший `oldText` повтор
+      // не отсекал: от этого в файлах задваивались строки.
+      this.deps.editors.applyEdits(entry.document, entry.file.edits, source);
+      for (const skip of entry.skipped) failed.push(skip);
+      reports.push({ path: entry.file.path, applied: entry.applied, version: entry.document.version });
+    }
+
+    return { reports, failed };
+  }
+
+  /**
+   * Старый путь без атомарности: файл за файлом, якорь проверяется уже после
+   * применения. Оставлен для реализаций без `previewEdits` (стенды).
+   */
+  private async applyFileEditsOneByOne(fileEdits: readonly FileEdit[], source: EditSource): Promise<ApplyResult> {
+    const reports: ApplyReport[] = [];
+    const failed: ApplyFailure[] = [];
+    for (const file of fileEdits) {
+      try {
+        const document = await this.ensureDocument(file.path);
+        if (document.readOnly) {
+          throw new Error('файл открыт только для чтения: он слишком большой для правок');
+        }
+        const refreshed = await this.refreshStale(document);
+        if (!refreshed && file.expectedVersion !== undefined && file.expectedVersion !== document.version) {
+          throw new Error(`Версия документа устарела: ожидалась ${file.expectedVersion}, текущая ${document.version}`);
+        }
         const translated = this.deps.editors.applyEdits(document, file.edits, source);
         if (translated.changes.length === 0) {
-          // Разбор прошёл, но текст не изменился: позиции указывают не туда.
-          // «применено 0» без объяснения модель читает как успех и повторяет ошибку.
           const reason = translated.skipped[0]?.reason;
           throw new Error(
             reason
@@ -169,7 +234,6 @@ export class EditService {
               : 'правки не изменили документ: позиции не совпали с содержимым файла — перечитай файл и повтори',
           );
         }
-        // Пропущенная правка не молчит: рядом с применёнными о ней надо сказать отдельно.
         for (const skip of translated.skipped) {
           failed.push({ path: file.path, message: `правка пропущена: ${skip.reason}` });
         }
@@ -178,7 +242,6 @@ export class EditService {
         failed.push({ path: file.path, message: error instanceof Error ? error.message : String(error) });
       }
     }
-
     return { reports, failed };
   }
 

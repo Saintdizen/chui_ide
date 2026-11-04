@@ -751,6 +751,11 @@ export class EditorWorkspace {
     return this.pane.applyEdits(document, edits);
   }
 
+  /** Сухой прогон правок для атомарной пачки — тот же активный пан, без правки текста. */
+  previewEdits(document: TextDocument, edits: readonly TextEdit[]): TranslatedEdits {
+    return this.pane.previewEdits(document, edits);
+  }
+
   /**
    * Позиции курсоров по файлам — их берёт сессия проекта. Собираем со всех панелей:
    * файл может быть открыт лишь в пассивной панели, и его позиция тоже нужна.
