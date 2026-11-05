@@ -247,29 +247,6 @@ Neovim).
 
 ---
 
-## Область 5. LSP и подсказки
-
-Сердце LSP-клиента (`src/main/lsp/lsp.ts`) объявляет и умеет почти весь
-протокол: definition, references, hover, signatureHelp, completion + resolve,
-codeAction, codeLens, inlayHint, inlineCompletion, documentSymbol,
-workspace symbol, selectionRange, foldingRange, formatting/range/onType,
-rename + prepareRename, diagnostics (push и pull), semanticTokens
-(full/range), typeDefinition, implementation, declaration. Задачи ниже — про
-то, чего не хватает вокруг: настройки, подача в редакторе, устойчивость,
-смена серверов.
-
-### Настройки серверов и жизненный цикл
-
-70. **Журнал сервера: потоки и фильтр.** Панель «LSP» в доке есть (хвост
-    журнала, кнопка из попапа строки состояния), а не хватает: отдельного
-    потока на сервер (сейчас все в куче), фильтра по серверу и методу, кнопки
-    «Журнал» из окна настроек и превращения `window/showMessage` от сервера
-    в уведомления приложения (сейчас такие сообщения никто не слушает —
-    сервер может жаловаться в пустоту).
-    Источник: VS Code `ux-notifications`, JetBrains `notification-balloons`.
-
----
-
 ## Правила работы со списком
 
 - Пункт закрывается только тестом, а не глазами: либо юнит на чистый модуль,
