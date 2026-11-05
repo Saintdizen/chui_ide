@@ -364,6 +364,12 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
       };
     }
 
+    // Пустой файл — не контекст: чип обещал бы текст, которого в нём нет.
+    if (!document.value.trim()) {
+      showToast('Файл пуст — прикладывать нечего', 'info');
+      return null;
+    }
+
     const text =
       document.value.length > MAX_ATTACHMENT_CHARS
         ? `${document.value.slice(0, MAX_ATTACHMENT_CHARS)}\n… (файл обрезан)`
