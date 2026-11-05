@@ -11,6 +11,7 @@ import type {
 import type { ToolPresetId } from '../../shared/tool-presets';
 import type { ChatRunLog } from '../../shared/run-log';
 import type { ReadCoverageSnapshot } from '../../shared/read-coverage';
+import type { AppliedInstruction } from '../../shared/instructions';
 import type { ToggledFile } from './chat-changes';
 import type { Checkpoint } from './chat-checkpoints';
 import type { RunArtifact } from '../core/artifacts';
@@ -112,6 +113,12 @@ export interface ChatSession {
    * прогоном и переживает перезапуск — по нему видно, во сколько обошлась беседа.
    */
   trace?: ChatRunTrace;
+  /**
+   * Правила проекта, которые видела модель в прошлый раз. Сравниваем с текущими:
+   * поменялись (или появились впервые) — говорим в ленте, нет — молчим.
+   * Переживает перезапуск, чтобы отметка не всплывала заново в каждой беседе.
+   */
+  instructions?: AppliedInstruction[];
   /**
    * Что агент уже прочитал в этой беседе (см. `shared/read-coverage.ts`). Едет в
    * запросе и возвращается в `done`: без этого новый ход заново читал прочитанное

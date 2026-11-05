@@ -17,6 +17,7 @@ import { perf } from '../../shared/perf';
 import type { PermissionPreset } from '../../shared/permissions';
 import type { ToolPresetId } from '../../shared/tool-presets';
 import { addRunTrace } from '../../shared/usage';
+import { type AppliedInstruction, appliedInstructionsLines, instructionsChanged } from '../../shared/instructions';
 import { describeRun, type ChatRunLog } from '../../shared/run-log';
 import type { RpcClient } from '../core/rpc';
 import { RpcError } from '../core/rpc';
@@ -484,6 +485,14 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         // След прогона копим в беседе: расход и число шагов видны за всё время,
         // а не только за последний шаг (см. «Информацию о сессии»).
         session.trace = addRunTrace(session.trace, done.trace);
+        // Правила проекта: замечаем смену набора и говорим в ленте. Иначе «агент
+        // знает правило, которое мы записали вчера» и «агент не видит наших
+        // правил» не отличаются на глаз — а разница только здесь.
+        const applied = done.trace?.instructions ?? [];
+        if (instructionsChanged(session.instructions, applied)) {
+          messageEl.insertBefore(instructionsNote(applied), activity.element);
+        }
+        session.instructions = applied;
         // Память чтений вернулась из прогона: кладём в беседу, чтобы следующий ход
         // знал, что уже прочитано, и не читал это снова.
         if (done.reads) session.reads = done.reads;
@@ -619,4 +628,22 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       liveActivity.state(value ? 'пауза · продолжить — кнопка внизу' : 'думает…');
     },
   };
+}
+
+/**
+ * Отметка в ленте: какие правила проекта видит модель.
+ *
+ * Показываем только при смене набора (и в первый раз): файлы правил
+ * перечитываются к каждому запросу сами, и повторять «правила применены»
+ * под каждым ответом — шум. Но без отметки нельзя отличить «агент знает
+ * правило» от «агент его не видел»: у модели правила в контексте, у человека —
+ * только в файле.
+ */
+function instructionsNote(list: readonly AppliedInstruction[]): HTMLElement {
+  return h(
+    'div',
+    { class: 'instructions-note' },
+    h('div', { class: 'instructions-note-head' }, 'Правила проекта в контексте'),
+    ...appliedInstructionsLines(list).map((line) => h('div', { class: 'instructions-note-line' }, line)),
+  );
 }

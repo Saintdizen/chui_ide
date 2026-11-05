@@ -17,7 +17,16 @@ import { isPeakTariff, pricingAt } from './providers';
 export function addRunTrace(a: ChatRunTrace | undefined, b: ChatRunTrace | undefined): ChatRunTrace | undefined {
   if (!a) return b;
   if (!b) return a;
-  return { steps: a.steps + b.steps, toolCalls: a.toolCalls + b.toolCalls, usage: addUsage(a.usage, b.usage) };
+  // `toolsTokens` и `instructions` не складываются: это не счётчики за прогоны, а
+  // факт последнего — сколько заняли описания сейчас и какие правила прочитались.
+  // Берём свежие: старые уже не про этот контекст (раньше они терялись совсем).
+  return {
+    steps: a.steps + b.steps,
+    toolCalls: a.toolCalls + b.toolCalls,
+    usage: addUsage(a.usage, b.usage),
+    ...(b.toolsTokens !== undefined ? { toolsTokens: b.toolsTokens } : {}),
+    ...(b.instructions ? { instructions: b.instructions } : {}),
+  };
 }
 
 /** Сложить два расхода. Отсутствующее поле считается нулём, но остаётся отсутствующим, если его нет с обеих сторон. */

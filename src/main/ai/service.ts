@@ -1055,6 +1055,9 @@ export class AiService {
       toolCalls: runToolCalls,
       usage: runUsage,
       toolsTokens,
+      // Какие правила проекта ушли в контекст: без этого «агент откуда-то знает
+      // правило» или «а правила-то прочитались?» — вопросы без ответа в ленте.
+      instructions: [...this.contextBlocks.appliedInstructions()],
     });
 
     /**

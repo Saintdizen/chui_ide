@@ -7,6 +7,7 @@ import {
   type ContextUsage,
 } from '../../shared/context-fit';
 import { AGENT_TOOLS } from '../../shared/tools';
+import { type AppliedInstruction, appliedInstructionsLines } from '../../shared/instructions';
 import { formatTokens } from '../../shared/usage';
 import { clear, h, svgIcon } from './dom';
 import { formatBalance, type AccountBalance } from '../../shared/balance';
@@ -27,6 +28,12 @@ export interface SessionInfoData {
   attachments: readonly ChatAttachment[];
   /** Системный промпт: он тоже часть запроса и занимает контекст. */
   systemPrompt: string;
+  /**
+   * Файлы правил проекта, которые main подмешал к промпту в прошлом ходе.
+   * Здеся, а не в промпте: человек ищет «наши правила применились?», а видит
+   * только общую строку инструкций.
+   */
+  instructions?: readonly AppliedInstruction[];
   /** Предлагаются ли модели описания инструментов. */
   tools: boolean;
   /**
@@ -121,7 +128,12 @@ function split(data: SessionInfoData, options: { onDropFiles?(): void }): Part[]
       key: 'system',
       label: 'Системные инструкции',
       tokens: parts.system,
-      detail: () => (data.systemPrompt ? [clip(data.systemPrompt)] : []),
+      detail: () => [
+        ...(data.systemPrompt ? [clip(data.systemPrompt)] : []),
+        ...(data.instructions && data.instructions.length > 0
+          ? appliedInstructionsLines(data.instructions).map((line) => `Правила проекта: ${line}`)
+          : []),
+      ],
     },
     {
       key: 'tools',

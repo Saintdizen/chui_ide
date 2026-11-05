@@ -145,10 +145,64 @@ export function describeBrokenLinks(name: string, links: readonly string[]): str
 }
 
 /**
- * `room` — сколько символов можно занять. Файл длиннее — показываем голову
- * (большую часть доступного места) и карту разделов из остатка: по ней видно,
- * о чём файл дальше, и есть чем попросить продолжение.
+ * Что из правил проекта реально ушло в контекст. В следе прогона нужны имя и
+ * размер, а не текст: полный текст есть в файле, а без записи вообще нельзя
+ * понять, откуда агент взял «в этом проекте так не делают».
  */
+export interface AppliedInstruction {
+  name: string;
+  /** Сколько символов файла реально показано модели. */
+  chars: number;
+  /** Файл длиннее потолка: хвост модель увидит только через `read`. */
+  truncated: boolean;
+}
+
+export function appliedInstruction(name: string, text: string, room: number): AppliedInstruction {
+  const budget = Math.max(400, room);
+  return { name, chars: Math.min(text.length, budget), truncated: text.length > budget };
+}
+
+/**
+ * Отпечаток набора правил: по нему видно, поменялся ли он с прошлого хода.
+ * Размер входит — иначе правка правила той же длины осталась бы незамеченной.
+ */
+export function instructionSignature(list: readonly AppliedInstruction[]): string {
+  return list.map((item) => `${item.name}:${item.chars}`).join('|');
+}
+
+/**
+ * Набор правил сменился с прошлого хода (или мы его ещё не видели).
+ */
+export function instructionsChanged(
+  previous: readonly AppliedInstruction[] | undefined,
+  next: readonly AppliedInstruction[],
+): boolean {
+  if (!previous) return true;
+  return instructionSignature(previous) !== instructionSignature(next);
+}
+
+/**
+ * Строки для ленты: какие правила видит модель и что с длинными файлами.
+ * Пустой список — правил нет, и это тоже надо сказать: человек ищет файл, а его нет.
+ */
+export function appliedInstructionsLines(list: readonly AppliedInstruction[]): string[] {
+  if (list.length === 0) {
+    return [`правил не найдено: ${INSTRUCTION_FILE_NAMES}`];
+  }
+  const lines = list.map((item) => `${item.name} — ${formatSize(item.chars)}`);
+  const cut = list.filter((item) => item.truncated).map((item) => item.name);
+  if (cut.length > 0) lines.push(`показана голова: ${cut.join(', ')} — дальше модель читает файл сам`);
+  return lines;
+}
+
+/** Имена файлов правил — одной строкой, чтобы подсказка в ленте не врала при их смене. */
+const INSTRUCTION_FILE_NAMES = '.ai_rules, AGENTS.md, CHUI.md, CLAUDE.md';
+
+function formatSize(chars: number): string {
+  if (chars < 1000) return `${chars} симв.`;
+  return `${(chars / 1000).toFixed(1).replace('.', ',')} тыс. симв.`;
+}
+
 export function formatInstructionFile(name: string, text: string, room: number): string {
   const budget = Math.max(400, room);
   if (text.length <= budget) return `Инструкции из ${name}:\n${text}`;

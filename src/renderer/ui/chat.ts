@@ -1076,6 +1076,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         session.usageFresh = false;
         session.turnsSinceCompact = 0;
         session.trace = conversation.trace;
+        // Набор правил из прошлого хода: отметка в ленте появится не «впервые»,
+        // а только когда правила действительно поменялись.
+        session.instructions = conversation.instructions;
         session.goal = conversation.goal;
         // План прошлого прогона: закрытое окно посреди работы не должно
         // оставлять панель пустой — шаги нужны тому же праву, что и цель.
@@ -1302,6 +1305,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       history: session.history,
       attachments: session.attachments,
       systemPrompt: settings.ai.systemPrompt,
+      ...(session.instructions ? { instructions: session.instructions } : {}),
       tools: composer.modes().useTools,
       // Вес описаний берём из следа последнего прогона: его знает main. Пока
       // ответа не было — числа нет, и панель оценит по всему списку, честно
@@ -2509,6 +2513,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     fork.transcript = plan.transcript;
     fork.history = plan.history;
     if (plan.compacted) fork.compacted = true;
+    // Правила уже сказаны в ленте источника — не повторяем в ветке.
+    if (source.instructions) fork.instructions = [...source.instructions];
     fork.touched = new Map(source.touched);
     fork.files = [...source.files];
     if (source.kept) fork.kept = [...source.kept];

@@ -1,7 +1,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { describeBrokenLinks, findBrokenLinks, formatInstructionFile } from '../../shared/instructions';
+import {
+  appliedInstruction,
+  describeBrokenLinks,
+  findBrokenLinks,
+  formatInstructionFile,
+  type AppliedInstruction,
+} from '../../shared/instructions';
 import { formatMemory } from '../../shared/memory';
 import { formatShortMap } from '../../shared/project-map';
 import { scanProject } from '../project/scan';
@@ -57,6 +63,18 @@ export class WorkspaceContext {
    */
   private pathsCache: { root: string; files: string[] } | null = null;
 
+  /**
+   * Что из правил проекта ушло в последний `build`. Запоминаем здесь, а не
+   * возвращаем вторым значением: `build` зовут в одном месте, а видно это
+   * человеку в ленте и в сведениях о беседе — через след прогона.
+   */
+  private applied: AppliedInstruction[] = [];
+
+  /** Правила проекта, показанные модели в последнем `build` (см. `applied`). */
+  appliedInstructions(): readonly AppliedInstruction[] {
+    return this.applied;
+  }
+
   /** Файлы проекта относительно корня: для проверки ссылок в правилах. */
   async projectFiles(root: string): Promise<string[]> {
     if (this.pathsCache?.root === root) return this.pathsCache.files;
@@ -104,6 +122,7 @@ export class WorkspaceContext {
   async build(withMap: boolean): Promise<string | null> {
     const root = this.workspace.rootPath();
     if (!root) return null;
+    this.applied = [];
 
     const parts = [`Рабочая папка проекта: ${root}`];
     if (withMap) {
@@ -133,6 +152,7 @@ export class WorkspaceContext {
         // попросить продолжение (`read_file`/`search` по этому файлу).
         const room = Math.min(MAX_INSTRUCTIONS_BYTES, MAX_INSTRUCTIONS_TOTAL_BYTES - spent);
         parts.push(formatInstructionFile(name, text, room));
+        this.applied.push(appliedInstruction(name, text, room));
         spent += Math.min(text.length, room);
 
         // Битые ссылки ищем по ВСЕМУ файлу, а не по показанной голове: в отброшенный

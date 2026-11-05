@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { describeBrokenLinks, findBrokenLinks, formatInstructionFile } from '../src/shared/instructions';
+import {
+  appliedInstruction,
+  appliedInstructionsLines,
+  describeBrokenLinks,
+  findBrokenLinks,
+  formatInstructionFile,
+  instructionSignature,
+  instructionsChanged,
+} from '../src/shared/instructions';
 
 /**
  * Правила проекта едут в КАЖДОМ запросе, поэтому у длинного файла есть выбор:
@@ -110,5 +118,41 @@ describe('битые ссылки в правилах', () => {
 
   it('битых нет — предупреждения нет', () => {
     expect(describeBrokenLinks('AGENTS.md', [])).toBe('');
+  });
+});
+
+describe('что из правил ушло в контекст', () => {
+  it('длинный файл — «показана голова» и размер по потолку', () => {
+    const item = appliedInstruction('AGENTS.md', 'a'.repeat(5000), 1000);
+    expect(item).toEqual({ name: 'AGENTS.md', chars: 1000, truncated: true });
+    const lines = appliedInstructionsLines([item]);
+    expect(lines[0]).toContain('AGENTS.md');
+    expect(lines.join('\n')).toContain('показана голова: AGENTS.md');
+  });
+
+  it('короткий файл — без пометки и с размером файла', () => {
+    const item = appliedInstruction('CHUI.md', 'кратко', 8000);
+    expect(item).toEqual({ name: 'CHUI.md', chars: 6, truncated: false });
+    expect(appliedInstructionsLines([item])).toEqual(['CHUI.md — 6 симв.']);
+  });
+
+  it('правил нет — говорим, какие файлы искали', () => {
+    const lines = appliedInstructionsLines([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('AGENTS.md');
+  });
+
+  it('смена набора видна: первый раз, тот же набор, другой размер, пропажа', () => {
+    const one = [appliedInstruction('AGENTS.md', 'x'.repeat(10), 8000)];
+    expect(instructionsChanged(undefined, one)).toBe(true);
+    expect(instructionsChanged(one, [appliedInstruction('AGENTS.md', 'x'.repeat(10), 8000)])).toBe(false);
+    expect(instructionsChanged(one, [appliedInstruction('AGENTS.md', 'x'.repeat(20), 8000)])).toBe(true);
+    expect(instructionsChanged(one, [])).toBe(true);
+  });
+
+  it('отпечаток различает файлы одного размера', () => {
+    const a = instructionSignature([appliedInstruction('A.md', '12345', 8000)]);
+    const b = instructionSignature([appliedInstruction('B.md', '12345', 8000)]);
+    expect(a).not.toBe(b);
   });
 });

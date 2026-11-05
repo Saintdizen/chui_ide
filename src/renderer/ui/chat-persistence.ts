@@ -61,6 +61,9 @@ export function serializeSession(session: ChatSession): ChatConversation {
     ...(session.kept && session.kept.length > 0 ? { keptAttachments: session.kept.map((item) => ({ ...item })) } : {}),
     ...(session.usage ? { usage: { ...session.usage } } : {}),
     ...(session.trace ? { trace: { ...session.trace, usage: { ...session.trace.usage } } } : {}),
+    // Какие правила проекта видела модель в прошлый раз: без этого после перезапуска
+    // отметка в ленте говорила бы «вижу правила впервые» в каждой беседе подряд.
+    ...(session.instructions ? { instructions: session.instructions.map((item) => ({ ...item })) } : {}),
     // План прогона — рядом с целью: перезапуск посреди работы не должен
     // оставлять панель пустой, когда шаги уже известны.
     ...(session.plan && session.plan.length > 0 ? { plan: session.plan.map((step) => ({ ...step })) } : {}),

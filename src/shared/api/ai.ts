@@ -2,6 +2,7 @@ import type { ReadCoverageSnapshot } from '../read-coverage';
 import type { PermissionPreset } from '../permissions';
 import type { ToolPresetId } from '../tool-presets';
 import type { ChatRunLog } from '../run-log';
+import type { AppliedInstruction } from '../instructions';
 import type { ReasoningEffort } from './settings';
 
 /* ── AI ─────────────────────────────────────────────────────────────────── */
@@ -262,6 +263,13 @@ export interface ChatRunTrace {
    * видит и оценивал бы по всему списку — то есть врал бы в обе стороны.
    */
   toolsTokens?: number;
+  /**
+   * Какие файлы правил проекта ушли в системный промпт этого прогона: имя и
+   * сколько символов файла модель увидела. Без этого «перчитать ли правила — не
+   * видно»: у агента они в контексте, а у человека — только в файле, то есть
+   * непонятно, применились ли они и не устарели ли.
+   */
+  instructions?: AppliedInstruction[];
 }
 
 export interface ChatStreamDone {
@@ -353,6 +361,12 @@ export interface ChatConversation {
   draft?: string;
   /** Планы прошлых прогонов этой беседы: что уже сделано и когда. */
   planHistory?: PlanArchiveEntry[];
+  /**
+   * Какие файлы правил проекта модель видела в последнем ходе. Сравниваем с
+   * текущими и говорим в ленте только при смене; в файле поле есть, чтобы
+   * перезапуск не выдавал «вижу правила впервые» в каждой беседе заново.
+   */
+  instructions?: AppliedInstruction[];
 }
 
 /** Всё, что main хранит по одной рабочей папке. */
