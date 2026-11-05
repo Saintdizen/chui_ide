@@ -19,6 +19,8 @@ export interface LspPopoverDeps {
   rpc: RpcClient;
   /** Перезапустить серверы: команда приложения (там и весточка о результате). */
   onRestart: () => void;
+  /** Остановить серверы: команда приложения (там и весточка о результате). */
+  onStop: () => void;
   /** Открыть раздел «Языки (LSP)» в настройках. */
   onOpenSettings: () => void;
 }
@@ -37,6 +39,13 @@ export function createLspPopover(deps: LspPopoverDeps): LspPopoverView {
     svgIcon('refresh', 12),
     h('span', {}, 'Перезапустить'),
   );
+  // Остановка рядом с перезапуском: когда сервер мешает (занял ядро, спорит
+  // за индекс), приходится гасить его, не выходя из попапа.
+  const stopButton = h(
+    'button',
+    { class: 'btn btn-small lsp-status-action', type: 'button', onClick: () => deps.onStop() },
+    h('span', {}, 'Остановить'),
+  );
   const settingsButton = h(
     'button',
     { class: 'btn btn-small lsp-status-action', type: 'button', onClick: () => deps.onOpenSettings() },
@@ -49,7 +58,7 @@ export function createLspPopover(deps: LspPopoverDeps): LspPopoverView {
     { class: 'lsp-status' },
     h('div', { class: 'lsp-status-title' }, 'Языковые серверы'),
     body,
-    h('div', { class: 'lsp-status-actions' }, restartButton, settingsButton),
+    h('div', { class: 'lsp-status-actions' }, restartButton, stopButton, settingsButton),
   );
 
   // Данные приходят асинхронно: без стража устаревший ответ переписал бы тело поверх свежего.
@@ -88,6 +97,11 @@ export function createLspPopover(deps: LspPopoverDeps): LspPopoverView {
             h('span', { class: 'lsp-status-origin' }, lspOriginLabel(server.origin)),
           ),
         );
+        // Версия и корень — второй строкой: они длинные, и в одну строку с языком
+        // и источником не влезают. Первое — *что* запущено, второе — *где*: без
+        // корня два экземпляра одного языка в разных папках выглядят одинаково.
+        const details = [server.version, server.root].filter(Boolean).join(' · ');
+        if (details) nodes.push(h('div', { class: 'lsp-status-details' }, details));
       }
     }
 

@@ -1058,6 +1058,10 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
           close();
           void commands.execute('lsp.restart');
         },
+        onStop: () => {
+          close();
+          void commands.execute('lsp.stop');
+        },
         onOpenSettings: () => {
           close();
           settingsModal.open('lsp');

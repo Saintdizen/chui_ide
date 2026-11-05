@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { lspChipFor, lspOriginLabel, NO_LSP_STATUS, type LspStatus } from '../src/shared/lsp-status';
+import {
+  describeServerVersion,
+  lspChipFor,
+  lspOriginLabel,
+  NO_LSP_STATUS,
+  type LspStatus,
+} from '../src/shared/lsp-status';
 
 describe('состояние языковых серверов', () => {
   const status: LspStatus = {
@@ -55,5 +61,24 @@ describe('состояние языковых серверов', () => {
 
   it('пустое состояние — пустой чип', () => {
     expect(lspChipFor('python', NO_LSP_STATUS)).toBeNull();
+  });
+});
+
+describe('версия сервера в попапе', () => {
+  it('имя и версия — одной строкой', () => {
+    expect(describeServerVersion({ name: 'pyright', version: '1.1.380' })).toBe('pyright 1.1.380');
+  });
+
+  it('сервер без версии не превращается в хвостик с пробелом', () => {
+    expect(describeServerVersion({ name: 'tsserver' })).toBe('tsserver');
+  });
+
+  it('только версия тоже годится', () => {
+    expect(describeServerVersion({ version: '2.0' })).toBe('2.0');
+  });
+
+  it('пустое и отсутствующее — не строка с прочерком, а ничего', () => {
+    expect(describeServerVersion({ name: '  ', version: '' })).toBeUndefined();
+    expect(describeServerVersion(null)).toBeUndefined();
   });
 });

@@ -256,6 +256,19 @@ button.status-item:focus-visible {
   white-space: nowrap;
 }
 
+/* Версия и корень запущенного сервера: вторая строка под именем, приглушённая —
+   это справка, а не главное. Путь длинный, поэтому обрезка с конца, а не
+   с начала: хвост папки говорит больше, чем корень домашнего каталога. */
+.lsp-status-details {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  margin-top: -4px;
+  padding-left: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .lsp-status-empty,
 .lsp-status-hint {
   color: var(--text_color_tertiary);

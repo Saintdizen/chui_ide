@@ -20,6 +20,17 @@ export interface LspServerStatus {
   /** Подпись для человека: у серверов поставки своя, иначе — имя команды. */
   label: string;
   origin: LspServerOrigin;
+  /**
+   * Корень, под который запущен этот экземпляр. Нужен, когда корней несколько:
+   * в списке видно, какой сервер какую папку обслуживает, иначе две строки одного
+   * языка выглядят одинаково и непонятно, чей это.
+   */
+  root?: string;
+  /**
+   * Версия сервера из `serverInfo` ответа `initialize` — единственное место, где
+   * он её называет. Нет — строки о версии просто не будет.
+   */
+  version?: string;
 }
 
 /** Язык, сервер которого поднять не удалось, и почему — это и есть ответ «почему нет». */
@@ -41,6 +52,23 @@ export interface LspStatus {
 
 /** Пометка, что серверов нет вовсе (или ещё не спрашивали). */
 export const NO_LSP_STATUS: LspStatus = { running: [], servers: [], failed: [] };
+
+/**
+ * Версия сервера для человека: «pyright 1.1.380».
+ *
+ * Сервер сам выбирает, что назвать: имя без версии — обычное дело (tsserver
+ * версию не присылает). Тогда показываем то, что есть, а пустое — не показываем
+ * вовсе: строка «версия: —» только занимает место.
+ */
+export function describeServerVersion(
+  info: { name?: string; version?: string } | null | undefined,
+): string | undefined {
+  const name = info?.name?.trim();
+  const version = info?.version?.trim();
+  if (name && version) return `${name} ${version}`;
+  if (name) return name;
+  return version || undefined;
+}
 
 /** Откуда взят сервер — короткая подпись для интерфейса. */
 export function lspOriginLabel(origin: LspServerOrigin): string {

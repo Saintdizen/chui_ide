@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PushTopic, type LspDiagnostic, type LspServerConfig, type LspSettings } from '../../shared/api';
 import { downgradeSeverity } from '../../shared/lsp-severity';
 import type { LspServerOrigin, LspStatus } from '../../shared/lsp-status';
-import { exitReason } from '../../shared/lsp-status';
+import { describeServerVersion, exitReason } from '../../shared/lsp-status';
 import type { FileEdit } from '../../shared/edits';
 import { toWorkspaceFileEdits } from '../../shared/lsp-workspace-edit';
 import { languageInfoForPath } from '../../shared/languages';
@@ -498,6 +498,8 @@ interface ServerRuntime {
   readonly versions: Map<string, number>;
   /** Что сервер умеет: спрашивать то, чего нет, бессмысленно и вредно. */
   capabilities: LspCapabilities;
+  /** Сервер назвался в ответе `initialize` (`serverInfo`) — оттуда берётся версия. */
+  serverInfo?: { name?: string; version?: string };
   /**
    * В чём сервер считает колонки: `utf-16` по умолчанию, `utf-32` — если он его
    * потребовал. Ставится после `initialize` (см. `negotiateEncoding`) и
@@ -993,11 +995,16 @@ export class LspService {
    * обычно видна сразу: сервер не найден или не ответил на `initialize`.
    */
   status(): LspStatus {
-    const servers = [...this.runtimes.values()].map((runtime) => ({
-      language: runtime.config.language,
-      label: runtime.config.label?.trim() || baseName(runtime.config.command),
-      origin: this.originOf(runtime.config),
-    }));
+    const servers = [...this.runtimes.values()].map((runtime) => {
+      const version = describeServerVersion(runtime.serverInfo);
+      return {
+        language: runtime.config.language,
+        label: runtime.config.label?.trim() || baseName(runtime.config.command),
+        origin: this.originOf(runtime.config),
+        ...(runtime.root ? { root: runtime.root } : {}),
+        ...(version ? { version } : {}),
+      };
+    });
     return {
       running: [...this.runtimes.values()].map((runtime) => this.keyFor(runtime.config.language, runtime.root)),
       servers,
@@ -1871,6 +1878,7 @@ export class LspService {
       `initialize: ${runtime.config.command}`,
     )) as {
       capabilities?: LspCapabilities;
+      serverInfo?: { name?: string; version?: string };
       error?: { message?: string };
     } | null;
 
@@ -1881,6 +1889,7 @@ export class LspService {
 
     // Возможности решают, что можно спрашивать: их отсутствие — не ошибка.
     runtime.capabilities = withSyncCapabilities(result?.capabilities);
+    runtime.serverInfo = result?.serverInfo;
     // Кодировку берём из ОТВЕТА сервера: он мог потребовать utf-32, и тогда все
     // колонки придётся пересчитывать (см. `position-encoding.ts`). Ответ без поля —
     // стандартный utf-16.
