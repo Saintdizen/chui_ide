@@ -69,6 +69,13 @@ function setup(text = 'one\ntwo\nthree\nfour') {
       for (let index = 0; index < line - 1; index += 1) start += (lines[index] ?? '').length + 1;
       return start;
     },
+    // Столбец прижимается к концу строки — так же, как настоящий `TextBuffer.offsetAt`.
+    offsetAt: (position: { line: number; column: number }) => {
+      const index = Math.min(Math.max(1, position.line), lines.length) - 1;
+      let start = 0;
+      for (let i = 0; i < index; i += 1) start += (lines[i] ?? '').length + 1;
+      return start + Math.min(Math.max(0, position.column - 1), (lines[index] ?? '').length);
+    },
   };
   const selected: [number, number][] = [];
   const controller = {
@@ -76,15 +83,22 @@ function setup(text = 'one\ntwo\nthree\nfour') {
     selectRange: (from: number, to: number) => selected.push([from, to]),
   };
   const revealed: number[] = [];
+  const opened: [string, number, number][] = [];
+  const deps = {
+    projectFiles: async () => ['src/main.ts', 'src/app.ts', 'src/core/paths.ts', 'tests/goto-widget.test.ts'],
+    openPath: (path: string, line: number, column: number) => opened.push([path, line, column]),
+  };
   const view = {
     element: document.createElement('div'),
     revealOffset: (offset: number) => revealed.push(offset),
   };
 
-  const widget = new GotoLineWidget(view as never, controller as never, buffer as never);
+  const widget = new GotoLineWidget(view as never, controller as never, buffer as never, deps);
   const root = (view.element as unknown as { querySelector(s: string): any }).querySelector('.own-editor-goto');
   const input = root.querySelector('.own-editor-goto-input');
-  return { widget, view, controller, root, input, selected, revealed, buffer };
+  const list = root.querySelector('.own-editor-goto-list');
+  const hint = root.querySelector('.own-editor-goto-hint');
+  return { widget, view, controller, root, input, list, hint, selected, revealed, buffer, opened, deps };
 }
 
 function press(input: any, key: string): void {
@@ -144,16 +158,115 @@ describe('панель перехода к строке', () => {
     expect(selected).toEqual([[14, 14]]);
   });
 
-  it('не число не сдвигает каретку и оставляет панель открытой', () => {
-    // Человек опечатался — закрывать панель нельзя, иначе открывать заново.
-    const { widget, input, selected, root } = setup();
+  it('текст без номера — это путь, а не опечатка: каретку не трогаем, файл открываем', () => {
+    // Раньше здесь стояло «не число не сдвигает каретку и оставляет панель открытой»:
+    // поле принимало только номер, и `строка` было опечаткой. Теперь поле понимает
+    // `файл:строка`, поэтому текст без номера — это имя файла, и оно уходит в
+    // приложение. Каретку в текущем файле при этом не двигаем.
+    const { widget, input, selected, opened } = setup();
     widget.show();
     input.value = 'строка';
 
     press(input, 'Enter');
 
     expect(selected).toEqual([]);
+    expect(opened).toEqual([['строка', 1, 1]]);
+  });
+
+  it('опечатка в номере панель не закрывает', () => {
+    // `a.ts:0` — вот это опечатка: номер есть, но невозможный. Закрывать панель
+    // нельзя, иначе открывать заново.
+    const { widget, input, selected, root, opened } = setup();
+    widget.show();
+    input.value = 'src/a.ts:0';
+
+    press(input, 'Enter');
+
+    expect(selected).toEqual([]);
+    expect(opened).toEqual([]);
     expect(root.hidden).toBe(false);
+  });
+
+  it('набор пути показывает имена файлов проекта', async () => {
+    const { widget, input, list } = setup();
+    widget.show();
+    // Список грузится в фоне: дожидаемся его.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    type(input, 'src/m');
+    expect(list.hidden).toBe(false);
+    expect(widget.suggestionList).toEqual(['src/main.ts']);
+  });
+
+  it('номер пути не мешает подсказке: ищем по пути до двоеточия', async () => {
+    const { widget, input } = setup();
+    widget.show();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    type(input, 'src/main.ts:12');
+    expect(widget.suggestionList).toEqual(['src/main.ts']);
+  });
+
+  it('голый номер подсказок не показывает — подсказывать нечего', async () => {
+    const { widget, input, list } = setup();
+    widget.show();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    type(input, '12');
+    expect(widget.suggestionList).toEqual([]);
+    expect(list.hidden).toBe(true);
+  });
+
+  it('Enter по выбранной подсказке подставляет путь и сохраняет номер', async () => {
+    const { widget, input, opened } = setup();
+    widget.show();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    type(input, 'src/m:7');
+    press(input, 'ArrowDown'); // выбор первой подсказки
+    press(input, 'Enter');
+
+    // Первый Enter только выбрал файл — переход по нему второй.
+    expect(input.value).toBe('src/main.ts:7');
+    expect(opened).toEqual([]);
+    press(input, 'Enter');
+    expect(opened).toEqual([['src/main.ts', 7, 1]]);
+  });
+
+  it('файл с номером открывается через приложение, а не в текущем буфере', () => {
+    const { widget, input, selected, opened } = setup();
+    widget.show();
+
+    type(input, 'src/core/paths.ts:12');
+    press(input, 'Enter');
+
+    expect(selected).toEqual([]);
+    expect(opened).toEqual([['src/core/paths.ts', 12, 1]]);
+    expect(widget.isVisible).toBe(false);
+  });
+
+  it('файл со столбцом передаёт и его', () => {
+    const { widget, input, opened } = setup();
+    widget.show();
+
+    type(input, 'src/app.ts:3:5');
+    press(input, 'Enter');
+
+    expect(opened).toEqual([['src/app.ts', 3, 5]]);
+  });
+
+  it('файл без номера — с начала', () => {
+    const { widget, input, opened } = setup();
+    widget.show();
+
+    type(input, 'src/app.ts');
+    press(input, 'Enter');
+
+    expect(opened).toEqual([['src/app.ts', 1, 1]]);
   });
 
   it('Escape закрывает и зовёт возврат фокуса', () => {
@@ -180,7 +293,9 @@ describe('панель перехода к строке', () => {
     // Знать о прижатии стоит: это не ошибка, но человек должен видеть, куда попадёт.
     expect(hint.textContent).toContain('последняя');
 
+    // Текст без числа — уже не «мусор в поле», а путь: подсказка показывает,
+    // что именно откроется.
     type(input, 'ой');
-    expect(hint.textContent).toContain('4');
+    expect(hint.textContent).toContain('ой');
   });
 });

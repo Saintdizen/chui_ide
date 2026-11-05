@@ -117,7 +117,7 @@ import { languageGrammar } from './editor/highlight/lazy-registry';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
 import { applyTextEdits, fromOffset } from '../shared/edits';
-import { isInsidePath, joinPath, pathAfter, separatorOf, splitPath } from '../shared/paths';
+import { isAbsolutePath, isInsidePath, joinPath, pathAfter, separatorOf, splitPath } from '../shared/paths';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
@@ -475,6 +475,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Файлы проекта — для подсказок пути внутри импорта: `from './ut'` просит файл,
     // а не слово. Пути приходят относительными — так их и пишут в импорте.
     projectFiles: () => rpc.request('workspace.listFiles').catch(() => []),
+    // Переход в другой файл из панели `Ctrl+G` (`файл:строка`). Путь из подсказки
+    // относительный (`src/main.ts`), а открытие работает с абсолютным.
+    openPath: (path: string, line: number, column: number) => {
+      const absolute = isAbsolutePath(path) ? path : joinPath(workspace.root ?? '', path);
+      void openPath(absolute).then(() => editors.reveal(absolute, line, column));
+    },
     // Алиасы `paths` из tsconfig: подсказка после точки разворачивает по ним импорт
     // (`@/core` → `src/core`). Пути приходят от корня проекта (`src/...`), как их и пишут.
     importAliases: async () => {

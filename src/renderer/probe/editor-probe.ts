@@ -105,7 +105,12 @@ const view = new EditorView(root, buffer, { language: 'typescript' });
 // будет в приложении: представление, контроллер и ввод — три разных слоя.
 const controller = new EditorController(buffer);
 const find = new FindWidget(view, controller, buffer);
-const goto = new GotoLineWidget(view, controller, buffer);
+const goto = new GotoLineWidget(view, controller, buffer, {
+  // В приложении список файлов придёт из проекта, а открывает файл само приложение —
+  // в пробе — заглушка: имя файла и номер строки в консоль.
+  projectFiles: async () => ['src/main.ts', 'src/app.ts', 'src/core/paths.ts', 'src/editor/view/editor-view.ts'],
+  openPath: (path, line, column) => console.info('открыть', path, line, column),
+});
 // Подсказки и наведение: попапы, которые видят изменения ввода и могут забрать клавишу.
 const suggest = new SuggestWidget(root);
 // Сниппеты — набор по умолчанию: в приложении к нему добавятся свои из настроек.

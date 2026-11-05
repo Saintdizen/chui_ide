@@ -246,6 +246,12 @@ export interface EditorHostOptions {
    */
   projectFiles?: () => Promise<readonly string[]>;
   /**
+   * Открыть файл проекта и встать на строку — для панели `Ctrl+G`, которая
+   * принимает `файл:строка`. Открытие (вкладки, история, недавние) — дело
+   * приложения, поэтому колбэк приходит готовым.
+   */
+  openPath?: (path: string, line: number, column: number) => void;
+  /**
    * Знаки-триггеры языкового сервера для файла (`@` в CSS, `:` в JSON, `.` в TS):
    * по ним попап открывается сразу после знака, а не только по набранным буквам.
    * Не задано — работает только наш путь (точка и буквы).
@@ -802,7 +808,11 @@ export class EditorHost {
     // и видят изменение уже после записи текста в документ (см. `sync` в editor-input).
     this.unsubscribe = this.controller.onChange((change) => this.onControllerChange(change));
     this.find = new FindWidget(this.view, this.controller, buffer);
-    this.goto = new GotoLineWidget(this.view, this.controller, buffer);
+    this.goto = new GotoLineWidget(this.view, this.controller, buffer, {
+      // Подсказка имён файлов и переход в другой файл — через приложение.
+      projectFiles: options.projectFiles,
+      openPath: options.openPath,
+    });
     this.suggest = new SuggestWidget(container);
     this.assistant = new CompletionAssistant(this.view, this.controller, buffer, this.suggest, {
       snippets: options.snippets,

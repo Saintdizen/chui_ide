@@ -185,6 +185,14 @@ export interface EditorWorkspaceOptions {
   projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;
   /** Файлы проекта (относительные пути) — для подсказок пути внутри импорта. */
   projectFiles?: () => Promise<readonly string[]>;
+  /**
+   * Открыть файл проекта (относительный путь) и встать на строку.
+   *
+   * Нужен панели перехода к строке: `Ctrl+G` принимает `файл:строка`, а файл
+   * может быть и не открыт. Открытие — забота приложения (вкладки, история,
+   * недавние), поэтому сюда приходит готовым колбком, а не делается здесь.
+   */
+  openPath?: (path: string, line: number, column: number) => void;
   /** Знаки-триггеры сервера для файла: по ним попап открывается сразу после знака. */
   completionTriggers?: (path: string) => Promise<CompletionTriggers>;
   /** Дотягивание подсказки (см. `LspFeatures.resolveCompletion`). */
@@ -329,6 +337,7 @@ export class EditorWorkspace {
   private readonly projectSymbols: EditorWorkspaceOptions['projectSymbols'];
   /** Файлы проекта — третий шов для подсказок пути в импорте. */
   private readonly projectFiles: EditorWorkspaceOptions['projectFiles'];
+  private readonly openPath: EditorWorkspaceOptions['openPath'];
   /** Знаки-триггеры сервера — тот же шов: попап открывается по ним. */
   private readonly completionTriggers: EditorWorkspaceOptions['completionTriggers'];
   /** Дотягивание подсказки — тот же шов. */
@@ -485,6 +494,7 @@ export class EditorWorkspace {
     this.completionFromLanguage = options.completionFromLanguage;
     this.projectSymbols = options.projectSymbols;
     this.projectFiles = options.projectFiles;
+    this.openPath = options.openPath;
     this.completionTriggers = options.completionTriggers;
     this.resolveCompletionItem = options.resolveCompletionItem;
     this.signatureFromLanguage = options.signatureFromLanguage;
@@ -592,6 +602,7 @@ export class EditorWorkspace {
       completionFromLanguage: this.completionFromLanguage,
       projectSymbols: this.projectSymbols,
       projectFiles: this.projectFiles,
+      openPath: this.openPath,
       importAliases: this.importAliases,
       completionTriggers: this.completionTriggers,
       resolveCompletionItem: this.resolveCompletionItem,

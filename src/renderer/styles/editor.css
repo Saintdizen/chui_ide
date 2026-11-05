@@ -790,7 +790,8 @@
     3px 3px;
 }
 
-/* Панель перехода к строке: сверху по центру, одна строка полей. */
+/* Панель перехода к строке: сверху по центру. Поле и подсказки — столбцом:
+   раньше поле стояло в строку с подписью, а списку негде было встать. */
 .own-editor-goto {
   position: absolute;
   top: 0;
@@ -798,9 +799,11 @@
   transform: translateX(-50%);
   z-index: 5;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 260px;
+  max-width: min(560px, 80%);
+  padding: 6px 10px;
   background: var(--popup_background);
   border: 1px solid var(--border_color);
   border-top: none;
@@ -817,14 +820,16 @@
 }
 
 .own-editor-goto-input {
-  width: 90px;
+  width: 100%;
   padding: 3px 6px;
   background: var(--sunken_background);
   border: 1px solid var(--border_color);
   border-radius: var(--radius_xs);
   color: var(--text_color);
   font: inherit;
-  text-align: right;
+  /* Путь длиннее поля не должен раздвигать панель. */
+  min-width: 0;
+  text-align: left;
 }
 
 .own-editor-goto-input:focus {
@@ -835,6 +840,38 @@
 .own-editor-goto-hint {
   color: var(--text_color_tertiary);
   font-variant-numeric: tabular-nums;
+}
+
+/* Подсказка имён файлов под полем: столбиком, без прокрутки (имён там — десяток). */
+.own-editor-goto-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+  border-top: 1px solid var(--border_color);
+  padding-top: 4px;
+  font-family: var(--font_mono, monospace);
+}
+
+.own-editor-goto-list[hidden] {
+  display: none;
+}
+
+.own-editor-goto-item {
+  padding: 2px 6px;
+  border-radius: var(--radius_xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.own-editor-goto-item:hover {
+  background: var(--hovered_fill);
+}
+
+.own-editor-goto-item.is-picked {
+  background: var(--selected_fill);
+  color: var(--selected_text);
 }
 
 /* Попап подсказок. Стоит в системе окна (не внутри полотна): попап, помещённый внутрь
