@@ -3069,12 +3069,15 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // команд: оно переживает вызовы и умирает вместе с окном, как и сам макет.
   let zenSaved: ZenSnapshot | null = null;
 
-  // Миникарта на один раз: живой вид меняется, а `settings.json` не трогаем — там
-  // остаётся выбор человека. Живёт здесь, потому что больше никому не нужно.
-  let minimapNow: boolean | null = null;
+  // Миникарта — настройка `editor.minimap`, а не тайный флаг вида.
+  //
+  // Было «на один раз»: `Alt+M` менял живой вид, `settings.json` не трогал. Окно
+  // настроек при этом продолжало показывать прежнее значение и было право о файле,
+  // но врало о том, что на экране; а любая следующая правка настроек (`applySettings`
+  // ставит мини-карту заново) молча возвращала её назад. Одна настройка — один
+  // результат: команда идёт тем же путём, что тумблер в окне.
   const toggleMinimap = (): void => {
-    minimapNow = !(minimapNow ?? settings.editor.minimap);
-    editors.applyOptions({ minimap: minimapNow });
+    void saveSettingsPatch({ editor: { minimap: !settings.editor.minimap } }).catch(() => undefined);
   };
 
   // Вид: панели, док, разделение и дзен — `core/view-commands.ts`. Состояние остаётся
@@ -3629,7 +3632,10 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     editors.applyOptions({
       tabSize: next.editor.tabSize,
       insertSpaces: next.editor.insertSpaces,
-      fontSize: next.editor.fontSize,
+      // Последний рубеж: сюда настройки приходят и из файла, и из main. Кегль уже
+      // поджат на входе (`sanitizeEditorFontSize`), но редактор не должен получить
+      // `0` или `NaN` ни при каком пути — иначе текст исчезает без сообщения.
+      fontSize: sanitizeEditorFontSize(next.editor.fontSize),
       lineHeight: next.editor.lineHeight,
       cursorStyle: next.editor.cursorStyle,
       cursorBlink: next.editor.cursorBlink,
@@ -3646,10 +3652,6 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       ligatures: next.editor.fontLigatures,
       spellcheck: next.editor.spellcheck,
     });
-    // Миникарта в дзене спрятана, но настройку не отменяет: пока режим включён, живой
-    // правкой её не показать — панели пересоберутся при возвращении раскладки.
-    if (!layout.root.classList.contains('is-zen')) editors.applyOptions({ minimap: next.editor.minimap });
-    editors.applyOptions({ overview: next.editor.overviewRuler });
     // Ассоциации могли смениться: пересчитываем язык открытых файлов и документов
     // (по нему работают подсветка, подсказки и сервер) — иначе ждали бы переоткрытия.
     setFileAssociations(next.editor.fileAssociations);

@@ -8,6 +8,7 @@
  * ключи молча игнорируются, битый JSON не роняет загрузку — берём пустые настройки.
  */
 import type { Settings } from './api';
+import { sanitizeEditorFontSize } from './editor-font-scale';
 
 /** Частичность на любую глубину: файл настроек пишут по одному ключу за раз. */
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
@@ -32,13 +33,27 @@ export function mergeDeep<T>(base: T | undefined, patch: T | undefined): T | und
   return result as T;
 }
 
-/** Оставляем только известные секции-объекты; остальное игнорируем молча. */
+/**
+ * Оставляем только известные секции-объекты; остальное игнорируем молча.
+ *
+ * Кегль редактора поджимаем здесь — это единственное место, через которое в
+ * проектную настройку попадает что угодно: и правка из окна, и правка из палитры,
+ * и руками написанный `.chui_ide/settings.json`. Без этого одна настройка имела
+ * три разных предела: клавиши держали 6..72, поле формы — 8..32, а файл — всё что
+ * угодно, вплоть до `0` и `-5`.
+ */
 export function sanitizeProjectSettings(raw: unknown): ProjectSettings {
   if (!isPlainObject(raw)) return {};
   const out: ProjectSettings = {};
   for (const section of PROJECT_SETTINGS_SECTIONS) {
     const value = raw[section];
     if (isPlainObject(value)) out[section] = value as never;
+  }
+  if (isPlainObject(out.editor) && 'fontSize' in out.editor) {
+    out.editor = {
+      ...out.editor,
+      fontSize: sanitizeEditorFontSize((out.editor as { fontSize: unknown }).fontSize),
+    } as never;
   }
   return out;
 }

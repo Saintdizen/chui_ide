@@ -19,6 +19,7 @@ import {
   type WorkspaceSettings,
 } from '../shared/api';
 import { AUTO_SAVE_DELAY_MS, normalizeAutoSaveDelay, normalizeAutoSaveMode } from '../shared/auto-save';
+import { sanitizeEditorFontSize } from '../shared/editor-font-scale';
 import { normalizeFormatterChoice } from '../shared/formatter';
 import { COMPACT_AT_TOKENS, COMPACT_EVERY_TURNS } from '../shared/context-fit';
 import { normalizeFavorites } from '../shared/favorites';
@@ -607,6 +608,9 @@ export class SettingsStore {
         next.autoSaveDelayMs = normalizeAutoSaveDelay(patch.editor.autoSaveDelayMs);
       }
       // Высота строки и каретка приходят из формы: приводим тем же разбором, что при чтении.
+      // Кегль правят и клавишами, и полем формы, и файлом: правило одно на все три
+      // входа (`shared/editor-font-scale.ts`), здесь только приводим к нему.
+      if (patch.editor.fontSize !== undefined) next.fontSize = sanitizeEditorFontSize(patch.editor.fontSize);
       if (patch.editor.lineHeight !== undefined) next.lineHeight = normalizeLineHeight(patch.editor.lineHeight);
       if (patch.editor.cursorStyle !== undefined) next.cursorStyle = normalizeCursorStyle(patch.editor.cursorStyle);
       if (patch.editor.cursorBlink !== undefined) next.cursorBlink = patch.editor.cursorBlink === true;
@@ -1107,6 +1111,8 @@ function loadSettings(filePath: string): StoredSettings {
       spellcheck: parsed.editor?.spellcheck === true,
       spellWords: normalizeSpellWords(parsed.editor?.spellWords),
       // Высоту строки и вид каретки правили в файле руками — проверяем и их.
+      // Кегль могли написать в файле руками — поджимаем в те же 6..72 px.
+      fontSize: sanitizeEditorFontSize(parsed.editor?.fontSize),
       lineHeight: normalizeLineHeight(parsed.editor?.lineHeight),
       cursorStyle: normalizeCursorStyle(parsed.editor?.cursorStyle),
       // Мигание включено только явным `true`: старый settings.json его не знает.

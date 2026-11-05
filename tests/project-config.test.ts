@@ -23,6 +23,50 @@ describe('sanitizeProjectSettings', () => {
     expect(sanitizeProjectSettings('x')).toEqual({});
     expect(sanitizeProjectSettings([1, 2])).toEqual({});
   });
+
+  describe('кегль редактора: один предел на все входы (TASKS 51)', () => {
+    /**
+     * Было три разных предела у одной настройки: `Ctrl+=`/`Ctrl+-` держали 6..72,
+     * поле «Размер шрифта» — зашитые 8..32, а `.chui_ide/settings.json` не проверялся
+     * вовсе: через файл проходили `0`, `-5` и `1e9`. Здесь проверяем общий слой.
+     */
+    it('значение из файла выше 72 поджимается к 72', () => {
+      expect(sanitizeProjectSettings({ editor: { fontSize: 200 } })).toEqual({ editor: { fontSize: 72 } });
+    });
+
+    it('значение ниже 6 поджимается к 6', () => {
+      expect(sanitizeProjectSettings({ editor: { fontSize: 1 } })).toEqual({ editor: { fontSize: 6 } });
+    });
+
+    it('ноль и отрицательное — не «мелкий шрифт», а мусор: дают 14', () => {
+      // Раньше `0` доходил до редактора, и текст просто исчезал без сообщения.
+      expect(sanitizeProjectSettings({ editor: { fontSize: 0 } })).toEqual({ editor: { fontSize: 14 } });
+      expect(sanitizeProjectSettings({ editor: { fontSize: -5 } })).toEqual({ editor: { fontSize: 14 } });
+    });
+
+    it('мусор вместо числа — тоже 14', () => {
+      expect(sanitizeProjectSettings({ editor: { fontSize: 'большой' } })).toEqual({ editor: { fontSize: 14 } });
+      expect(sanitizeProjectSettings({ editor: { fontSize: null } })).toEqual({ editor: { fontSize: 14 } });
+      expect(sanitizeProjectSettings({ editor: { fontSize: Number.NaN } })).toEqual({ editor: { fontSize: 14 } });
+    });
+
+    it('дробное округляется, допустимое не меняется', () => {
+      expect(sanitizeProjectSettings({ editor: { fontSize: 15.6 } })).toEqual({ editor: { fontSize: 16 } });
+      expect(sanitizeProjectSettings({ editor: { fontSize: 14 } })).toEqual({ editor: { fontSize: 14 } });
+      expect(sanitizeProjectSettings({ editor: { fontSize: 72 } })).toEqual({ editor: { fontSize: 72 } });
+      expect(sanitizeProjectSettings({ editor: { fontSize: 6 } })).toEqual({ editor: { fontSize: 6 } });
+    });
+
+    it('остальные поля редактора не трогаются', () => {
+      expect(sanitizeProjectSettings({ editor: { fontSize: 200, tabSize: 2 } })).toEqual({
+        editor: { fontSize: 72, tabSize: 2 },
+      });
+    });
+
+    it('без fontSize секция остаётся как была', () => {
+      expect(sanitizeProjectSettings({ editor: { tabSize: 2 } })).toEqual({ editor: { tabSize: 2 } });
+    });
+  });
 });
 
 describe('applyProjectSettingsPatch', () => {

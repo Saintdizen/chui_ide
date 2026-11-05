@@ -12,6 +12,7 @@ import type {
 import type { AiProviderPatch, AiProviderView, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
 import { formatBalance } from '../../shared/balance';
+import { EDITOR_FONT_MAX, EDITOR_FONT_MIN, EDITOR_FONT_STEP } from '../../shared/editor-font-scale';
 import { FORMATTER_CHOICES, FORMATTER_LABELS, normalizeFormatterChoice } from '../../shared/formatter';
 import {
   findProviderPreset,
@@ -1113,7 +1114,13 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'field-label' }, 'Шрифт'),
       field(
         'Размер шрифта',
-        numberInput(editor.fontSize, 8, 32, 1, (value) => editable({ fontSize: value })),
+        // Границы и шаг — из `shared/editor-font-scale.ts`, те же, что у `Ctrl+=`,
+        // `Ctrl+-` и `Ctrl+колеса`. Здесь стояли зашитые 8–32, и одна настройка
+        // имела два разных предела: клавишами кегль доходил до 72, а поле отвергало
+        // всё выше 32 — при этом main не проверял значение вовсе.
+        numberInput(editor.fontSize, EDITOR_FONT_MIN, EDITOR_FONT_MAX, EDITOR_FONT_STEP, (value) =>
+          editable({ fontSize: value }),
+        ),
       ),
       field(
         'Высота строки, px (0 — по шрифту)',
