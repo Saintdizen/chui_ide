@@ -21,6 +21,7 @@ import type { WorkspaceModel } from '../core/workspace-model';
 import { entryIsDirectory, entryIsFile, entryIsSymlink, symlinkLabel } from '../../shared/entry-kind';
 import { pairFromSelection } from '../core/file-compare';
 import { effectiveNestingRules, nestEntries } from '../core/file-nesting';
+import { checkName } from '../../shared/name-check';
 import { groupByKind } from '../core/tree-group';
 import { packageAncestorDirs, topLevelPackages } from '../../shared/monorepo';
 import type { ProjectPackagesModel } from '../core/project-packages';
@@ -714,12 +715,36 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   /* ── инлайн-ввод имени ─────────────────────────────────────────────────── */
 
-  const inlineInput = (depth: number, initial: string, commit: (value: string) => void): HTMLElement => {
+  /**
+   * Проверить имя до похода в main.
+   *
+   * Без этого занятое имя или пробел в конце доходили до файловой системы и
+   * возвращались молчанием: дерево просто не менялось. Причина должна быть
+   * видна там, где её вводят.
+   */
+  const checkNameIn = (dir: string, name: string, original?: string): string | null => {
+    const siblings = (children.get(dir) ?? []).map((entry) => entry.name);
+    const result = checkName(name, {
+      siblings,
+      original,
+      windows: (window.chui?.platform ?? '') === 'win32',
+    });
+    return result.ok ? null : (result.reason ?? 'Имя не подходит');
+  };
+
+  const inlineInput = (
+    depth: number,
+    initial: string,
+    commit: (value: string) => void,
+    check?: (value: string) => string | null,
+  ): HTMLElement => {
     const input = h('input', { class: 'tree-input', type: 'text', value: initial, spellcheck: false });
+    const hint = h('div', { class: 'tree-input-hint' });
     const row = h(
       'div',
       { class: 'tree-row is-editing', style: { paddingLeft: `${8 + depth * options.indent}px` } },
       input,
+      hint,
     );
 
     let done = false;
@@ -731,10 +756,21 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       else render();
     };
 
+    const tell = (reason: string | null): boolean => {
+      hint.textContent = reason ?? '';
+      input.classList.toggle('is-invalid', reason !== null);
+      return reason === null;
+    };
+
+    input.addEventListener('input', () => tell(null));
+
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        finish(input.value.trim());
+        // Не trim: пробел в конце — это ошибка имени, а не то, что можно тихо убрать.
+        const reason = check?.(input.value) ?? null;
+        if (!tell(reason)) return;
+        finish(input.value);
       } else if (event.key === 'Escape') {
         event.preventDefault();
         finish(null);
@@ -1026,7 +1062,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const isSelected = selection.paths.includes(entry.path);
 
     if (inlineEdit?.kind === 'rename' && inlineEdit.path === entry.path) {
-      return inlineInput(depth, inlineEdit.currentName, (value) => void commitRename(entry.path, value));
+      const renaming = inlineEdit;
+      return inlineInput(
+        depth,
+        renaming.currentName,
+        (value) => void commitRename(entry.path, value),
+        (value) => checkNameIn(dir, value, renaming.currentName),
+      );
     }
 
     const classes = ['tree-row'];
@@ -1563,7 +1605,12 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     if (row.kind === 'create') {
       const edit = inlineEdit;
       if (edit?.kind !== 'create') return null;
-      return inlineInput(row.depth, '', (value) => void commitCreate(edit, value));
+      return inlineInput(
+        row.depth,
+        '',
+        (value) => void commitCreate(edit, value),
+        (value) => checkNameIn(edit.parent, value),
+      );
     }
     return renderRow(row.entry, row.depth, row.dir, {
       nested: row.nested,

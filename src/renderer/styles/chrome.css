@@ -2317,6 +2317,17 @@ textarea {
   text-overflow: ellipsis;
 }
 
+/* Причина, по которой имя не приняли: занятое, с пробелом в конце, недопустимое. */
+.tree-input-hint {
+  padding: 2px 0 0;
+  color: var(--red_prime_background);
+  font-size: var(--font_small_size);
+}
+
+.tree-row.is-editing .tree-input.is-invalid {
+  border-color: var(--red_prime_background);
+}
+
 /* Совпавшее с фильтром: подсветка отвечает на вопрос «почему эта строка осталась». */
 .tree-name mark {
   padding: 0;
