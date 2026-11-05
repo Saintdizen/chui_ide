@@ -172,4 +172,55 @@ describe('ui/toast', () => {
     expect(run).toHaveBeenCalledTimes(1);
     expect(toasts()[0]?.removed).toBe(true);
   });
+
+  // П.6: кнопка должна вести ТУДА, где видно, что случилось. Было: тост умел
+  // только `run` — произвольное замыкание, которое нельзя записать в историю.
+  it('кнопка с командой исполняет команду через переданный исполнитель', async () => {
+    const { showToast } = await loadToast();
+    const execute = vi.fn();
+    showToast('подключены', 'success', {
+      action: { label: 'Показать', command: 'view.lspLog' },
+      execute,
+    });
+    all.find((node) => node.tag === 'button')?.click();
+    expect(execute).toHaveBeenCalledWith('view.lspLog', undefined);
+  });
+
+  it('клик по самому уведомлению тоже ведёт по команде', async () => {
+    const { showToast } = await loadToast();
+    const execute = vi.fn();
+    showToast('подключены', 'success', {
+      action: { label: 'Показать', command: 'view.lspLog', args: [1] },
+      execute,
+    });
+    toasts()[0]?.click();
+    expect(execute).toHaveBeenCalledWith('view.lspLog', [1]);
+    expect(toasts()[0]?.removed).toBe(true);
+  });
+
+  // Главная ловушка: команда есть, а исполнителя не дали — молча ронять нельзя,
+  // иначе кнопка выглядит рабочей, но не делает ничего.
+  it('без исполнителя команда не роняет уведомление, а просто закрывает', async () => {
+    const { showToast } = await loadToast();
+    showToast('подключены', 'success', { action: { label: 'Показать', command: 'view.lspLog' } });
+    expect(() => all.find((node) => node.tag === 'button')?.click()).not.toThrow();
+    expect(toasts()[0]?.removed).toBe(true);
+  });
+
+  it('история помнит шаг с командой, но не замыкание', async () => {
+    const { showToast, notices } = await loadToast();
+    showToast('подключены', 'success', {
+      key: 'lsp:ready',
+      action: { label: 'Показать', command: 'view.lspLog' },
+    });
+    showToast('сделано', 'success', {
+      key: 'git:done',
+      action: { label: 'Отменить', run: () => undefined },
+    });
+    // Свежее сверху: последний тост (`git:done`) — первый в истории.
+    const [done, ready] = notices.history();
+    expect(ready?.action?.command).toBe('view.lspLog');
+    // Замыкание живёт только до перезагрузки окна — в истории ему не место.
+    expect(done?.action ?? null).toBeNull();
+  });
 });

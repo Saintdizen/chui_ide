@@ -1944,9 +1944,13 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     waitForScan,
     documents: () => documents.all(),
     // Уведомление с кнопкой — форма `showToast`, но кнопка называется иначе.
+    // Команда — первый выбор: тогда запись в истории знает, куда ведёт, а `run`
+    // остаётся для того, что командой не выражено (открыть окно настроек).
+    // `execute` передаём всегда — без него команда в тосте была бы мёртвой
+    // надписью, а `toast.ts` о реестре команд знать не должен.
     toast: (message, kind, action) =>
       action
-        ? showToast(message, kind, { action: { label: action.label, run: action.run } })
+        ? showToast(message, kind, { action, execute: (id, args) => void commands.execute(id, ...(args ?? [])) })
         : showToast(message, kind),
     openLspSettings: () => {
       // Окно настроек на разделе «Языки»: оттуда ставят сервер, которого нет.

@@ -41,7 +41,11 @@ export interface LspServersOptions {
   root: () => string | null;
   /** Открытые документы: после `lsp.restart` их нужно снова открыть в сервере. */
   documents: () => Iterable<OpenDocument>;
-  toast: (message: string, kind?: 'info' | 'success' | 'error', action?: { label: string; run: () => void }) => void;
+  toast: (
+    message: string,
+    kind?: 'info' | 'success' | 'error',
+    action?: { label: string; command?: string; args?: unknown[]; run?: () => void },
+  ) => void;
   /** Куда ведёт кнопка «поставить сервер» в уведомлении. */
   openLspSettings: () => void;
   /** Новый статус после перезапуска — показать чип сразу, не дожидаясь опроса. */
@@ -130,6 +134,9 @@ export function createLspServers(options: LspServersOptions) {
         hintShown = true;
         const available = await rpc.request('lsp.detect').catch(() => []);
         if (available.length > 0) {
+          // «Открыть» ведёт в раздел «Языки» окна настроек. Замыкание, а не
+          // команда: окно настроек командой не открывается, а шаг, который
+          // нельзя повторить, в истории — обманка (см. toNoticeAction).
           toast('Языковые серверы установлены, но выключены в настройках', 'info', {
             label: 'Открыть',
             run: openLspSettings,
@@ -167,7 +174,12 @@ export function createLspServers(options: LspServersOptions) {
     if (added.length === 0) return true;
     for (const language of added) announced.add(language);
     options.announce?.(added);
-    toast(`Языковые серверы подключены: ${added.join(', ')}`);
+    // «Показать» ведёт туда, где ВИДНО, что произошло: в журнал LSP. Это
+    // команда, поэтому шаг переживает закрытие тоста и работает из истории.
+    toast(`Языковые серверы подключены: ${added.join(', ')}`, 'success', {
+      label: 'Показать',
+      command: 'view.lspLog',
+    });
     return true;
   };
 
