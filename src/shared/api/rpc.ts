@@ -16,6 +16,7 @@ import type { GitSparseInfo } from '../git-sparse';
 import type { GitIdentity, GitSshKey } from '../git-identity';
 import type { WorkspaceRoot } from '../workspace-roots';
 import type { LspStatus } from '../lsp-status';
+import type { LspTraceLine } from '../lsp-trace';
 import type { InheritedResult, SymbolIndexStatus } from '../symbol-index';
 import type { SemanticToken } from '../lsp-semantic-tokens';
 import type { FolderCompareResult } from '../folder-compare';
@@ -819,6 +820,11 @@ export interface ChuiMethods {
   'lsp.restart': { params: void; result: LspStatus };
   /** Остановить поднятые серверы: следующий открытый файл поднимет их снова. */
   'lsp.stop': { params: void; result: LspStatus };
+  /** Хвост журнала обмена с серверами — панель «LSP» в доке. */
+  'lsp.trace': {
+    params: { lines?: number } | void;
+    result: { enabled: boolean; path: string | null; lines: LspTraceLine[] };
+  };
   'lsp.status': { params: void; result: LspStatus };
   /**
    * Прогреть серверы языков проекта, не дожидаясь открытия файлов (см. `LspService.prewarm`).

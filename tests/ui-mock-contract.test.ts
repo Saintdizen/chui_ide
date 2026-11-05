@@ -87,6 +87,7 @@ const NOT_MOCKED: Record<string, string[]> = {
   ],
   'внешние инструменты (MCP) — процессы запускает main': ['ai.mcpTools'],
   'проверка команды и остановка сервера — процессы живут в main': ['lsp.check', 'lsp.stop'],
+  'журнал сервера — файл пишет main, в моке его нет': ['lsp.trace'],
   'нужен настоящий репозиторий и клиент git — в моке их нет': [
     'git.bisectMark',
     'git.bisectReset',

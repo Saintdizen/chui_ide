@@ -1,7 +1,10 @@
 import { NO_LSP_STATUS } from '../../../shared/lsp-status';
 import { EMPTY_INDEX_STATUS, type InheritedResult } from '../../../shared/symbol-index';
+import { readFile } from 'node:fs/promises';
+
 import { detectLspSources } from '../../lsp/detect';
 import { checkLspCommand } from '../../lsp/check';
+import { parseTrace } from '../../../shared/lsp-trace';
 import { mergeByPriority } from '../../../shared/lsp-bundled';
 import type { RpcServices } from '../context';
 import type { RpcRouter } from '../router';
@@ -30,6 +33,18 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
   // файлах (`workspace/willRenameFiles`). Применяет их renderer до `fs.rename`.
   router.register('lsp.willRenameFiles', (params) => deps.lsp?.willRenameFiles(params.oldPath, params.newPath) ?? null);
   router.register('lsp.restart', () => deps.lsp?.restart() ?? NO_LSP_STATUS);
+  // Журнал обмена с серверами для панели «LSP»: хвост файла, который пишет
+  // `LspService` при включённой настройке `lsp.trace`.
+  router.register('lsp.trace', async (params) => {
+    const path = deps.lsp?.traceFilePath() ?? null;
+    const raw = path ? await readTraceFile(path) : '';
+    return {
+      enabled: deps.settings.get().lsp.trace === true,
+      path,
+      lines: parseTrace(raw, params?.lines ?? 200),
+    };
+  });
+
   router.register('lsp.stop', () => deps.lsp?.stopAll() ?? NO_LSP_STATUS);
   router.register('lsp.status', () => deps.lsp?.status() ?? NO_LSP_STATUS);
   // Прогрев: поднять серверы языков проекта, не дожидаясь открытия файлов.
@@ -128,4 +143,13 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
       cwd: deps.workspace.rootPath() ?? process.cwd(),
     }),
   );
+}
+
+async function readTraceFile(path: string): Promise<string> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch {
+    // Файла ещё нет — журнал не включён ни разу. Это не ошибка: панель скажет это словами.
+    return '';
+  }
 }

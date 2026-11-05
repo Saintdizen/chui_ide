@@ -1532,3 +1532,52 @@ body > .overlay {
     animation-duration: var(--motion_base) !important;
   }
 }
+
+/* Панель «LSP»: хвост журнала обмена с серверами. Строка — время, направление
+   и метод; моноширинный шрифт, чтобы одинаковые сообщения выстраивались столбцом. */
+.lsp-log {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.lsp-log-actions {
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px;
+}
+
+.lsp-log-hint {
+  padding: 4px 6px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.lsp-log-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 6px 4px;
+  font-family: var(--font_mono_family, monospace);
+  font-size: var(--font_small_size);
+}
+
+.lsp-log-line {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.lsp-log-line.is-server .lsp-log-direction {
+  color: var(--text_color_secondary);
+}
+
+.lsp-log-time {
+  color: var(--text_color_tertiary);
+}
+
+.lsp-log-kind {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

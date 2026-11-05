@@ -139,6 +139,7 @@ import { createRunArtifacts } from './core/artifacts';
 import { mountProjectSelect } from './ui/project-select';
 import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
+import { createLspLogPanel } from './ui/lsp-log';
 import { createLspPopover } from './ui/lsp-popover';
 import { createMarkdownPreview, isMarkdownPath } from './ui/markdown-preview';
 import { createDocView } from './ui/doc-view';
@@ -1062,6 +1063,10 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
           close();
           void commands.execute('lsp.stop');
         },
+        onShowLog: () => {
+          close();
+          dock.show('lsp-log');
+        },
         onOpenSettings: () => {
           close();
           settingsModal.open('lsp');
@@ -1498,6 +1503,13 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     onShow: () => notebookPanel.refresh(),
   });
   dock.register({ id: 'tests', title: 'Тесты', element: testPanel.element, onShow: () => void testPanel.refresh() });
+  // Журнал языковых серверов: хвост файла, который main пишет при `lsp.trace`.
+  // Читаем при показе вкладки — журнал растёт, пока панель скрыта.
+  const lspLog = createLspLogPanel({
+    fetch: (lines) => rpc.request('lsp.trace', { lines }),
+    openSettings: () => settingsModal.open('lsp'),
+  });
+  dock.register({ id: 'lsp-log', title: 'LSP', element: lspLog.element, onShow: () => void lspLog.refresh() });
   // Структуру собираем при показе вкладки: файл мог смениться, пока панель была скрыта.
   dock.register({ id: 'outline', title: 'Структура', element: outline.element, onShow: () => outline.refresh() });
   // Список собираем при показе вкладки и по изменению пометок (ниже). Значок на вкладке —

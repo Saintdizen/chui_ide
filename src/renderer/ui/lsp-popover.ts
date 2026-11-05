@@ -21,6 +21,8 @@ export interface LspPopoverDeps {
   onRestart: () => void;
   /** Остановить серверы: команда приложения (там и весточка о результате). */
   onStop: () => void;
+  /** Открыть панель «LSP» с журналом обмена. */
+  onShowLog: () => void;
   /** Открыть раздел «Языки (LSP)» в настройках. */
   onOpenSettings: () => void;
 }
@@ -46,6 +48,8 @@ export function createLspPopover(deps: LspPopoverDeps): LspPopoverView {
     { class: 'btn btn-small lsp-status-action', type: 'button', onClick: () => deps.onStop() },
     h('span', {}, 'Остановить'),
   );
+  const logButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Журнал');
+  logButton.addEventListener('click', () => deps.onShowLog());
   const settingsButton = h(
     'button',
     { class: 'btn btn-small lsp-status-action', type: 'button', onClick: () => deps.onOpenSettings() },
@@ -58,7 +62,7 @@ export function createLspPopover(deps: LspPopoverDeps): LspPopoverView {
     { class: 'lsp-status' },
     h('div', { class: 'lsp-status-title' }, 'Языковые серверы'),
     body,
-    h('div', { class: 'lsp-status-actions' }, restartButton, stopButton, settingsButton),
+    h('div', { class: 'lsp-status-actions' }, restartButton, stopButton, logButton, settingsButton),
   );
 
   // Данные приходят асинхронно: без стража устаревший ответ переписал бы тело поверх свежего.
