@@ -10,6 +10,7 @@ import type { PullMode } from '../git-pull';
 import type { ThemeFile } from '../theme-file';
 import type { McpServerConfig } from '../mcp';
 import type { AgentHookConfig } from '../agent-hooks';
+import type { CommandGrant, EditGrant } from '../agent-grants';
 import type { AutomationConfig } from '../automations';
 import type { AiSandboxSettings } from '../sandbox';
 import type { WhitespaceMode } from '../whitespace';
@@ -109,6 +110,19 @@ export interface AiSettings {
    * доступ» остаётся полным. Включается галочкой в настройках.
    */
   confirmDangerous: boolean;
+  /**
+   * Разрешения, выданные кнопками карточки: «эта команда», «вся папка», «всегда».
+   * Список виден и правится в настройках — иначе «навсегда» пришлось бы отменять
+   * только правкой файла настроек руками.
+   */
+  commandGrants: CommandGrant[];
+  /**
+   * Файлы и папки, которые агент правит без повторного вопроса.
+   *
+   * Отдельно от `commandGrants`: там разрешение на команду, здесь — на запись
+   * в путь. Список виден и правится в настройках, как и список команд.
+   */
+  editGrants: EditGrant[];
   /**
    * Спрашивать модель перед подтверждением команды.
    *

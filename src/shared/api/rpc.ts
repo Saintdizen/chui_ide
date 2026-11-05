@@ -1,3 +1,4 @@
+import type { CommandGrantScope } from '../agent-grants';
 import type { MenuRole } from '../app-menu';
 import type { AccountBalance } from '../balance';
 import type { OfficePreview } from '../office';
@@ -162,10 +163,20 @@ export interface ConfirmCommandHostParams {
    * показывается в карточке подсказкой: человеку полезно видеть, что её смутило.
    */
   review?: ReviewVerdict;
+  /**
+   * Каталог, где команду выполнять собираются: по нему карточка предлагает
+   * «больше не спрашивать в этой папке». Не задан — такой кнопки нет.
+   */
+  cwd?: string;
 }
 
 export interface ConfirmCommandHostResult {
   allowed: boolean;
+  /**
+   * «Больше не спрашивать» — в каком объёме запомнить разрешение. Пусто —
+   * разрешение разовое, следующий раз спросим снова.
+   */
+  remember?: CommandGrantScope;
 }
 
 /** Аргументы `ai.confirmBrowser`: действие в браузере, которое просит выполнить агент. */

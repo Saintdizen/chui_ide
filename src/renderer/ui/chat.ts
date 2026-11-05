@@ -18,6 +18,8 @@ import { sessionAttachment } from '../../shared/session-context';
 import { leaveQuestion, type RunLeaving } from '../../shared/run-keep';
 import { composerAction, feedAction, focusAfterCard, recallStep, type ComposerAction } from '../../shared/run-keys';
 import { isAutoTitle } from '../../shared/chat-title';
+import { addEditGrant, type EditGrant, matchingEditGrant, rememberedEditGrant } from '../../shared/agent-grants';
+import { parentOf } from '../../shared/paths';
 import { resolvePatches } from '../../shared/patch';
 import { turnsSinceCompact } from './compact-turns';
 import { keptContextMessage, restoreSent } from '../../shared/chat-attachments';
@@ -2809,6 +2811,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return deps.edits.textForAnchor(target);
   }
 
+  /** Разрешения на правку из настроек: пути, про которые больше не спрашиваем. */
+  function editGrants(): EditGrant[] {
+    return settings.ai.editGrants ?? [];
+  }
+
   // Решения (ревью правок, подтверждение команды) живут в `chat-approvals.ts`:
   // там разметка карточек, а панель только подключает их к ленте и к отмене.
   // Карточка ложится в ту ленту, откуда пришёл вызов, даже если человек успел
@@ -2824,6 +2831,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       else body.focus({ preventScroll: true });
     },
     scrollToEnd: () => scrollToEnd(),
+    // «Не спрашивать про этот файл (папку)» — разрешение живёт в настройках,
+    // а не в беседе: иначе следующий прогон спросил бы заново.
+    rememberEdit: (scope, path) => {
+      const target = scope === 'dir' ? parentOf(path) : path;
+      const next = addEditGrant(settings.ai.editGrants ?? [], rememberedEditGrant(scope, target));
+      void deps.rpc.request('settings.update', { ai: { editGrants: next } }).then((updated) => {
+        settings = updated;
+      });
+    },
     register: (cancel) => {
       pendingApprovals.add(cancel);
       return () => pendingApprovals.delete(cancel);
@@ -2834,11 +2850,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const askPrompt = createAskPrompt(approvals);
   const planApproval = createPlanApproval(approvals);
 
-  deps.host.handle('ai.confirmCommand', async (params) => ({
+  deps.host.handle('ai.confirmCommand', async (params) =>
     // `review` приходит, только если проверка модели не решилась разрешить сама:
-    // её причина нужна человеку в карточке.
-    allowed: await commandApproval.confirm(params.command, params.review?.reason),
-  }));
+    // её причина нужна человеку в карточке. `cwd` — чтобы предложить «больше не
+    // спрашивать в этой папке».
+    commandApproval.confirm(params.command, params.review?.reason, params.cwd),
+  );
 
   // Действия в браузере — тоже карточка в ленте: страница может сделать что угодно
   // от имени пользователя, поэтому вопрос задаётся тем же способом.
@@ -2883,9 +2900,22 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    * видеть, что агент сделал, даже когда не спрашивал.
    */
   async function applyAgentEdits(params: ApplyEditsHostParams): Promise<ApplyEditsHostResult> {
-    // При полном доступе применяем всё сразу, иначе спрашиваем: какие файлы применить.
-    const selected = params.autoApprove === true ? [...params.edits] : await editReview.review(params.edits);
-    if (!selected || selected.length === 0) return { rejected: true };
+    // При полном доступе применяем всё сразу. Иначе спрашиваем, но не про те
+    // файлы, про которые человек уже ответил «не спрашивать»: без этого
+    // разрешение работало бы только в режиме без ревью вовсе.
+    const trustAll = params.autoApprove === true;
+    const trusted = new Set(
+      trustAll
+        ? []
+        : params.edits.filter((file) => matchingEditGrant(editGrants(), file.path)).map((file) => file.path),
+    );
+    const approved = trustAll ? params.edits : params.edits.filter((file) => trusted.has(file.path));
+    const asks = trustAll ? [] : params.edits.filter((file) => !trusted.has(file.path));
+    const reviewed = asks.length > 0 ? await editReview.review(asks) : [];
+    // Разрешённые файлы применяются даже при отмене остального: «Отмена»
+    // относится к карточке, а не к прошлому решению человека.
+    const selected = [...approved, ...(reviewed ?? [])];
+    if (selected.length === 0) return { rejected: true };
 
     // Вызов пришёл из конкретной беседы: правки принадлежат ей, даже если
     // пользователь успел переключить вкладку.
@@ -2902,17 +2932,19 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
 
     const result = await deps.edits.applyFileEdits(selected, 'programmatic');
-    // На диск пишем только при полном доступе (экрана ревью не было — значит,
-    // правки применяются сразу, как и говорит эта настройка). Иначе они ложатся
+    // На диск пишем только там, где вопроса не было: полный доступ или
+    // выданное ранее разрешение на этот файл (папку). Остальное ложится
     // в документы в памяти, файлы помечаются «не сохранён», а записывает их
-    // человек кнопкой «Сохранить» в панели изменений. Без записи на диск при
-    // полном доступе следующий read_file/search (main читает с диска) показывал
-    // бы старый текст, хотя инструмент уже отчитался «применено».
+    // человек кнопкой «Сохранить» в панели изменений. Без записи на диск
+    // следующий read_file/search (main читает с диска) показывал бы старый
+    // текст, хотя инструмент уже отчитался «применено».
     const applied = result.reports.length > 0;
+    // За какой путь не спрашивали — тот и пишем молча.
+    const silent = (path: string): boolean => trustAll || trusted.has(path);
     // Причины незаписи собираем, а не только показываем тостом: по ним агент
     // понимает, что смотреть, а не просто «правка не на диске».
     const reasons = applied
-      ? await persistPaths(result.reports.map((report) => report.path))
+      ? await persistPaths(result.reports.map((report) => report.path).filter(silent))
       : new Map<string, string>();
 
     // Что осталось только в буфере. Раньше здесь ничего не делалось: агент
@@ -2923,9 +2955,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Теперь на полном доступе дожимаем запись: `persistPaths` выше мог не
     // справиться (конфликт времени, ошибка ввода-вывода), а признак — всё тот
     // же `dirty` у документа.
-    if (params.autoApprove === true && applied) {
+    if (applied) {
       for (const [path, reason] of await persistPaths(
-        result.reports.map((report) => report.path).filter((path) => deps.documents.get(path)?.dirty),
+        result.reports
+          .map((report) => report.path)
+          .filter((target) => silent(target) && deps.documents.get(target)?.dirty),
       )) {
         reasons.set(path, reason);
       }

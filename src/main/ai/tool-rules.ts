@@ -8,6 +8,7 @@
  * Вынесено из `agent-tools.ts`: это правила, а не механика инструментов, и живут
  * они дольше любого из них.
  */
+import { decisionAllowed, decisionRemember, matchesGrant, rememberedGrant } from '../../shared/agent-grants';
 import type { ToolContext, ToolOutcome } from './tool-context';
 
 /**
@@ -97,9 +98,20 @@ export function commandDenied(): ToolOutcome {
  */
 export async function confirmRun(ctx: ToolContext, command: string, prompt = command): Promise<ToolOutcome | null> {
   if (!ctx.confirmCommand) return noCommandBridge();
+  // Выданное разрешение — это уже данный ответ: спрашивать заново значит
+  // показывать человеку кнопки, которые он уже нажал.
+  // Папка разрешения — корень проекта: там же идут команды, у них нет
+  // своего `cwd` в контексте инструментов.
+  const cwd = ctx.workspace.rootPath() ?? undefined;
+  if (matchesGrant(ctx.commandGrants, { command, cwd })) return null;
   if (!needsConfirmation(ctx, command)) return null;
-  const allowed = await ctx.confirmCommand(prompt);
-  return allowed ? null : commandDenied();
+  const answer = await ctx.confirmCommand(prompt);
+  if (!decisionAllowed(answer)) return commandDenied();
+  // «Больше не спрашивать» — не про этот прогон: запоминаем и отдаём тому,
+  // кто держит настройки, — следующий раз сюда не придёт.
+  const remember = decisionRemember(answer);
+  if (remember) ctx.grantCommand?.(rememberedGrant(remember, command, cwd));
+  return null;
 }
 
 /**

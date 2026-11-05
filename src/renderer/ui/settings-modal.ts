@@ -12,6 +12,7 @@ import type {
 import type { AiProviderPatch, AiProviderView, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
 import { formatBalance } from '../../shared/balance';
+import { describeEditGrant, describeGrant, removeEditGrant, removeGrant } from '../../shared/agent-grants';
 import { EDITOR_FONT_MAX, EDITOR_FONT_MIN, EDITOR_FONT_STEP } from '../../shared/editor-font-scale';
 import { FORMATTER_CHOICES, FORMATTER_LABELS, normalizeFormatterChoice } from '../../shared/formatter';
 import {
@@ -496,6 +497,51 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     prompt.value = ai.systemPrompt;
     prompt.addEventListener('change', () => void patch({ ai: { systemPrompt: prompt.value } }));
 
+    /**
+     * Список разрешённого, выданного кнопками карточки.
+     *
+     * «Больше не спрашивать» — обещание, которое исполняется без человека,
+     * и снять его надо галочкой, а не правкой файла настроек руками. Список
+     * показывает то, что разрешено на самом деле: подписи строит `describeGrant`
+     * — та же функция, что и в карточке.
+     */
+    const grantRows = ai.commandGrants.map((grant, index) =>
+      h(
+        'div',
+        { class: 'field-row' },
+        h('span', { class: 'field-input grant-label' }, describeGrant(grant)),
+        h(
+          'button',
+          {
+            class: 'btn btn-small',
+            type: 'button',
+            onClick: () => void patch({ ai: { commandGrants: removeGrant(ai.commandGrants, index) } }),
+          },
+          'Убрать',
+        ),
+      ),
+    );
+
+    // Разрешения на правку — отдельный список: «не спрашивать про файл» отвечает
+    // на другой вопрос, чем «не спрашивать про команду», и смешивать их в одном
+    // списке значило бы разрешать не то, что человек думал.
+    const editGrantRows = ai.editGrants.map((grant, index) =>
+      h(
+        'div',
+        { class: 'field-row' },
+        h('span', { class: 'field-input grant-label' }, describeEditGrant(grant)),
+        h(
+          'button',
+          {
+            class: 'btn btn-small',
+            type: 'button',
+            onClick: () => void patch({ ai: { editGrants: removeEditGrant(ai.editGrants, index) } }),
+          },
+          'Убрать',
+        ),
+      ),
+    );
+
     return [
       switchRow('Ассистент включён', ai.enabled, (value) => void patch({ ai: { enabled: value } }, true)),
       h(
@@ -545,6 +591,32 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'тогда команды исполняются молча. На отдельные безобидные команды подсказка может сработать зря — ' +
           'страховка склонна спросить лишний раз.',
       ),
+      ...(grantRows.length > 0
+        ? [
+            h('div', { class: 'settings-divider' }),
+            h('div', { class: 'field-label' }, 'Разрешённые команды'),
+            h(
+              'div',
+              { class: 'field-hint' },
+              'Эти команды агент выполняет, не спрашивая: так решили кнопки «Всегда» на карточках. ' +
+                '«Убрать» вернёт вопрос снова.',
+            ),
+            ...grantRows,
+          ]
+        : []),
+      ...(editGrantRows.length > 0
+        ? [
+            h('div', { class: 'settings-divider' }),
+            h('div', { class: 'field-label' }, 'Разрешённые правки'),
+            h(
+              'div',
+              { class: 'field-hint' },
+              'Эти файлы и папки агент правит и записывает молча: так решили кнопки «Не спрашивать» ' +
+                'на карточке правок. Правки в остальных файлах по-прежнему спрашивают.',
+            ),
+            ...editGrantRows,
+          ]
+        : []),
       switchRow(
         'Проверять команды моделью перед подтверждением',
         ai.approvalReview,

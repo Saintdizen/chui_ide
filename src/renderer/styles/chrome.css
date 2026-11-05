@@ -1425,6 +1425,17 @@ textarea {
   gap: 6px;
 }
 
+/* Строка списка разрешённого: текст читается как поле, но не правится — менять его
+   можно только «Убрать» и новым ответом на карточке. */
+.grant-label {
+  display: block;
+  padding: 5px 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg_muted, inherit);
+}
+
 .field-row .field-input {
   flex: 1;
   min-width: 0;

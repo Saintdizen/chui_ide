@@ -270,8 +270,21 @@ describe('chat-approvals: команда в браузере и в термин�
     const { host: approvalHost, mounted } = host();
     const decision = create(approvalHost as never).confirm('npm test', undefined);
     mounted[0]?.findAll((item) => item.text === 'Выполнить')[0]?.fire('click');
-    await expect(decision).resolves.toBe(true);
+    // Разовый ответ — только «да»: запоминать нечего.
+    await expect(decision).resolves.toEqual({ allowed: true });
     expect(mounted[0]?.findAll((item) => item.text === 'разрешено')).toHaveLength(1);
+    expect(mounted[0]?.findAll((item) => item.text === 'Всегда: эта команда')).toHaveLength(0);
+  });
+
+  it('кнопки «Всегда» несут объём разрешения, а без папки их нет', async () => {
+    const create = await setupCommand();
+    const { host: approvalHost, mounted } = host();
+    const decision = create(approvalHost as never).confirm('npm test', undefined, '/work/app');
+    expect(mounted[0]?.findAll((item) => item.text === 'Всегда: эта команда')).toHaveLength(1);
+    expect(mounted[0]?.findAll((item) => item.text === 'Всегда: эта папка')).toHaveLength(1);
+    mounted[0]?.findAll((item) => item.text === 'Всегда: эта папка')[0]?.fire('click');
+
+    await expect(decision).resolves.toEqual({ allowed: true, remember: 'dir' });
   });
 
   it('причина проверки модели стоит в карточке, а без неё строки нет', async () => {

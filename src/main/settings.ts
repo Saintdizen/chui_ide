@@ -26,6 +26,7 @@ import { normalizeFavorites } from '../shared/favorites';
 import { parseFsAddress, formatFsAddress } from '../shared/fs-address';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { normalizeAgentHooks, type AgentHookConfig } from '../shared/agent-hooks';
+import { type CommandGrant, type EditGrant, normalizeEditGrants, normalizeGrants } from '../shared/agent-grants';
 import { normalizeAutomations, type AutomationConfig } from '../shared/automations';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { normalizeSnippets } from '../shared/snippets';
@@ -113,6 +114,10 @@ interface StoredSettings {
     toolPreset: ToolPresetId;
     /** Страховка полного доступа: спрашивать перед необратимыми командами. */
     confirmDangerous: boolean;
+    /** Разрешения, выданные карточкой подтверждения: команда / папка / всё. */
+    commandGrants: CommandGrant[];
+    /** Разрешения на правку без вопроса: файл целиком или вся папка. */
+    editGrants: EditGrant[];
     /** Проверять безобидные команды моделью, не спрашивая человека. */
     approvalReview: boolean;
     /** Модель для проверки; не задана — активная. */
@@ -212,6 +217,10 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // (sudo, rm, git push --force) спрашиваем, пока человек сам не отключит
     // страховку. Лишний вопрос дешевле одного пропущенного `rm -rf`.
     confirmDangerous: true,
+    // Выданные разрешения переживают перезапуск — иначе «больше не спрашивать»
+    // значило бы «до закрытия окна». Список виден в настройках.
+    commandGrants: [],
+    editGrants: [],
     // Проверка команд моделью выключена: она тратит токены и решает за человека.
     // Включается осознанно — тем, кто устал подтверждать `ls` и `git status`.
     approvalReview: false,
@@ -485,6 +494,8 @@ export class SettingsStore {
         maxAutopilotSteps: ai.maxAutopilotSteps,
         toolPreset: sanitizeToolPreset(ai.toolPreset),
         confirmDangerous: ai.confirmDangerous,
+        commandGrants: normalizeGrants(ai.commandGrants),
+        editGrants: normalizeEditGrants(ai.editGrants),
         approvalReview: ai.approvalReview === true,
         reviewModel: ai.reviewModel,
         compressOutput: ai.compressOutput !== false,
@@ -812,6 +823,8 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     target.maxAutopilotSteps = clampSteps(patch.maxAutopilotSteps, target.maxAutopilotSteps);
   }
   if (patch.confirmDangerous !== undefined) target.confirmDangerous = patch.confirmDangerous === true;
+  if (patch.commandGrants !== undefined) target.commandGrants = normalizeGrants(patch.commandGrants);
+  if (patch.editGrants !== undefined) target.editGrants = normalizeEditGrants(patch.editGrants);
   if (patch.approvalReview !== undefined) target.approvalReview = patch.approvalReview === true;
   // Модель проверки: пусто — проверяет активная модель беседы.
   if (patch.reviewModel !== undefined) {

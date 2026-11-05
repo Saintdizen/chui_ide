@@ -225,3 +225,83 @@ describe('отказ — одним словом', () => {
     expect(term.created).toEqual([`${ROOT}/packages/core`]);
   });
 });
+
+describe('разрешения навсегда', () => {
+  /**
+   * «Больше не спрашивать» — не подсказка для памяти, а решение: раз оно есть,
+   * карточка не должна появляться снова, иначе кнопка ничего не делает.
+   */
+  it('выданное разрешение на команду отменяет вопрос', async () => {
+    const box = sandbox();
+    let asked = 0;
+    const ctx = {
+      workspace: workspace(),
+      sandbox: box,
+      allowAll: true,
+      confirmDangerous: true,
+      commandGrants: [{ scope: 'command', value: 'rm -rf dist' }],
+      confirmCommand: async () => {
+        asked += 1;
+        return true;
+      },
+    } as unknown as ToolContext;
+
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ command: 'rm -rf dist' }));
+
+    expect(outcome.ok).toBe(true);
+    expect(asked).toBe(0);
+  });
+
+  it('разрешение на папку не распространяется на корень проекта', async () => {
+    let asked = 0;
+    const ctx = {
+      workspace: workspace(),
+      sandbox: sandbox(),
+      allowAll: true,
+      confirmDangerous: true,
+      commandGrants: [{ scope: 'dir', value: `${ROOT}/packages` }],
+      confirmCommand: async () => {
+        asked += 1;
+        return true;
+      },
+    } as unknown as ToolContext;
+
+    await runTool(ctx, 'terminal', JSON.stringify({ command: 'rm -rf dist' }));
+
+    expect(asked).toBe(1);
+  });
+
+  it('ответ карточки «эта команда» уходит в настройки одним разрешением', async () => {
+    const granted: unknown[] = [];
+    const ctx = {
+      workspace: workspace(),
+      sandbox: sandbox(),
+      allowAll: true,
+      confirmDangerous: true,
+      confirmCommand: async () => ({ allowed: true, remember: 'command' as const }),
+      grantCommand: (grant: unknown) => granted.push(grant),
+    } as unknown as ToolContext;
+
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ command: 'rm -rf dist' }));
+
+    expect(outcome.ok).toBe(true);
+    expect(granted).toEqual([{ scope: 'command', value: 'rm -rf dist' }]);
+  });
+
+  it('отказ карточки не записывает ничего', async () => {
+    const granted: unknown[] = [];
+    const ctx = {
+      workspace: workspace(),
+      sandbox: sandbox(),
+      allowAll: true,
+      confirmDangerous: true,
+      confirmCommand: async () => ({ allowed: false }),
+      grantCommand: (grant: unknown) => granted.push(grant),
+    } as unknown as ToolContext;
+
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ command: 'rm -rf dist' }));
+
+    expect(outcome.ok).toBe(false);
+    expect(granted).toEqual([]);
+  });
+});

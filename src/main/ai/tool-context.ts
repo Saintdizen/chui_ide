@@ -18,6 +18,7 @@ import type {
   ToolPresentedFile,
 } from '../../shared/api';
 import type { BrowserSnapshot } from '../../shared/browser';
+import type { CommandDecision, CommandGrant } from '../../shared/agent-grants';
 import type { SearchSymbol } from '../../shared/code-search';
 import type { FileEdit } from '../../shared/edits';
 import type { LintOutcome } from '../../shared/lint';
@@ -346,7 +347,11 @@ export interface ToolContext {
    */
   applyPatches?(patches: PatchFile[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /** Спросить у пользователя разрешение на запуск команды. */
-  confirmCommand?(command: string): Promise<boolean>;
+  confirmCommand?(command: string): Promise<CommandDecision>;
+  /** Разрешения, выданные ранее кнопками карточки (из настроек). */
+  commandGrants?: readonly CommandGrant[];
+  /** Человек нажал «больше не спрашивать»: запомнить и больше не спрашивать. */
+  grantCommand?(grant: CommandGrant): void;
   /**
    * Задать человеку вопрос и дождаться ответа (инструмент `ask`). Пустой ответ —
    * вопрос остался без ответа: прогон прервали или нажали «Отменить».

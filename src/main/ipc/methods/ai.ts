@@ -5,6 +5,7 @@ import { SessionIndexStore } from '../../ai/session-index-store';
 import { PushTopic, RpcErrorCode, type ChatRequest } from '../../../shared/api';
 import { shouldReview, type ReviewVerdict } from '../../../shared/approval-review';
 import { sanitizePlanExitDecision } from '../../../shared/plan-exit';
+import { addGrant, type CommandGrant, normalizeGrants, rememberedGrant } from '../../../shared/agent-grants';
 import { isDangerousCommand } from '../../ai/tool-rules';
 import { pushToRenderers } from '../push';
 import type { RpcServices } from '../context';
@@ -23,6 +24,15 @@ import { RpcFailure, type RpcRouter } from '../router';
  * Перенесено из `register.ts` без правок логики.
  */
 export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
+  /**
+   * Запомнить разрешение: «больше не спрашивать» — настройка, а не состояние
+   * прогона, поэтому живёт в файле настроек и видна в списке разрешённого.
+   */
+  const rememberCommandGrant = (grant: CommandGrant): void => {
+    const current = normalizeGrants(deps.settings.get().ai.commandGrants);
+    deps.settings.update({ ai: { commandGrants: addGrant(current, grant) } });
+  };
+
   /**
    * Ассистент выключается мастер-тумблером в настройках. Проверяем на входе:
    * выключенный AI не должен ни ходить в сеть, ни тратить токены — ни через
@@ -111,18 +121,24 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
               // Молча выполненное действие всё равно должно быть видно: строка в ленте
               // говорит, что команду разрешила проверка и почему.
               pushToRenderers(PushTopic.ApprovalReview, { command, reason: verdict.reason });
-              return true;
+              return { allowed: true };
             }
             // Проверка не решилась — её причина едет в карточку подсказкой: человеку
             // полезно знать, что именно смутило модель.
             const decision = await deps.host.request(
               ctx.sender,
               'ai.confirmCommand',
-              { command, review: verdict ?? undefined },
+              { command, cwd: deps.workspace.rootPath() ?? undefined, review: verdict ?? undefined },
               ctx.signal,
             );
-            return decision.allowed;
+            // «Больше не спрашивать» — решение человека, и его надо записать ДО
+            // возврата: следующая такая же команда сюда уже не придёт.
+            if (decision.allowed && decision.remember) {
+              rememberCommandGrant(rememberedGrant(decision.remember, command, deps.workspace.rootPath() ?? undefined));
+            }
+            return { allowed: decision.allowed };
           },
+          rememberCommandGrant: (grant) => rememberCommandGrant(grant),
           confirmBrowser: (action) =>
             deps.host
               .request(ctx.sender, 'ai.confirmBrowser', { action }, ctx.signal)

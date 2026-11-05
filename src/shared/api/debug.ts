@@ -1,4 +1,5 @@
 import type { AccountBalance } from '../balance';
+import type { CommandGrant, EditGrant } from '../agent-grants';
 import type { ToolPresetId } from '../tool-presets';
 import type { McpServerConfig } from '../mcp';
 import type { AgentHookConfig } from '../agent-hooks';
@@ -222,6 +223,10 @@ export interface AiSettingsPatch {
   maxAutopilotSteps?: number;
   /** Спрашивать ли при полном доступе перед необратимыми командами. */
   confirmDangerous?: boolean;
+  /** Выданные разрешения: «больше не спрашивать» с карточки команды. */
+  commandGrants?: CommandGrant[];
+  /** Выданные разрешения на правку: «больше не спрашивать» про файл или папку. */
+  editGrants?: EditGrant[];
   /** Проверять ли команду моделью перед карточкой подтверждения. */
   approvalReview?: boolean;
   /** Модель для проверки команд; пусто — активная модель беседы. */

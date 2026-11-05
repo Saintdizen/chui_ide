@@ -1,5 +1,12 @@
 import type { FileEdit } from '../../shared/edits';
 import type { PlanExitDecision } from '../../shared/plan-exit';
+import {
+  type CommandGrantScope,
+  type ConfirmCommandAnswer,
+  type EditGrantScope,
+  describeGrant,
+  normalizeCommand,
+} from '../../shared/agent-grants';
 import { commandConsequence, editsConsequence, type DangerLevel } from '../../shared/step-consequence';
 import { fileWord } from './chat-text';
 import { h, svgIcon, type IconName } from './dom';
@@ -47,6 +54,14 @@ export interface ApprovalHost {
    * Поэтому после ответа фокус ставим явно — в ленту или в поле ввода.
    */
   returnFocus(): void;
+  /**
+   * «Больше не спрашивать про этот файл (или его папку)».
+   *
+   * Отличается от обычного ответа на карточку тем, что решение переживает
+   * прогон: хозяин пишет разрешение в настройки. Для `dir` берётся папка
+   * самого файла — карточке незачем знать про пути больше, чем она показывает.
+   */
+  rememberEdit?(scope: EditGrantScope, path: string): void;
 }
 
 /**
@@ -123,6 +138,22 @@ export function createEditReview(host: ApprovalHost): EditReview {
         section.appendChild(group);
       }
       if (file.extra) section.appendChild(h('div', { class: 'review-error' }, `… и ещё правок: ${file.extra}`));
+      // «Этот файл — всегда» прямо на строке файла: спрашивать раз за разом
+      // про один и тот же файл бессмысленно, а разрешать пачке целиком
+      // (это уже полный доступ) человек не обязан.
+      if (host.rememberEdit) {
+        const remember = h(
+          'button',
+          { class: 'btn btn-small review-remember', type: 'button' },
+          'Не спрашивать про файл',
+        );
+        remember.addEventListener('click', () => {
+          host.rememberEdit?.('file', file.path);
+          remember.disabled = true;
+          remember.textContent = 'Больше не спрошу';
+        });
+        section.appendChild(remember);
+      }
       block.appendChild(section);
     });
 
@@ -200,7 +231,20 @@ export function createEditReview(host: ApprovalHost): EditReview {
     for (const box of checks) box.addEventListener('change', syncCount);
     syncCount();
 
-    block.appendChild(h('div', { class: 'review-actions' }, applyButton, rejectButton, allButton));
+    // Папка целиком — следующий шаг после файла: агент часто ходит по одному
+    // дереву, и разрешать каждый файл по отдельности утомительно.
+    const folderButton = host.rememberEdit
+      ? h('button', { class: 'btn btn-small', type: 'button' }, 'Не спрашивать про папки')
+      : null;
+    if (folderButton) {
+      folderButton.addEventListener('click', () => {
+        for (const file of files) host.rememberEdit?.('dir', file.path);
+        folderButton.disabled = true;
+        folderButton.textContent = 'Папки запомнены';
+      });
+    }
+
+    block.appendChild(h('div', { class: 'review-actions' }, applyButton, rejectButton, allButton, folderButton));
     host.mount(block);
     host.scrollToEnd();
 
@@ -236,17 +280,37 @@ interface ApprovalRequest {
 
 export interface CommandApproval {
   /**
-   * Спросить разрешение на запуск команды; `true` — выполнять.
-   * `review` — причина, по которой проверка модели не разрешила команду сама.
+   * Спросить разрешение на запуск команды. Ответ — не только «да/нет»: человек
+   * может разрешить и запомнить (см. `ConfirmCommandAnswer`).
+   * `review` — причина, по которой проверка модели не разрешила команду сама;
+   * `cwd` — папка запуска, чтобы предложить «больше не спрашивать здесь».
    */
-  confirm(command: string, review?: string): Promise<boolean>;
+  confirm(command: string, review?: string, cwd?: string): Promise<ConfirmCommandAnswer>;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
   confirmBrowser(action: string): Promise<boolean>;
 }
 
+/**
+ * Кнопка «больше не спрашивать»: в каком объёме запомнить разрешение
+ * и что написать на кнопке. Одна и та же строка не должна отличаться от
+ * того, что окажется потом в настройках (там подпись собирает describeGrant).
+ */
+interface GrantOption {
+  scope: CommandGrantScope;
+  label: string;
+}
+
+/**
+ * Разрешение на команду — не «да/нет».
+ *
+ * Оказавшись десятый раз перед одной и той же `npm test`, человек ничего
+ * нового не решает: ему нужна кнопка «больше не спрашивать». Кнопок три, а
+ * не одна, потому что «навсегда для всего» — уже не то же самое, что «эта
+ * папка»: агент ходит и в домашний каталог.
+ */
 export function createCommandApproval(host: ApprovalHost): CommandApproval {
   /** Общая карточка: рисуем, ждём нажатия, отдаём ответ обещанием. */
-  function show(request: ApprovalRequest): Promise<boolean> {
+  function show(request: ApprovalRequest, grants: readonly GrantOption[] = []): Promise<ConfirmCommandAnswer> {
     const block = h('div', { class: 'approval' });
     block.appendChild(h('div', { class: 'approval-head' }, svgIcon('warning', 13), h('span', {}, request.title)));
     block.appendChild(h('pre', { class: 'approval-command' }, request.body));
@@ -272,13 +336,13 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
       );
     }
 
-    let settle: (allowed: boolean) => void = () => undefined;
-    const decision = new Promise<boolean>((resolve) => {
+    let settle: (answer: ConfirmCommandAnswer) => void = () => undefined;
+    const decision = new Promise<ConfirmCommandAnswer>((resolve) => {
       settle = resolve;
     });
 
     /** Решение принято — тело и подсказка больше не нужны: остаётся строка статуса. */
-    function finish(allowed: boolean, note: string): void {
+    function finish(answer: ConfirmCommandAnswer, note: string): void {
       unregister();
       block.classList.add('decision-done');
       block.replaceChildren(
@@ -291,24 +355,42 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
         ),
       );
       block.scrollIntoView({ block: 'nearest' });
-      settle(allowed);
+      settle(answer);
       host.returnFocus();
     }
 
     const runButton = h(
       'button',
-      { class: 'btn btn-small btn-primary', type: 'button', onClick: () => finish(true, 'разрешено') },
+      {
+        class: 'btn btn-small btn-primary',
+        type: 'button',
+        onClick: () => finish({ allowed: true }, 'разрешено'),
+      },
       'Выполнить',
+    );
+    // «Больше не спрашивать» стоит рядом с «Выполнить», но другим весом: разовое
+    // «да» должно оставаться самым простым движением.
+    const grantButtons = grants.map((grant) =>
+      h(
+        'button',
+        {
+          class: 'btn btn-small',
+          type: 'button',
+          title: `Больше не спрашивать: ${grant.label}`,
+          onClick: () => finish({ allowed: true, remember: grant.scope }, `разрешено навсегда: ${grant.label}`),
+        },
+        grant.scope === 'command' ? 'Всегда: эта команда' : grant.scope === 'dir' ? 'Всегда: эта папка' : 'Всегда: всё',
+      ),
     );
     const skipButton = h(
       'button',
-      { class: 'btn btn-small', type: 'button', onClick: () => finish(false, 'отменено') },
+      { class: 'btn btn-small', type: 'button', onClick: () => finish({ allowed: false }, 'отменено') },
       'Отменить',
     );
-    const abort = (): void => finish(false, 'отменено');
+    const abort = (): void => finish({ allowed: false }, 'отменено');
     const unregister = host.register(abort);
 
-    block.appendChild(h('div', { class: 'approval-actions' }, runButton, skipButton));
+    block.appendChild(h('div', { class: 'approval-actions' }, runButton, ...grantButtons, skipButton));
     host.mount(block);
     host.scrollToEnd();
 
@@ -316,26 +398,39 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
   }
 
   return {
-    confirm: (command, review) =>
-      show({
-        title: 'Ассистент просит выполнить команду',
-        body: command,
-        hint: 'Команда выполнится в папке проекта от вашего имени.',
-        done: 'Выполняется скрипт',
-        icon: 'terminal',
-        // Разбор — локальный и мгновенный, без модели: человек и так ждёт,
-        // а необратимое (`rm -rf`) должно читаться с первого взгляда.
-        consequence: commandConsequence(command),
-        ...(review ? { review: `Проверка не решилась: ${review}` } : {}),
-      }),
-    confirmBrowser: (action) =>
-      show({
-        title: 'Ассистент просит действие в браузере',
-        body: action,
-        hint: 'Действие выполнится в отдельном браузере IDE — он не видит ваши сессии и закладки.',
-        done: 'Действие в браузере',
-        icon: 'search',
-      }),
+    confirm: (command, review, cwd) =>
+      show(
+        {
+          title: 'Ассистент просит выполнить команду',
+          body: command,
+          hint: cwd
+            ? 'Команда выполнится от вашего имени. «Всегда» запоминается в настройках — там же его можно убрать.'
+            : 'Команда выполнится в папке проекта от вашего имени.',
+          done: 'Выполняется скрипт',
+          icon: 'terminal',
+          // Разбор — локальный и мгновенный, без модели: человек и так ждёт,
+          // а необратимое (`rm -rf`) должно читаться с первого взгляда.
+          consequence: commandConsequence(command),
+          ...(review ? { review: `Проверка не решилась: ${review}` } : {}),
+        },
+        cwd
+          ? [
+              { scope: 'command', label: describeGrant({ scope: 'command', value: normalizeCommand(command) }) },
+              { scope: 'dir', label: describeGrant({ scope: 'dir', value: cwd }) },
+              { scope: 'all', label: describeGrant({ scope: 'all' }) },
+            ]
+          : [],
+      ),
+    confirmBrowser: async (action) =>
+      (
+        await show({
+          title: 'Ассистент просит действие в браузере',
+          body: action,
+          hint: 'Действие выполнится в отдельном браузере IDE — он не видит ваши сессии и закладки.',
+          done: 'Действие в браузере',
+          icon: 'search',
+        })
+      ).allowed,
   };
 }
 

@@ -23,6 +23,7 @@ import {
   type TestGenerationResult,
   type ChatTitleResult,
 } from '../../shared/api';
+import { type CommandGrant, type ConfirmCommandAnswer, normalizeGrants } from '../../shared/agent-grants';
 import type { FileEdit } from '../../shared/edits';
 import type { PatchFile } from '../../shared/patch';
 import { ageStaleResults, ageToolResults } from './age-results';
@@ -241,8 +242,13 @@ export interface ChatHostBridge {
   applyEdits(edits: FileEdit[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /** Правки по якорю: позиции считает renderer, у него есть текст документа. */
   applyPatches(patches: PatchFile[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
-  /** Спросить у пользователя разрешение на запуск команды. */
-  confirmCommand(command: string): Promise<boolean>;
+  /**
+   * Спросить у пользователя разрешение на запуск команды. Ответ несёт не только
+   * «да/нет»: человек может разрешить навсегда — и тогда решать больше нечего.
+   */
+  confirmCommand(command: string): Promise<ConfirmCommandAnswer>;
+  /** Запомнить выданное разрешение в настройках (кнопка «больше не спрашивать»). */
+  rememberCommandGrant(grant: CommandGrant): void;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
   confirmBrowser(action: string): Promise<boolean>;
   /** Задать человеку вопрос и дождаться ответа: инструмент `ask`. Пустая строка — ответа не будет. */
@@ -832,6 +838,7 @@ export class AiService {
       autoApprove: flags.autoApprove,
       allowAll: flags.allowAll,
       confirmDangerous: settings.ai.confirmDangerous === true,
+      commandGrants: normalizeGrants(settings.ai.commandGrants),
     };
     // Сжатие вывода — только для контекста модели: человек в карточке инструмента
     // видит текст как он есть (см. `compressToolOutput`).
@@ -901,6 +908,7 @@ export class AiService {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
       toolContext.applyPatches = (patches, auto) => host.applyPatches(patches, auto);
       toolContext.confirmCommand = (command) => host.confirmCommand(command);
+      toolContext.grantCommand = (grant) => host.rememberCommandGrant(grant);
       toolContext.confirmBrowser = (action) => host.confirmBrowser(action);
       toolContext.ask = (question, options) => host.ask(question, options);
       toolContext.diagnostics = (path) => host.getDiagnostics(path);
