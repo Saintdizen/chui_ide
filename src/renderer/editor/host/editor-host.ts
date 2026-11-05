@@ -926,6 +926,14 @@ export class EditorHost {
     // Заглядывание идёт после списка мест: видимый список забирает клавишу первым,
     // а копия — уже когда списка нет (при заглядывании он и не показывается).
     if (this.peek) interceptors.push(this.peek);
+    // Обход мест раскрытого сниппета — раньше Emmet: пока сниппет не пройден, Tab идёт
+    // по его местам, а не раскрывает сокращение (TASKS 45).
+    interceptors.push({
+      handleKey: (event) => {
+        if (event.key !== 'Tab' || event.ctrlKey || event.altKey || event.metaKey) return false;
+        return this.assistant.goToSnippetStop(event.shiftKey ? 'previous' : 'next');
+      },
+    });
     // Emmet — после попапов: видимый список подсказок забирает Tab себе, а уже потом
     // Tab раскрывает сокращение (см. `input/emmet.ts`).
     if (options.emmetEnabled) {

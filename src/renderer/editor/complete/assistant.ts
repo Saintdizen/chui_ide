@@ -41,6 +41,7 @@ import { importPathAt, importPathItems, type ImportPathContext } from './import-
 import { expandPostfix, postfixAt, postfixOffers } from './postfix';
 import { callContextAt, namedArgumentItems } from './named-args';
 import { expandSnippet } from './snippet';
+import { SnippetSession } from './snippet-session';
 import { importsOf, memberAccessAt, type membersOf, membersOfPath, type MemberAccess } from './member-access';
 import { prefixAt } from './prefix';
 import { WordIndex } from './word-index';
@@ -439,6 +440,11 @@ export class CompletionAssistant {
   /** Подписи, для которых уже спрашивали resolve: не повторяем на каждое движение стрелок. */
   private readonly resolveRequested = new Set<string>();
   private language: string;
+  /**
+   * Раскрытый сниппет, по местам которого сейчас ходит `Tab` (`snippet-session.ts`).
+   * Живёт до последнего места или до первой чужой правки: тогда заготовка уже не та.
+   */
+  private snippet: SnippetSession | null = null;
   /** Номер запроса к серверу: показ ответа — только если он ещё про текущее место. */
   private lspRequestId = 0;
   /** Знаки, по которым сервер сам готов открывать подсказки (`.` в TS, `@` в CSS). */
@@ -551,6 +557,21 @@ export class CompletionAssistant {
   }
 
   /**
+   * `Tab` / `Shift+Tab` по местам раскрытого сниппета (`snippet-session.ts`).
+   * Возвращает `true`, если клавишу забрали: дальше ввод её не отдаёт отступу.
+   * `false` — сниппета нет или он кончился: Tab работает как обычно.
+   */
+  goToSnippetStop(direction: 'next' | 'previous'): boolean {
+    if (!this.snippet) return false;
+    const jump = direction === 'next' ? this.snippet.next() : this.snippet.previous();
+    if (jump.done) this.snippet = null;
+    const stop = jump.stop;
+    if (!stop) return false;
+    this.controller.setSelection({ anchor: stop.start, active: stop.end });
+    return true;
+  }
+
+  /**
    * Текст изменился: пересчитать подсказки. Вызывается вводом после правки — тогда
    * подсказки предлагаются ровно по тому, что в документе сейчас.
    *
@@ -563,6 +584,12 @@ export class CompletionAssistant {
     this.clearIndexTimer();
     // Начали печатать — уровни ширины больше не нужны: набранное начало точнее.
     if (change.kind !== 'selection') this.askedAll = false;
+    // Правка вне границ заготовки значит, что сниппет уже не тот, по которому разбор
+    // считал места: сдвиги после неё ложные. Выбором места (Tab) сюда тоже приходят,
+    // но там смещения не меняются — такие проходы ничего не рвут.
+    if (change.kind === 'text' && this.snippet && !this.snippet.coversChange(change.from)) {
+      this.snippet = null;
+    }
     if (change.kind === 'selection') {
       // Курсор переехал без правки: список про прежнее место, показывать его нельзя.
       if (this.widget.isVisible) this.widget.hide();
@@ -1205,6 +1232,8 @@ export class CompletionAssistant {
       const anchor = start + shift + (expanded ? expanded.caret : inserted.length);
       const active = start + shift + (expanded ? expanded.selectionEnd : inserted.length);
       this.controller.applyEdits(changes, { anchor, active });
+      // Места заготовки сдвинуты авто-импортом: Tab ходит уже по сдвинутому тексту.
+      this.snippet = expanded && expanded.tabstops.length > 0 ? new SnippetSession(expanded, start + shift) : null;
       return;
     }
 
@@ -1216,8 +1245,12 @@ export class CompletionAssistant {
         { start, removed, inserted: expanded.text },
         { anchor: start + expanded.caret, active: start + expanded.selectionEnd },
       );
+      // Запоминаем заготовку: дальше Tab ходит по её местам, пока их не пройдёт
+      // (`snippet-session.ts`). Сдвиг от авто-импорта тоже учитываем.
+      this.snippet = expanded.tabstops.length > 0 ? new SnippetSession(expanded, start) : null;
       return;
     }
+    this.snippet = null;
     // Вставка идёт обычной правкой контроллера — значит, попадает в историю и
     // отменяется Ctrl+Z, как любой набор. Вставляем `insert`, если он есть: сервер
     // может подставлять не то, что в подписи.
