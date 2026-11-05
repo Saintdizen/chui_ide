@@ -3020,8 +3020,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       инструментов и предъявленные заметки. Ничего дополнительно не спрашиваем:
       в момент падения ещё один запрос — лишняя точка отказа.
     */
-    runEndNote: (session, how, reason) => {
-      const unsaved = [...session.touched.keys()].filter(
+    runEndNote: (session, how, reason) => {      const unsaved = [...session.touched.keys()].filter(
         (path) => deps.documents.get(path)?.dirty === true,
       );
       // Правки буфера — отдельная карта с путём в ключе: у `ToggledFile`
@@ -3048,6 +3047,19 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       const target = sessions.find((item) => item.id === session.id);
       if (!target) return;
       threadEnd(target, how, report);
+    },
+    /*
+      «Повторить» у ошибки. Идёт через `regenerate`, а не через новый `send`:
+      вопрос уже лежит в истории, и повтор — тот же вопрос заново, а не второй.
+
+      Через `void`: обработчик клика не ждёт длины прогона, а `regenerate`
+      сам сторожит занятость — двойной щелчок не запустит две копии.
+    */
+    retryRun: (session) => {
+      // Повторять в закрытой беседе некуда: `regenerate` резал бы ленту узла,
+      // которого уже нет.
+      if (!sessions.some((item) => item.id === session.id)) return;
+      void regenerate(session);
     },
     modes: () => composer.modes(),
   });

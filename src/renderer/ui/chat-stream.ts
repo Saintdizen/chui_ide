@@ -25,6 +25,7 @@ import type { ChatSession } from './chat-session';
 import { createToolFeed, toolLabel, type ReasoningRowView, type ToolCardView } from './chat-tools';
 import { createStreamDedupe } from './stream-dedupe';
 import type { RunEndHow } from './run-end';
+import { classifyFailure } from './run-failure';
 import { clear, h, svgIcon } from './dom';
 import { showToast } from './toast';
 
@@ -106,6 +107,11 @@ export interface StreamHost {
    */
   runEndNote(session: ChatSession, how: RunEndHow, reason?: string): void;
   /**
+   * Повторить оборвавшийся прогон тем же вопросом. Вопрос уже лежит в истории,
+   * поэтому повтор — обычный ход, а не воскрешение текста из DOM.
+   */
+  retryRun(session: ChatSession): void;
+  /**
    * Открыть файл-результат агента (show с action present) — как клик по файлу.
    * Место необязательно: `present` его присылает, только если модель назвала строку.
    */
@@ -146,6 +152,49 @@ function toWireMessage(message: ChatMessage): ChatMessage {
   if (message.toolCallId) copy.toolCallId = message.toolCallId;
   if (message.toolCalls?.length) copy.toolCalls = message.toolCalls;
   return copy;
+}
+
+/**
+ * Блок неудачи вместо голой строки текста.
+ *
+ * Сырое сообщение остаётся видимым: без него не пожалуешься и не поищешь
+ * причину. Но рядом — смысл и действие: иначе человек читает `HTTP 429 after
+ * 4 attempts` и не знает, то ли ждать, то ли менять ключ, то ли чинить сеть.
+ */
+function failureBlock(reason: string, onRetry: () => void): HTMLElement {
+  const failure = classifyFailure(reason);
+  // `null` — остановка руками, but сюда попадают только настоящие сбои.
+  const info = failure ?? {
+    kind: 'other' as const,
+    title: 'Не удалось получить ответ',
+    hint: reason,
+    retryable: true,
+  };
+  const actions = h('div', { class: 'failure-actions' });
+  if (info.retryable) {
+    const retry = h(
+      'button',
+      { class: 'btn btn-primary', type: 'button', title: 'Ещё раз с тем же вопросом (Ctrl+R)' },
+      svgIcon('refresh', 12),
+      'Повторить',
+    );
+    retry.addEventListener('click', () => {
+      // Блок живёт до первого нажатия: повтор заменит ответ, и старая кнопка
+      // стала бы приглашением второй раз заказать то же самое.
+      retry.disabled = true;
+      onRetry();
+    });
+    actions.append(retry);
+  }
+  return h(
+    'div',
+    { class: `msg-failure is-${info.kind}`, role: 'alert' },
+    h('div', { class: 'msg-failure-title' }, svgIcon('warning', 12), info.title),
+    h('div', { class: 'msg-failure-hint' }, info.hint),
+    // Причина как есть — свёрнуто, а не спрятано: она нужна, когда совет не помог.
+    h('details', { class: 'msg-failure-raw' }, h('summary', {}, 'Что ответил провайдер'), h('code', {}, reason)),
+    actions,
+  );
 }
 
 export function createStreamRunner(host: StreamHost): StreamRunner {
@@ -492,10 +541,11 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         host.runEndNote(session, 'stopped');
       } else {
         clear(segment);
-        segment.appendChild(h('p', { class: 'msg-error' }, error instanceof Error ? error.message : String(error)));
+        const reason = error instanceof Error ? error.message : String(error);
+        segment.appendChild(failureBlock(reason, () => void host.retryRun(session)));
         showToast('Не удалось получить ответ модели', 'error');
         // Сводка идёт после строки ошибки: сначала что случилось, потом — что от работы осталось.
-        host.runEndNote(session, 'failed', error instanceof Error ? error.message : String(error));
+        host.runEndNote(session, 'failed', reason);
       }
     } finally {
       // Прогон кончился — заслон больше не нужен: следующий начнётся с шага 1
