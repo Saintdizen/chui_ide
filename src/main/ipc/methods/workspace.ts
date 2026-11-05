@@ -63,7 +63,8 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
   }));
   router.register('workspace.updateImports', (params) => deps.workspace.updateImports(params.oldPath, params.newPath));
   router.register('workspace.copy', async (params) => ({ path: await deps.workspace.copy(params.from, params.to) }));
-  router.register('workspace.trash', (params) => deps.workspace.trash(params.path));
+  router.register('workspace.trash', (params, ctx) => deps.workspace.trash(params.path, ctx.signal));
+  router.register('workspace.undoTrash', (params) => deps.workspace.undoTrash(params.undo));
 
   // Открытие рабочей папки меняет состояние репозитория целиком, поэтому
   // обновляем его сразу и рассылаем — UI не должен ходить за этим сам.

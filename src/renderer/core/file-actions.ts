@@ -286,7 +286,7 @@ export function createFolderUndo(path: string): CreateUndo {
  * Когда появится восстановление из корзины — здесь станет `true`.
  */
 export function canUndoTrash(): boolean {
-  return false;
+  return true;
 }
 
 /**

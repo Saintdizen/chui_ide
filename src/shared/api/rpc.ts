@@ -410,7 +410,13 @@ export interface ChuiMethods {
   'workspace.updateImports': { params: { oldPath: string; newPath: string }; result: { files: string[] } };
   /** Копия файла или папки: существующий объект в цели не перетирается. */
   'workspace.copy': { params: { from: string; to: string }; result: { path: string } };
-  'workspace.trash': { params: { path: string }; result: void };
+  /**
+   * В корзину. В ответе — ручка возврата (`null` — возвращать нечего: папка
+   * или слишком большой файл). Она нужна тосту «Вернуть».
+   */
+  'workspace.trash': { params: { path: string }; result: { undo: string | null } };
+  /** Вернуть файл из своего хранилища возврата (не из корзины системы). */
+  'workspace.undoTrash': { params: { undo: string }; result: { path: string } };
   /**
    * Карта проекта: языки, манифесты, тесты и точки входа. Собирается обходом
    * имён без чтения содержимого — дёшево и без последствий для больших проектов.

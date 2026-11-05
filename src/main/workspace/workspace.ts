@@ -2,7 +2,7 @@ import { createCodeIndex } from './code-index';
 import { spawn } from 'node:child_process';
 import { promises as fs, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
-import { shell } from 'electron';
+import { app, shell } from 'electron';
 import {
   PushTopic,
   RpcErrorCode,
@@ -19,6 +19,7 @@ import {
   type WorkspaceInfo,
 } from '../../shared/api';
 import { compareEntries } from '../../shared/entry-kind';
+import { TrashUndo } from './trash-undo';
 import { officeKindOf, officeRefusal, type OfficePreview } from '../../shared/office';
 import { parseOfficeDocument } from '../doc/office';
 import { nextActiveRoot, type WorkspaceRoot } from '../../shared/workspace-roots';
@@ -159,6 +160,12 @@ export class WorkspaceService {
    * в 7,5 тысяч файлов это 788 мс из 875), поэтому повторный поиск читает только
    * изменившееся. Свежесть сверяется по `mtime` и размеру при каждом обращении.
    */
+  /**
+   * Хранилище возврата для удалённых файлов. Основа — userData: переживает
+   * перезапуск окна, но не переустановку приложения, и это правильно.
+   */
+  private readonly trashUndo = new TrashUndo(() => path.join(app.getPath('userData'), 'trash-undo'));
+
   private readonly contents = new ContentCache();
   /**
    * Обход проекта для поисков по коду (структура, экспорты, наследование).
@@ -650,14 +657,18 @@ export class WorkspaceService {
   }
 
   /** Удаление только в корзину: безвозвратное rm из IDE — слишком дорогая ошибка. */
-  async trash(target: string): Promise<void> {
+  async trash(target: string, signal?: AbortSignal): Promise<{ undo: string | null }> {
     const resolved = await this.safePath(target);
     if (resolved === this.requireRoot()) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Корень проекта удалить нельзя');
     }
+    let undo: string | null = null;
     try {
       // Файл сейчас уйдёт в корзину: его содержимое — последний шанс что-то вернуть.
       await this.onBeforeChange?.(resolved, 'delete');
+      // Своя копия — потому что `shell.trashItem` ручки не возвращает, и
+      // «Вернуть» из системной корзины кроссплатформенно нечем.
+      undo = await this.trashUndo.keep(resolved, signal);
       await shell.trashItem(resolved);
     } catch (error) {
       throw new RpcFailure(
@@ -667,6 +678,20 @@ export class WorkspaceService {
     }
     this.contents.invalidate(resolved);
     this.notifyChanged(resolved, 3);
+    return { undo };
+  }
+
+  /**
+   * Вернуть файл, удалённый в корзину: копия из своего хранилища возврата
+   * кладётся на прежнее место. Системная корзина при этом не трогается — там
+   * остаётся то же удаление, и вернуть его оттуда можно и без нас.
+   */
+  async undoTrash(undo: string): Promise<{ path: string }> {
+    const restored = await this.trashUndo.restore(undo);
+    if (!restored) throw new RpcFailure(RpcErrorCode.NotFound, 'Возвращать нечего: копия не найдена');
+    this.contents.invalidate(restored);
+    this.notifyChanged(restored, 1);
+    return { path: restored };
   }
 
   async search(options: SearchOptions, signal?: AbortSignal): Promise<SearchResult> {

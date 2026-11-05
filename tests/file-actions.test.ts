@@ -71,8 +71,10 @@ describe('отмена создания', () => {
 });
 
 describe('canUndoTrash', () => {
-  it('восстановления из корзины нет — и не притворяемся, что есть', () => {
-    expect(canUndoTrash()).toBe(false);
+  it('возврат есть: файл копируется перед корзиной', () => {
+    // Механизм — `main/workspace/trash-undo.ts`: системная корзина ручки не
+    // возвращает, поэтому копия кладётся в своё хранилище возврата.
+    expect(canUndoTrash()).toBe(true);
   });
 });
 
@@ -196,8 +198,8 @@ describe('copiedToTrash', () => {
 });
 
 describe('undoableAfterTrash', () => {
-  it('без восстановления из корзины возвращать нечего, сколько ни удали', () => {
-    expect(undoableAfterTrash(5)).toBe(0);
+  it('возвращается столько, сколько сохранилось', () => {
+    expect(undoableAfterTrash(5)).toBe(5);
     expect(undoableAfterTrash(0)).toBe(0);
   });
 });

@@ -28,6 +28,9 @@
 
   /* ── данные: дерево повторяет обычный проект на JavaScript ─────────────── */
 
+  /** Удалённое в мок-корзину: путь → содержимое, чтобы «Вернуть» работал. */
+  const TRASHED = new Map();
+
   const FILES = new Map([
     [
       `${ROOT}/eslint.config.js`,
@@ -1092,6 +1095,9 @@ module.exports = [
       return { path: params.to };
     },
     'workspace.trash': (params) => {
+      // Возврат в браузере отыгрывается честно: содержимое держим в памяти.
+      const trashed = FILES.get(params.path);
+      if (trashed !== undefined) TRASHED.set(params.path, trashed);
       FILES.delete(params.path);
       for (const key of [...DIRS.keys()]) {
         if (key === params.path || key.startsWith(`${params.path}/`)) DIRS.delete(key);
@@ -1100,6 +1106,17 @@ module.exports = [
         if (key.startsWith(`${params.path}/`)) FILES.delete(key);
       }
       dropChild(params.path);
+      return { undo: trashed === undefined ? null : params.path };
+    },
+    'workspace.undoTrash': (params) => {
+      // В моке ручка — это сам путь: на диске в браузере ничего не было.
+      const text = TRASHED.get(params.undo);
+      if (text !== undefined) {
+        FILES.set(params.undo, text);
+        TRASHED.delete(params.undo);
+        addChild(params.undo);
+      }
+      return { path: params.undo };
     },
 
     // Картинку отдаём настоящую (крошечный PNG): по ней видно, что миниатюра

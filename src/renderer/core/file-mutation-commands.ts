@@ -2,7 +2,7 @@ import { objectsWord } from '../../shared/import-install';
 import { basename } from '../ui/dom';
 import type { ToastKind, ToastOptions } from '../ui/toast';
 import type { DefineCommand } from './command-args';
-import { copiedToTrash, trackMoves, undoableAfterTrash, undoMoves, type MoveTrack } from './file-actions';
+import { canUndoTrash, copiedToTrash, trackMoves, undoableAfterTrash, undoMoves, type MoveTrack } from './file-actions';
 import { deleteManyPrompt, deletePrompt, movedNotice, trashedNotice } from './file-notices';
 import { describeFileError } from './file-errors';
 import type { TextDocument } from './document';
@@ -71,8 +71,23 @@ export function registerFileMutationCommands(define: DefineCommand, deps: FileMu
     }
 
     if (openEditors.has(path)) openEditors.close(path);
-    await rpc.request('workspace.trash', { path });
+    const { undo } = await rpc.request('workspace.trash', { path });
     explorer.scheduleRefresh();
+    // Ручка возврата есть не всегда (папка, слишком большой файл) — тогда и
+    // кнопки нет: обещать возврат, которого не будет, хуже, чем молчать.
+    if (canUndoTrash() && undo) {
+      showToast(`В корзине: ${basename(path)}`, undefined, {
+        action: {
+          label: 'Вернуть',
+          run: () =>
+            rpc
+              .request('workspace.undoTrash', { undo })
+              .then(() => explorer.scheduleRefresh())
+              .catch(() => showToast('Вернуть не удалось: копия не сохранилась', 'error')),
+        },
+      });
+      return;
+    }
     showToast(`В корзине: ${basename(path)}`);
   });
 
@@ -97,10 +112,12 @@ export function registerFileMutationCommands(define: DefineCommand, deps: FileMu
 
     let removed = 0;
     let firstFailure: unknown = null;
+    const undos: string[] = [];
     for (const path of list) {
       try {
         if (openEditors.has(path)) openEditors.close(path);
-        await rpc.request('workspace.trash', { path });
+        const { undo } = await rpc.request('workspace.trash', { path });
+        if (undo) undos.push(undo);
         removed += 1;
       } catch (error) {
         // Одного неудачного объекта мало, чтобы отменить удаление остальных.
@@ -118,10 +135,20 @@ export function registerFileMutationCommands(define: DefineCommand, deps: FileMu
       const why = describeFileError(firstFailure, 'файл');
       if (why) showToast(why, 'error');
     }
-    // Восстановления из корзины нет (canUndoTrash) — кнопки не обещаем. Число
-    // возвращаемых спрашивает undoableAfterTrash, а не литерал на месте.
-    if (undoableAfterTrash(removed) > 0) {
-      showToast(`Можно вернуть: ${removed}`, 'info', { action: { label: 'Вернуть', run: () => undefined } });
+    // Возвращаем ровно те, у кого сохранилась копия: папки и большие файлы
+    // приходят без ручки, и обещать их возврат было бы враньём.
+    if (canUndoTrash() && undoableAfterTrash(undos.length) > 0) {
+      showToast(`Можно вернуть: ${undos.length}`, 'info', {
+        action: {
+          label: 'Вернуть',
+          run: async () => {
+            for (const undo of undos) {
+              await rpc.request('workspace.undoTrash', { undo }).catch(() => undefined);
+            }
+            explorer.scheduleRefresh();
+          },
+        },
+      });
     }
   });
 
