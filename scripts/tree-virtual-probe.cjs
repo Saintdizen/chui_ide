@@ -27,6 +27,11 @@ const { openIdeWindow } = require('../dist/main/window.js');
 registerAppScheme();
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const failures = [];
+const check = (what, ok, detail) => {
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}${ok || detail === undefined ? '' : `: ${JSON.stringify(detail)}`}`);
+  if (!ok) failures.push(what);
+};
 const ask = (window, expression, timeoutMs = 20000) =>
   Promise.race([window.webContents.executeJavaScript(expression), wait(timeoutMs).then(() => 'нет ответа')]);
 
@@ -61,16 +66,21 @@ app.whenReady().then(async () => {
   await wait(6000);
 
   // Раскрываем папку `many` — её дети и есть большой список.
-  await ask(
+  //
+  // Через `window.__chui.explorer.expand`, а не кликом и не через scrollIntoView:
+  // в первом случае надо было ждать, что pull запросит детей, во втором —
+  // что высота распорок совпадёт с оценкой виртуализации. Оба способа врут
+  // пачками, а тут происходит ровно то же, что в раскрытии кликом.
+  const opened = await ask(
     ide,
     `(() => {
-      const row = [...document.querySelectorAll('.tree-row')].find(
-        (item) => item.querySelector('.tree-name')?.textContent === 'many',
-      );
-      row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      return Boolean(row);
+      const explorer = window.__chui?.explorer;
+      if (!explorer?.expand) return 'нет expand в __chui.explorer';
+      explorer.expand(${JSON.stringify(path.join(project, 'many'))});
+      return 'раскрываю';
     })()`,
   );
+  check('папка many раскрыта', opened === 'раскрываю', opened);
   await wait(3000);
 
   const snapshot = () =>
@@ -106,6 +116,70 @@ app.whenReady().then(async () => {
   );
   await wait(800);
   console.log(`[tree] снизу: ${JSON.stringify(await snapshot())}`);
+
+  /* Липкая шапка: прокрутка увезла папки за край, и по одним файлам не понять,
+     где ты. Проверяем не «элемент есть», а что он ГОВОРИТ: после прокрутки вниз
+     там должны быть имена папок, а не пусто. */
+  const crumbsBottom = await ask(
+    ide,
+    `(() => {
+      const el = document.querySelector('.explorer .tree-crumbs');
+      if (!el) return { found: false };
+      const style = getComputedStyle(el);
+      return {
+        found: true,
+        text: (el.textContent ?? '').trim(),
+        sticky: style.position,
+        visible: el.getBoundingClientRect().height > 0,
+      };
+    })()`,
+  );
+  console.log(`[tree] шапка снизу: ${JSON.stringify(crumbsBottom)}`);
+  check('шапка есть и липкая', crumbsBottom?.found === true && crumbsBottom?.sticky === 'sticky', crumbsBottom);
+  const depths = await ask(
+    ide,
+    `(() => {
+      const rows = [...document.querySelectorAll('.explorer .tree-rows .tree-row')];
+      return rows.slice(0, 6).map((el) => ({
+        name: el.querySelector('.tree-name')?.textContent ?? '',
+        indent: getComputedStyle(el).paddingLeft,
+        cls: el.className,
+      }));
+    })()`,
+  );
+  console.log(`[tree] глубина строк снизу: ${JSON.stringify(depths)}`);
+  const state = await ask(
+    ide,
+    `(() => {
+      const tree = document.querySelector('.explorer .tree');
+      const host = document.querySelector('.explorer .tree-rows');
+      return {
+        scrollTop: tree.scrollTop,
+        hostTop: host.offsetTop,
+        hostH: host.offsetHeight,
+        view: tree.clientHeight,
+        rows: document.querySelectorAll('.explorer .tree-rows .tree-row').length,
+        gaps: [...document.querySelectorAll('.explorer .tree-rows .tree-gap')].map((g) => g.style.height),
+        crumbs: document.querySelector('.explorer .tree-crumbs')?.textContent ?? '',
+        crumbsN: document.querySelectorAll('.explorer .tree-crumbs > *').length,
+      };
+    })()`,
+  );
+  console.log(`[tree] состояние окна: ${JSON.stringify(state)}`);
+  check('шапка сказала, где мы', typeof crumbsBottom?.text === 'string' && crumbsBottom.text.length > 0, crumbsBottom?.text);
+
+  await ask(
+    ide,
+    `(() => {
+      const tree = document.querySelector('.explorer .tree');
+      tree.scrollTop = 0;
+      tree.dispatchEvent(new Event('scroll'));
+      return true;
+    })()`,
+  );
+  await wait(400);
+  const crumbsTop = await ask(ide, `document.querySelector('.explorer .tree-crumbs')?.textContent ?? ''`);
+  console.log(`[tree] шапка сверху: ${JSON.stringify(crumbsTop)}`);
 
   /* Окно строк считают по ВЫСОТЕ панели в момент отрисовки. Если она была нулевой
      (раскладка не встала, переключали панели, тянули окно), окно схлопывалось в
@@ -149,6 +223,7 @@ app.whenReady().then(async () => {
     failed = true;
   }
 
+  if (failures.length > 0) failed = true;
   terminals.dispose();
   workspace.dispose();
   await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);

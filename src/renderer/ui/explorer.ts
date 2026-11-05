@@ -52,6 +52,7 @@ import {
 import { walkTree, type WalkAction, type WalkKey, type WalkRow } from '../core/tree-walk';
 import { ariaPositions, type AriaPosition } from '../core/tree-aria';
 import { EMPTY_TYPEAHEAD, typeaheadPress, typeaheadTarget } from '../core/tree-typeahead';
+import { ancestorsAt, breadcrumbChanged, type Breadcrumb } from '../core/tree-crumbs';
 import { showContextMenu } from './context-menu';
 import { clear, debounce, h, svgIcon } from './dom';
 import { fileIcon, folderIcon } from './file-icons';
@@ -88,6 +89,11 @@ export interface ExplorerView {
   startRename(path: string): void;
   /** Раскрытые папки — сохраняются в сессии проекта. */
   expandedPaths(): string[];
+  /**
+   * Раскрыть ещё не раскрытую папку без клика — для проб и для тех, кто ставит
+   * набор до первой отрисовки. Путь уже раскрыт или его нет в дереве — тихо ничего.
+   */
+  expand(path: string): void;
   /** Вернуть раскрытые папки прошлой сессии: чужие пути игнорируются. */
   restoreExpanded(paths: readonly string[]): void;
   /** Вид и поведение дерева: значки, сортировка, фильтры, клик. */
@@ -209,12 +215,15 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   /**
    * Раскрыть или свернуть папку — единственное место, где меняется набор: там же и
    * единственный повод сказать сессии, что рабочее место изменилось.
+   * Возвращает `true`, если набор действительно сменился: по этому признаку внешний
+   * код знает, что надо дождаться перерисовки (проба ждёт, а не спит).
    */
-  const setExpanded = (path: string, open: boolean): void => {
-    if (open === expanded.has(path)) return;
+  const setExpanded = (path: string, open: boolean): boolean => {
+    if (open === expanded.has(path)) return false;
     if (open) expanded.add(path);
     else expanded.delete(path);
     deps.onExpandedChange?.();
+    return true;
   };
   const children = new Map<string, readonly DirEntry[]>();
   /** Пути, про которые git уже сказал: игнорируемые (по ответу) и спрошенные. */
@@ -1576,8 +1585,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         const absolute = new Set([...skip].map((relative) => joinPath(info.root, relative)));
         for (const item of packages) {
           const dir = joinPath(info.root, item.path);
-          rows.push({ kind: 'package', name: item.name, dir, relative: item.path, depth: 0 });
-          if (expanded.has(dir)) pushDir(dir, 1);
+          rows.push({ kind: 'package', name: item.name, dir, relative: item.path, depth: 1 });
+          if (expanded.has(dir)) pushDir(dir, 2);
         }
         pushDir(info.root, 0, absolute);
         return filtered(rows);
@@ -1589,7 +1598,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const active = item.root === info.root;
       const collapsed = collapsedRoots.has(item.root);
       rows.push({ kind: 'root', root: item, active, collapsed });
-      if (!collapsed) pushDir(item.root, 1);
+      if (!collapsed) pushDir(item.root, 2);
     }
     return filtered(rows);
   };
@@ -1629,10 +1638,57 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    * тысяч файлов, и держать все узлы в DOM нельзя. Сверху и снизу — распорки на
    * высоту скрытых строк, чтобы полоса прокрутки и прокрутка остались честными.
    */
+  /**
+   * Липкая шапка: папки, внутри которых стоит первая видимая строка.
+   *
+   * Дерево виртуализировано — в монорепо папки над окном давно уехали за край, и
+   * по одним файлам не понять, где ты. Шапка стоит над прокруткой (`position:
+   * sticky`), поэтому видна всегда, но текст в ней меняется от прокрутки.
+   *
+   * Пересоздаём узлы только по факту смены пути (`breadcrumbChanged`): событие
+   * `scroll` приходит десятки раз на секунду, а разметка на каждый кадр — это
+   * работа ради ничего.
+   */
+  let crumbShown: Breadcrumb[] | null = null;
+  const crumbsEl = h('div', { class: 'tree-crumbs', 'aria-hidden': 'true' });
+
+  /** Строка списка в том виде, в каком её читает шапка. */
+  const crumbRowOf = (row: FlatRow): { depth: number; name?: string; dir?: string } => {
+    if (row.kind === 'entry') return { depth: row.depth, name: row.entry.name, dir: row.dir };
+    if (row.kind === 'group') return { depth: row.depth, name: row.label };
+    if (row.kind === 'package') return { depth: row.depth, name: row.name, dir: row.dir };
+    if (row.kind === 'root') return { depth: 0, name: row.root.name, dir: row.root.root };
+    if (row.kind === 'create') return { depth: row.depth, dir: row.parent };
+    // Строка загрузки каталога: глубины у неё нет, и в шапку она не идёт.
+    return { depth: 0 };
+  };
+
+  const renderCrumbs = (paintedFrom: number): void => {
+    const index = paintedFrom;
+    const root = deps.workspace.roots[0]?.root ?? '';
+    // Строки кладём в вид, который понимает шапка: `name` есть не у всех (группа
+    // `kind: 'group'` зовёт его `label`, загрузка имени не имеет вовсе), поэтому
+    // берём имя отдельно, а не полагаемся на совпадение полей.
+    // Пустой список — не «ничего не поменялось», а «показывать нечего»: на корне
+    // проекта предков нет, и `[] === []` оставляло в шапке прежние куски.
+    // Поэтому `null` и пустота различаются: первое — «ещё не рисовали».
+    const next = ancestorsAt(flatRows.map(crumbRowOf), index, root);
+    if (crumbShown !== null && !breadcrumbChanged(crumbShown, next)) return;
+    crumbShown = next;
+    crumbsEl.replaceChildren(
+      ...next.map((crumb) =>
+        h('span', { class: 'tree-crumb', title: crumb.path }, crumb.label),
+      ),
+    );
+    // Шапка без кусков занимает место и ловит клики — убираем её с экрана целиком.
+    crumbsEl.hidden = next.length === 0;
+  };
+
   const renderWindow = (): void => {
     const host = rowsHost;
     const scroller = treeEl;
     if (!host || !scroller) return;
+    // DEBUG
 
     // Таблицу мест считаем ЗДЕСЬ: строки рисуются из `flatRows`, и место строки
     // в наборе зависит от всего набора, а не от окна (`renderWindow` рисует лишь
@@ -1670,6 +1726,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const scrolled = Math.max(0, scroller.scrollTop - host.offsetTop);
     const window = computeWindow(total, scrolled, viewport, stride);
     paintRange(window.first, window.last, stride);
+    renderCrumbs(window.first);
   };
 
   /** Раскрыть или свернуть каталог строкой пакета (как обычной папкой дерева). */
@@ -1994,6 +2051,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // Удалённые папки — над локальным деревом: они о рабочем месте, а не о проекте.
     if ((deps.remoteRoots?.() ?? []).length > 0) tree.appendChild(remoteBlock());
     if (pinned.length > 0) tree.appendChild(pinnedBlock());
+    // Шапка — перед строками и внутри прокрутки: sticky работает только от
+    // прокручиваемого предка, а вне его она уехала бы вместе с содержимым.
+    tree.appendChild(crumbsEl);
     tree.appendChild(host);
     tree.addEventListener('contextmenu', (event) => openMenu(null, event));
     tree.addEventListener('keydown', (event) => onTreeKey(event));
@@ -2234,6 +2294,34 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     }
   };
 
+  /**
+   * Раскрыть папку без клика (публичный `expand`).
+   *
+   * Родители раскрываются — как в `reveal`, — но свою папку `reveal` бы ещё и
+   * ВЫДЕЛИЛ. А выделенная папка при следующем клике норовит переключиться, да и
+   * само выделение шло через тот же путь: у пробы выходило «раскрыл — и тут же
+   * свернулось». Здесь ровно раскрытие: набор, догрузка, перерисовка.
+   */
+  const expandPublic = (path: string): void => {
+    const root = deps.workspace.root;
+    if (!root) return;
+    const relativePath = deps.workspace.relative(path);
+    if (!relativePath || relativePath.startsWith('..')) return;
+    let current = root;
+    let loading = false;
+    for (const segment of relativePath.split('/').filter(Boolean)) {
+      current = joinPath(current, segment);
+      expanded.add(current);
+      if (!children.has(current)) {
+        loading = true;
+        void load(current).then(render);
+      }
+    }
+    deps.onExpandedChange?.();
+    // Папки ещё читаются — их ответ перерисует сам (`load(...).then(render)`).
+    if (!loading) render();
+  };
+
   deps.workspace.onDidChange(() => {
     const next = deps.workspace.root;
     // Та же папка — это обновление («Обновить», повторное открытие того же
@@ -2282,6 +2370,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     render,
     scheduleRefresh,
     reveal,
+    expand: expandPublic,
     startCreate,
     startRename,
     expandedPaths: () => [...expanded],

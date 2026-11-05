@@ -1928,6 +1928,44 @@ textarea {
   padding: 4px 0 12px;
 }
 
+/* Липкая шапка: папки, внутри которых стоит первая видимая строка.
+   `sticky` работает только от прокручиваемого предка — предок здесь `.tree`,
+   который и прокручивается. Отрицательный верхний отступ гасит `padding: 4px`
+   самого списка: без него над шапкой оставалась бы щель, и строки проезжали бы
+   мимо неё. Фон непрозрачный и на переменной темы: иначе строки видны сквозь
+   шапку и она не держит взгляд, ради которого сделана. */
+.explorer .tree-crumbs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 0;
+  align-items: center;
+  min-height: 22px;
+  margin: -4px 0 2px;
+  padding: 2px 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--font_small_size);
+  color: var(--text_color_tertiary);
+  background: var(--panel_background);
+  border-bottom: 1px solid var(--border_color);
+}
+
+/* Кусок цепочки. Разделитель — псевдоэлементом: он не читается вслух
+   (шапка `aria-hidden`) и не мешает выделять текст. */
+.explorer .tree-crumb + .tree-crumb::before {
+  content: '/';
+  margin: 0 4px;
+  opacity: 0.5;
+}
+
+/* Шапка без предков (корень проекта — путь из одного куска и пустой) не нужна
+   вовсе: пустая полоса крадёт высоту у строк. */
+.explorer .tree-crumbs:empty {
+  display: none;
+}
+
 /* Распорки виртуализации: держат длину прокрутки за невидимые строки. Высоту
    задаёт скрипт; здесь только запрет сжиматься во flex-раскладке. */
 .tree-gap {
