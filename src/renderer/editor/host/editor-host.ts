@@ -186,6 +186,8 @@ export interface EditorHostOptions {
   wordWrap?: boolean;
   /** Плавная прокрутка: прыжок курсора ведёт текст разгоном. */
   smoothScroll?: boolean;
+  /** Задержка подсказки при наведении, мс (настройка `editor.hoverDelayMs`). */
+  hoverDelayMs?: number;
   /** Vim-режим: модальное управление клавишами (настройка `editor.vimMode`). */
   vimMode?: boolean;
   /** Tab уводит фокус из редактора (настройка `editor.tabMovesFocus`). */
@@ -832,6 +834,8 @@ export class EditorHost {
         : undefined,
     });
     this.hover = new HoverWidget(this.view, buffer, {
+      // Пауза из настроек: сколько мыши стоять над словом, решает человек, а не код.
+      ...(options.hoverDelayMs !== undefined ? { delayMs: options.hoverDelayMs } : {}),
       // Пометки языка — текстом: волна под словом сама ничего не объясняет, а человек,
       // увидев её, хочет прочитать, в чём дело (см. `showAt` в `hover-widget.ts`).
       problems: (offset) => this.problemsAtOffset(offset),
@@ -1279,6 +1283,8 @@ export class EditorHost {
     minimap?: boolean;
     wordWrap?: boolean;
     smoothScroll?: boolean;
+    /** Задержка подсказки при наведении, мс. */
+    hoverDelayMs?: number;
     vimMode?: boolean;
     emacsMode?: boolean;
     ligatures?: boolean;
@@ -1310,6 +1316,8 @@ export class EditorHost {
     }
     if (options.wordWrap !== undefined) this.view.setWordWrap(options.wordWrap);
     if (options.smoothScroll !== undefined) this.view.setSmoothScroll(options.smoothScroll);
+    // Настройка поменялась — следующая пауза будет новой, без перезапуска редактора.
+    if (options.hoverDelayMs !== undefined) this.hover.setDelay(options.hoverDelayMs);
     if (options.vimMode !== undefined) this.input.setVimMode(options.vimMode);
     if (options.emacsMode !== undefined) this.input.setEmacsMode(options.emacsMode);
     if (options.ligatures !== undefined) this.view.setLigatures(options.ligatures);

@@ -1188,6 +1188,17 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       switchRow('Миникарта', editor.minimap, (value) => editable({ minimap: value })),
       switchRow('Перенос длинных строк', editor.wordWrap, (value) => editable({ wordWrap: value })),
       switchRow('Плавная прокрутка', editor.smoothScroll, (value) => editable({ smoothScroll: value })),
+      field(
+        'Подсказка при наведении — пауза, мс',
+        numberInput(editor.hoverDelayMs, 0, 5000, 50, (value) => editable({ hoverDelayMs: value })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Сколько мыши нужно постоять над словом, чтобы всплыло окно. Меньше — подсказки сыплются от ' +
+          'любого проезда мышью, больше — не дождёшься. Ноль — показывать сразу. Ctrl над карточкой ' +
+          'раскрывает её целиком.',
+      ),
       switchRow('Vim-режим', editor.vimMode, (value) => editable({ vimMode: value })),
       h(
         'div',

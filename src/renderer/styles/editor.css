@@ -1116,6 +1116,9 @@
   position: fixed;
   z-index: 39;
   max-width: 420px;
+  /* Окно подсказки не тянется через экран: свёрнутая — по содержимому, раскрытая —
+     не выше доли окна (считает виджет), а хвост документации читается прокруткой. */
+  overflow: auto;
   padding: 6px 10px;
   background: var(--popup_background);
   border: 1px solid var(--border_color);
@@ -1124,6 +1127,12 @@
   font-family: var(--font_ui);
   font-size: var(--font_labels_size);
   color: var(--text_color);
+}
+
+/* Свёрнутая карточка: видно только начало ответа, хвост — по Ctrl (см. `hover-widget.ts`). */
+.own-editor-hover.is-collapsed .own-editor-hover-body {
+  max-height: calc(var(--font_default_size) * 1.6 * 6);
+  overflow: hidden;
 }
 
 .own-editor-hover-title {

@@ -157,11 +157,7 @@ describe('попап: preselect от сервера', () => {
 
   it('preselect: false не выделяет', () => {
     const { widget } = setup();
-    widget.show(
-      [item('alpha'), { ...item('beta'), preselect: false }],
-      { left: 100, top: 200, bottom: 220 },
-      0,
-    );
+    widget.show([item('alpha'), { ...item('beta'), preselect: false }], { left: 100, top: 200, bottom: 220 }, 0);
     expect(widget.current?.label).toBe('alpha');
   });
 });

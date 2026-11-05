@@ -431,6 +431,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     minimap: settings.editor.minimap,
     wordWrap: settings.editor.wordWrap,
     smoothScroll: settings.editor.smoothScroll,
+    hoverDelayMs: settings.editor.hoverDelayMs,
     vimMode: settings.editor.vimMode,
     // Смена режима Vim обновляет значок в строке состояния.
     onVimModeChange: () => refreshStatus(),
@@ -3622,6 +3623,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       minimap: next.editor.minimap,
       wordWrap: next.editor.wordWrap,
       smoothScroll: next.editor.smoothScroll,
+      hoverDelayMs: next.editor.hoverDelayMs,
       vimMode: next.editor.vimMode,
       emacsMode: next.editor.emacsMode,
       tabMovesFocus: next.editor.tabMovesFocus,

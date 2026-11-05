@@ -434,13 +434,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     кликабельной ссылкой. Источник: VS Code `ux-notifications`,
     JetBrains `notification-balloons`.
 
-### Подсказки и всплывающие окна
-
-72. **Ховер не мигает и не крадёт фокус.** Задержка появления настраивается,
-    окно держится, пока читают, переносится, не перекрывает курсор; `Ctrl`
-    в ховере — как в VS Code — раскрывает больше.
-    Источник: VS Code `edit-evolved` (hover), JetBrains `popups`.
-
 ---
 
 ## Правила работы со списком

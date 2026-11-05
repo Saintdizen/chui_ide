@@ -32,8 +32,20 @@ import { COMMENT, roleLabel, STRING } from '../highlight/tokens';
 import type { TextBuffer } from '../core/text-buffer';
 import type { EditorView } from '../view/editor-view';
 
-/** Пауза перед показом: на ходу мышь не должна ничего открывать. */
-const HOVER_DELAY_MS = 350;
+/**
+ * Пауза перед показом по умолчанию: на ходу мышь не должна ничего открывать.
+ * Сколько на самом деле — решает настройка `editor.hoverDelayMs` (`shared/api/settings.ts`).
+ */
+export const HOVER_DELAY_MS = 350;
+
+/**
+ * Сколько строк тела видно в свёрнутой карточке. Документация бывает на экран,
+ * и показывать её целиком при первом же наведении — значит закрыть файл.
+ */
+export const HOVER_COLLAPSED_LINES = 6;
+
+/** Предел высоты раскрытой карточки, доля окна: остальное — прокруткой внутри. */
+export const HOVER_MAX_HEIGHT_RATIO = 0.6;
 
 /** Что знает языковой сервер о слове. `text` — разметка (markdown), строки — для показа. */
 export interface HoverExternalInfo {
@@ -72,6 +84,12 @@ export interface HoverWidgetOptions {
    * Показываются ПЕРВЫМИ: увидев волну, человек хочет прочитать, в чём дело.
    */
   problems?: (offset: number) => readonly HoverProblem[];
+  /**
+   * Пауза перед показом, мс (настройка `editor.hoverDelayMs`). Не задана — `HOVER_DELAY_MS`.
+   * Живёт в объекте, а не в замыкании: человек может поменять её в настройках, не
+   * перезапуская редактор, — тогда `setDelay` перезапишет её на ходу.
+   */
+  delayMs?: number;
 }
 
 export class HoverWidget {
@@ -91,12 +109,20 @@ export class HoverWidget {
    * на другое слово. Сверяем номер — иначе через карточку прошёл бы чужой текст.
    */
   private requestId = 0;
+  /** Пауза перед показом, мс: на ходу мышь не должна ничего открывать. */
+  private delayMs: number;
+  /**
+   * Раньше подсказка спрятала что-то за многоточием: раскрытие по `Ctrl` должно
+   * показать всё, и место взять снова — от того же слова.
+   */
+  private collapsed = false;
 
   constructor(view: EditorView, buffer: TextBuffer, options: HoverWidgetOptions = {}) {
     this.view = view;
     this.buffer = buffer;
     this.sources = options.sources ?? (options.external ? [options.external] : []);
     this.problems = options.problems;
+    this.delayMs = options.delayMs ?? HOVER_DELAY_MS;
 
     this.root = document.createElement('div');
     this.root.className = 'own-editor-hover';
@@ -113,6 +139,16 @@ export class HoverWidget {
     viewport?.addEventListener('mouseleave', this.onMouseLeave);
     viewport?.addEventListener('mousedown', this.onMouseLeave);
     viewport?.addEventListener('scroll', this.onMouseLeave);
+    // `Ctrl` над карточкой — раскрыть её целиком, как в VS Code. Слушаем `keydown` окна:
+    // фокус к этому моменту остаётся в редакторе или нигде, а подсказка — не поле ввода.
+    window.addEventListener('keydown', this.onKeyDown, true);
+    // Отпустили — снова короткая: иначе окно от мимолётного нажатия тянется через экран.
+    window.addEventListener('keyup', this.onKeyUp, true);
+  }
+
+  /** Настройка поменялась — следующая пауза будет новой, без перезапуска. */
+  setDelay(delayMs: number): void {
+    if (Number.isFinite(delayMs) && delayMs >= 0) this.delayMs = delayMs;
   }
 
   get isVisible(): boolean {
@@ -200,6 +236,9 @@ export class HoverWidget {
     this.render(title, lines);
     this.root.hidden = false;
     this.visible = true;
+    // Новая карточка всегда начинается свёрнутой: `Ctrl` — жест на конкретную, а не режим.
+    this.collapsed = this.root.classList.contains('is-collapsed');
+    this.root.classList.remove('is-expanded');
     this.position(clientX, clientY);
   }
 
@@ -232,6 +271,12 @@ export class HoverWidget {
       body.append(row);
     }
     this.root.replaceChildren(head, body);
+    // Свёрнутая карточка не выше нескольких строк: длинный ответ сервера иначе заслонил
+    // бы весь файл. Остальное видно по `Ctrl` — тем же жестом, что и в VS Code.
+    this.collapsed = lines.length > HOVER_COLLAPSED_LINES;
+    this.root.classList.toggle('is-collapsed', this.collapsed);
+    // Раскрытая тоже не тянется через экран: предел — доля окна, хвост читается прокруткой.
+    this.root.style.maxHeight = `${Math.round(window.innerHeight * HOVER_MAX_HEIGHT_RATIO)}px`;
   }
 
   /**
@@ -254,11 +299,43 @@ export class HoverWidget {
     // Мышь поехала — прежняя подсказка уже не про то место.
     this.hide();
     const { clientX, clientY } = event;
+    if (this.delayMs <= 0) {
+      // `0` — показывать сразу: пауза нулевая, таймер только отнял бы кадр.
+      this.showAt(this.view.offsetAt(clientX, clientY), clientX, clientY);
+      return;
+    }
     this.timer = window.setTimeout(() => {
       this.timer = null;
       const offset = this.view.offsetAt(clientX, clientY);
       this.showAt(offset, clientX, clientY);
-    }, HOVER_DELAY_MS);
+    }, this.delayMs);
+  };
+
+  /**
+   * `Ctrl` над показанной карточкой раскрывает её целиком — как в VS Code: сначала
+   * видно только начало, иначе карточка закрыла бы половину файла. Дальше карточка
+   * живёт до конца `Ctrl`: отпустили — снова свёрнутая, чтобы не тянулась через экран
+   * от мимолётного нажатия.
+   */
+  private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Control') return;
+    if (!this.visible || this.collapsed === false) return;
+    event.preventDefault();
+    this.collapsed = false;
+    this.root.classList.remove('is-collapsed');
+    this.root.classList.add('is-expanded');
+    // Карточка выросла — могла вылезти за окно: место пересчитываем от того же слова.
+    this.position(this.root.getBoundingClientRect().left, this.root.getBoundingClientRect().top - 18);
+  };
+
+  /** `Ctrl` отпустили — свёрнутая карточка возвращается к короткому виду. */
+  private readonly onKeyUp = (event: KeyboardEvent): void => {
+    if (event.key !== 'Control') return;
+    if (!this.visible || !this.root.classList.contains('is-expanded')) return;
+    this.collapsed = true;
+    this.root.classList.remove('is-expanded');
+    this.root.classList.add('is-collapsed');
+    this.position(this.root.getBoundingClientRect().left, this.root.getBoundingClientRect().top - 18);
   };
 
   /** Сколько событий видел виджет и что показал — для проб и диагностики. */
@@ -299,6 +376,8 @@ export class HoverWidget {
     viewport?.removeEventListener('mouseleave', this.onMouseLeave);
     viewport?.removeEventListener('mousedown', this.onMouseLeave);
     viewport?.removeEventListener('scroll', this.onMouseLeave);
+    window.removeEventListener('keydown', this.onKeyDown, true);
+    window.removeEventListener('keyup', this.onKeyUp, true);
     this.root.remove();
   }
 }

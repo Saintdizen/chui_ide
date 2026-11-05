@@ -274,6 +274,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Плавная прокрутка включена: дальний прыжок так читается, а быстрый набор она не
     // задевает (плавными едут только прыжки, а не каждое движение курсора).
     smoothScroll: true,
+    // Подсказка при наведении появляется через 350 мс: мышью обычно проезжают мимо слова,
+    // и мгновенное окно только мельтешит (так же и в VS Code).
+    hoverDelayMs: 350,
     // Vim-режим выключен: это выбор человека, а не поведение по умолчанию.
     vimMode: false,
     // Emacs-режим тоже выключен: это выбор человека, а не поведение по умолчанию.
@@ -578,6 +581,10 @@ export class SettingsStore {
       if (patch.editor.minimap !== undefined) next.minimap = patch.editor.minimap === true;
       if (patch.editor.wordWrap !== undefined) next.wordWrap = patch.editor.wordWrap === true;
       if (patch.editor.smoothScroll !== undefined) next.smoothScroll = patch.editor.smoothScroll === true;
+      // Задержка ховера — число из формы: 0 допустим (показывать сразу), остальное поджимаем.
+      if (patch.editor.hoverDelayMs !== undefined) {
+        next.hoverDelayMs = normalizeHoverDelay(patch.editor.hoverDelayMs);
+      }
       if (patch.editor.vimMode !== undefined) next.vimMode = patch.editor.vimMode === true;
       if (patch.editor.emacsMode !== undefined) next.emacsMode = patch.editor.emacsMode === true;
       if (patch.editor.fontLigatures !== undefined) next.fontLigatures = patch.editor.fontLigatures === true;
@@ -1076,6 +1083,8 @@ function loadSettings(filePath: string): StoredSettings {
       wordWrap: parsed.editor?.wordWrap === true,
       // Плавная прокрутка выключена только явным `false`: старый settings.json её не знает.
       smoothScroll: parsed.editor?.smoothScroll !== false,
+      // Задержка ховера: старое settings.json её не знает — берём значение по умолчанию.
+      hoverDelayMs: normalizeHoverDelay(parsed.editor?.hoverDelayMs),
       // Vim-режим включён только явным `true`: старый settings.json его не знает.
       vimMode: parsed.editor?.vimMode === true,
       // Emacs-режим включён только явным `true`: старый settings.json его не знает.
@@ -1178,6 +1187,16 @@ export const MAX_REMOTE_ROOTS = 10;
 function cloneThemeFile(theme: ThemeFile | null | undefined): ThemeFile | null {
   if (!theme) return null;
   return { ...theme, chrome: { ...theme.chrome }, tokens: { ...theme.tokens } };
+}
+
+/**
+ * Задержка подсказки при наведении: целое от 0 до 5000 мс. `0` — показывать сразу,
+ * а не «выключить»: выключение живёт отдельной настройкой, и путать их нечем.
+ */
+function normalizeHoverDelay(value: unknown): number {
+  const delay = Math.round(Number(value));
+  if (!Number.isFinite(delay) || delay < 0 || delay > 5000) return DEFAULT_SETTINGS.editor.hoverDelayMs;
+  return delay;
 }
 
 /** Лимиты шагов агента: целое в разумном диапазоне, иначе — значение по умолчанию. */

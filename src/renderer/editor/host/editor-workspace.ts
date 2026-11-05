@@ -108,6 +108,8 @@ export interface EditorWorkspaceOptions {
   wordWrap?: boolean;
   /** Плавная прокрутка: прыжок курсора ведёт текст разгоном. */
   smoothScroll?: boolean;
+  /** Задержка подсказки при наведении, мс (настройка `editor.hoverDelayMs`). */
+  hoverDelayMs?: number;
   /** Vim-режим: модальное управление клавишами (настройка `editor.vimMode`). */
   vimMode?: boolean;
   /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
@@ -299,6 +301,7 @@ export class EditorWorkspace {
   private readonly minimap: boolean | undefined;
   private readonly wordWrap: boolean | undefined;
   private readonly smoothScroll: boolean | undefined;
+  private readonly hoverDelayMs: number | undefined;
   private readonly vimModeInitial: boolean | undefined;
   private readonly vimModeChange: ((mode: VimMode) => void) | undefined;
   private readonly emacsMode: boolean | undefined;
@@ -452,6 +455,7 @@ export class EditorWorkspace {
     this.minimap = options.minimap;
     this.wordWrap = options.wordWrap;
     this.smoothScroll = options.smoothScroll;
+    this.hoverDelayMs = options.hoverDelayMs;
     this.vimModeInitial = options.vimMode;
     this.vimModeChange = options.onVimModeChange;
     this.emacsMode = options.emacsMode;
@@ -568,6 +572,7 @@ export class EditorWorkspace {
       minimap: this.minimap,
       wordWrap: this.wordWrap,
       smoothScroll: this.smoothScroll,
+      hoverDelayMs: this.hoverDelayMs,
       vimMode: this.vimModeInitial,
       onVimModeChange: this.vimModeChange,
       emacsMode: this.emacsMode,
@@ -1136,6 +1141,8 @@ export class EditorWorkspace {
     minimap?: boolean;
     wordWrap?: boolean;
     smoothScroll?: boolean;
+    /** Задержка подсказки при наведении, мс. */
+    hoverDelayMs?: number;
     vimMode?: boolean;
     emacsMode?: boolean;
     ligatures?: boolean;
