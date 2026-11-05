@@ -30,6 +30,14 @@ export interface WrapSegment {
 const TAB = 9;
 const SPACE = 32;
 
+/**
+ * Потолок визуальных рядов на одну строку. При переносе по 100 знаков это 20 000
+ * рядов — 2 МБ в одной строке. Дальше строка не режется: остаток идёт одним
+ * отрезком (см. `wrapSegments`). Число выбрано так, чтобы раскладка укладывалась
+ * в кадр (см. замер в тесте `wrap-model.test.ts`).
+ */
+export const WRAP_MAX_SEGMENTS = 20000;
+
 /** Начало суррогатной пары — резать строку между половинами нельзя. */
 function isHighSurrogate(code: number): boolean {
   return code >= 0xd800 && code <= 0xdbff;
@@ -45,7 +53,12 @@ function isLowSurrogate(code: number): boolean {
  * строки (длина `text.length + 1`). `maxWidth <= 0` или не-число — переноса нет: один
  * отрезок на всю строку (это и есть выключенный word wrap).
  */
-export function wrapSegments(text: string, offsets: readonly number[], maxWidth: number): WrapSegment[] {
+export function wrapSegments(
+  text: string,
+  offsets: readonly number[],
+  maxWidth: number,
+  maxSegments: number = WRAP_MAX_SEGMENTS,
+): WrapSegment[] {
   const columns = offsets.length - 1;
   if (!(maxWidth > 0) || columns <= 0) return [{ startColumn: 0, endColumn: columns }];
 
@@ -53,6 +66,13 @@ export function wrapSegments(text: string, offsets: readonly number[], maxWidth:
   const segments: WrapSegment[] = [];
   let start = 0;
   while (start < columns) {
+    // Потолок рядов: строка на мегабайт иначе дала бы десятки тысяч отрезков, и на
+    // раскладку уходил бы кадр. Остаток строки — один отрезок: он всё равно не влезет
+    // на экран, а горизонтальная прокрутка покажет его как есть.
+    if (segments.length >= maxSegments - 1) {
+      segments.push({ startColumn: start, endColumn: columns });
+      break;
+    }
     // Докуда влезает от начала отрезка: берём самый дальний столбец, чей правый край
     // ещё в пределах ширины.
     let end = start;

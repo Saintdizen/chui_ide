@@ -25,7 +25,7 @@
  * (`line-layout.ts`, `viewport.ts`, `selection.ts`) и проверяется в тестах без окна.
  */
 
-import { wrapsByLineCount } from '../../../shared/large-file';
+import { wrapsByLineCount, wrapsByLineLength } from '../../../shared/large-file';
 import type { TextBuffer } from '../core/text-buffer';
 import { LineHighlighter } from '../highlight/highlighter';
 import { sharedTokens } from '../highlight/token-cache';
@@ -119,6 +119,22 @@ interface LineLayoutCache {
   version: number;
   line: number;
   offsets: number[];
+}
+
+/**
+ * Сколько строк держим разложенными. Одна строка мало: прокрутка и рисование
+ * ходят по видимым строкам туда-обратно, и кэш на одну промахивался почти
+ * каждый раз — на длинной строке это линейный проход по мегабайтам в кадре.
+ * Потолок небольшой: старая запись вытесняется первой, а память одного
+ * мегабайта длинной строки заметна — держим порядок, а не всё подряд.
+ */
+const LAYOUT_CACHE_LIMIT = 64;
+
+/** Строка и её возможные отрезки переноса. */
+interface WrapCacheEntry {
+  version: number;
+  width: number;
+  segments: WrapSegment[];
 }
 
 export class EditorView {
@@ -232,6 +248,16 @@ export class EditorView {
   }
 
   private layoutCache: LineLayoutCache | null = null;
+  /**
+   * Раскладки по строкам с вытеснением. `layoutCache` выше остаётся быстрым путём
+   * для «той же строки подряд» — он же хранит и последний результат.
+   */
+  private readonly layoutCacheByLine = new Map<number, LineLayoutCache>();
+  /**
+   * Отрезки переноса по строкам. Раньше здесь был один результат на вызов:
+   * строка на мегабайт переносилась заново на каждое движение курсора.
+   */
+  private readonly wrapCache = new Map<number, WrapCacheEntry>();
   /**
    * Свёрнутые строки. Пока ничего не свёрнуто, ряд совпадает со строкой и вся
    * арифметика ниже — прежняя; ради этого перевод «строка ↔ ряд» и вынесен сюда.
@@ -448,7 +474,7 @@ export class EditorView {
   /** Перемерить шрифт и перерисовать. Нужно после догрузки шрифта и при смене кегля. */
   remeasure(): void {
     this.metrics = measureFromHost(this.root);
-    this.layoutCache = null;
+    this.clearTextCaches();
     this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.applyMetrics();
     this.render();
@@ -836,7 +862,7 @@ export class EditorView {
    * остаются верными, даже если файл в тысячу строк.
    */
   refresh(fromOffset?: number): void {
-    this.layoutCache = null;
+    this.clearTextCaches();
     // Самая широкая строка могла исчезнуть: ширину полотна пересобираем заново по тому,
     // что рисуем сейчас — иначе полотно остаётся растянутым вправо и после удаления
     // длинной строки ползёт в пустоту.
@@ -983,7 +1009,7 @@ export class EditorView {
     this.semantic = new Map();
     this.scrollTop = 0;
     this.widest = 0;
-    this.layoutCache = null;
+    this.clearTextCaches();
     this.rowsKey = '';
     this.lineCount = buffer.lineCount;
     // Новый документ — другой размер: перенос для большого файла не включаем.
@@ -1149,6 +1175,11 @@ export class EditorView {
         continue;
       }
       const text = this.buffer.lineText(line);
+      // Слишком длинную строку не раскладываем: один ряд вместо тысяч.
+      if (!wrapsByLineLength(text.length)) {
+        counts[index] = 1;
+        continue;
+      }
       const offsets = layoutLine(text, this.metrics, this.insertsFor(line));
       counts[index] = wrapSegments(text, offsets, width).length;
     }
@@ -1158,9 +1189,30 @@ export class EditorView {
 
   /** Отрезки переноса строки: один на всю строку, когда перенос выключен. */
   private segmentsFor(line: number): WrapSegment[] {
+    if (!this.wrapOn) {
+      const length = this.buffer.lineText(line).length;
+      return [{ startColumn: 0, endColumn: length }];
+    }
+    // Слишком длинная строка — один ряд: раскладка на каждый её знак дороже пользы,
+    // а пролистать двадцать тысяч рядов способов нет (`wrapsByLineLength`).
+    const text = this.buffer.lineText(line);
+    if (!wrapsByLineLength(text.length)) {
+      return [{ startColumn: 0, endColumn: text.length }];
+    }
     const offsets = this.offsetsFor(line);
-    if (!this.wrapOn) return [{ startColumn: 0, endColumn: offsets.length - 1 }];
-    return wrapSegments(this.buffer.lineText(line), offsets, this.wrapWidth());
+    // Ширина входит в ключ: окно поменяли — отрезки прежние не годятся.
+    const width = this.wrapWidth();
+    const hit = this.wrapCache.get(line);
+    if (hit && hit.version === this.buffer.version && hit.width === width) {
+      return hit.segments;
+    }
+    const segments = wrapSegments(this.buffer.lineText(line), offsets, width);
+    this.wrapCache.set(line, { version: this.buffer.version, width, segments });
+    if (this.wrapCache.size > LAYOUT_CACHE_LIMIT) {
+      const oldest = this.wrapCache.keys().next();
+      if (!oldest.done) this.wrapCache.delete(oldest.value);
+    }
+    return segments;
   }
 
   /** Номер отрезка строки, которому принадлежит столбец. */
@@ -1320,9 +1372,11 @@ export class EditorView {
       // Скрытые строки в слое не рисуем: ряды идут подряд, без провалов.
       if (this.isHidden(line)) continue;
       const text = this.buffer.lineText(line);
-      const offsets = layoutLine(text, this.metrics, this.insertsFor(line));
-      // Длинная строка при переносе разрезана на отрезки; каждый рисуется своим рядом.
-      const segments = this.wrapOn ? wrapSegments(text, offsets, this.wrapWidth()) : [wholeLine(offsets)];
+      // Раскладка и отрезки — через кэш (`offsetsFor`/`segmentsFor`). Здесь же
+      // каждый кадр раскладывал строку-гигант заново: строка на мегабайт — сотни
+      // миллисекунд на перерисовку, и прокрутка внутри неё не шла вовсе.
+      const segments = this.segmentsFor(line);
+      const offsets = this.offsetsFor(line);
       for (const segment of segments) {
         const width = (offsets[segment.endColumn] ?? 0) - (offsets[segment.startColumn] ?? 0);
         if (width > this.widest) this.widest = width;
@@ -1643,7 +1697,7 @@ export class EditorView {
     this.inlayByLine = byLine;
     // Вставки-подсказки меняют ширину строк: самую широкую строку считаем заново.
     this.widest = 0;
-    this.layoutCache = null;
+    this.clearTextCaches();
     this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.render();
   }
@@ -1675,7 +1729,7 @@ export class EditorView {
     this.colorByLine = byLine;
     // Плашки меняют ширину строк — пересчитываем раскладку, как у подсказок.
     this.widest = 0;
-    this.layoutCache = null;
+    this.clearTextCaches();
     this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.render();
   }
@@ -1702,7 +1756,7 @@ export class EditorView {
     this.inlineValueByLine = byLine;
     // Значения отладчика тоже шире строки — ширину полотна считаем заново.
     this.widest = 0;
-    this.layoutCache = null;
+    this.clearTextCaches();
     this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.render();
   }
@@ -2218,14 +2272,38 @@ export class EditorView {
     this.selectionLayer.replaceChildren(shades);
   }
 
-  /** Раскладка строки по x с кэшем на одну строку: обычно спрашивают про одну и ту же. */
+  /**
+   * Забыть раскладки и отрезки переноса.
+   * Версия буфера в ключе ловит правки текста, но не всё: ширина шрифта, вставки-подсказки
+   * и украшения меняют x той же строки при том же тексте. Поэтому все места, где эти
+   * вещи меняются, зовут сброс руками.
+   */
+  private clearTextCaches(): void {
+    this.layoutCache = null;
+    this.layoutCacheByLine.clear();
+    this.wrapCache.clear();
+  }
+
+  /** Раскладка строки по x: быстрый путь на одну строку плюс кэш по видимым строкам. */
   private offsetsFor(line: number): number[] {
     const cache = this.layoutCache;
     if (cache && cache.line === line && cache.version === this.buffer.version) {
       return cache.offsets;
     }
+    const hit = this.layoutCacheByLine.get(line);
+    if (hit && hit.version === this.buffer.version) {
+      this.layoutCache = hit;
+      return hit.offsets;
+    }
     const offsets = layoutLine(this.buffer.lineText(line), this.metrics, this.insertsFor(line));
-    this.layoutCache = { version: this.buffer.version, line, offsets };
+    const entry: LineLayoutCache = { version: this.buffer.version, line, offsets };
+    this.layoutCache = entry;
+    this.layoutCacheByLine.set(line, entry);
+    // Вытесняем самую старую: Map хранит порядок вставки, а не порядок чтения.
+    if (this.layoutCacheByLine.size > LAYOUT_CACHE_LIMIT) {
+      const oldest = this.layoutCacheByLine.keys().next();
+      if (!oldest.done) this.layoutCacheByLine.delete(oldest.value);
+    }
     return offsets;
   }
 
@@ -2290,11 +2368,6 @@ export class EditorView {
 /** Просит ли система меньше движения (`prefers-reduced-motion`). */
 function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
-}
-
-/** Отрезок, покрывающий всю строку (перенос выключен). */
-function wholeLine(offsets: readonly number[]): WrapSegment {
-  return { startColumn: 0, endColumn: offsets.length - 1 };
 }
 
 /**

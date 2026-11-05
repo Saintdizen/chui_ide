@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   LARGE_FILE_BYTES,
   MAX_OPEN_BYTES,
+  MAX_WRAP_LINE_CHARS,
   MAX_WRAP_LINES,
   isReadOnlySize,
   withinOpenLimit,
   wrapsByLineCount,
+  wrapsByLineLength,
 } from '../src/shared/large-file';
 
 /**
@@ -69,5 +71,25 @@ describe('wrapsByLineCount', () => {
     // Иначе файл, который ещё можно открыть, открывался бы с рывком: порог
     // переноса обязан срабатывать раньше, чем файл перестанут брать вовсе.
     expect(MAX_WRAP_LINES).toBeLessThan(MAX_OPEN_BYTES);
+  });
+});
+
+describe('порог по длине строки', () => {
+  it('обычная строка переносится', () => {
+    expect(wrapsByLineLength(0)).toBe(true);
+    expect(wrapsByLineLength(200)).toBe(true);
+    expect(wrapsByLineLength(MAX_WRAP_LINE_CHARS)).toBe(true);
+  });
+
+  it('миллион знаков в одной строке — не переносим', () => {
+    // Минифицированный JSON, base64, дамп в одну строку. Раскладка такой строки —
+    // массив на каждый знак и десятки тысяч рядов: ни прокрутить, ни запомнить.
+    expect(wrapsByLineLength(MAX_WRAP_LINE_CHARS + 1)).toBe(false);
+    expect(wrapsByLineLength(1_000_000)).toBe(false);
+  });
+
+  it('порог ниже, чем файл вообще разрешено открыть', () => {
+    // Строка не может быть длиннее файла: если файл открывают, порог обязан сработать.
+    expect(MAX_WRAP_LINE_CHARS).toBeLessThan(MAX_OPEN_BYTES);
   });
 });

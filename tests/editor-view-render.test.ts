@@ -399,3 +399,48 @@ describe('закреплённые заголовки (sticky scroll)', () => {
     expect(stickyRows(root)).toEqual([]);
   });
 });
+
+describe('огромная строка не тормозит вид', () => {
+  /** Строка в `columns` знаков без пробелов: переносится по знаку. */
+  const wide = (columns: number): string => 'a'.repeat(columns);
+
+  it('строка длиннее потолка — ОДИН ряд, а не десятки тысяч', () => {
+    // Было: порог по числу строк (MAX_WRAP_LINES) есть, а по длине — нет, и файл из
+    // сотни строк по мегабайту раскладывал всё это на открытии. Строка-гигант теперь
+    // остаётся одним рядом: раскладка на каждый её знак дороже пользы.
+    const { view } = makeView(`${wide(300_000)}\nвторая`);
+    view.setWordWrap(true);
+    // Перенос включён (строк в файле мало) — порог именно про длину строки.
+    expect(view.wordWrap).toBe(true);
+    expect(view.foldState().rows).toBe(2); // гигант + «вторая», гигант не размотан
+  });
+
+  it('перерисовка вида не раскладывает гиганта заново', () => {
+    // Было: renderLines звал layoutLine/wrapSegments НАПРЯМУЮ, мимо кэша — каждый
+    // кадр прокрутки внутри строки-гиганта раскладывал её с нуля.
+    const { view } = makeView(`${wide(300_000)}\nвторая`);
+    view.setWordWrap(true);
+    const started = Date.now();
+    for (let index = 0; index < 20; index += 1) {
+      view.setWordWrap(false);
+      view.setWordWrap(true); // полная перерисовка слоя строк
+    }
+    // Без кэша здесь была бы сорокократная раскладка 300 000 знаков — секунды.
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
+
+  it('строка в пределах потолка переносится как обычно', () => {
+    const { view } = makeView(`${'a'.repeat(500)}\nвторая`);
+    view.setWordWrap(true);
+    expect(view.foldState().rows).toBeGreaterThan(2); // короткая строка размотана
+    expect(() => view.scrollToLine(2)).not.toThrow();
+    expect(view.firstVisibleLine()).toBe(2);
+  });
+
+  it('огромная строка не теряет конец и не роняет вид', () => {
+    const { view } = makeView(`${wide(300_000)}\nвторая`);
+    view.setWordWrap(true);
+    expect(() => view.scrollToLine(2)).not.toThrow();
+    expect(view.firstVisibleLine()).toBe(2);
+  });
+});

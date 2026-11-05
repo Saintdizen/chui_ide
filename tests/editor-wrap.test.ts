@@ -5,6 +5,7 @@ import {
   splitsSurrogate,
   wrapCount,
   wrapSegments,
+  WRAP_MAX_SEGMENTS,
 } from '../src/renderer/editor/view/wrap-model';
 import { RowMap } from '../src/renderer/editor/view/row-map';
 
@@ -142,5 +143,39 @@ describe('таблица визуальных рядов', () => {
     map.rebuild([]);
     expect(map.rowTotal).toBe(0);
     expect(map.lineAtRow(0)).toEqual({ line: 1, segment: 0 });
+  });
+});
+
+describe('огромная строка не вешает перенос', () => {
+  it('потолок рядов: строка в миллион знаков даёт не больше WRAP_MAX_SEGMENTS', () => {
+    const text = 'a'.repeat(1_000_000);
+    const segments = wrapSegments(text, mono(text), 100); // 10 знаков на ряд
+    expect(segments.length).toBeLessThanOrEqual(WRAP_MAX_SEGMENTS);
+    // Последний отрезок добирает остаток: строка покрыта целиком, ничего не потеряно.
+    expect(segmentsCover(segments, text.length)).toBe(true);
+    expect(segments[segments.length - 1]!.endColumn).toBe(text.length);
+  });
+
+  it('настоящий перенос укладывается в потолок и не режется', () => {
+    const text = 'слово '.repeat(100);
+    const segments = wrapSegments(text, mono(text), 60, 20000);
+    expect(segments.length).toBeLessThan(WRAP_MAX_SEGMENTS);
+    expect(segmentsCover(segments, text.length)).toBe(true);
+  });
+
+  it('потолок сам по себе: маленький maxSegments честно обрывает перебор', () => {
+    const text = 'a'.repeat(1000);
+    const segments = wrapSegments(text, mono(text), 10, 5);
+    expect(segments.length).toBe(5);
+    expect(segmentsCover(segments, text.length)).toBe(true);
+  });
+
+  it('миллион знаков переносится за считанные десятки миллисекунд', () => {
+    const text = 'a'.repeat(1_000_000);
+    const started = Date.now();
+    wrapSegments(text, mono(text), 100);
+    // Порог нарочно щедрый: тест ловит не микросекунды, а возврат квадратичности
+    // (было: обратный поиск пробела от конца отрезка к началу строки).
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 });
