@@ -183,3 +183,18 @@ describe('связка перехода по пометкам', () => {
     expect(() => navigation.next()).not.toThrow();
   });
 });
+
+describe('обход в пределах файла', () => {
+  const items = [problem('/a.ts', 1), problem('/a.ts', 5), problem('/b.ts', 2)];
+
+  it('иначе берёт только пометки этого файла', () => {
+    const got = nextProblem(items, { path: '/a.ts', line: 1, column: 1 }, 'next', { path: '/a.ts' });
+    expect(got?.line).toBe(5);
+    expect(got?.path).toBe('/a.ts');
+  });
+
+  it('по кругу в пределах файла — не уходит в другой', () => {
+    const got = nextProblem(items, { path: '/a.ts', line: 5, column: 1 }, 'next', { path: '/a.ts' });
+    expect(got?.line).toBe(1);
+  });
+});

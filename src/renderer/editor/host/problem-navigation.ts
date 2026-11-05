@@ -34,6 +34,11 @@ export function orderProblems(items: readonly DiagnosticItem[]): DiagnosticItem[
   return [...items].sort(compareItems);
 }
 
+/** Область обхода: без области — все файлы, с путём — только этот файл. */
+export interface ProblemScope {
+  path: string;
+}
+
 /**
  * Ближайшая пометка после (`next`) или до (`previous`) текущего места. По краям
  * заворачиваем: с последней пометки «следующая» ведёт к первой, с первой
@@ -47,8 +52,11 @@ export function nextProblem(
   items: readonly DiagnosticItem[],
   current: ProblemSpot | null,
   direction: ProblemDirection,
+  scope?: ProblemScope,
 ): DiagnosticItem | null {
-  const ordered = orderProblems(items);
+  let pool = items;
+  if (scope) pool = items.filter((item) => item.path === scope.path);
+  const ordered = orderProblems(pool);
   if (ordered.length === 0) return null;
   if (!current) return direction === 'next' ? ordered[0]! : ordered[ordered.length - 1]!;
 
@@ -93,12 +101,33 @@ export class ProblemNavigation {
   previous(): void {
     this.go('previous');
   }
-  private go(direction: ProblemDirection): void {
+
+  /** Следующая пометка в текущем файле (сквозь файлы — `next`). */
+  nextInFile(): void {
+    this.goInActiveFile('next');
+  }
+
+  /** Предыдущая пометка в текущем файле. */
+  previousInFile(): void {
+    this.goInActiveFile('previous');
+  }
+
+  private goInActiveFile(direction: ProblemDirection): void {
+    const spot = this.deps.position();
+    if (!spot) {
+      // Файла нет — внутрифайловый обход бессмыслен; говорим тем же языком.
+      this.deps.notice?.('Пометок нет');
+      return;
+    }
+    this.go(direction, { path: spot.path });
+  }
+
+  private go(direction: ProblemDirection, scope?: ProblemScope): void {
     const problems = this.deps.problems();
-    const target = nextProblem(problems, this.deps.position(), direction);
+    const target = nextProblem(problems, this.deps.position(), direction, scope);
     if (!target) {
       // Одна формулировка на оба направления: пометок нет — неважно, куда шли.
-      this.deps.notice?.('Пометок нет');
+      this.deps.notice?.(scope ? 'В файле пометок нет' : 'Пометок нет');
       return;
     }
     this.deps.reveal({ path: target.path, line: target.line, column: target.column });

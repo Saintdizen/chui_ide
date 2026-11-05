@@ -83,3 +83,28 @@ describe('заголовок панели', () => {
     expect(problemsSummary({ errors: 0, warnings: 0, infos: 0 } as ProblemCounts)).toBe('Проблем нет');
   });
 });
+
+describe('отбор по виду и серверу', () => {
+  it('только ошибки', () => {
+    const result = filterProblems(items, '', { severities: ['error'] });
+    expect(result.map((item) => item.message)).toEqual(['Тип «string» не присваивается «number»', 'Неизвестное имя']);
+  });
+
+  it('только сервер import-check', () => {
+    expect(filterProblems(items, '', { sources: ['import-check'] })).toHaveLength(1);
+  });
+
+  it('вид и сервер вместе', () => {
+    expect(filterProblems(items, '', { severities: ['info'], sources: ['ts'] })).toHaveLength(1);
+  });
+
+  it('пустой фильтр ничего не отсеивает', () => {
+    expect(filterProblems(items, '', {})).toHaveLength(items.length);
+  });
+
+  it('groupProblems уважает фильтр', () => {
+    const groups = groupProblems(items, '', (path) => path, { severities: ['error'] });
+    expect(groups.map((group) => group.counts.errors)).toEqual([1, 1]);
+    expect(groups.every((group) => group.items.every((item) => item.severity === 'error'))).toBe(true);
+  });
+});

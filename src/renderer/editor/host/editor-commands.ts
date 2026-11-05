@@ -94,6 +94,10 @@ export interface EditorCommandContext {
   nextProblem?(): void;
   /** Перейти к предыдущей пометке языка. */
   previousProblem?(): void;
+  /** Перейти к следующей пометке в текущем файле (не покидая его). */
+  nextProblemInFile?(): void;
+  /** Перейти к предыдущей пометке в текущем файле. */
+  previousProblemInFile?(): void;
   /** Отформатировать файл (нужен инструмент языка). */
   formatCode?(): void;
   /** Показать быстрые исправления под курсором (нужен языковой сервер). */
@@ -126,6 +130,8 @@ export type EditorCommandRequirement =
   | 'formatCode'
   | 'nextProblem'
   | 'previousProblem'
+  | 'nextProblemInFile'
+  | 'previousProblemInFile'
   | 'codeActions'
   | 'expandSelection'
   | 'shrinkSelection';
@@ -575,6 +581,24 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     category: 'Навигация',
     requires: 'previousProblem',
     run: (context) => context.previousProblem?.(),
+  },
+  {
+    id: 'editor.nextProblemInFile',
+    label: 'Следующая проблема в файле',
+    alias: 'goToNextProblemInFile',
+    keybinding: 'Alt+F8',
+    category: 'Навигация',
+    requires: 'nextProblemInFile',
+    run: (context) => context.nextProblemInFile?.(),
+  },
+  {
+    id: 'editor.previousProblemInFile',
+    label: 'Предыдущая проблема в файле',
+    alias: 'goToPreviousProblemInFile',
+    keybinding: 'Shift+Alt+F8',
+    category: 'Навигация',
+    requires: 'previousProblemInFile',
+    run: (context) => context.previousProblemInFile?.(),
   },
 ];
 

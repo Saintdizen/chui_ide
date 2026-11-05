@@ -28,19 +28,37 @@ export function countProblems(items: readonly DiagnosticItem[]): ProblemCounts {
 }
 
 /**
+ * Отбор по серьёзности и серверу (источнику) поверх текстового запроса. Пустые поля
+ * ничего не отсеивают; `severities` — какие виды оставить (`error`/`warning`/`info`).
+ */
+export interface ProblemFilter {
+  severities?: readonly DiagnosticItem['severity'][];
+  sources?: readonly string[];
+}
+
+/**
  * Отбор по подстроке: ищем в тексте сообщения, имени источника и пути файла. Пустой
  * запрос ничего не отсеивает — панель без фильтра показывает всё. Регистр не важен:
- * так и набирают в поле фильтра.
+ * так и набирают в поле фильтра. `filter` дорезает по виду/серверу.
  */
-export function filterProblems(items: readonly DiagnosticItem[], query: string): DiagnosticItem[] {
+export function filterProblems(
+  items: readonly DiagnosticItem[],
+  query: string,
+  filter: ProblemFilter = {},
+): DiagnosticItem[] {
   const needle = query.trim().toLowerCase();
-  if (needle === '') return [...items];
-  return items.filter(
-    (item) =>
+  const severities = filter.severities && filter.severities.length > 0 ? new Set(filter.severities) : null;
+  const sources = filter.sources && filter.sources.length > 0 ? new Set(filter.sources) : null;
+  return items.filter((item) => {
+    if (severities && !severities.has(item.severity)) return false;
+    if (sources && !sources.has(item.source)) return false;
+    if (needle === '') return true;
+    return (
       item.message.toLowerCase().includes(needle) ||
       item.source.toLowerCase().includes(needle) ||
-      item.path.toLowerCase().includes(needle),
-  );
+      item.path.toLowerCase().includes(needle)
+    );
+  });
 }
 
 /** Проблемы одного файла: подпись для заголовка и счётчики — чтобы видеть вес файла. */
@@ -60,9 +78,10 @@ export function groupProblems(
   items: readonly DiagnosticItem[],
   query: string,
   label: (path: string) => string,
+  filter: ProblemFilter = {},
 ): ProblemGroup[] {
   const groups = new Map<string, ProblemGroup>();
-  for (const item of filterProblems(items, query)) {
+  for (const item of filterProblems(items, query, filter)) {
     let group = groups.get(item.path);
     if (!group) {
       group = { path: item.path, label: label(item.path), items: [], counts: { errors: 0, warnings: 0, infos: 0 } };

@@ -1961,6 +1961,12 @@
   flex: 0 0 auto;
 }
 
+/* Отбор по виду и серверу: селекты рядом с фильтром, не тянутся вширь. */
+.problems-toolbar select {
+  flex: 0 0 auto;
+  max-width: 160px;
+}
+
 .problems-list {
   flex: 1 1 auto;
   min-height: 0;

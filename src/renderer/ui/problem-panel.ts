@@ -12,7 +12,13 @@
  * ввод, и терять его на каждой правке файла нельзя.
  */
 
-import { countProblems, groupProblems, problemsSummary, type ProblemCounts } from '../../shared/problem-list';
+import {
+  countProblems,
+  groupProblems,
+  problemsSummary,
+  type ProblemCounts,
+  type ProblemFilter,
+} from '../../shared/problem-list';
 import type { DiagnosticItem } from '../../shared/api';
 import { clear, h } from './dom';
 
@@ -48,6 +54,8 @@ export function createProblemPanel(deps: ProblemPanelDeps): ProblemPanel {
     placeholder: 'Фильтр…',
     title: 'Отбор по тексту сообщения, источнику или файлу',
   });
+  const severitySelect = h('select', { class: 'field-input problems-severity', title: 'Отбор по виду' });
+  const sourceSelect = h('select', { class: 'field-input problems-source', title: 'Отбор по серверу' });
   const list = h('div', { class: 'problems-list' });
   const element = h(
     'div',
@@ -59,11 +67,15 @@ export function createProblemPanel(deps: ProblemPanelDeps): ProblemPanel {
       summary,
       h('div', { class: 'toolbar-spacer' }),
       filter,
+      severitySelect,
+      sourceSelect,
     ),
     list,
   );
 
   filter.addEventListener('input', () => render());
+  severitySelect.addEventListener('change', () => render());
+  sourceSelect.addEventListener('change', () => render());
 
   /** Строка проблемы: значок вида, сообщение, источник и место — как в списке IDE. */
   const problemRow = (problem: DiagnosticItem): HTMLElement => {
@@ -83,10 +95,40 @@ export function createProblemPanel(deps: ProblemPanelDeps): ProblemPanel {
     return row;
   };
 
+  /** Наполнить список отбора: первый вариант — «все» (значение пустое). */
+  const fillOptions = (select: HTMLSelectElement, allLabel: string, values: readonly string[]): void => {
+    const keep = select.value;
+    clear(select);
+    select.appendChild(h('option', { value: '' }, allLabel));
+    for (const value of values) select.appendChild(h('option', { value }, value));
+    // Выбор не теряем, если он ещё законен; иначе — «все».
+    select.value = values.includes(keep) ? keep : '';
+  };
+
+  // Виды пометок в порядке важности: ошибки, предупреждения, замечания.
+  const severityOrder = ['error', 'warning', 'info'] as const;
+
+  const activeFilter = (): ProblemFilter => {
+    const severity = severitySelect.value as '' | 'error' | 'warning' | 'info';
+    const source = sourceSelect.value;
+    const filterValue: ProblemFilter = {};
+    if (severity) filterValue.severities = [severity];
+    if (source) filterValue.sources = [source];
+    return filterValue;
+  };
+
   const render = (): void => {
     clear(list);
     const markers = deps.markers();
     const counts = countProblems(markers);
+    // Отбор по виду и серверу: списки собираем из самих пометок — что не пришло,
+    // то и не предлагаем (нет смысла выбирать пустой сервер).
+    fillOptions(
+      severitySelect,
+      'Все виды',
+      severityOrder.filter((s) => markers.some((m) => m.severity === s)),
+    );
+    fillOptions(sourceSelect, 'Все серверы', [...new Set(markers.map((m) => m.source))].sort());
     // Итог — по всем пометкам, а не по отобранным: фильтр сужает список, но число
     // найденных проблем не должно от него зависеть (иначе оно просто исчезает).
     summary.textContent = problemsSummary(counts);
@@ -96,7 +138,7 @@ export function createProblemPanel(deps: ProblemPanelDeps): ProblemPanel {
       return;
     }
 
-    const groups = groupProblems(markers, filter.value, deps.label);
+    const groups = groupProblems(markers, filter.value, deps.label, activeFilter());
     if (groups.length === 0) {
       list.appendChild(h('div', { class: 'problems-empty' }, 'Ничего не найдено по фильтру.'));
       return;

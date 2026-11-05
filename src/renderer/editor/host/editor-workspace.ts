@@ -907,6 +907,8 @@ export class EditorWorkspace {
     // Переход по пометкам есть всегда: хранилище пометок — у самого рабочего места.
     context.nextProblem = () => this.problems.next();
     context.previousProblem = () => this.problems.previous();
+    context.nextProblemInFile = () => this.problems.nextInFile();
+    context.previousProblemInFile = () => this.problems.previousInFile();
     return context;
   }
 
