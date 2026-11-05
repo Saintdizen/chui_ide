@@ -14,9 +14,30 @@ export interface CommandDescriptor {
    * делать, заранее говорит об этом, вместо тоста «проект не открыт» после запуска.
    */
   enabled?: () => boolean;
+  /**
+   * Почему команду НЕ надо показывать в палитре. Поле есть — команда скрыта,
+   * и причина написана здесь, а не подразумевается.
+   *
+   * Нужно это не для удобства, а чтобы у невидимости был адрес. Команда без
+   * причины в палитре — забытая команда: её либо не нашли, либо она должна
+   * быть видна. Причина обязательна: пустая строка считается опечаткой, и
+   * такая команда продолжает показываться.
+   *
+   * Скрытие из палитры не мешает вызову: меню, клавиши и ассистент зовут
+   * команду по идентификатору и про это поле не знают.
+   */
+  hidden?: string;
 }
 
 export type CommandHandler = (...args: unknown[]) => unknown;
+
+/**
+ * Скрыта ли команда из палитры. Причина — чтобы у невидимости был адрес;
+ * пустая строка или одна мелочь — опечатка, а не решение, и команда видна.
+ */
+export function isHiddenFromPalette(descriptor: CommandDescriptor): boolean {
+  return (descriptor.hidden ?? '').trim().length > 0;
+}
 
 export interface CommandInvocation {
   id: string;
@@ -50,8 +71,17 @@ export class CommandRegistry {
     return this.entries.get(id)?.descriptor.enabled?.() ?? true;
   }
 
+  /** Все команды реестра, включая скрытые: это реестр, а не палитра. */
   list(): CommandDescriptor[] {
     return [...this.entries.values()].map((entry) => entry.descriptor);
+  }
+
+  /**
+   * Команды для палитры: всё из реестра, кроме помеченных `hidden` с причиной.
+   * Пустая причина — не причина: команда остаётся видимой.
+   */
+  paletteVisible(): CommandDescriptor[] {
+    return this.list().filter((descriptor) => !isHiddenFromPalette(descriptor));
   }
 
   async execute(id: string, ...args: unknown[]): Promise<unknown> {

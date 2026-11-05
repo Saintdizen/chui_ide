@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchScore } from '../src/shared/fuzzy';
+import { loosePositions, looseScore, matchScore } from '../src/shared/fuzzy';
 
 /** Совпало ли имя с набранным (без разбора оценки). */
 const matches = (name: string, pattern: string): boolean => matchScore(name, pattern) !== null;
@@ -73,5 +73,40 @@ describe('отказ в совпадении', () => {
 
   it('пустое набранное совпадает со всем (оценка нулевая)', () => {
     expect(matchScore('anything', '')).toEqual({ score: 0, positions: [] });
+  });
+});
+
+/**
+ * Вольный поиск — второй, для текста без регистра.
+ *
+ * Строгое правило требует горба после разрыва (`gT` → `getTitle`). Свёрнутое в
+ * нижний регистр название горбов не имеет вовсе, поэтому к палитре и подсветке
+ * дерева применяется оно: иначе `свн` в «свернуть все» не нашлось бы.
+ */
+describe('вольный поиск (без горбов)', () => {
+  it('строгий отвергает, вольный находит', () => {
+    expect(matchScore('свернуть все', 'свн')).toBeNull();
+    // Позиции — жадно слева направо: `в` берётся в самом слове «свернуть».
+    expect(loosePositions('свернуть все', 'свн')).toEqual([0, 1, 4]);
+  });
+
+  it('порядок знаков обязателен и здесь', () => {
+    expect(loosePositions('свернуть', 'нрс')).toBeNull();
+  });
+
+  it('набранное длиннее имени не совпадает', () => {
+    expect(loosePositions('да', 'дальше')).toBeNull();
+  });
+
+  it('оценка вольного: начало лучше, чем середина', () => {
+    expect(looseScore('свернуть все', 'све')).toBeGreaterThan(looseScore('свернуть все', 'все'));
+  });
+
+  it('несовпадение — оценка минус бесконечность', () => {
+    expect(looseScore('свернуть', 'ззз')).toBe(Number.NEGATIVE_INFINITY);
+  });
+
+  it('пустое набранное совпадает со всем', () => {
+    expect(loosePositions('что угодно', '')).toEqual([]);
   });
 });

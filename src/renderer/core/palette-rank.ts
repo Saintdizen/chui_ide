@@ -1,3 +1,4 @@
+import { loosePositions } from '../../shared/fuzzy';
 import type { CommandDescriptor } from './commands';
 
 /**
@@ -75,23 +76,14 @@ function foldWithMap(text: string): { folded: string; origin: number[] } {
 /**
  * Позиции букв запроса в названии, если они нашлись ПО ПОРЯДКУ (не подряд).
  *
- * Это последний шанс палитры: человек помнит обрывки («свн»), а не слово.
- * Буквы ищутся на любых местах, но жадно слева направо — так совпадение
- * ложится на самое раннее и плотное место названия, и подсветка не прыгает
- * через всё слово без нужды.
+ * Последний шанс палитры: человек помнит обрывки («свн»), а не слово.
+ * Берём ВОЛЬНЫЙ поиск (`shared/fuzzy` loosePositions), а не строгий `matchScore`:
+ * названия сюда приходят уже свёрнутыми в нижний регистр, горбов в них нет по
+ * построению, и строгое правило отвергло бы `свн` в «свернуть все» — ровно тот
+ * случай, ради которого фаззи и нужна.
  */
-function subsequencePositions(folded: string, query: string): number[] | null {
-  const needle = query.replace(/\s+/g, '');
-  if (needle.length === 0) return null;
-  const positions: number[] = [];
-  let at = 0;
-  for (const char of needle) {
-    const found = folded.indexOf(char, at);
-    if (found < 0) return null;
-    positions.push(found);
-    at = found + 1;
-  }
-  return positions;
+function subsequencePositions(folded: string, query: string): readonly number[] | null {
+  return loosePositions(folded, query.replace(/\s+/g, ''));
 }
 
 function rankOf(descriptor: CommandDescriptor, query: string, foldedTitle: string): number {

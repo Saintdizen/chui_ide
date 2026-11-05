@@ -85,7 +85,10 @@ export function createPalette(deps: {
     // Без запроса ищем по истории: человек, живущий в двух командах, не должен
     // каждый раз искать их заново. С запросом порядок задаёт совпадение —
     // иначе редкая команда с точным совпадением пряталась бы под привычными.
-    const ranked = rankCommandMatches(deps.commands.list(), query, recent, MAX_ITEMS);
+    // Палитра показывает реестр, но не служебное: `hidden` — это решение с причиной,
+    // а не забывчивость. Считаем один раз — порядок и состав должны совпадать.
+    const visible = deps.commands.paletteVisible();
+    const ranked = rankCommandMatches(visible, query, recent, MAX_ITEMS);
     // Заголовки групп — только без запроса: с запросом порядок задаёт
     // релевантность, и заголовок разорвал бы её. А пустой экран — это больше
     // двухсот команд подряд, и категории в нём единственный ориентир.
@@ -94,7 +97,7 @@ export function createPalette(deps: {
     // Одна раскладка на всё: из неё же берётся и порядок пунктов, и где ставить
     // заголовок. Считать её дважды — значит рано или поздно показать заголовок
     // не от той группы.
-    const groups = grouped ? groupCommands(deps.commands.list(), recent) : [];
+    const groups = grouped ? groupCommands(visible, recent) : [];
     const headers: (string | null)[] = grouped ? groups.flatMap((group) => group.items.map(() => group.header)) : [];
     matches = grouped
       ? groups

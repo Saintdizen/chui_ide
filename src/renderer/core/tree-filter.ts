@@ -19,6 +19,7 @@
  * Логика чистая и потому проверяется тестами: промах тут означает либо пустой
  * экран при непустом совпадении, либо папку без содержимого.
  */
+import { matchScore } from '../../shared/fuzzy';
 
 /** Строка дерева в том виде, в каком её видит фильтр. */
 export interface FilterRow {
@@ -140,6 +141,21 @@ function mergeRanges(ranges: readonly MatchRange[]): MatchRange[] {
 }
 
 /**
+ * Все места, где слово стоит в имени подряд. Пусто — подстроки нет.
+ *
+ * Подсвечиваем КАЖДОЕ вхождение: `tt` в `button-title` это две правдивые
+ * подсветки, а не одна произвольная.
+ */
+function substrings(haystack: string, needle: string): number[] {
+  const found: number[] = [];
+  if (needle.length === 0) return found;
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+    found.push(at);
+  }
+  return found;
+}
+
+/**
  * Совпадение имени со всем запросом и что подсветить.
  *
  * Подсветка — объединение совпадений всех слов: имя, подходящее по двум словам
@@ -158,17 +174,23 @@ export function matchName(name: string, query: string): NameMatch {
       addPositions(ranges, positions);
       continue;
     }
-    // Слово без шаблонов — подстрока. Показываем все вхождения, а не первое:
-    // `tt` в `button-title` — это две подсветки, и обе правдивые.
-    let from = lower.indexOf(token.text);
-    if (from < 0) return { matched: false, ranges: [] };
-    while (from >= 0) {
-      addPositions(
-        ranges,
-        Array.from({ length: token.text.length }, (_, i) => from + i),
-      );
-      from = lower.indexOf(token.text, from + token.text.length);
+    // Слово без шаблонов сначала — подстрока: `tt` в `button-title` это две
+    // подсветки, и обе правдивые. Если подстроки нет — последний шанс — горбы
+    // общим поиском (`shared/fuzzy`): тот же ответ, что в палитре и списке файлов.
+    // Искать `utl` в `util` по буквам не станем: общий поиск такого не разрешает.
+    const hits = substrings(lower, token.text);
+    if (hits.length > 0) {
+      for (const from of hits) {
+        addPositions(
+          ranges,
+          Array.from({ length: token.text.length }, (_, i) => from + i),
+        );
+      }
+      continue;
     }
+    const humps = matchScore(lower, token.text)?.positions ?? null;
+    if (!humps) return { matched: false, ranges: [] };
+    addPositions(ranges, humps);
   }
   return { matched: true, ranges: mergeRanges(ranges) };
 }

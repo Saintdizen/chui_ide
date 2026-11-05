@@ -5,16 +5,7 @@
  * а панель только рисует то, что вернула эта функция.
  */
 
-/** Позиция последнего совпадённого символа, если `needle` — подпоследовательность `hay`. */
-function subsequenceEnd(hay: string, needle: string): number {
-  let at = 0;
-  for (const char of needle) {
-    at = hay.indexOf(char, at);
-    if (at < 0) return -1;
-    at += 1;
-  }
-  return at;
-}
+import { matchScore } from '../../shared/fuzzy';
 
 /**
  * Подбор файлов под запрос.
@@ -63,18 +54,19 @@ export function rankFiles(
   const scored: Array<{ file: string; score: number }> = [];
   for (const file of files) {
     const lower = file.toLowerCase();
-    if (subsequenceEnd(lower, needle) < 0) continue;
-
     const slash = lower.lastIndexOf('/');
     const base = lower.slice(slash + 1);
-    let score = 0;
-    if (base.startsWith(needle)) score += 100;
-    else if (base.includes(needle)) score += 60;
-    else if (lower.includes(needle)) score += 30;
-    // Буквы нашлись по порядку, но не подряд: `cfg` есть в `config.ts`. Без этой ветки
-    // такой файл получал только штраф за длину — меньше нуля — и проваливался ниже
-    // любого, что вообще не совпал. Ставим его между «по пути подряд» и остальными.
-    else score += 15;
+    // Нечёткость — общая с подсказками (`shared/fuzzy`), а не своя: горбы и начало
+    // слова должны пониматься одинаково во всех списках. Раньше здесь стояла
+    // подпоследовательность по всему пути — `gT` находил `src/README.md` (буквы
+    // из разных каталогов), а оценка не знала ни горбов, ни начала слова.
+    const inName = matchScore(base, needle);
+    const inPath = inName ? null : matchScore(lower, needle);
+    const hit = inName ?? inPath;
+    if (!hit) continue;
+
+    let score = hit.score;
+    if (inName) score += 200;
     // Короткий путь ближе к цели, чем такой же по совпадению длинный.
     score -= Math.min(file.length, 200) * 0.05;
     // Недавние — надбавка за привычку, не больше 20: она перебивает разницу в длине

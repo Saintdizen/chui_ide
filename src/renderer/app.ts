@@ -2357,9 +2357,13 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     openFile: (path) => openPath(path),
     recentFiles: () => recentFiles.paths(),
     commands: {
-      list: () => commands.list(),
+      // Палитра и `>`-режим кормятся одним списком: `hidden` обязан соблюдаться в обоих.
+      list: () => commands.paletteVisible(),
       isEnabled: (id) => commands.isEnabled(id),
       run: (id) => void commands.execute(id),
+      // `>` открывается и по Ctrl+P, минуя пункт палитры: без этого действия
+      // редактора не попадали бы в список до первого Ctrl+Shift+P.
+      refresh: () => syncEditorActions(),
     },
     recentCommands: () => recentCommands.ids(),
     symbols: async (query) => {

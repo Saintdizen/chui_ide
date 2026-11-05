@@ -23,6 +23,7 @@ const { GitService } = require('../dist/main/git/git.js');
 const { registerIpc } = require('../dist/main/ipc/register.js');
 const { HostClient } = require('../dist/main/ipc/host.js');
 const { pushToRenderers } = require('../dist/main/ipc/push.js');
+const { PushTopic } = require('../dist/shared/api.js');
 const { registerAppScheme, serveRenderer } = require('../dist/main/protocol.js');
 const { SettingsStore } = require('../dist/main/settings.js');
 const { TerminalService } = require('../dist/main/terminal/terminal.js');
@@ -55,6 +56,11 @@ app.whenReady().then(async () => {
 
   const ide = openIdeWindow();
   await wait(6000);
+  // Мост `__chui` есть только при включённом флаге — без него проба спрашивает пустоту
+  // и винит приложение в том, чего сама не включила. Так делают соседние пробы.
+  await ide.webContents.executeJavaScript("localStorage.setItem('chui:probe','1')");
+  ide.reload();
+  await wait(6000);
 
   // Открываем файл: без активного редактора действий в палитре не будет вовсе.
   const opened = await ask(
@@ -74,12 +80,49 @@ app.whenReady().then(async () => {
 
   // Один ввод: какой префикс включает какой режим. Окно открывается `Ctrl+P` —
   // тем же путём, что у человека.
-  const openQuick = async (query) =>
-    await ask(
+  // Что видит окно СРАЗУ после Ctrl+P, до правки ввода: так видно, произошла ли
+  // загрузка вообще. Время важнее догадок: «В проекте нет файлов» штатно живёт
+  // один кадр, пока едет ответ.
+  console.log(
+    `[проба] сразу после Ctrl+P: ${JSON.stringify(
+      await ask(
+        ide,
+        `(async () => {
+          document.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', ctrlKey: true, bubbles: true }),
+          );
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          const root = [...document.querySelectorAll('.palette')].find((node) => node.querySelector('.palette-footer'));
+          if (!root) return { ошибка: 'окно не открылось' };
+          const input = root.querySelector('.palette-input');
+          const before = {
+            пусто: root.querySelector('.palette-empty')?.textContent ?? null,
+            пунктов: root.querySelectorAll('.palette-item').length,
+            строки: [...root.querySelectorAll('.palette-item-title')].slice(0, 5).map((n) => n.textContent ?? ''),
+            подпись: root.querySelector('.palette-footer')?.textContent ?? null,
+            ввод: input?.value ?? null,
+          };
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          return {
+            сразу: before,
+            черезДвеСекунды: {
+              пусто: root.querySelector('.palette-empty')?.textContent ?? null,
+              пунктов: root.querySelectorAll('.palette-item').length,
+              строки: [...root.querySelectorAll('.palette-item-title')].slice(0, 5).map((n) => n.textContent ?? ''),
+            },
+          };
+        })()`,
+      ),
+    )}`,
+  );
+  const openQuick = async (query) => {
+    // Открываем тем же путём, что меню: push-событие из main. Ctrl+P в окне
+    // не привязан — его нити держит только меню Electron.
+    pushToRenderers(PushTopic.MenuCommand, { command: 'file.quickOpen' });
+    await wait(600);
+    return await ask(
       ide,
       `(async () => {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }));
-        await new Promise((resolve) => setTimeout(resolve, 500));
         const root = [...document.querySelectorAll('.palette')].find((node) => node.querySelector('.palette-footer'));
         if (!root) return { ошибка: 'окно не открылось' };
         const input = root.querySelector('.palette-input');
@@ -96,8 +139,23 @@ app.whenReady().then(async () => {
         };
       })()`,
     );
+  };
 
   console.log(`[проба] listFiles из main: ${JSON.stringify(await workspace.listFiles())}`);
+  // Смотрим, что видит САМО окно: есть ли мост, ошибка чтения и содержимое списка.
+  console.log(
+    `[проба] окно: ${JSON.stringify(
+      await ask(
+        ide,
+        `(async () => {
+    const out = { мост: Boolean(window.__chui) };
+    try { out.listFiles = await window.__chui.rpc.request('workspace.listFiles'); } catch (error) { out.ошибка = String((error && error.message) || error); }
+    out.корень = window.__chui.workspace?.root ?? null;
+    return out;
+  })()`,
+      ),
+    )}`,
+  );
   console.log(`[проба] пустой ввод: ${JSON.stringify(await openQuick(''))}`);
   console.log(`[проба] файлы «demo»: ${JSON.stringify(await openQuick('demo'))}`);
   console.log(`[проба] «>» команды: ${JSON.stringify(await openQuick('>палитра'))}`);

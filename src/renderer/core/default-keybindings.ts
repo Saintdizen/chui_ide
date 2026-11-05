@@ -39,6 +39,12 @@ export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   // открытый диалог). Поэтому сочетание продублировано здесь — из двух путей до команды
   // доходит один: нажатие, съеденное меню, до renderer не доходит вовсе.
   { combo: 'Ctrl+Shift+P', command: 'palette.open' },
+  // Быстрое открытие — Ctrl+P тоже есть в меню («Файл»), но живёт там так же
+  // ненадёжно: клавишу забирает тот, у кого фокус. Плюс одна причина сверх того:
+  // пробы и встроенные окна, где меню нет вовсе, без этой строки остались бы
+  // без входа в список файлов. Дублирование безвредно: съеденное меню до renderer
+  // не доходит, и срабатывает ровно один путь.
+  { combo: 'Ctrl+P', command: 'file.quickOpen' },
   { combo: 'Ctrl+Shift+G', command: 'view.showChanges' },
   { combo: 'Ctrl+`', command: 'view.showTerminal' },
   { combo: 'Ctrl+Alt+E', command: 'view.toggleEditor' },

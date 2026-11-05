@@ -8,6 +8,12 @@
  * этого не хватало прежнему подбору: он знал только `startsWith`, а потому на `gT`
  * не находил `getTitle` вовсе.
  *
+ * Есть и второй, ВОЛЬНЫЙ поиск (`loosePositions`, `looseScore`): буква после разрыва
+ * ищется где угодно, горбы не требуются. Он для текста, где регистр уже стёрт или
+ * его нет вовсе — названий команд в палитре, подсветки файлов в дереве. Строгое
+ * правило там отвергало бы `свн` в «свернуть все», то есть ровно тот запрос, ради
+ * которого палитра и заведена.
+ *
  * Второе решение — регистр. Строчная буква в набранном совпадает с любой (`my` —
  * и `MyClass`, и `myValue`), а заглавная требует заглавной ровно там же: набрав `MC`,
  * человек просит имена именно с этих заглавных, и `macOS` такой запрос не удовлетворит.
@@ -80,6 +86,38 @@ function matchPositions(name: string, pattern: string): number[] | null {
     from = found + 1;
   }
   return positions;
+}
+
+/**
+ * Те же места, но без требования горба: буква ищется где угодно после пройденного.
+ *
+ * Нужно там, где регистр уже стёрт (палитра сверяет свёрнутые названия): горбов
+ * в `свернуть все` нет вовсе, и строгое правило отвергало бы `свн` — ровно тот
+ * запрос, ради которого палитра и заведена.
+ */
+export function loosePositions(name: string, pattern: string): number[] | null {
+  const positions: number[] = [];
+  let from = 0;
+  for (const wanted of pattern) {
+    let found = -1;
+    for (let at = from; at < name.length; at += 1) {
+      if (charMatches(name[at]!, wanted)) {
+        found = at;
+        break;
+      }
+    }
+    if (found < 0) return null;
+    positions.push(found);
+    from = found + 1;
+  }
+  return positions;
+}
+
+/** Оценка вольного совпадения: многословное название не должно проваливаться вниз. */
+export function looseScore(name: string, pattern: string): number {
+  const positions = loosePositions(name, pattern);
+  if (!positions) return Number.NEGATIVE_INFINITY;
+  return relevance(name, pattern, positions);
 }
 
 /** Совпадает ли знак имени с набранным знаком: заглавная требует заглавной, строчная — любой. */

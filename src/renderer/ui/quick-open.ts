@@ -70,7 +70,13 @@ export function createQuickOpen(deps: {
    */
   recentFiles?(): readonly string[];
   /** Реестр команд для режима `>`. Нет — режим скажет, что недоступен. */
-  commands?: { list(): CommandDescriptor[]; isEnabled(id: string): boolean; run(id: string): void };
+  commands?: {
+    list(): CommandDescriptor[];
+    isEnabled(id: string): boolean;
+    run(id: string): void;
+    /** Перед показом списка: действия редактора живут своей жизнью и меняются. */
+    refresh?(): void;
+  };
   /** Недавние команды — чтобы `>` начинался с того, что запускали. */
   recentCommands?(): readonly string[];
   /** Символы текущего файла под запрос. */
@@ -131,6 +137,15 @@ export function createQuickOpen(deps: {
   async function loadFiles(): Promise<void> {
     const current = deps.workspace.root;
     if (current === root && files.length > 0) return;
+    if (!current) {
+      // Проекта нет — и списку неоткуда взяться. Причина видна в списке, а не
+      // выдаётся за «файлов нет»: это разные вещи.
+      files = [];
+      root = null;
+      loadError = 'Проект не открыт';
+      return;
+    }
+    loadError = null;
     loading = true;
     render();
     try {
@@ -461,7 +476,7 @@ export function createQuickOpen(deps: {
       overlay.hidden = false;
       input.value = initialQuery;
       cursor = 0;
-      // Список мог устареть: проект сменился или появились файлы. Читаем при открытии.
+      deps.commands?.refresh?.();
       await loadFiles();
       render();
       input.focus();
