@@ -14,6 +14,18 @@ describe('хвост журнала LSP', () => {
     expect(parseTrace(raw, 2).map((item) => item.kind)).toEqual(['b', 'c']);
   });
 
+  it('сервер в строке сохраняется: в журнале живут все сразу', () => {
+    const raw = JSON.stringify({
+      at: '2026-11-05T10:00:00.000Z',
+      direction: 'client',
+      server: 'Pyright',
+      message: { method: 'x' },
+    });
+    expect(parseTrace(raw)[0]!.server).toBe('Pyright');
+    // Старые строки писались без подписи — пустая строка не должна ронять панель.
+    expect(parseTrace(line('client', { method: 'x' }))[0]!.server).toBe('');
+  });
+
   it('недописанная строка не роняет разбор', () => {
     const raw = `${line('client', { method: 'textDocument/hover' })}\n{"at":"2026-11`;
     expect(parseTrace(raw).map((item) => item.kind)).toEqual(['textDocument/hover']);

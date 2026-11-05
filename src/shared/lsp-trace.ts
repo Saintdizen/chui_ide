@@ -14,11 +14,14 @@ export interface LspTraceLine {
   kind: string;
   /** Одна строка текста: JSON сообщения без переносов. */
   text: string;
+  /** Какой сервер это сказал: в журнале живут все сразу. */
+  server: string;
 }
 
 /** Запись журнала как пришла из main: JSON одной строкой. */
 interface RawTraceLine {
   at?: unknown;
+  server?: unknown;
   direction?: unknown;
   message?: unknown;
 }
@@ -44,6 +47,7 @@ export function parseTrace(raw: string, limit = 200): LspTraceLine[] {
       direction,
       kind: describeKind(message),
       text: describeMessage(message),
+      server: typeof parsed.server === 'string' ? parsed.server : '',
     });
   }
   return limit > 0 ? out.slice(-limit) : out;

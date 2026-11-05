@@ -862,6 +862,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         kind: () => projectScan?.kind.id ?? null,
         patch: (value) => saveSettingsPatch(value),
       },
+      // Журнал живёт в доке, а настройки — модальным окном: закрываем окно,
+      // иначе панель окажется под ним.
+      openLspLog: () => {
+        void settingsModal.close();
+        dock.show('lsp-log');
+      },
     });
   };
   const settingsModal: SettingsModalView = {

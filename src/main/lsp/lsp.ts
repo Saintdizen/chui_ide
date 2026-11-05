@@ -1690,7 +1690,7 @@ export class LspService {
       (method, params) => this.onRequest(method, params),
       // Журнал обмена: пишем только когда человек включил трассировку. Проверку делаем
       // на каждом сообщении — тумблер можно переключить и посреди работы.
-      (direction, message) => this.trace(direction, message),
+      (direction, message) => this.trace(direction, message, config.label?.trim() || config.language),
       // Срок ждать ответа — из настроек, чтобы зависший сервер не держал подсказку
       // вечно, а человек мог убавить срок в settings.
       () => this.settings().requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
@@ -1950,11 +1950,13 @@ export class LspService {
    * Записать сообщение обмена в журнал — если трассировка включена и файл есть.
    * Пишем построчно (`JSON.stringify`), дописываем в конец: журнал читается хвостом.
    */
-  private trace(direction: 'client' | 'server', message: unknown): void {
+  private trace(direction: 'client' | 'server', message: unknown, server?: string): void {
     if (!this.settings().trace) return;
     const file = this.tracePath();
     if (!file) return;
-    const line = `${JSON.stringify({ at: new Date().toISOString(), direction, message })}\n`;
+    // Подпись сервера — часть строки: в журнале живут все серверы сразу, и без
+    // неё две одинаковые строки от python и go неразличимы.
+    const line = `${JSON.stringify({ at: new Date().toISOString(), direction, server, message })}\n`;
     // Пишем не дожидаясь: журнал не должен задерживать сам обмен.
     void appendFile(file, line, 'utf8').catch(() => undefined);
   }

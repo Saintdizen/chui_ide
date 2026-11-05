@@ -90,6 +90,11 @@ export interface SettingsModalDeps {
     kind: () => string | null;
     patch: (value: SettingsPatch) => Promise<Settings>;
   };
+  /**
+   * Показать журнал обмена с серверами: файл смотрит main, а панель живёт в доке.
+   * Без этого кнопка не появляется — окно остаётся работоспособным в отрыве.
+   */
+  openLspLog?: () => void;
 }
 
 export interface SettingsModalView {
@@ -2293,7 +2298,18 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'Его пометки показываются в редакторе рядом с собственными.',
       ),
       h('div', { class: 'field-hint' }, statusText),
-      field('Перезапустить', h('div', { class: 'field-row' }, restartButton, stopButton)),
+      field(
+        'Перезапустить',
+        h(
+          'div',
+          { class: 'field-row' },
+          restartButton,
+          stopButton,
+          ...(deps.openLspLog
+            ? [h('button', { class: 'btn btn-small', type: 'button', onClick: () => deps.openLspLog?.() }, 'Журнал')]
+            : []),
+        ),
+      ),
       switchRow('Журнал обмена с серверами (отладка)', lsp.trace, (value) => void patch({ lsp: { trace: value } })),
       h(
         'div',

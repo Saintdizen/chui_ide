@@ -23,13 +23,18 @@ export interface LspLogDeps {
 
 export function createLspLogPanel(deps: LspLogDeps): LspLogPanel {
   const hint = h('div', { class: 'lsp-log-hint', hidden: true });
+  // Фильтр по тексту: и по серверу, и по методу. Журнал длинный, и искать в нём
+  // глазами — то же, что не читать вовсе.
+  const filter = h('input', { class: 'lsp-log-filter', type: 'search', placeholder: 'Фильтр: сервер или метод' });
+  let all: LspTraceLine[] = [];
+  filter.addEventListener('input', () => draw());
   const body = h('div', { class: 'lsp-log-body' });
   const refreshButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Обновить');
   const settingsButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Настройки языков');
   const element = h(
     'div',
     { class: 'lsp-log' },
-    h('div', { class: 'lsp-log-actions' }, refreshButton, settingsButton),
+    h('div', { class: 'lsp-log-actions' }, refreshButton, settingsButton, filter),
     hint,
     body,
   );
@@ -64,7 +69,22 @@ export function createLspLogPanel(deps: LspLogDeps): LspLogPanel {
       return;
     }
     hint.hidden = true;
-    body.append(...result.lines.map(renderLine));
+    all = result.lines;
+    draw();
+  }
+
+  /** Перерисовать с учётом фильтра: он не меняет то, что пришло от main. */
+  function draw(): void {
+    const needle = filter.value.trim().toLowerCase();
+    const visible = needle
+      ? all.filter((line) => `${line.server} ${line.kind} ${line.text}`.toLowerCase().includes(needle))
+      : all;
+    hint.hidden = true;
+    if (visible.length === 0) {
+      showHint(`Под фильтр «${filter.value.trim()}» ничего не подошло.`);
+      return;
+    }
+    body.replaceChildren(...visible.map(renderLine));
     body.scrollTop = body.scrollHeight;
   }
 
@@ -86,6 +106,7 @@ function renderLine(line: LspTraceLine): HTMLElement {
     { class: `lsp-log-line is-${line.direction}`, title: line.text },
     h('span', { class: 'lsp-log-time' }, time),
     h('span', { class: 'lsp-log-direction' }, line.direction === 'server' ? '←' : '→'),
+    h('span', { class: 'lsp-log-server' }, line.server),
     h('span', { class: 'lsp-log-kind' }, line.kind),
   );
 }
