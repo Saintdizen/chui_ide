@@ -12,6 +12,7 @@ import { toWorkspaceFileEdits } from '../../shared/lsp-workspace-edit';
 import { languageInfoForPath } from '../../shared/languages';
 import { listProjectFiles } from '../project/scan';
 import { prewarmLanguages, serverCandidates } from '../../shared/lsp-bundled';
+import { sameServerConfig } from '../../shared/lsp-config';
 import { toLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { parseProgress } from '../../shared/lsp-progress';
 import {
@@ -119,6 +120,8 @@ const SWEEP_MAX_BYTES = 2_000_000;
  * `workspace/symbol` и мало чтобы посчитать редактор зависшим навсегда.
  */
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+/** Пауза перед перезапуском сервера после правки его настроек: склеивает серию правок. */
+const SERVER_RELOAD_DELAY_MS = 600;
 
 /**
  * Авто-перезапуск упавшего сервера (см. `scheduleRestart`). Пауза растёт вдвое:
@@ -890,6 +893,8 @@ export class LspService {
   private readonly restartAttempts = new Map<string, number>();
   /** Отложенные перезапуски упавших серверов (язык → таймер). */
   private readonly restartTimers = new Map<string, NodeJS.Timeout>();
+  /** Пауза перед перезапуском сервера после правки его настроек: склеивает серию правок. */
+  private readonly reloadTimers = new Map<string, NodeJS.Timeout>();
 
   /** Карта символов проекта: второй источник объявлений (см. `SymbolIndexSource`). */
   private indexSource: SymbolIndexSource | null = null;
@@ -1376,6 +1381,42 @@ export class LspService {
       runtime.connection.notify('workspace/didChangeConfiguration', {
         settings: { python: python ? { pythonPath: python } : {} },
       });
+    }
+    this.reloadChangedServers();
+  }
+
+  /**
+   * Правка настроек сервера — без перезапуска приложения.
+   *
+   * Сервер держит команду, окружение и `initializationOptions` в памяти: поменять
+   * их на ходу нечем, только перезапустить. Но и все серверы гасить нельзя —
+   * правка одной строки не должна трогать чужой язык. Поэтому сравниваем
+   * конфиг с тем, с каким сервер поднят; выключенный в настройках сервер
+   * просто гасим. Пауза склеивает серию правок: человек дописывает команду
+   * по буквам, и перезапуск на каждую — не то, чего он ждёт.
+   */
+  private reloadChangedServers(): void {
+    const servers = this.settings().servers;
+    for (const [language, runtime] of [...this.runtimes]) {
+      const next = servers.find((server) => server.language === runtime.config.language && server.enabled);
+      if (next && sameServerConfig(runtime.config, next)) continue;
+      const pending = this.reloadTimers.get(language);
+      if (pending) clearTimeout(pending);
+      const timer = setTimeout(() => {
+        this.reloadTimers.delete(language);
+        const current = this.runtimes.get(language);
+        if (!current) return;
+        const root = current.root;
+        this.stop(language);
+        // Выключенный язык не поднимаем: остановка и есть желаемое состояние.
+        const wanted = this.settings().servers.find((server) => server.language === language && server.enabled);
+        if (!wanted) return;
+        void this.startLanguage(language, root).catch(() => {
+          // Причина уже в статусе: `startLanguage` кладёт её в `failures`.
+        });
+      }, SERVER_RELOAD_DELAY_MS);
+      timer.unref?.();
+      this.reloadTimers.set(language, timer);
     }
   }
 
