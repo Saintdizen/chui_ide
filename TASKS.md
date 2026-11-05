@@ -441,14 +441,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     в ховере — как в VS Code — раскрывает больше.
     Источник: VS Code `edit-evolved` (hover), JetBrains `popups`.
 
-73. **Автодополнение: причины, регистр, порядок.** В списке подсказок виден вид
-    элемента (метод, поле, сниппет, модуль), документирующее окно справа,
-    подсветка совпавших букв. Учитывать `sortText`/`filterText`/`preselect`,
-    `commitCharacters`, `isIncomplete` (допересылка по мере ввода). Правила
-    нечёткости — одни на проект (`editor/complete/fuzzy.ts`), включая
-    регистронезависимость и бонус за начало слова.
-    Источник: VS Code `edit-evolved` (IntelliSense), Zed `editing-code`.
-
 ---
 
 ## Правила работы со списком

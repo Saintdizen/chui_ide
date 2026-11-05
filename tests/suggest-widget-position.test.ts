@@ -127,6 +127,45 @@ describe('попап: дописывание списка', () => {
   });
 });
 
+describe('попап: preselect от сервера', () => {
+  it('без preselect выделено первое', () => {
+    const { widget } = setup();
+    widget.show([item('alpha'), item('beta')], { left: 100, top: 200, bottom: 220 }, 0);
+    expect(widget.current?.label).toBe('alpha');
+  });
+
+  it('preselect выделяет именно ту строку, а не первую', () => {
+    const { widget } = setup();
+    widget.show(
+      [item('alpha'), { ...item('beta'), preselect: true }, item('gamma')],
+      { left: 100, top: 200, bottom: 220 },
+      0,
+    );
+    // Сервер уже знает, какая перегрузка подходит к месту, — спорить с ним нечем.
+    expect(widget.current?.label).toBe('beta');
+  });
+
+  it('из нескольких preselect берётся первая — порядок задал sortText', () => {
+    const { widget } = setup();
+    widget.show(
+      [item('alpha'), { ...item('beta'), preselect: true }, { ...item('gamma'), preselect: true }],
+      { left: 100, top: 200, bottom: 220 },
+      0,
+    );
+    expect(widget.current?.label).toBe('beta');
+  });
+
+  it('preselect: false не выделяет', () => {
+    const { widget } = setup();
+    widget.show(
+      [item('alpha'), { ...item('beta'), preselect: false }],
+      { left: 100, top: 200, bottom: 220 },
+      0,
+    );
+    expect(widget.current?.label).toBe('alpha');
+  });
+});
+
 describe('попап: высота по факту', () => {
   it('длинный список не переворачивает попап над кареткой', () => {
     const { widget, popup, list } = setup();

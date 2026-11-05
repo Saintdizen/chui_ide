@@ -102,8 +102,12 @@ export class SuggestWidget {
     // дописывания строк стало больше — попап мог вылезти за край, тогда его перевернём.
     this.anchor = anchor;
     this.items = [...items];
-    // Выделено всегда первое: обычно оно и нужное, а выбор стрелкой — уже уточнение.
-    this.selected = 0;
+    // Выделено первое: обычно оно и нужное, а выбор стрелкой — уже уточнение. Исключение —
+    // подсказка сервера с `preselect`: он сказал, какой строке место под кареткой соответствует
+    // лучше всех (перегрузки, поля одной формы), и спорить с ним нечем. Если таких несколько —
+    // первая из них: порядок между равными задал сам сервер (`sortText`).
+    const preselect = this.items.findIndex((item) => item.preselect === true);
+    this.selected = preselect >= 0 ? preselect : 0;
     this.prefixLength = prefixLength;
     this.visible = true;
     this.root.hidden = false;
