@@ -35,6 +35,8 @@ export const PushTopic = {
   /** Пометки, снятые обходом проекта: сервер смотрит и закрытые файлы. */
   LspProjectDiagnostics: 'lsp:project-diagnostics',
   LspProgress: 'lsp:progress',
+  /** `window/showMessage` от языкового сервера — в уведомления приложения. */
+  LspMessage: 'lsp:message',
   /** Состав серверов изменился: поднялся, исчез или упал — чип в статусбаре обновляется сам. */
   LspServers: 'lsp:servers',
   DebugState: 'debug:state',

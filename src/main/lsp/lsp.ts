@@ -13,6 +13,7 @@ import { languageInfoForPath } from '../../shared/languages';
 import { listProjectFiles } from '../project/scan';
 import { prewarmLanguages, serverCandidates } from '../../shared/lsp-bundled';
 import { sameServerConfig } from '../../shared/lsp-config';
+import { parseShowMessage } from '../../shared/lsp-notifications';
 import { toLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { parseProgress } from '../../shared/lsp-progress';
 import {
@@ -1685,7 +1686,7 @@ export class LspService {
 
     const connection = new JsonRpcConnection(
       child,
-      (method, params) => this.onNotification(method, params),
+      (method, params) => this.onNotification(method, params, config),
       (method, params) => this.onRequest(method, params),
       // Журнал обмена: пишем только когда человек включил трассировку. Проверку делаем
       // на каждом сообщении — тумблер можно переключить и посреди работы.
@@ -2650,12 +2651,20 @@ export class LspService {
     return this.languageOfPath.get(path) ?? languageInfoForPath(path)?.id ?? null;
   }
 
-  private onNotification(method: string, params: unknown): void {
+  private onNotification(method: string, params: unknown, config?: LspServerConfig): void {
     // Прогресс: сервер говорит, чем занят, и как далеко зашёл. Отдаём в окно, чтобы
     // долгая работа (индексация, поиск) была видна, а не выглядела зависанием.
     if (method === '$/progress') {
       const progress = parseProgress(params);
       if (progress) this.publish(PushTopic.LspProgress, progress);
+      return;
+    }
+    if (method === 'window/showMessage') {
+      // Сервер жалуется или советует, а мы раньше это выбрасывали: человек ничего
+      // не видел (Pyright без окружения молчит именно так). Отдаём в окно
+      // уведомлением с подписью сервера — иначе непонятно, кто говорит.
+      const message = parseShowMessage(params, config ?? { language: '', command: '', label: 'Языковой сервер' });
+      if (message) this.publish(PushTopic.LspMessage, message);
       return;
     }
     if (method !== 'textDocument/publishDiagnostics') return;
@@ -2836,6 +2845,10 @@ export class LspService {
     // Сервер просит создать индикатор прогресса — разрешаем: сам индикатор рисуем мы,
     // уведомления придут тем же `$/progress` (см. `onNotification`).
     if (method === 'window/workDoneProgress/create') return null;
+    // Сервер просит выбрать из вариантов («поставить окружение?»). Выбора у нас
+    // нет — отвечаем отказом (null), а не тишиной: без ответа сервер считает
+    // запрос висящим и не идёт дальше.
+    if (method === 'window/showMessageRequest') return null;
     if (method === 'workspace/configuration') {
       const items = (params as { items?: Array<{ section?: string }> }).items ?? [];
       const python = this.pythonPath();

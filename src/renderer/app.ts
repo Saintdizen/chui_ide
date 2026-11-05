@@ -3823,6 +3823,17 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       case PushTopic.LspProgress:
         lspProgress.apply(message.payload as LspProgress);
         break;
+      case PushTopic.LspMessage: {
+        // Сервер сам сказал что-то человеку (`window/showMessage`): раньше такие
+        // сообщения выбрасывались целиком — Pyright без окружения жаловался в никуда.
+        const said = message.payload as { message?: string; severity?: string; server?: string } | null;
+        if (typeof said?.message !== 'string' || !said.message.trim()) break;
+        // В тостах три вида, в LSP — четыре: предупреждение человека тоже должно
+        // видеть, но не красным.
+        const kind = said.severity === 'error' ? 'error' : 'info';
+        showToast(said.server ? `${said.server}: ${said.message}` : said.message, kind);
+        break;
+      }
       case PushTopic.LspServers:
         // Сервер поднялся, исчез или упал посреди работы. Раньше такое не двигало
         // чип: он был снят при смене языка и замирал — «всё хорошо» при мёртвом сервере.
