@@ -113,6 +113,117 @@ export function bindingConflicts(bindings: readonly BindingLike[]): BindingConfl
   return conflicts;
 }
 
+/** Откуда сочетание родом. */
+export type BindingOrigin = 'renderer' | 'menu';
+
+/** Одна строка редактора сочетаний — то, что видит человек и что решает спор. */
+export interface BindingRow extends BindingLike {
+  /** Ключ переопределения: `команда` либо `menu:команда`. */
+  readonly id: string;
+  readonly origin: BindingOrigin;
+  /** Нынешнее сочетание — это НЕ встроенное, а выбранное человеком. */
+  readonly isCustom: boolean;
+  /**
+   * Порядок применения: меньше — главнее. У встроенных он нулевой (их никто не
+   * перебивает), у переопределений — «чем позже задано, тем главнее».
+   */
+  readonly order: number;
+}
+
+/**
+ * Кто главнее, когда одно сочетание взяли две строки.
+ *
+ * Порядок не выдуман, а снят с того, как нажатие идёт по программе:
+ *
+ *   1. **Клавиша меню бьёт сочетание renderer.** Акселератор держит Electron и
+ *      перехватывает нажатие раньше окна: событие до renderer просто не доходит.
+ *      Поэтому сочетание вроде «Ctrl+`» из меню победит такое же сочетание в
+ *      редакторе, что бы ни лежало в настройках.
+ *   2. **Своё бьёт встроенное.** Переопределение потому и переопределение, что
+ *      пришло после; человек нажал клавишу именно затем, чтобы она сработала.
+ *   3. Дальше — `order`: последнее заданное главнее. У меню и renderer ключи
+ *      разные, так что настройка может быть у каждого.
+ */
+function bindingOrder(row: BindingRow): number {
+  const byOrigin = row.origin === 'menu' ? 0 : 10;
+  return byOrigin + (row.isCustom ? 0 : 5) + row.order;
+}
+
+/** Команда (для меню — с приставкой), которая сработает по этому сочетанию. */
+export interface BindingWinner {
+  /** Ключ победившей строки: `команда` или `menu:команда`. */
+  readonly id: string;
+  /** Почему победила — человеческим языком, для показа рядом со спором. */
+  readonly reason: string;
+}
+
+/** Разобранный спор: одно сочетание и все, кто на него заявился. */
+export interface BindingDispute extends BindingConflict {
+  /** Строки спора в порядке главенства: первая — та, что сработает. */
+  readonly rows: BindingRow[];
+  readonly winner: BindingWinner;
+  /** Строки, которым достанется не то, что человек думал, — их и предлагаем развести. */
+  readonly losers: BindingRow[];
+}
+
+/**
+ * Разобрать столкновения по строкам редактора: кто сработает и почему.
+ *
+ * `bindingConflicts` отвечает на вопрос «что столкнулось», этот — на вопрос
+ * «и что теперь будет». Человеку нужно второе: без него предупреждение «Ctrl+K
+ * у двух команд» заставляет гадать, какая из них жива.
+ *
+ * Пустые сочетания и одинаковые сочетания у ОДНОЙ команды спором не считаются:
+ * команда и клавиша меню у неё — разные строки, но итог один и тот же.
+ */
+export function bindingDisputes(rows: readonly BindingRow[]): BindingDispute[] {
+  const byCombo = new Map<string, BindingRow[]>();
+  for (const row of rows) {
+    if (!row.combo) continue;
+    const group = byCombo.get(row.combo);
+    if (group) group.push(row);
+    else byCombo.set(row.combo, [row]);
+  }
+  const disputes: BindingDispute[] = [];
+  for (const [combo, group] of byCombo) {
+    // Разные строки одной команды — не спор: какая бы ни сработала, команда та же.
+    const commands = [...new Set(group.map((row) => menuCommandOf(row.id)))];
+    if (commands.length < 2) continue;
+    // Сортировка устойчивая: при равном порядке остаётся порядок в списке.
+    const sorted = [...group].sort((a, b) => bindingOrder(a) - bindingOrder(b));
+    const winnerRow = sorted[0]!;
+    disputes.push({
+      combo,
+      commands,
+      rows: sorted,
+      winner: { id: winnerRow.id, reason: winnerReasonText(winnerRow) },
+      losers: sorted.slice(1),
+    });
+  }
+  return disputes;
+}
+
+/** Короткое «почему» для победившей строки. */
+function winnerReasonText(row: BindingRow): string {
+  if (row.origin === 'menu') {
+    return row.isCustom
+      ? 'клавиша меню, заданная вами: Electron перехватывает её раньше окна'
+      : 'клавиша меню: Electron перехватывает её раньше окна';
+  }
+  return row.isCustom ? 'сочетание, заданное вами: оно перебивает встроенное' : 'встроенное сочетание';
+}
+
+/**
+ * Кнопка «снять с пересечения»: пустое сочетание у всех проигравших строк.
+ *
+ * Именно пустое, а не «как было»: вернуть встроенное значение значило бы вернуть
+ * тот же спор — встроенная клавиша меню и встроенная клавиша renderer столкнутся
+ * снова. Снимаем и даём человеку назначить заново осознанно.
+ */
+export function bindingResolution(dispute: BindingDispute): { command: string; combo: string }[] {
+  return dispute.losers.map((row) => ({ command: row.id, combo: '' }));
+}
+
 export function normalizeKeybindingOverrides(value: unknown): KeybindingOverride[] {
   if (!Array.isArray(value)) return [];
   const byCommand = new Map<string, string>();

@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { APP_MENU, menuAccelerators } from '../src/shared/app-menu';
 import {
   bindingConflicts,
+  bindingDisputes,
+  bindingResolution,
   isMenuBinding,
   menuBindingId,
   menuComboOverrides,
   menuCommandOf,
   rendererOverrides,
+  type BindingRow,
 } from '../src/shared/keybindings';
 
 describe('ключи переопределений: меню и renderer', () => {
@@ -114,5 +117,86 @@ describe('menuAccelerators', () => {
   it('переопределение назначает клавишу пункту, у которого её не было', () => {
     const map = menuAccelerators(new Map([['view.showOutline', 'Ctrl+Alt+O']]));
     expect(map.get('view.showOutline')).toBe('Ctrl+Alt+O');
+  });
+});
+
+describe('bindingDisputes: кто победил и почему (п.2)', () => {
+  const row = (patch: Partial<BindingRow> & { id: string; combo: string }): BindingRow => ({
+    command: patch.id,
+    origin: 'renderer',
+    isCustom: false,
+    order: 0,
+    ...patch,
+  });
+
+  it('без столкновений споров нет', () => {
+    expect(bindingDisputes([row({ id: 'a', combo: 'Ctrl+K' }), row({ id: 'b', combo: 'Ctrl+J' })])).toEqual(
+      [],
+    );
+  });
+
+  it('пустые сочетания не спорят', () => {
+    expect(bindingDisputes([row({ id: 'a', combo: '' }), row({ id: 'b', combo: '' })])).toEqual([]);
+  });
+
+  it('две строки одной команды — не спор: какая бы ни сработала, команда та же', () => {
+    const rows = [
+      row({ id: 'file.save', combo: 'Ctrl+S' }),
+      row({ id: 'menu:file.save', combo: 'Ctrl+S', origin: 'menu' }),
+    ];
+    expect(bindingDisputes(rows)).toEqual([]);
+  });
+
+  it('клавиша меню бьёт сочетание renderer: Electron перехватывает раньше окна', () => {
+    const rows = [
+      row({ id: 'file.save', combo: 'Ctrl+S' }),
+      row({ id: 'menu:file.saveAs', combo: 'Ctrl+S', origin: 'menu' }),
+    ];
+    const [dispute] = bindingDisputes(rows);
+    expect(dispute!.winner.id).toBe('menu:file.saveAs');
+    expect(dispute!.winner.reason).toContain('раньше окна');
+    expect(dispute!.losers.map((item) => item.id)).toEqual(['file.save']);
+  });
+
+  it('своё бьёт встроенное в одном доме', () => {
+    const rows = [
+      row({ id: 'a', combo: 'Ctrl+K' }),
+      row({ id: 'b', combo: 'Ctrl+K', isCustom: true }),
+    ];
+    expect(bindingDisputes(rows)[0]!.winner.id).toBe('b');
+  });
+
+  it('своё в renderer НЕ бьёт клавишу меню: Electron всё равно первый', () => {
+    const rows = [
+      row({ id: 'a', combo: 'Ctrl+K', isCustom: true }),
+      row({ id: 'menu:b', combo: 'Ctrl+K', origin: 'menu' }),
+    ];
+    expect(bindingDisputes(rows)[0]!.winner.id).toBe('menu:b');
+  });
+
+  it('из двух своих главнее заданное позже', () => {
+    const rows = [
+      row({ id: 'a', combo: 'Ctrl+K', isCustom: true, order: 3 }),
+      row({ id: 'b', combo: 'Ctrl+K', isCustom: true, order: 0 }),
+    ];
+    expect(bindingDisputes(rows)[0]!.winner.id).toBe('b');
+  });
+
+  it('строки спора идут в порядке главенства', () => {
+    const rows = [
+      row({ id: 'x', combo: 'Ctrl+K' }),
+      row({ id: 'menu:y', combo: 'Ctrl+K', origin: 'menu' }),
+      row({ id: 'z', combo: 'Ctrl+K', isCustom: true }),
+    ];
+    expect(bindingDisputes(rows)[0]!.rows.map((item) => item.id)).toEqual(['menu:y', 'z', 'x']);
+  });
+
+  it('снятие отдаёт пустое сочетание проигравшим, победителя не трогает', () => {
+    const rows = [
+      row({ id: 'menu:a', combo: 'Ctrl+K', origin: 'menu' }),
+      row({ id: 'b', combo: 'Ctrl+K' }),
+    ];
+    const [dispute] = bindingDisputes(rows);
+    expect(bindingResolution(dispute!)).toEqual([{ command: 'b', combo: '' }]);
   });
 });

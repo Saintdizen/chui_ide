@@ -38,23 +38,31 @@ describe('источник сочетаний', () => {
 });
 
 describe('кто победил при двух сочетаниях', () => {
-  // Вот главная грабля. Electron перехватывает акселератор РАНЬШЕ, чем событие
-  // дойдёт до renderer: если у одной команды сочетание объявлено в обоих
-  // местах и они разные, показать надо то, что сработает на самом деле.
-  it('при расхождении верно то, что сработает, — меню', () => {
+  // Главная грабля блока. Правило держится не на теории, а на замере живым окном
+  // (`npm run probe:shortcuts`, шаг 4): `Ctrl+P` и `Ctrl+Alt+E` есть и в меню, и
+  // в renderer — и в обоих случаях сработала запись renderer. Значит окно обгоняет
+  // меню, и показывать надо его сочетание. Обратный порядок тут не «менее верен»,
+  // а прямо врёт: человек увидит `Ctrl+B`, а сработает не оно.
+  it('при расхождении верно то, что сработает, — renderer', () => {
     const src = source([['view.toggleSidebar', 'Ctrl+Alt+B']], [['view.toggleSidebar', 'Ctrl+B']]);
     const found = shortcutFor('view.toggleSidebar', src);
-    expect(found).toEqual({ combo: 'Ctrl+B', from: 'menu' });
+    expect(found).toEqual({ combo: 'Ctrl+Alt+B', from: 'renderer' });
   });
 
-  it('и это НЕ то же самое, что объявлено в renderer', () => {
+  it('акселератор меню не подменяет своё сочетание', () => {
     const src = source([['view.toggleSidebar', 'Ctrl+Alt+B']], [['view.toggleSidebar', 'Ctrl+B']]);
-    expect(shortcutFor('view.toggleSidebar', src)?.combo).not.toBe('Ctrl+Alt+B');
+    expect(shortcutFor('view.toggleSidebar', src)?.combo).not.toBe('Ctrl+B');
   });
 
-  it('совпадающие сочетания помечаются как меню — источник всё равно один', () => {
+  it('меню остаётся источником для команд, которых у окна нет', () => {
+    // `role`-пункты («Свернуть окно») в реестре команд не живут: их клавиша — только в меню.
+    const src = source([], [['window.minimize', 'Ctrl+M']]);
+    expect(shortcutFor('window.minimize', src)).toEqual({ combo: 'Ctrl+M', from: 'menu' });
+  });
+
+  it('совпадающие сочетания — источник renderer', () => {
     const src = source([['x', 'Ctrl+K']], [['x', 'Ctrl+K']]);
-    expect(shortcutFor('x', src)?.from).toBe('menu');
+    expect(shortcutFor('x', src)?.from).toBe('renderer');
   });
 });
 

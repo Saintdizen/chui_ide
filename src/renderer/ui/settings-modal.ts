@@ -64,11 +64,13 @@ import { PYTHON_LSP_PACKAGES, lspLanguagesForKind } from '../../shared/lsp-prese
 import type { CommandRegistry } from '../core/commands';
 import { menuAccelerators } from '../../shared/app-menu';
 import {
-  bindingConflicts,
+  bindingDisputes,
+  bindingResolution,
   isMenuBinding,
   menuBindingId,
   menuCommandOf,
-  type BindingLike,
+  type BindingDispute,
+  type BindingRow,
 } from '../../shared/keybindings';
 import { DEFAULT_KEYBINDINGS } from '../core/default-keybindings';
 import { comboFromEvent, isModifierKey } from '../core/keybindings';
@@ -1495,7 +1497,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       /** Команда или `menu:…` — по нему ищем строку среди спорящих. */
       rowId?: string;
     }> = [];
-    const bindings: BindingLike[] = [];
+    const bindings: BindingRow[] = [];
     let category = '';
     // Порядок — по категории, затем по названию: так заголовок группы стоит один раз,
     // а внутри группы пункты идут по алфавиту, а не вперемешку с чужими.
@@ -1521,7 +1523,18 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       {
         const fallback = rendererDefaults.get(command) ?? '';
         const current = saved.has(command) ? saved.get(command)! : fallback;
-        if (current) bindings.push({ combo: current, command });
+        const isCustom = saved.has(command);
+        if (current) {
+          bindings.push({
+            combo: current,
+            command,
+            id: command,
+            origin: 'renderer',
+            isCustom,
+            // У переопределений порядок — «чем позже задано, тем главнее».
+            order: isCustom ? [...saved.keys()].indexOf(command) : 0,
+          });
+        }
         const row = h(
           'div',
           { class: 'field field-between' },
@@ -1536,7 +1549,17 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         const key = menuBindingId(command);
         const fallback = menuKeys.get(command) ?? '';
         const current = saved.has(key) ? saved.get(key)! : fallback;
-        bindings.push({ combo: current, command: key });
+        const isCustom = saved.has(key);
+        if (current) {
+          bindings.push({
+            combo: current,
+            command: key,
+            id: key,
+            origin: 'menu',
+            isCustom,
+            order: isCustom ? [...saved.keys()].indexOf(key) : 0,
+          });
+        }
         const row = h(
           'div',
           { class: 'field field-between' },
@@ -1547,10 +1570,11 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       }
     }
 
-    // Что с чем столкнулось: одно сочетание у нескольких команд — почти всегда описка.
-    // Считаем ПОСЛЕ заполнения: `bindings` собирается в том же цикле выше.
-    const clashes = bindingConflicts(bindings);
-    const clashing = new Set(clashes.flatMap((item) => item.commands));
+    // Что с чем столкнулось и КТО СРАБОТАЕТ (п.2). Одного списка «столкнулись Ctrl+K,
+    // Ctrl+J» мало: человек не знает, какая из двух команд жива, и правит наугад.
+    // Выше цикла строки уже собраны с происхождением, поэтому разбор бесплатный.
+    const disputes = bindingDisputes(bindings);
+    const clashing = new Set(disputes.flatMap((item) => item.commands));
     // Предупреждение общим списком «столкнулись Ctrl+K, Ctrl+J» заставляет искать
     // спорящие строки глазами по сотне: человек должен видеть ОБЕ рядом.
     for (const entry of entries) {
@@ -1613,17 +1637,63 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           '(её меняет система). Поиск открывает и команды без сочетания — им можно задать новое.',
       ),
     ];
-    if (clashes.length > 0) {
-      head.push(
+    if (disputes.length > 0) {
+      const sections: Child[] = [
         h(
           'div',
           { class: 'field-hint st-ui-warn' },
-          `Одно сочетание у нескольких команд: ${clashes.map((item) => item.combo).join(', ')}. ` +
-            'Сработает первое, остальным стоит задать другое. Спорящие строки помечены ниже.',
+          'Одно сочетание у нескольких команд. Ниже сказано, какая из них сработает и почему: ' +
+            'именно это и происходит сейчас, а не догадка.',
         ),
-      );
+      ];
+      for (const dispute of disputes) {
+        sections.push(disputeNotice(dispute, commands, (next) => {
+          void patch({ keybindings: { overrides: [...next].map(([command, combo]) => ({ command, combo })) } });
+        }));
+      }
+      head.push(h('div', { class: 'st-ui-keydisputes' }, ...sections));
     }
     return [...head, ...entries.map((entry) => entry.element)];
+  }
+
+  /**
+   * Один спор: сочетание, кто сработает и почему, и кнопка «снять с пересечения».
+   *
+   * Кнопка снимает сочетание со ВСЕХ, кроме победителя, и оставляет `combo: ''` — не
+   * «как было»: вернуть встроенное значение значило бы вернуть тот же спор, ведь
+   * встроенная клавиша меню и встроенная клавиша редактора столкнутся снова.
+   */
+  function disputeNotice(
+    dispute: BindingDispute,
+    commands: Map<string, { title: string }>,
+    write: (overrides: Map<string, string>) => void,
+  ): Child {
+    const titleOf = (row: BindingRow): string =>
+      commands.get(menuCommandOf(row.id))?.title ?? menuCommandOf(row.id);
+    const winnerRow = dispute.rows[0]!;
+    return h(
+      'div',
+      { class: 'field st-ui-keydispute' },
+      h('span', { class: 'field-sub' }, `${dispute.combo} — у ${dispute.commands.length} команд`),
+      h(
+        'div',
+        { class: 'field-hint' },
+        `Сработает «${titleOf(winnerRow)}»: ${dispute.winner.reason}.`,
+      ),
+      h(
+        'button',
+        {
+          class: 'st-ui-btn',
+          type: 'button',
+          onclick: () => {
+            const remaining = new Map(settings!.keybindings.overrides.map((item) => [item.command, item.combo]));
+            for (const change of bindingResolution(dispute)) remaining.set(change.command, change.combo);
+            write(remaining);
+          },
+        },
+        'Снять с пересечения',
+      ),
+    );
   }
 
   /** Поле сочетания: читает нажатую комбинацию и само ничего не печатает. */

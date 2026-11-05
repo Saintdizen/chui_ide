@@ -153,6 +153,47 @@ app.whenReady().then(async () => {
   check('клик по сочетанию открыл настройки', clicked?.modalOpen === true, clicked?.modalOpen);
   check('раздел — «Сочетания клавиш»', String(clicked?.section ?? '').includes('Сочетания'), clicked?.section);
 
+  /* --- 4. Замер: чей Ctrl+P срабатывает ------------------------------------ */
+  // Правило «меню бьёт renderer» (shortcut-hints.ts) — допущение о том, что
+  // Electron съедает акселератор раньше окна. Проверяем его, а не верим.
+  await ask(ide, `(() => { const el = document.querySelector('.modal [aria-label="Закрыть"]') ?? document.querySelector('.modal .modal-close'); if (el) el.click(); return 'закрыл'; })()`);
+  await wait(500);
+  const watch = `(() => {
+    window.__probeRuns = [];
+    const wrap = (name) => {
+      const service = window.__chui.commands;
+      const original = service.execute.bind(service);
+      service.execute = (command, ...rest) => {
+        window.__probeRuns.push(command);
+        return original(command, ...rest);
+      };
+      return name;
+    };
+    return wrap('mutated');
+  })()`;
+  await ask(ide, watch);
+  ide.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Control' });
+  ide.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'P', modifiers: ['control'] });
+  ide.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'P', modifiers: ['control'] });
+  ide.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Control' });
+  await wait(1600);
+  const ran = await ask(ide, 'window.__probeRuns');
+  step(`Ctrl+P отправил команды: ${JSON.stringify(ran)}`);
+  // Второй замер: то же самое, но с сочетанием, где у клавиши меню НЕТ
+  // веб-события — Ctrl+Alt+E (панель редактора). Именно на нём проверяется
+  // правило «меню бьёт renderer»: Electron не отдаст окно чужим?
+  await ask(ide, 'window.__probeRuns = []');
+  ide.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Control' });
+  ide.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Alt' });
+  ide.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'E', modifiers: ['control', 'alt'] });
+  ide.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'E', modifiers: ['control', 'alt'] });
+  ide.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Alt' });
+  ide.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Control' });
+  await wait(1600);
+  const ranAlt = await ask(ide, 'window.__probeRuns');
+  step(`Ctrl+Alt+E отправил команды: ${JSON.stringify(ranAlt)}`);
+  check('Ctrl+Alt+E срабатывает', Array.isArray(ranAlt) && ranAlt.includes('view.toggleEditor'), ranAlt);
+
   const shot = path.join(dir, 'shortcuts.png');
   try {
     await fs.writeFile(shot, (await ide.webContents.capturePage()).toPNG());

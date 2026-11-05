@@ -7,13 +7,16 @@ import type { CommandDescriptor } from './commands';
  * (tooltips, menus, docs)?», JetBrains `action-system`): сочетание должно быть
  * видно там же, где живёт действие, а не только в списке настроек.
  *
- * ГЛАВНАЯ ГРАБЛЯ ЗДЕСЬ ОДНА: сочетание у действия имеет два источника.
- * Своё клавиши держит renderer (`core/default-keybindings.ts`), клавиши пунктов
- * меню — Electron (`accelerator` в `shared/app-menu.ts`). Возьми любой из них
- * молча — и подсказка соврёт: либо «нет сочетания» у меню, либо чужое
- * сочетание у перехваченной команды (меню в Electron срабатывает РАНЬШЕ, и
- * renderer своё не получит). Поэтому источники сводятся здесь явно, с
- * приоритетом: что видит Electron, то и напечатано.
+ * ПОРЯДОК КТО КОМУ УСТУПАЕТ — не догадка, а замер (проба `npm run probe:shortcuts`,
+ * шаг 4: шлёт настоящие нажатия в живое окно):
+ *
+ *   Ctrl+P     → сработал ТОЛЬКО `file.quickOpen` (сочетание renderer),
+ *   Ctrl+Alt+E → сработал ТОЛЬКО `view.toggleEditor` (то же самое).
+ *
+ * В обоих случаях команда есть и в меню с тем же accelerator, так что Electron
+ * нажатие окну УСТУПАЕТ — выигрывает запись renderer. Поэтому renderer первым;
+ * меню — запасной источник для команд, которые живут только в меню
+ * (`role`-пункты вроде «Свернуть окно»: их в реестре команд нет).
  */
 export interface ShortcutSource {
   /** Сочетания, которые держит renderer: команда → комбинация. */
@@ -32,13 +35,13 @@ export function shortcutFor(
   commandId: string,
   source: ShortcutSource,
 ): { combo: string; from: 'menu' | 'renderer' } | null {
-  // Меню первым: Electron перехватывает раньше renderer — если показать
-  // сочетание из renderer, когда то же действие есть в меню, человек увидит
-  // одно, а сработает другое.
-  const menu = source.menuAccelerators.get(commandId);
-  if (menu) return { combo: menu, from: 'menu' };
+  // Renderer первым — замерено, а не выведено: окно обгоняет меню (см. шапку).
+  // Показывать accelerator меню при живом своём сочетании значило бы назвать
+  // клавишу, которая не сработает, если её поменяли в настройках.
   const own = source.rendererBindings.get(commandId);
   if (own) return { combo: own, from: 'renderer' };
+  const menu = source.menuAccelerators.get(commandId);
+  if (menu) return { combo: menu, from: 'menu' };
   return null;
 }
 
