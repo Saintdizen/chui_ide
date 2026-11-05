@@ -2,6 +2,8 @@ import type { DirEntry, ExplorerSettings, GitChange, WorkspaceInfo } from '../..
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { submoduleStateLabel, type GitSubmodule } from '../../shared/git-submodules';
 import { maskToRegExp } from '../../shared/glob';
+import { plural } from '../../shared/review';
+import { countExcluded, excludedLabel } from '../core/excluded-notes';
 import { chainDepth, folderChain, type FolderChain } from '../core/folder-chain';
 import { isInsidePath, joinPath, nameOf, parentOf, pathAfter, separatorOf, splitPath } from '../../shared/paths';
 import {
@@ -665,20 +667,57 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    * отрисовки. Фильтр — часть вида, поэтому его результат не кешируем: смена
    * настройки должна применяться сразу.
    */
-  const visible = (entries: readonly DirEntry[], dir: string): DirEntry[] => {
+  /**
+   * То же, что `visible`, но говорит и сколько отсеяно.
+   *
+   * Исключённое раньше пропадало молча: файл есть на диске, а в дереве его нет, и
+   * причину приходилось выуживать из настроек. Теперь папка показывает, скольких она
+   * не показывает, — но только ИСКЛЮЧЁННЫХ: скрытое точкой — это не «исключение», а
+   * обычная тишина, и считать его в ту же строку значило бы врать цифрой.
+   */
+  /**
+   * Папки, в которых человек попросил «показать исключённое» на этот раз.
+   *
+   * Именно на раз: переживёт перерисовку (иначе строка исчезла бы вместе с
+   * кликом), но не перезапуск — настройку не трогает, чужой проект не портит.
+   * Смена настроек чистит набор: правило поменяли — смотреть надо заново.
+   */
+  const peekExcluded = new Set<string>();
+
+  const visibleSplit = (
+    entries: readonly DirEntry[],
+    dir: string,
+  ): { shown: DirEntry[]; excluded: number; patterns: string[] } => {
     // С несколькими корнями «относительно текущего проекта» не годится: путь берём
     // от того корня, которому папка принадлежит (файл из второй папки — к ней).
     const owner = deps.workspace.ownerOf(dir);
     const prefix = owner && dir !== owner.root ? pathAfter(owner.root, dir) : '';
-    return sortEntries(
+    const relativeOf = (entry: { name: string }): string => (prefix ? `${prefix}/${entry.name}` : entry.name);
+    // «Показать на раз» — папка без исключений, и счётчик у неё честно нулевой.
+    const hiding = peekExcluded.has(dir) ? [] : options.exclude;
+    const counted = countExcluded(
+      entries,
+      hiding,
+      relativeOf,
+      (entry) => !options.showHidden && entry.name.startsWith('.'),
+    );
+    const hidden = new Set<string>();
+    if (counted.count > 0) {
+      for (const entry of entries) {
+        if (!options.showHidden && entry.name.startsWith('.')) continue;
+        if (matchesExclude(entry.name, relativeOf(entry), hiding)) hidden.add(entry.name);
+      }
+    }
+    const shown = sortEntries(
       entries.filter((entry) => {
         if (!options.showHidden && entry.name.startsWith('.')) return false;
-        if (options.exclude.length === 0) return true;
-        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-        return !matchesExclude(entry.name, relative, options.exclude);
+        return !hidden.has(entry.name);
       }),
     );
+    return { shown, excluded: counted.count, patterns: [...counted.patterns] };
   };
+;
+;
 
   /** Путь от корня, которому принадлежит файл: по нему работают маски значков. */
   const relativeOf = (path: string): string => {
@@ -1369,7 +1408,15 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     | { kind: 'package'; name: string; dir: string; relative: string; depth: number }
     | { kind: 'root'; root: WorkspaceRoot; active: boolean; collapsed: boolean }
     | { kind: 'create'; parent: string; depth: number }
-    | { kind: 'loading'; dir: string };
+    | { kind: 'loading'; dir: string }
+    /**
+     * «Ещё N исключено» в хвосте папки.
+     *
+     * Нужна, чтобы дерево не врало перечнем: файл на диске есть, но его не
+     * показывают. `patterns` — какие маски это сделали: по ним человек поймёт,
+     * что править, не открывая настройки наугад.
+     */
+    | { kind: 'excluded'; dir: string; depth: number; count: number; patterns: string[] };
 
   /** Сам список, его хозяин и высота строки: нужны окну отрисовки. */
   let treeEl: HTMLElement | null = null;
@@ -1507,7 +1554,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         rows.push({ kind: 'loading', dir });
         return;
       }
-      const list = visible(entries, dir);
+      const split = visibleSplit(entries, dir);
+      const list = split.shown;
       const nest = options.fileNesting
         ? nestEntries(
             list.map((item) => item.name),
@@ -1559,6 +1607,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           if (skip && entryIsDirectory(entry) && skip.has(entry.path)) continue;
           pushEntry(entry);
         }
+      }
+
+      // Исключённое показываем счётчиком в хвосте папки: файл на диске есть, и
+      // молчать о нём значит врать перечнем. Только при раскрытой папке — у
+      // свёрнутой нет «хвоста», а цифра без места выглядела бы обрывком.
+      if (split.excluded > 0) {
+        rows.push({ kind: 'excluded', dir, depth, count: split.excluded, patterns: split.patterns });
       }
 
       // Удалённые, но не закоммиченные файлы: на диске их нет, поэтому в списке
@@ -1621,11 +1676,42 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         (value) => checkNameIn(edit.parent, value),
       );
     }
+    if (row.kind === 'excluded') return excludedRow(row.dir, row.depth, row.count, row.patterns);
     return renderRow(row.entry, row.depth, row.dir, {
       nested: row.nested,
       deleted: row.deleted,
       ...(row.chain ? { chain: row.chain } : {}),
     });
+  };
+
+  /**
+   * Хвост папки: «Ещё 3 исключено настройкой».
+   *
+   * Клик — показать один раз. Не переключатель в настройках: человек чаще хочет
+   * ЗАГЛЯНУТЬ, чем менять правило навсегда, и одно нажатие не должно оставлять
+   * след в чужом проекте. Маски перечислены прямо в подсказке — по ним читатель
+   * найдёт в настройках то, что его прячет.
+   */
+  const excludedRow = (dir: string, depth: number, count: number, patterns: readonly string[]): HTMLElement => {
+    const label = excludedLabel(count, plural);
+    const note = patterns.length === 0 ? '' : ` (${patterns.join(', ')})`;
+    const row = h(
+      'div',
+      {
+        class: 'tree-excluded-note',
+        title: `Скрыто настройкой explorer.exclude${note}. Щелчок покажет их на один раз.`,
+        onClick: () => {
+          // Один клик — папка показывает всех, кого прятала. Строка-счётчик после
+          // этого исчезает сама: исключённых больше нет, и показывать нечего.
+          peekExcluded.add(dir);
+          render();
+        },
+      },
+      h('span', { class: 'tree-excluded-label' }, label),
+      ...(note ? [h('span', { class: 'tree-excluded-patterns' }, note)] : []),
+    );
+    row.style.paddingLeft = `${8 + depth * options.indent}px`;
+    return row;
   };
 
   /** Распорка высотой скрытых строк: она и держит честную длину прокрутки. */
@@ -1688,8 +1774,6 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const host = rowsHost;
     const scroller = treeEl;
     if (!host || !scroller) return;
-    // DEBUG
-
     // Таблицу мест считаем ЗДЕСЬ: строки рисуются из `flatRows`, и место строки
     // в наборе зависит от всего набора, а не от окна (`renderWindow` рисует лишь
     // видимую часть).
@@ -2421,6 +2505,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         ignored.clear();
         ignoreAsked.clear();
       }
+      peekExcluded.clear();
       render();
     },
   };

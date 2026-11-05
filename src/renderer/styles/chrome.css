@@ -2249,6 +2249,32 @@ textarea {
   color: var(--text_color_error);
 }
 
+/* «Ещё N исключено» в хвосте папки.
+
+   Не красная и не тревожная: это не беда, а настройка. Но и не такой же серый,
+   как «Папка пуста», — иначе строка читалась бы как содержимое. Курсор-рука и
+   подчёркивание по наведению говорят, что по ней можно щёлкнуть. */
+.tree-excluded-note {
+  display: flex;
+  gap: 4px;
+  padding: 2px 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  font-style: italic;
+  cursor: pointer;
+}
+
+.tree-excluded-note:hover {
+  color: var(--text_color_secondary);
+  text-decoration: underline;
+}
+
+/* Маски обычным начертанием: это цитата из настроек, а не рассуждение дерева. */
+.tree-excluded-patterns {
+  font-style: normal;
+  opacity: 0.75;
+}
+
 /* Блоки над деревом: «Избранное» (постоянный список из настроек) и закреплённые
    (из сессии проекта). Вид у них общий — это одинаковые строки по абсолютным путям. */
 .tree-pins,
