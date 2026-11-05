@@ -16,7 +16,7 @@ import type { ApplyFailure, FileEdit } from '../../shared/edits';
 import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectCommand } from '../../shared/commands';
 import { sessionAttachment } from '../../shared/session-context';
 import { leaveQuestion, type RunLeaving } from '../../shared/run-keep';
-import { composerAction, focusAfterCard, type ComposerAction } from '../../shared/run-keys';
+import { composerAction, feedAction, focusAfterCard, recallStep, type ComposerAction } from '../../shared/run-keys';
 import { isAutoTitle } from '../../shared/chat-title';
 import { resolvePatches } from '../../shared/patch';
 import { turnsSinceCompact } from './compact-turns';
@@ -335,6 +335,62 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     onToolPresetChange: (preset) => void saveToolPreset(preset),
   });
   const input = composer.input;
+
+  /**
+   * ↑ в пустом поле возвращает прошлый вопрос — как в оболочке. `recallIndex` —
+   * где стоит человек в списке вопросов этой беседы, `null` — в своём черновике.
+   *
+   * Живёт здесь, а не рядом с обработчиком: `activate`/`send` сбрасывают
+   * состояние, а вызываются они раньше того места в коде.
+   */
+  let recallIndex: number | null = null;
+  /** Что было набрано до первого ↑: «вперёд» за последний вопрос вернёт именно это. */
+  let recallDraft = '';
+
+  /*
+    Клавиатура ленты.
+
+    В ленту фокус приходит после ответа на карточку (см. `focusAfterCard`), а по
+    Tab — нет: она `tabindex="-1"`, чтобы не удлинять обход окна. Но раз фокус
+    тут оказался, листаться должно как в любом списке: PageUp/PageDown —
+    страница, Home/End — край, Escape — обратно в поле ввода.
+
+    Стрелки вверх/вниз не трогаем: Alt+↑/↓ в ленте уже прыгает по своим
+    вопросам (см. `jumpToPrompt`), а прокрутку с прыжком не совместить.
+  */
+  body.addEventListener('keydown', (event) => {
+    const action = feedAction({
+      key: event.key,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+    });
+    if (action === 'none') return;
+    event.preventDefault();
+    if (action === 'composer') {
+      input.focus();
+      return;
+    }
+    if (action === 'to-end') {
+      stickToEnd();
+      return;
+    }
+    // Листал руками — значит читает, а не следит за ответом: иначе следующий
+    // пришедший токен утащил бы ленту вниз из-под глаз.
+    autoScroll = false;
+    jumpButton.hidden = false;
+    if (action === 'to-start') body.scrollTop = 0;
+    // Не полный экран, а экран минус строка: без перекрытия читать сшивку
+    // страниц невозможно — теряется место, на котором остановился глаз.
+    else if (action === 'page-up') body.scrollTop -= pageStep();
+    else body.scrollTop += pageStep();
+  });
+
+  /** Шаг страницы ленты: чуть меньше видимой высоты, чтобы соседние экраны сшивались. */
+  function pageStep(): number {
+    return Math.max(80, body.clientHeight - 48);
+  }
 
   /* ── команды проекта (`.chui/commands`) ───────────────────────────────────── */
 
@@ -813,6 +869,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     for (const session of sessions) session.thread.hidden = session.id !== id;
     const next = active();
     input.value = next.draft;
+    // История вопросов у каждой беседы своя: индекс с прежней вкладки здесь — чужой.
+    resetRecall();
     // Очередь живёт в ленте своей беседы: при возврате на вкладку она должна быть
     // на месте, иначе спрятанные вопросы человеку не видны и не снимаются.
     renderQueue(next);
@@ -2452,6 +2510,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     input.value = '';
     session.draft = '';
+    // Вопрос ушёл, поле пустое — история вопросов начинается заново.
+    resetRecall();
     menu.hide();
     // Контекст приложен к конкретному вопросу: дальше он только мешает.
     const sent = attachments.takeForSend();
@@ -2505,6 +2565,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     enqueuePrompt(session, { text, attachments: attachments.takeForSend() });
     input.value = '';
     session.draft = '';
+    resetRecall();
     renderQueue(session);
     showToast('Вопрос в очереди — уйдёт после ответа');
     return 'busy';
@@ -3095,7 +3156,27 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     modes: () => composer.modes(),
   });
 
-  input.addEventListener('input', () => menu.sync());
+  /** Вопросы этой беседы — то, что человек сам писал. Служебный дострой и пустышки — не вопрос. */
+  function askedQuestions(): string[] {
+    return active()
+      .transcript.filter(
+        (message) =>
+          message.role === 'user' && message.content !== CONTINUE_PROMPT && message.content.trim().length > 0,
+      )
+      .map((message) => message.content);
+  }
+
+  /** Новая беседа, вкладка или отправка — история вопросов начинается заново. */
+  function resetRecall(): void {
+    recallIndex = null;
+    recallDraft = '';
+  }
+
+  input.addEventListener('input', () => {
+    // Набранный текст — уже не прошлый вопрос: следующее ↑ начинает с конца.
+    resetRecall();
+    menu.sync();
+  });
 
   input.addEventListener('keydown', (event) => {
     // Стоп, пауза и «продолжить» — с клавиш, а не только мышью. Разбор
@@ -3133,6 +3214,37 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         event.preventDefault();
         menu.pickCurrent();
         return;
+      }
+    }
+
+    // ↑/↓ без модификаторов — история вопросов. ↑ берём только там, где она
+    // никому не мешает: поле пустое (или мы уже в истории) и каретка в начале.
+    // Стрелка посреди набранного текста — движение по строкам, и отнимать её нельзя.
+    if (
+      (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      const up = event.key === 'ArrowUp';
+      const inHistory = recallIndex !== null;
+      const caretAtStart = (input.selectionStart ?? 0) === 0 && (input.selectionEnd ?? 0) === 0;
+      const wanted = up ? inHistory || (input.value.trim() === '' && caretAtStart) : inHistory;
+      if (wanted) {
+        const questions = askedQuestions();
+        const next = recallStep(recallIndex, up ? -1 : 1, questions.length);
+        // Нечего вспоминать: пускай стрелка двигает каретку, как обычно.
+        if (recallIndex !== null || next !== null) {
+          event.preventDefault();
+          if (recallIndex === null) recallDraft = input.value;
+          recallIndex = next;
+          input.value = next === null ? recallDraft : (questions[next] ?? '');
+          // Программная правка события `input` не даёт: каретку в конец и подсказки обновляем сами.
+          input.setSelectionRange(input.value.length, input.value.length);
+          menu.sync();
+          return;
+        }
       }
     }
 

@@ -25,6 +25,8 @@ export interface ComposerKey {
   ctrlKey: boolean;
   metaKey: boolean;
   shiftKey: boolean;
+  /** Необязателен: в разборе прогона Alt не участвует, а старые тесты его не передают. */
+  altKey?: boolean;
 }
 
 /**
@@ -87,4 +89,51 @@ export type FocusTarget = 'composer' | 'thread';
  */
 export function focusAfterCard(answered: boolean): FocusTarget {
   return answered ? 'thread' : 'composer';
+}
+
+/** Что сделать с лентой по нажатой в ней клавише. */
+export type FeedAction = 'page-up' | 'page-down' | 'to-start' | 'to-end' | 'composer' | 'none';
+
+/**
+ * Разобрать нажатие в ленте беседы.
+ *
+ * Лента — не обычный текст, а список сообщений, и человек ждёт от неё
+ * поведения списка: PageUp/PageDown листают экран, Home/End — к началу
+ * и к концу, Escape уводит обратно в поле ввода.
+ *
+ * • С Shift/Alt/Ctrl/⌘ не лезем: там браузерное выделение и системные жесты,
+ *   и отнимать их у человека без нужды — хуже, чем не иметь своих.
+ * • Escape — именно «уйти отсюда», а не «остановить прогон»: в ленте прогон
+ *   не останавливают, человек сюда пришёл читать.
+ */
+export function feedAction(key: ComposerKey): FeedAction {
+  if (key.ctrlKey || key.metaKey || key.shiftKey || key.altKey) return 'none';
+  if (key.key === 'PageUp') return 'page-up';
+  if (key.key === 'PageDown') return 'page-down';
+  if (key.key === 'Home') return 'to-start';
+  if (key.key === 'End') return 'to-end';
+  if (key.key === 'Escape') return 'composer';
+  return 'none';
+}
+
+/**
+ * Шаг по истории вопросов: `↑` — назад по времени, `↓` — вперёд.
+ *
+ * `current` — где стоит человек сейчас: `null` — в своём черновике, число —
+ * индекс вопроса в списке (0 — самый старый, `count - 1` — самый свежий).
+ * Возвращает новый индекс или `null`, если шаг уводит обратно в черновик:
+ * так `↓` за последним вопросом возвращает то, что было набрано до `↑`,
+ * а не застревает на последнем.
+ *
+ * Модуль чистый: список вопросов собирает тот, у кого есть беседа.
+ */
+export function recallStep(current: number | null, direction: -1 | 1, count: number): number | null {
+  if (count <= 0) return null;
+  if (direction === -1) {
+    if (current === null) return count - 1;
+    return Math.max(0, current - 1);
+  }
+  if (current === null) return null;
+  const next = current + 1;
+  return next >= count ? null : next;
 }
