@@ -4,6 +4,7 @@ import { submoduleStateLabel, type GitSubmodule } from '../../shared/git-submodu
 import { maskToRegExp } from '../../shared/glob';
 import { plural } from '../../shared/review';
 import { countExcluded, excludedLabel } from '../core/excluded-notes';
+import { emptyReasonFor, emptyState, type EmptyReason } from '../core/empty-state';
 import { chainDepth, folderChain, type FolderChain } from '../core/folder-chain';
 import { isInsidePath, joinPath, nameOf, parentOf, pathAfter, separatorOf, splitPath } from '../../shared/paths';
 import {
@@ -1416,7 +1417,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
      * показывают. `patterns` — какие маски это сделали: по ним человек поймёт,
      * что править, не открывая настройки наугад.
      */
-    | { kind: 'excluded'; dir: string; depth: number; count: number; patterns: string[] };
+    | { kind: 'excluded'; dir: string; depth: number; count: number; patterns: string[] }
+    /**
+     * Пустое место с объяснением и действием.
+     *
+     * Отдельная строка, а не текст внутри списка: у неё есть кнопка, а кнопка
+     * должна попадать в окно виртуализации наравне с прочими строками.
+     */
+    | { kind: 'empty'; dir: string; depth: number; reason: EmptyReason; patterns: string[] };
 
   /** Сам список, его хозяин и высота строки: нужны окну отрисовки. */
   let treeEl: HTMLElement | null = null;
@@ -1540,6 +1548,21 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    * свёрнутые спутники. Порядок тот же, что узлов на экране, — по нему работает
    * выделение диапазоном (`Shift`) и прокрутка к строке.
    */
+  /**
+   * Сбросить фильтр дерева — общий путь для Escape и кнопки в пустом месте.
+   *
+   * Одному и тому же действию одно тело: иначе Escape и кнопка разойдутся, и
+   * одно из двух перестанет сбрасывать список.
+   */
+  const clearFilter = (): void => {
+    filterQuery = '';
+    const input = treeEl?.querySelector<HTMLInputElement>('.tree-filter-input');
+    if (input) input.value = '';
+    // Перестраивает и перерисовывает `render`: у него уже есть свежий `info`,
+    // а заводить второй источник правды здесь значило бы их рассинхронить.
+    render();
+  };
+
   const buildFlat = (info: WorkspaceInfo): FlatRow[] => {
     const rows: FlatRow[] = [];
     // Склеенные цепочки — на один проход сборки дерева, а не на кадр: дерево
@@ -1607,6 +1630,23 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           if (skip && entryIsDirectory(entry) && skip.has(entry.path)) continue;
           pushEntry(entry);
         }
+      }
+
+      // Пустое место объясняет себя: какой из пяти случаев перед нами и что нажать.
+      // Порядок проверок живёт в `core/empty-state.ts`: пропавший корень важнее
+      // пустоты (иначе человек пойдёт создавать файл в папку, которой нет), а
+      // исключённое важнее пустоты (иначе он поверит, что папка пуста, хотя полна).
+      const reason = emptyReasonFor({
+        isLoading: false,
+        failed: false,
+        hasFilter: filterQuery.trim() !== '',
+        total: entries.length,
+        shown: split.excluded > 0 ? 0 : list.length,
+        excluded: split.excluded,
+        isRoot: deps.workspace.ownerOf(dir)?.root === dir,
+      });
+      if (reason !== null) {
+        rows.push({ kind: 'empty', dir, depth, reason, patterns: split.patterns });
       }
 
       // Исключённое показываем счётчиком в хвосте папки: файл на диске есть, и
@@ -1677,11 +1717,60 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       );
     }
     if (row.kind === 'excluded') return excludedRow(row.dir, row.depth, row.count, row.patterns);
+    if (row.kind === 'empty') return emptyRow(row.dir, row.depth, row.reason, row.patterns);
     return renderRow(row.entry, row.depth, row.dir, {
       nested: row.nested,
       deleted: row.deleted,
       ...(row.chain ? { chain: row.chain } : {}),
     });
+  };
+
+  /**
+   * Пустое место: что случилось и что нажать.
+   *
+   * Действие берётся из текста состояния (`core/empty-state.ts`), а исполняется
+   * здесь: `excluded-only` показывает папку на этот раз, остальные гоняют
+   * команду. Так текст остаётся чистым, а знание о кнопках — в одном месте.
+   */
+  const emptyRow = (
+    dir: string,
+    depth: number,
+    reason: EmptyReason,
+    patterns: readonly string[],
+  ): HTMLElement => {
+    const state = emptyState(reason, patterns);
+    const action = state.action;
+    const button =
+      action === null
+        ? null
+        : h(
+            'button',
+            {
+              class: 'tree-empty-action',
+              type: 'button',
+              onClick: () => {
+                if (reason === 'excluded-only') {
+                  peekExcluded.add(dir);
+                  render();
+                  return;
+                }
+                if (reason === 'filter-empty') {
+                  clearFilter();
+                  return;
+                }
+                if (action.command) void deps.commands.execute(action.command);
+              },
+            },
+            action.label,
+          );
+    const row = h(
+      'div',
+      { class: 'tree-empty-state', style: { paddingLeft: `${12 + depth * options.indent}px` } },
+      h('div', { class: 'tree-empty-title' }, state.title),
+      h('div', { class: 'tree-empty-hint' }, state.hint),
+      ...(button ? [button] : []),
+    );
+    return row;
   };
 
   /**
@@ -2059,15 +2148,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           onKeydown: (event: Event) => {
             if ((event as KeyboardEvent).key === 'Escape') {
               event.stopPropagation();
-              filterQuery = '';
-              (event.target as HTMLInputElement).value = '';
-              flatRows = buildFlat(info);
-              visibleNow = [];
-              for (const row of flatRows) {
-                if (row.kind === 'entry' && !row.deleted) visibleNow.push(row.entry.path);
-              }
-              host.replaceChildren();
-              renderWindow();
+              clearFilter();
             }
           },
         }),

@@ -2249,6 +2249,47 @@ textarea {
   color: var(--text_color_error);
 }
 
+/* Пустое место в дереве: что случилось и одна кнопка.
+
+   Не по центру панели, а слева в отступе глубины: пустая папка — это строка
+   папки, а не отдельный экран. Центрированное сообщение читалось бы как «здесь
+   всё», хотя человек просто раскрыл папку внутри дерева. */
+.tree-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.tree-empty-title {
+  color: var(--text_color_secondary);
+}
+
+.tree-empty-hint {
+  /* Подсказка короче заголовка по весу, но не мельче: её читают, а не проглядывают. */
+  opacity: 0.85;
+}
+
+/* Кнопка — не ссылка: действие меняет дерево, и это должно быть видно по виду. */
+.tree-empty-action {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--button_border_color);
+  border-radius: var(--radius_sm);
+  background: var(--button_background);
+  color: var(--text_color);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tree-empty-action:hover {
+  border-color: var(--button_border_color_hover);
+  background: var(--element_background_hover);
+}
+
 /* «Ещё N исключено» в хвосте папки.
 
    Не красная и не тревожная: это не беда, а настройка. Но и не такой же серый,
