@@ -7,12 +7,17 @@ interface FakeNode {
   parent: FakeNode | null;
   text: string;
   removed: boolean;
+  /** Живой узел — с `false` автоуход тоста не стартует, как и в настоящем DOM. */
+  isConnected: boolean;
   handlers: Record<string, ((event: unknown) => void)[]>;
   classList: { add: (name: string) => void; classes: Set<string> };
   appendChild: (child: FakeNode) => FakeNode;
   addEventListener: (type: string, handler: (event: unknown) => void) => void;
   remove: () => void;
   click: () => void;
+  /** Событие без клика: `mouseenter`, `mouseleave`, `focusin` — пауза автоухода. */
+  fire: (type: string) => void;
+  querySelector: (selector: string) => FakeNode | null;
 }
 
 function fakeNode(tag: string, attrs: Record<string, string> = {}): FakeNode {
@@ -23,6 +28,7 @@ function fakeNode(tag: string, attrs: Record<string, string> = {}): FakeNode {
     parent: null,
     text: '',
     removed: false,
+    isConnected: true,
     handlers: {},
     classList: { classes: new Set<string>(), add: (name) => node.classList.classes.add(name) },
     appendChild: (child) => {
@@ -35,12 +41,26 @@ function fakeNode(tag: string, attrs: Record<string, string> = {}): FakeNode {
     },
     remove: () => {
       node.removed = true;
+      node.isConnected = false;
       if (!node.parent) return;
       node.parent.children = node.parent.children.filter((child) => child !== node);
       node.parent = null;
     },
     click: () => {
       for (const handler of node.handlers.click ?? []) handler({ stopPropagation: () => {} });
+    },
+    fire: (type) => {
+      for (const handler of node.handlers[type] ?? []) handler({});
+    },
+    // Ровно та выборка, которая нужна `Esc`: верхний (последний добавленный)
+    // тост, ещё не уехавший.
+    querySelector: (selector) => {
+      if (selector !== '.toast:not(.is-leaving)') return null;
+      const live = node.children.filter(
+        (child) =>
+          child.tag === 'div' && child.attrs.class?.includes('toast') && !child.classList.classes.has('is-leaving'),
+      );
+      return live[live.length - 1] ?? null;
     },
   };
   all.push(node);
@@ -68,18 +88,32 @@ function domModule() {
 }
 
 let all: FakeNode[] = [];
+/** Слушатели, повешенные на `window`: Esc в уведомлениях и пауза автоухода. */
+let windowHandlers: Record<string, ((event: unknown) => void)[]> = {};
+
+/** Дождаться свежих таймеров после `showToast` и вызвать клавишу. */
+function pressEscape(): void {
+  for (const handler of windowHandlers.keydown ?? []) handler({ key: 'Escape', preventDefault: () => {} });
+}
 
 beforeEach(() => {
   all = [];
+  windowHandlers = {};
   vi.resetModules();
   vi.useFakeTimers();
   const body = fakeNode('body');
   vi.stubGlobal('document', {
     body,
+    querySelector: () => null,
     createElement: (tag: string) => {
       const node = fakeNode(tag);
       all.push(node);
       return node;
+    },
+  });
+  vi.stubGlobal('window', {
+    addEventListener: (type: string, handler: (event: unknown) => void) => {
+      (windowHandlers[type] ??= []).push(handler);
     },
   });
 });
@@ -109,6 +143,7 @@ describe('ui/toast', () => {
     const [error, info] = toasts();
     expect(error?.attrs.role).toBe('alert');
     expect(info?.attrs.role).toBe('status');
+    // Без действия — ни класса `is-actionable`, ни курсора-руки на плашке.
     expect(error?.attrs.class).toBe('toast toast-error');
   });
 
@@ -222,5 +257,75 @@ describe('ui/toast', () => {
     expect(ready?.action?.command).toBe('view.lspLog');
     // Замыкание живёт только до перезагрузки окна — в истории ему не место.
     expect(done?.action ?? null).toBeNull();
+  });
+
+  // П.7: тост не отбирает ввод. Промах мимо плашки должен пройти насквозь —
+  // под ней в правом нижнем углу низ чата с полем ввода.
+  it('без действия тост не обещает быть кнопкой: ни курсора-руки, ни «нажмите»', async () => {
+    const { showToast } = await loadToast();
+    showToast('просто уведомление');
+    const [toast] = toasts();
+    expect(toast?.attrs.class).toBe('toast toast-info');
+    expect(toast?.attrs.title).toBeUndefined();
+  });
+
+  it('тост с действием получает класс `is-actionable` и подсказку', async () => {
+    const { showToast } = await loadToast();
+    showToast('сделано', 'success', { action: { label: 'Отменить', run: () => {} } });
+    const [toast] = toasts();
+    expect(toast?.attrs.class).toBe('toast toast-success is-actionable');
+    expect(toast?.attrs.title).toBe('Отменить');
+  });
+
+  it('Esc убирает верхний тост и не трогает остальные', async () => {
+    const { showToast } = await loadToast();
+    showToast('первый');
+    showToast('второй');
+    const [first, second] = toasts();
+    pressEscape();
+    // Верхний — тот, что добавлен последним.
+    expect(second?.classList.classes.has('is-leaving')).toBe(true);
+    expect(first?.classList.classes.has('is-leaving')).toBe(false);
+    vi.advanceTimersByTime(220);
+    expect(second?.removed).toBe(true);
+    expect(first?.removed).toBe(false);
+  });
+
+  it('Esc отдаёт ход открытому меню или окну: тост остаётся', async () => {
+    vi.stubGlobal('document', {
+      body: fakeNode('body'),
+      querySelector: (selector: string) => (selector.includes('context-menu') ? fakeNode('div') : null),
+      createElement: (tag: string) => {
+        const node = fakeNode(tag);
+        all.push(node);
+        return node;
+      },
+    });
+    const { showToast } = await loadToast();
+    showToast('Открыт рабочий каталог');
+    pressEscape();
+    expect(toasts()[0]?.classList.classes.has('is-leaving')).toBe(false);
+  });
+
+  // Четыре секунды — и плашка ушла бы из-под курсора в самый момент клика.
+  it('пока курсор на уведомлении, автоуход ждёт; курсор ушёл — досчитывается', async () => {
+    const { showToast } = await loadToast();
+    showToast('почитай');
+    const [toast] = toasts();
+    toast?.fire('mouseenter');
+    vi.advanceTimersByTime(10_000);
+    expect(toast?.classList.classes.has('is-leaving')).toBe(false);
+    toast?.fire('mouseleave');
+    vi.advanceTimersByTime(4000);
+    expect(toast?.classList.classes.has('is-leaving')).toBe(true);
+  });
+
+  it('фокус на кнопке тоже держит уведомление: с клавиатуры его не уберут из-под руки', async () => {
+    const { showToast } = await loadToast();
+    showToast('сделано', 'success', { action: { label: 'Отменить', run: () => {} } });
+    const [toast] = toasts();
+    toast?.fire('focusin');
+    vi.advanceTimersByTime(10_000);
+    expect(toast?.classList.classes.has('is-leaving')).toBe(false);
   });
 });

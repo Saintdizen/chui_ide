@@ -1,4 +1,5 @@
 import { h, svgIcon, type IconName } from './dom';
+import { OCCLUDERS } from './occluders';
 import { type NoticeAction, NoticeRegistry } from '../core/notice-registry';
 
 export type ToastKind = 'info' | 'error' | 'success';
@@ -92,6 +93,7 @@ export function showToast(message: string, kind: ToastKind = 'info', options: To
     // узла, который уже был в документе, — на созданном «в момент события» она молчит.
     container = h('div', { class: 'toasts', role: 'region', 'aria-live': 'polite', 'aria-label': 'Уведомления' });
     document.body.appendChild(container);
+    bindEscape();
   }
 
   const action = options.action;
@@ -105,8 +107,12 @@ export function showToast(message: string, kind: ToastKind = 'info', options: To
   const toast = h(
     'div',
     {
-      class: `toast toast-${kind}`,
-      title: action ? action.label : 'Нажмите, чтобы закрыть',
+      // `is-actionable` — единственный признак «на меня можно нажать»: по нему
+      // CSS даёт курсор-руку, и его же доля `Escape`/пауза ниже.
+      class: action ? `toast toast-${kind} is-actionable` : `toast toast-${kind}`,
+      // Подсказка — только когда действие НАСТОЯЩЕЕ. Было `title` у любой
+      // плашки, и тост без действия обещал кнопку, которой нет.
+      ...(action ? { title: action.label } : {}),
       // Ошибку объявляем сразу (это важное), остальное — когда читалка дойдёт.
       role: kind === 'error' ? 'alert' : 'status',
     },
@@ -141,11 +147,65 @@ export function showToast(message: string, kind: ToastKind = 'info', options: To
 
   // Тост с действием живёт дольше: за обычные 4 секунды человек не успеет
   // передумать и нажать «Отменить».
-  setTimeout(
-    () => {
-      toast.classList.add('is-leaving');
-      setTimeout(() => toast.remove(), 220);
+  const life = action ? 8000 : kind === 'error' ? 8000 : 4000;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let remaining = life;
+  let startedAt = 0;
+
+  const dismiss = (): void => {
+    toast.classList.add('is-leaving');
+    setTimeout(() => toast.remove(), 220);
+  };
+  const start = (): void => {
+    if (timer !== null) return;
+    startedAt = Date.now();
+    timer = setTimeout(dismiss, remaining);
+  };
+  // Пауза, пока на плашку смотрят или целятся мышью: иначе текст уезжает
+  // ровно в тот момент, когда его дочитывают, а кнопку не нажать.
+  const pause = (): void => {
+    if (timer === null) return;
+    clearTimeout(timer);
+    timer = null;
+    remaining -= Date.now() - startedAt;
+    if (remaining < 800) remaining = 800;
+  };
+
+  toast.addEventListener('mouseenter', pause);
+  toast.addEventListener('mouseleave', start);
+  toast.addEventListener('focusin', pause);
+  toast.addEventListener('focusout', start);
+  start();
+}
+
+/**
+ * «Убрать с глаз» без мыши: Esc гасит последнее уведомление.
+ *
+ * Тост не берёт фокус на себя и не встаёт в очередь событий — слушатель на
+ * `window` в фазе перехвата смотрит только на клавишу и никогда не
+ * `preventDefault`. Иначе ошибка, вылетевшая во время набора, съедала бы Esc у
+ * меню и пикеров, и «закрыть всплывающее» перестало бы работать.
+ */
+let escapeBound = false;
+function bindEscape(): void {
+  if (escapeBound) return;
+  escapeBound = true;
+  window.addEventListener(
+    'keydown',
+    (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      // Что-то открыто поверх (меню, попап, окно) — тогда Esc его, не наш.
+      // Список берём тот же, что и страница браузера в сцене: разбирать «кто
+      // там сверху» по каждому окну — значит забывать новые попапы по одному.
+      if (document.querySelector(OCCLUDERS)) return;
+      const last = container?.querySelector<HTMLElement>('.toast:not(.is-leaving)');
+      if (!last) return;
+      event.preventDefault();
+      last.classList.add('is-leaving');
+      setTimeout(() => last.remove(), 220);
     },
-    action ? 8000 : kind === 'error' ? 8000 : 4000,
+    // Перехват: раньше обработчиков на полях ввода. Предотвращение — только
+    // когда тост и правда убран, поэтому набор не страдает.
+    { capture: true },
   );
 }

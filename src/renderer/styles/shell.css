@@ -1279,6 +1279,11 @@ body > .overlay {
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
+  /* Колонка уведомлений — НЕ ловушка для мыши: место занимает весь правый
+     низ окна, то есть ровно там, где поле ввода чата. Без этой строки
+     промах мимо плашки попадал в контейнер и до поля не доходил — а человек
+     в это время печатает. Кликается только само уведомление. */
+  pointer-events: none;
 }
 
 .toast {
@@ -1293,8 +1298,17 @@ body > .overlay {
   box-shadow: var(--box_shadow_small);
   color: var(--text_color);
   font-size: var(--font_labels_size);
-  cursor: pointer;
+  /* Плашка перехватывает мышь только на себе — и только когда ей есть что
+     сказать по клику (см. `is-actionable` ниже). */
+  pointer-events: auto;
   animation: popup-fade var(--motion_base) var(--motion_ease);
+}
+
+/* Тост с действием — кнопка и есть: на него можно нажать.
+   Тост без действия — просто строчка: курсор-рука и подсказка «нажмите»
+   обещали бы кнопку там, где её нет. */
+.toast.is-actionable {
+  cursor: pointer;
 }
 
 .toast.is-leaving {
@@ -1329,6 +1343,10 @@ body > .overlay {
   color: var(--link_color);
   font-size: var(--font_labels_size);
   font-weight: 600;
+  /* Кнопка внутри плашки тоже обязана быть кликабельной: контейнер выше её
+     не съедает, но правило `pointer-events` наследуется — ставим явно. */
+  pointer-events: auto;
+  cursor: pointer;
   transition: background var(--motion_fast) var(--motion_ease);
 }
 

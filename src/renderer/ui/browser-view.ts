@@ -12,6 +12,7 @@ import type { BrowserPage } from '../core/browser-tabs';
 import type { RpcClient } from '../core/rpc';
 import { showContextMenu } from './context-menu';
 import { h, svgIcon } from './dom';
+import { OCCLUDERS } from './occluders';
 
 /**
  * Встроенный браузер: страница открывается вкладкой в редакторе.
@@ -71,17 +72,7 @@ export interface BrowserViewDeps {
   attachContext(item: ChatAttachment): void;
 }
 
-/**
- * Что рисуется в DOM поверх сцены и потому требует спрятать страницу.
- *
- * Оверлеи и модалки (палитра, окна), панели-меню (`.context-menu`), попапы
- * (`.popover`: выпадающие списки, статус языковых серверов) и «Информация о сессии».
- * Список один на всех: разбирать «кто там сверху» по каждому окну значило бы
- * забывать новые попапы по одному.
- */
-const OCCLUDERS =
-  '.overlay:not([hidden]), .modal-backdrop:not([hidden]), .context-menu, .popover:not([hidden]), .session-info:not([hidden])';
-
+// Список «что открыто поверх» лежит в `occluders.ts`: им же гасит Esc в уведомлениях.
 export function createBrowserView(deps: BrowserViewDeps): BrowserView {
   const address = h('input', {
     class: 'browser-address',
