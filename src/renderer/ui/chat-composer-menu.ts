@@ -1,5 +1,6 @@
 import type { ProjectCommand } from '../../shared/commands';
 import { expandCommandPrompt } from '../../shared/commands';
+import { CHAT_ACTIONS, type ChatActionId } from '../../shared/chat-actions';
 import { clear, h } from './dom';
 
 /**
@@ -110,6 +111,11 @@ export interface ComposerMenuDeps {
   onMentionSession(uid: string): void;
   /** Пересобрать команды проекта: при смене папки и при первом `/`. */
   requestCommands(): void;
+  /**
+   * Своя команда беседы (`/compact`, `/new`, `/fork`). Меню не выполняет её само:
+   * вкладки и контекст — дело панели, а не списка.
+   */
+  onChatAction(id: ChatActionId): void;
 }
 
 export interface ComposerMenuView {
@@ -228,6 +234,17 @@ export function createComposerMenu(deps: ComposerMenuDeps): ComposerMenuView {
             deps.input.focus();
           },
         }));
+      // Свои действия беседы — первыми: они не подставляют текст, а делают дело,
+      // и искать их надо раньше чужих заготовок.
+      const actions = CHAT_ACTIONS.filter((item) => item.command.slice(1).startsWith(query)).map((item) => ({
+        title: `${item.command} — ${item.title}`,
+        hint: item.hint,
+        run: () => {
+          deps.input.value = '';
+          deps.onChatAction(item.id);
+          deps.input.focus();
+        },
+      }));
       const builtin = SLASH_COMMANDS.filter((item) => item.id.slice(1).startsWith(query)).map((item) => ({
         title: `${item.id} — ${item.title}`,
         hint: item.hint,
@@ -240,7 +257,7 @@ export function createComposerMenu(deps: ComposerMenuDeps): ComposerMenuView {
       }));
       // Список ещё не пришёл — просим его: следующее нажатие `/` покажет команды.
       if (own.length === 0) deps.requestCommands();
-      show([...own, ...builtin]);
+      show([...actions, ...own, ...builtin]);
       return;
     }
 

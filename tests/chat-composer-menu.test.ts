@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createComposerMenu, type ContextKind } from '../src/renderer/ui/chat-composer-menu';
+import type { ChatActionId } from '../src/shared/chat-actions';
 import { h } from '../src/renderer/ui/dom';
 import { installMiniDom } from './helpers/mini-dom';
 
@@ -18,6 +19,7 @@ function harness(value: string, paths: readonly string[] = ['src/a.ts', 'src/b.t
   input.value = value;
   const contexts: ContextKind[] = [];
   const mentions: string[] = [];
+  const actions: ChatActionId[] = [];
 
   const view = createComposerMenu({
     input,
@@ -31,12 +33,13 @@ function harness(value: string, paths: readonly string[] = ['src/a.ts', 'src/b.t
     sessions: () => [],
     onMentionSession: () => undefined,
     requestCommands: () => undefined,
+    onChatAction: (id) => actions.push(id),
   });
 
   const titles = (): string[] =>
     [...view.element.querySelectorAll('.composer-menu-item')].map((node) => node.textContent ?? '');
 
-  return { input, view, contexts, mentions, titles };
+  return { input, view, contexts, mentions, actions, titles };
 }
 
 describe('`#` и `@` в композере', () => {

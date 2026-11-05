@@ -20,6 +20,9 @@ import { composerAction, feedAction, focusAfterCard, recallStep, type ComposerAc
 import { isAutoTitle } from '../../shared/chat-title';
 import { addEditGrant, type EditGrant, matchingEditGrant, rememberedEditGrant } from '../../shared/agent-grants';
 import { parentOf } from '../../shared/paths';
+import { CHAT_ACTIONS, type ChatAction, parseChatAction } from '../../shared/chat-actions';
+import { type CompactionFacts, compactionFacts, compactionLines } from '../../shared/compaction-facts';
+import { forkPlan } from './chat-fork';
 import { resolvePatches } from '../../shared/patch';
 import { turnsSinceCompact } from './compact-turns';
 import { keptContextMessage, restoreSent } from '../../shared/chat-attachments';
@@ -595,6 +598,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     requestCommands: () => {
       // Спрашиваем один раз: иначе каждая буква после слэша шла бы в main.
       if (!commandsLoaded) void loadProjectCommands();
+    },
+    // Свои команды беседы из меню — тем же путём, что и набранные руками:
+    // два пути разошлись бы по поведению через месяц.
+    onChatAction: (id) => {
+      const action = CHAT_ACTIONS.find((item) => item.id === id);
+      if (action) void runChatAction(action, '');
     },
   });
 
@@ -1408,6 +1417,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       }
 
       const before = session.history.length;
+      // «Что вошло в сводку» считаем ДО замены: после неё останется только резюме,
+      // а человек хочет видеть, из чего оно получилось.
+      const facts = compactionFacts(session.history, { files: session.touched.size });
       // Меняем ТОЛЬКО контекст: `transcript` (то, что человек читает) остаётся целым,
       // и после перезапуска лента соберётся из него же.
       session.history = [
@@ -1424,7 +1436,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       // говорит, а расписание начинается заново.
       session.usageFresh = false;
       session.turnsSinceCompact = 0;
-      renderCompacted(session, before, summary);
+      renderCompacted(session, before, summary, facts);
       showToast(`Беседа сжата: ${before} ${plural(before, 'сообщение', 'сообщения', 'сообщений')} → краткое резюме`);
       return true;
     } catch (error) {
@@ -1497,7 +1509,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    * «текст обрезался» ровно в тот момент, когда беседа стала длинной. Своё
    * прочитанное человек вправе перечитать и скопировать.
    */
-  function renderCompacted(session: ChatSession, before: number, summary: string): void {
+  function renderCompacted(session: ChatSession, before: number, summary: string, facts: CompactionFacts): void {
     // Отметка живёт ВНУТРИ хода, а не отдельным ребёнком ленты. Причина не
     // косметическая: `currentTurn` заводит новый `.chat-turn` для любого
     // сообщения, кроме приветствия, — следующий вопрос человека встал бы ниже
@@ -1516,6 +1528,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       h(
         'div',
         { class: 'thread-summary-text' },
+        // «Сжали 40 сообщений» само по себе ничего не говорит: человек хочет
+        // знать, о чём резюме и что в него вошло, — иначе не понять, не
+        // потерялось ли главное, не начав читать само резюме.
+        h('div', { class: 'thread-summary-facts' }, ...compactionLines(facts).map((line) => h('div', {}, line))),
         'Выше — вся переписка, её можно перечитать. Модель дальше получает только это резюме:',
         h('div', { class: 'thread-summary-body' }, summary),
       ),
@@ -2394,12 +2410,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /**
-   * «Править»: отрезать этот вопрос и всё после него, вернуть текст в поле ввода.
+   * «Править»: новый ход в НОВОЙ ветке — старая беседа остаётся целиком.
    *
-   * `threadIndex` — номер в ЛЕНТЕ (`transcript`). Раньше он же шёл в `history`, а
+   * `threadIndex` — номер в ЛЕНТЕ (`transcript`). Раньше он же шел в `history`, а
    * после сжатия беседы это разные массивы: правка отрезала не тот вопрос и
    * ломала контекст (вопрос человека улетал, а резюме оставалось). Теперь номер
-   * переводится через `contextIndexOf`.
+   * переводится через `contextIndexOf` — это делает `forkPlan`.
+   *
+   * Отрезать историю на месте — потеря без выгоды: человек часто сам не знает,
+   * какая формулировка была лучше. Ветка решает это без потерь: прежняя вкладка
+   * живёт с прежним ответом, новая — с новым вопросом.
    */
   function editUserMessage(session: ChatSession, threadIndex: number, text: string): void {
     if (busy) {
@@ -2408,29 +2428,22 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
     const index = contextIndexOf(session.transcript, session.history, threadIndex);
     if (index < 0) {
-      // Вопрос уже за резюме сжатия: в контексте его нет, резать нечего. Вернуть
-      // текст в поле всё равно полезно — человек хотел его поправить.
-      showToast('Этот вопрос уже вне контекста: беседа сжата, поправка не отрежет историю');
-      input.value = text;
-      session.draft = text;
-      input.focus();
+      // Вопрос уже за резюме сжатия: в контексте его нет, отрезать нечего. Ветку
+      // всё равно заводим (с копией всей беседы), но текст кладём в поле, а не
+      // отправляем сами: человек только что правил формулировку.
+      showToast('Этот вопрос уже вне контекста: правка уйдёт новым вопросом в ветке');
+      const fork = forkActive(session, null, '', text);
+      syncTabTitle(fork, text);
+      renderTabs();
       return;
     }
 
-    session.history = session.history.slice(0, index);
-    // Ленту режем тем же номером — по `threadIndex`, не по индексу контекста: без
-    // этого переписанный вопрос оставался бы на экране, а модель его уже не видит.
-    session.transcript = session.transcript.slice(0, threadIndex);
-    session.usage = undefined;
-    // После обрезки продолжение другое: по старому расходу про кеш не судим.
-    session.usageFresh = false;
-    session.turnsSinceCompact = turnsSinceCompact(session.history);
-    renderHistory(session);
-    syncSessionInfo();
-    scheduleSave();
-    input.value = text;
-    session.draft = text;
-    input.focus();
+    const fork = forkActive(session, threadIndex, '', text);
+    // Имя ветки — по новому вопросу, а не по старому: так вкладки различаются
+    // тем, чем они отличаются, а не общим началом.
+    syncTabTitle(fork, text);
+    renderTabs();
+    showToast('Вопрос поправлен в новой ветке — старая осталась во вкладке');
   }
 
   /** «Повторить»: выбросить ответы после последнего вопроса и спросить снова. */
@@ -2482,6 +2495,58 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     await stream.run(session, provider.id, model, []);
   }
 
+  /**
+   * Ветка беседы: копия (можно — до какого-то вопроса) в новой вкладке.
+   *
+   * Новая вкладка, а не пометка внутри одной: ветка живёт дальше как обычная
+   * беседа — свои правки, свои файлы, своё сохранение. Старая остаётся как
+   * была, поэтому «правка вопроса» больше не стирает продолжение.
+   */
+  function forkActive(source: ChatSession, cut: number | null, name = '', draft = ''): ChatSession {
+    const plan = forkPlan(source, cut, name);
+    const fork = createSession();
+    fork.title = plan.title;
+    fork.transcript = plan.transcript;
+    fork.history = plan.history;
+    if (plan.compacted) fork.compacted = true;
+    fork.touched = new Map(source.touched);
+    fork.files = [...source.files];
+    if (source.kept) fork.kept = [...source.kept];
+    fork.draft = draft;
+    renderHistory(fork);
+    if (draft) {
+      input.value = draft;
+      composer.focusInput();
+    }
+    renderTabs();
+    syncSessionInfo();
+    scheduleSave();
+    return fork;
+  }
+
+  /**
+   * Своя команда беседы. Живёт здесь, а не в main: это управление вкладками и
+   * контекстом, модели тут делать нечего.
+   */
+  async function runChatAction(action: ChatAction, argument: string): Promise<PromptRun> {
+    if (busy) {
+      showToast('Дождитесь ответа или остановите генерацию');
+      return 'busy';
+    }
+    if (action.id === 'compact') {
+      await compactActive();
+      return 'started';
+    }
+    if (action.id === 'new') {
+      createSession();
+      showToast('Новая беседа: прежняя осталась во вкладке');
+      return 'started';
+    }
+    const fork = forkActive(active(), null, argument);
+    showToast(`Ветка открыта в новой вкладке: ${fork.title}`);
+    return 'started';
+  }
+
   async function send(raw: string): Promise<PromptRun> {
     const written = raw.trim();
     if (!written) return 'busy';
@@ -2489,10 +2554,22 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // закончится. Тихо проглоченный Enter — худшее из поведений: человек уверен,
     // что написал, а спросить не спросил.
     if (busy) return enqueue(written);
+    // Свои команды беседы (`/compact`, `/new`, `/fork`) — раньше команд проекта:
+    // они управляют самой беседой, а не уходят вопросом модели. Вопрос
+    // «сожми переписку» в чате бесполезен: модель пересказывает только то, что
+    // ей дали, а сжимать надо контекст, который копится в приложении.
+    const session = active();
+    const special = parseChatAction(written);
+    if (special) {
+      input.value = '';
+      session.draft = '';
+      resetRecall();
+      menu.hide();
+      return runChatAction(special.action, special.argument);
+    }
     // `/имя хвост` — это команда проекта, а не вопрос модели: подставляем её текст.
     const text = await expandProjectCommand(written);
 
-    const session = active();
     const provider = currentProvider();
     if (!provider) {
       showToast('Провайдер не настроен', 'error');
