@@ -1,29 +1,14 @@
 # Задачи chui_ide
 
-Довести до идеала пять областей: **Оболочка IDE**, **Проводник**, **Редактор**,
-**Чат**, **LSP и подсказки**. В файле — только открытые задачи: сделанное
-переехало в README и в `git log --follow -p TASKS.md`, здесь его нет.
+Пять областей: **Оболочка IDE**, **Проводник**, **Редактор**, **Чат**, **LSP и
+подсказки**. Здесь — только открытые задачи: сделанное переехало в README и в
+`git log --follow -p TASKS.md`.
 
-Пункты пронумерованы сквозно (1..N) — на номер ссылаемся в коммитах.
-Внутри каждой области они идут группами от простого к сложному. У каждого —
-источник: по нему пункт сверен. Свод по пяти областям собран из корпуса
-`.log/` (VS Code, Zed, JetBrains, Sublime, Neovim, Microsoft Writing Style),
-сверен по коду.
-
-## Источники
-
-- `.log/docs-2026-11-04/` — 42 страницы VS Code + Copilot Chat: ux-guidelines,
-  ux-editor-actions, edit-basics, edit-evolved, refactoring, settings,
-  ux-command-palette, ux-quick-picks, ux-notifications, ux-context-menus,
-  ux-status-bar, ux-views, ux-sidebars, ux-accessibility, chat-overview,
-  copilot-context, custom-instructions, tools-reference, default-keys и др.
-- `.log/docs-rivals-2026-11-04/` — конкуренты: Zed (ui-checklist,
-  editing-code, finding-navigating, project-panel, command-palette,
-  tab-switcher, outline-panel, snippets, diagnostics, ai/*), JetBrains
-  Platform UI (lists-and-trees, popups, notification-balloons,
-  status-bar-widgets, progress-indicators, action-system, tool-window,
-  how-to-write-guidelines), Microsoft Writing Style, Neovim (editing,
-  windows, undo, tagsrch).
+Номера сквозные (1..N) — на них ссылаемся в коммитах; пропуски в нумерации —
+закрытые пункты. У каждого пункта назван источник, по которому он сверен:
+страницы лежат в `.log/docs-2026-11-04/` (VS Code) и
+`.log/docs-rivals-2026-11-04/` (Zed, JetBrains, Microsoft Writing Style,
+Neovim).
 
 ---
 
@@ -243,8 +228,6 @@
     файлов, форматирование: строка прогресса и возможность отменить, а не
     «окно задумалось». Источник: Zed `development/ui-checklist` (Performance),
     JetBrains `progress-indicators`.
-
-### Правка кода
 
 ---
 
