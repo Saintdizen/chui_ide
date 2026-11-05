@@ -39,7 +39,7 @@ import { badgeFor, badgeTitle } from '../../shared/icon-badges';
 import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
 import { sortTree } from '../core/tree-sort';
 import { computeWindow } from '../core/tree-window';
-import { filterTreePaths, matchName } from '../core/tree-filter';
+import { filterTreePaths, matchName, withNestedHosts, type NestedRowInfo } from '../core/tree-filter';
 import { movePlan } from '../core/tree-move';
 import {
   clickSelection,
@@ -1414,7 +1414,21 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
       projected.push({ name, path, parent });
     }
-    const keep = filterTreePaths(projected, filterQuery);
+    const keep = withNestedHosts(
+      rows.flatMap((row): NestedRowInfo[] =>
+        row.kind === 'entry'
+          ? [
+              {
+                path: row.entry.path,
+                nested: row.nested,
+                dir: row.dir,
+                depth: row.depth,
+              },
+            ]
+          : [],
+      ),
+      filterTreePaths(projected, filterQuery),
+    );
     return rows.filter((row) => {
       const path = pathOf(row);
       // Строки без пути (группы, разделители) не фильтруются: они держат

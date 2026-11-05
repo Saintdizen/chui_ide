@@ -3,6 +3,8 @@ import {
   countMatches,
   filterTreePaths,
   matchName,
+  withNestedHosts,
+  type NestedRowInfo,
   matchesName,
   parseFilterQuery,
   type FilterRow,
@@ -106,5 +108,39 @@ describe('счёт совпадений с шаблонами', () => {
   it('считает строки, а не предков', () => {
     expect(countMatches(rows, '*.test.ts')).toBe(1);
     expect(countMatches(rows, 'ts')).toBe(3);
+  });
+});
+
+describe('вложенность не рвётся фильтром', () => {
+  /** Папка src: хозяин Button.tsx и его спутники. */
+  const rows: NestedRowInfo[] = [
+    { path: 'src', nested: false, dir: '', depth: 0 },
+    { path: 'src/Button.tsx', nested: false, dir: 'src', depth: 1 },
+    { path: 'src/Button.test.tsx', nested: true, dir: 'src', depth: 2 },
+    { path: 'src/Button.css', nested: true, dir: 'src', depth: 2 },
+    { path: 'src/other.ts', nested: false, dir: 'src', depth: 1 },
+  ];
+
+  it('совпал спутник — хозяин едет с ним', () => {
+    const keep = withNestedHosts(rows, new Set(['src', 'src/Button.test.tsx']));
+    // Иначе спутник висел бы с отступом под пустотой.
+    expect(keep.has('src/Button.tsx')).toBe(true);
+  });
+
+  it('совпал хозяин — спутники остаются: они часть его строки', () => {
+    const keep = withNestedHosts(rows, new Set(['src', 'src/Button.tsx']));
+    expect(keep.has('src/Button.test.tsx')).toBe(true);
+    expect(keep.has('src/Button.css')).toBe(true);
+  });
+
+  it('чужая строка не притягивается', () => {
+    const keep = withNestedHosts(rows, new Set(['src', 'src/Button.tsx']));
+    expect(keep.has('src/other.ts')).toBe(false);
+  });
+
+  it('входной набор не меняется', () => {
+    const original = new Set(['src/Button.test.tsx']);
+    withNestedHosts(rows, original);
+    expect([...original]).toEqual(['src/Button.test.tsx']);
   });
 });

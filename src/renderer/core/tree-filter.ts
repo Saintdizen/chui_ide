@@ -216,3 +216,52 @@ export function countMatches(rows: readonly FilterRow[], query: string): number 
   for (const row of rows) if (matchName(row.name, query).matched) count += 1;
   return count;
 }
+
+/**
+ * Строка дерева глазами правила «спутник не отрывается от хозяина».
+ *
+ * `nested` — строка нарисована ПОД другой (вложенный файл), а не отдельной
+ * записью папки. `dir` и `depth` нужны, чтобы найти хозяина: он всегда
+ * выше на единицу и в той же папке.
+ */
+export interface NestedRowInfo {
+  readonly path: string;
+  readonly nested: boolean;
+  readonly dir: string;
+  readonly depth: number;
+}
+
+/**
+ * Дополнить набор полутнями так, чтобы вложенность не рвалась.
+ *
+ * Две беды в одном месте, и обе видны глазом:
+ * — совпал спутник (`Button.test.tsx`), а хозяин (`Button.tsx`) — нет:
+ *   спутник остаётся с отступом, под которым ничего нет;
+ * — совпал хозяин, а спутники — нет: под ним расходится дыра, хотя спутники —
+ *   это его же продолжение, а не отдельные файлы.
+ *
+ * Поэтому правило простое: в наборе либо оба, либо никого. Возвращается НОВЫЙ
+ * набор: входной не меняется, потому что он приходит из общего сопоставления.
+ */
+export function withNestedHosts(rows: readonly NestedRowInfo[], keep: ReadonlySet<string>): Set<string> {
+  const out = new Set(keep);
+  // Хозяева по папкам: последний не-спутник, увиденный на каждой глубине.
+  const hosts = new Map<string, NestedRowInfo>();
+
+  for (const row of rows) {
+    if (!row.nested) {
+      hosts.set(`${row.dir}:${row.depth}`, row);
+      continue;
+    }
+    const host = hosts.get(`${row.dir}:${row.depth - 1}`);
+    if (!host) continue;
+    if (keep.has(row.path)) {
+      // Спутник нужен — значит, и хозяин: без него строке не на что опереться.
+      out.add(host.path);
+      continue;
+    }
+    // Хозяин нужен — спутники идут с ним: они часть его строки.
+    if (keep.has(host.path)) out.add(row.path);
+  }
+  return out;
+}
