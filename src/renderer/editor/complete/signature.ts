@@ -40,8 +40,8 @@ export interface SignatureAssistantOptions {
   path: () => string | null;
 }
 
-/** Чем вызвано решение спросить сервер: знаком-триггером или правкой в уже открытом вызове. */
-type RequestReason = { kind: 'trigger'; character: string } | { kind: 'content' };
+/** Чем вызвано решение спросить сервер: знаком-триггером, правкой в вызове или командой. */
+type RequestReason = { kind: 'trigger'; character: string } | { kind: 'content' } | { kind: 'manual' };
 
 export class SignatureAssistant implements KeyInterceptor {
   private readonly view: EditorView;
@@ -97,6 +97,25 @@ export class SignatureAssistant implements KeyInterceptor {
   /** Клавиши карточки (стрелки листают подписи, Escape закрывает) — раньше редактора. */
   handleKey(event: KeyboardEvent): boolean {
     return this.widget.handleKey(event);
+  }
+
+  /**
+   * Показать подсказку по команде (`Ctrl+Shift+Space`), а не по знаку-триггеру.
+   *
+   * Человек зовёт карточку сам — например, вернулся в готовый вызов и хочет понять,
+   * какой довод сейчас. Значит не смотрим на последний набранный знак (его могло и не
+   * быть), достаточно того, что курсор не в строке/комментарии: там вызова нет, и
+   * врать карточкой не надо. Повторный зов на уже открытой карточке — это запрос
+   * заново (`triggerKind: 1`), а не перелистывание: так VS Code и делает.
+   */
+  trigger(): void {
+    const caret = this.controller.caret;
+    const tokenType = this.view.tokenTypeAt(caret);
+    if (tokenType === STRING || tokenType === COMMENT) {
+      this.hide();
+      return;
+    }
+    void this.request(caret, { kind: 'manual' });
   }
 
   /** Текст изменился: решаем, спросить подсказку, оставить или закрыть. */
@@ -181,7 +200,9 @@ export class SignatureAssistant implements KeyInterceptor {
     const head =
       reason.kind === 'trigger'
         ? { triggerKind: 2 as const, triggerCharacter: reason.character }
-        : { triggerKind: 3 as const };
+        : reason.kind === 'manual'
+          ? { triggerKind: 1 as const }
+          : { triggerKind: 3 as const };
     return {
       ...head,
       isRetrigger: this.shownHelp !== null,

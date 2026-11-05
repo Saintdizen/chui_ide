@@ -69,6 +69,16 @@ describe('каталог команд редактора', () => {
       expect(findEditorCommand(`editor.case.${style}`)).toBeDefined();
     }
   });
+
+  it('карточка параметров — команда с Ctrl+Shift+Space, требует шва сервера', () => {
+    const command = findEditorCommand('editor.parameterHints');
+    expect(command?.keybinding).toBe('Ctrl+Shift+Space');
+    expect(command?.requires).toBe('parameterHints');
+    // Без источника подсказок её нет в палитре — иначе пункт молча ничего бы не сделал.
+    expect(availableCommands(fakeContext()).some((item) => item.id === 'editor.parameterHints')).toBe(false);
+    const withHints = fakeContext({ parameterHints: () => undefined });
+    expect(availableCommands(withHints).some((item) => item.id === 'editor.parameterHints')).toBe(true);
+  });
 });
 
 describe('доступность команд по контексту', () => {

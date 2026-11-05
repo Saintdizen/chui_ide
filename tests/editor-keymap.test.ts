@@ -206,4 +206,14 @@ describe('ввод символов', () => {
       expect(resolveKey({ key: 'f', alt: true })).toBeNull();
     });
   });
+
+  describe('карточка параметров', () => {
+    it('Ctrl+Shift+Space открывает подсказку вручную', () => {
+      expect(resolveKey({ key: ' ', ctrl: true, shift: true })).toEqual({ kind: 'edit', edit: 'parameterHints' });
+    });
+
+    it('Ctrl+Space без Shift — не наша команда (это дополнение системы)', () => {
+      expect(resolveKey({ key: ' ', ctrl: true })).not.toEqual({ kind: 'edit', edit: 'parameterHints' });
+    });
+  });
 });

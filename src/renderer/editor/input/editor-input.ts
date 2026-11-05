@@ -50,6 +50,8 @@ export type CommandName =
   | 'gotoLine'
   | 'palette'
   | 'codeActions'
+  /** Ctrl+Shift+Space — показать карточку параметров по требованию. */
+  | 'parameterHints'
   /** Навигация по символу: перейти к определению, ссылки, заглянуть в определение. */
   | 'goToDefinition'
   | 'references'
@@ -721,6 +723,11 @@ export class EditorInputBinding {
       // Ctrl+. — быстрые исправления: список действий языка показывает вызывающий.
       case 'codeActions':
         this.onCommand?.('codeActions');
+        break;
+      // Ctrl+Shift+Space — карточка параметров вручную: она бывает нужна и там,
+      // где триггер-знак не печатали (просто стоишь в вызове).
+      case 'parameterHints':
+        this.onCommand?.('parameterHints');
         break;
       // F12, Shift+F12, Ctrl+Shift+F12 — навигация по символу: дело вызывающего
       // (у него языковой сервер, чтение файлов и открытие вкладок).

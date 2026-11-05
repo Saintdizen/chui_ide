@@ -102,6 +102,8 @@ export interface EditorCommandContext {
   formatCode?(): void;
   /** Показать быстрые исправления под курсором (нужен языковой сервер). */
   codeActions?(): void;
+  /** Показать карточку параметров у курсора (нужен языковой сервер). */
+  parameterHints?(): void;
   /** Свернуть блок у курсора, развернуть его, свернуть или развернуть всё. */
   fold(): void;
   unfold(): void;
@@ -133,6 +135,7 @@ export type EditorCommandRequirement =
   | 'nextProblemInFile'
   | 'previousProblemInFile'
   | 'codeActions'
+  | 'parameterHints'
   | 'expandSelection'
   | 'shrinkSelection';
 
@@ -563,6 +566,15 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     category: CATEGORY,
     requires: 'codeActions',
     run: (context) => context.codeActions?.(),
+  },
+  {
+    id: 'editor.parameterHints',
+    label: 'Показать параметры функции',
+    alias: 'parameterHints',
+    keybinding: 'Ctrl+Shift+Space',
+    category: CATEGORY,
+    requires: 'parameterHints',
+    run: (context) => context.parameterHints?.(),
   },
   {
     id: 'editor.nextProblem',

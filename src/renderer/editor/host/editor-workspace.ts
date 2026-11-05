@@ -905,6 +905,9 @@ export class EditorWorkspace {
     // Быстрые исправления — тот же порядок: список показывает приложение.
     const codeActions = this.codeActions;
     if (codeActions) context.codeActions = () => path && codeActions(path, this.pane.cursor());
+    // Карточка параметров — у самой панели: сервер дал функцию, панель знает каретку.
+    // Нет источника подсказок — команды в палитре не будет (см. `requires`).
+    if (this.signatureFromLanguage) context.parameterHints = () => this.pane.showParameterHints();
     // Обёртка выделения — шов приложения: ему и список вариантов, и их смысл для языка.
     if (this.surroundWith) context.surroundWith = () => this.surroundWith?.();
     // Форматирование выделения: сервер переписывает только участок, а не файл целиком.

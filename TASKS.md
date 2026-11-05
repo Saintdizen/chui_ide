@@ -455,11 +455,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     ввод. (В коде это есть — закрепить тестом на реальном сервере.)
     Источник: VS Code `edit-evolved`, Zed `configuring-languages`.
 
-75. **Подсказка параметров устойчива к вложенности.** Сигнатура обновляется по
-    `,` и `)`, переключается `↑/↓`/`Ctrl+Shift+Space`, не схлопывается при
-    печати внутри строкового литерала, показывает текущий параметр.
-    Источник: VS Code `edit-evolved` (parameter info).
-
 ---
 
 ## Правила работы со списком

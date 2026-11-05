@@ -2047,6 +2047,11 @@ export class EditorHost {
     this.refreshDecorations(path);
   }
 
+  /** Показать карточку параметров по команде (Ctrl+Shift+Space). */
+  showParameterHints(): void {
+    this.signature?.trigger();
+  }
+
   /** Файлы, открытые в панелях сейчас. Нужно тому, кто рисует полоски изменений. */
   visiblePaths(): string[] {
     return this.path ? [this.path] : [];
@@ -2191,7 +2196,8 @@ export class EditorHost {
     else if (command === 'codeActions') {
       // Быстрые исправления — дело приложения: ему и сервер, и список, и правки.
       if (this.path) this.codeActions?.(this.path, this.cursorPosition());
-    } else if (command === 'goToDefinition') this.goToDefinition();
+    } else if (command === 'parameterHints') this.showParameterHints();
+    else if (command === 'goToDefinition') this.goToDefinition();
     else if (command === 'references') this.findReferences();
     else if (command === 'peekDefinition') this.peekDefinition();
     else if (command === 'surroundWith') this.surroundWithHandler?.();

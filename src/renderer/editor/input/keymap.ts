@@ -113,6 +113,8 @@ export type EditCommand =
   | 'palette'
   /** Ctrl+. — быстрые исправления под курсором (список показывает приложение). */
   | 'codeActions'
+  /** Ctrl+Shift+Space — карточка параметров вызова по требованию. */
+  | 'parameterHints'
   /** Ctrl+D — добавить следующее вхождение слова; Ctrl+Shift+L — сразу все. */
   | 'selectNextOccurrence'
   | 'selectAllOccurrences'
@@ -262,7 +264,9 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     if (named === '/') return { kind: 'edit', edit: 'toggleComment' };
     // Ctrl+. — быстрые исправления: как в других редакторах, на той же клавише.
     if (named === '.') return { kind: 'edit', edit: 'codeActions' };
-    // Ctrl+Shift+[ сворачивает блок, Ctrl+Shift+] раскрывает — как в других редакторах.
+    // Ctrl+Shift+Space — карточка параметров, даже если её не открыл триггер (как в VS Code).
+    // Space с `Ctrl` — в отдельном branch, сюда доходит только со сдвигом.
+    if (lower === ' ' && extend) return { kind: 'edit', edit: 'parameterHints' };
     // Со сдвигом те же клавиши дают «{» и «}»: раскладка меняет знак, команда — та же.
     if (named === '[') return { kind: 'edit', edit: 'fold' };
     if (named === ']') return { kind: 'edit', edit: 'unfold' };
