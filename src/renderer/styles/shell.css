@@ -1061,6 +1061,17 @@ button.status-item:focus-visible {
   background: var(--separator_color);
 }
 
+/* Заголовок группы в меню (виды быстрых правок). Не пункт: мельче и без нажатия. */
+.context-heading {
+  padding: 4px 12px 2px;
+  font-size: var(--font_small_size);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  user-select: none;
+}
+
 /* ── палитра команд ─────────────────────────────────────────────────────── */
 
 /* Затемнение модального слоя (палитра, быстрый переход, символы). Слой — прямой

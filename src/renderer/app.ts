@@ -2721,6 +2721,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     save: {
       policy: writePolicy,
       format: (document) => formatDocument(formatDeps, document),
+      codeActions: (document, kinds) => fixes.runSourceActions(document.path, kinds),
     },
     git: {
       saveBeforeCommit: () => settings.git.saveBeforeCommit !== false,

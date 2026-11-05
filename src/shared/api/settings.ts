@@ -215,6 +215,12 @@ export interface EditorSettings {
   languageIndent: boolean;
   /** Форматировать документ при сохранении (ruff или black из окружения). */
   formatOnSave: boolean;
+  /**
+   * Действия языкового сервера при сохранении, по видам: `source.organizeImports`,
+   * `source.fixAll` и прочие `source.*`. Пусто — ничего не делаем. Применяются
+   * до записи, чтобы на диск ушёл уже исправленный текст (одна отмена на всё).
+   */
+  codeActionsOnSave: string[];
   /** Убирать пробелы в конце строк при сохранении. */
   trimTrailingWhitespace: boolean;
   /** Дописывать перевод строки в конце файла при сохранении. */

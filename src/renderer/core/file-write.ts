@@ -19,6 +19,8 @@ export interface SavePolicy {
   trimTrailingWhitespace: boolean;
   insertFinalNewline: boolean;
   formatOnSave: boolean;
+  /** Виды `source.*`, которые применяет сервер при сохранении (пусто — никаких). */
+  codeActionsOnSave?: string[];
 }
 
 /** Что делать с выбранным путём «Сохранить как» — решает `shared/save-as.ts`. */
@@ -60,6 +62,8 @@ export interface FileWritePorts {
   save: {
     policy(): SavePolicy;
     format(document: TextDocument): Promise<unknown>;
+    /** Применить по видам действия сервера (`source.organizeImports` и т. п.). */
+    codeActions(document: TextDocument, kinds: readonly string[]): Promise<unknown>;
   };
   git: {
     saveBeforeCommit(): boolean | undefined;
@@ -109,6 +113,12 @@ export function createFileWrite(ports: FileWritePorts): FileWrite {
     // Форматирование при сохранении: правку проводит документ, поэтому на экране и на
     // диске оказывается одно и то же.
     if (policy.formatOnSave) await ports.save.format(document);
+    // Действия сервера по видам (`source.organizeImports`, `source.fixAll`) — тоже до записи:
+    // на диск уходит уже исправленный текст, и это одна отмена с прочими правками сохранения.
+    // Отказ сервера не должен срывать сохранение: файл человек ждёт на диске.
+    if (policy.codeActionsOnSave && policy.codeActionsOnSave.length > 0) {
+      await ports.save.codeActions(document, policy.codeActionsOnSave).catch(() => undefined);
+    }
     const result = await ports.edits.saveDocument(document);
     if (result === 'conflict') {
       const confirmed = await ports.confirm({
@@ -229,6 +239,9 @@ export function createFileWrite(ports: FileWritePorts): FileWrite {
     const prepared = applySaveEdits(document.value, policy);
     if (prepared !== document.value) document.setText(prepared, 'programmatic');
     if (policy.formatOnSave) await ports.save.format(document);
+    if (policy.codeActionsOnSave && policy.codeActionsOnSave.length > 0) {
+      await ports.save.codeActions(document, policy.codeActionsOnSave).catch(() => undefined);
+    }
 
     try {
       // Формат строк тот же, что у исходного файла: `save as` не повод менять концы

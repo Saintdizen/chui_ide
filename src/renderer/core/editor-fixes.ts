@@ -1,5 +1,5 @@
 import { installLanguageOf, installMenuItems, installSuggestions } from '../../shared/import-install';
-import { codeActionKindLabel, type CodeActionItem } from '../../shared/lsp-code-actions';
+import { codeActionKindLabel, groupCodeActions, type CodeActionItem } from '../../shared/lsp-code-actions';
 import { packageForModule } from '../../shared/python-packages';
 import type { ImportChecker } from './import-check';
 import { refactorLabel, type RefactorAction } from '../../shared/lsp-refactor';
@@ -99,13 +99,32 @@ export function createEditorFixes(deps: EditorFixesDeps) {
     const actions = await lsp.codeActions(path, position, diagnostics);
     // Свои правки идут вперёд: они отвечают на наши же пометки и понятнее серверных.
     const own: PopupMenuItem[] = [...spellingQuickFixes(), ...importInstallActions(path, position)];
-    const fromServer: PopupMenuItem[] = actions.map((action) => ({
-      label: action.title,
-      hint: codeActionKindLabel(action.kind),
-      onSelect: () => void applyCodeAction(path, action),
-    }));
+    // Серверные действия — заголовками по виду: длинный плоский список не понять
+    // с первого взгляда, а «рефакторинг» и «источник» — разные вещи.
+    const groups = groupCodeActions(actions);
+    const sections: PopupMenuItem[] = [];
+    for (const group of groups) {
+      // Одиночное действие без вида заголовка не заслуживает: он его только обособит.
+      if (groups.length > 1) sections.push({ heading: true, label: group.label });
+      for (const action of group.actions) {
+        sections.push({
+          label: action.title,
+          hint: codeActionKindLabel(action.kind),
+          onSelect: () => void applyCodeAction(path, action),
+        });
+      }
+    }
     const items: PopupMenuItem[] =
-      own.length > 0 && fromServer.length > 0 ? [...own, { separator: true }, ...fromServer] : [...own, ...fromServer];
+      own.length > 0 && sections.length > 0 ? [...own, { separator: true }, ...sections] : [...own, ...sections];
+    // Последнее применённое — одной кнопкой: повторять одно и то же исправление по всему
+    // файлу приходится часто, а заново искать его в списке — каждый раз.
+    if (lastAction && lastAction.path === path) {
+      const repeat = lastAction;
+      items.push(
+        { separator: true },
+        { label: `Повторить: ${repeat.action.title}`, onSelect: () => void applyCodeAction(path, repeat.action) },
+      );
+    }
     if (items.length === 0) {
       showToast('Быстрых исправлений здесь нет');
       return;
@@ -115,8 +134,12 @@ export function createEditorFixes(deps: EditorFixesDeps) {
     showPopupMenu(items, point?.left ?? 0, (point?.bottom ?? 0) + 2);
   };
 
+  /** Последнее применённое действие и файл: «повторить» правки того же файла. */
+  let lastAction: { path: string; action: CodeActionItem } | null = null;
+
   /** Применить выбранное действие: его правки и/или команду сервера. */
   const applyCodeAction = async (path: string, action: CodeActionItem): Promise<void> => {
+    lastAction = { path, action };
     if (action.edits) {
       const result = await edits.applyFileEdits(action.edits);
       if (result.failed.length > 0) showToast(result.failed[0]!.message, 'error');
@@ -218,6 +241,16 @@ export function createEditorFixes(deps: EditorFixesDeps) {
       (point?.bottom ?? 0) + 2,
     );
   };
+  /**
+   * Действия сервера по видам на весь файл — для сохранения с `source.*`. Правки идут тем
+   * же путём, что и прочие (`applyCodeAction`), и все они попадают в одну запись истории:
+   * сохранение — одно действие, одна отмена на всё.
+   */
+  const runSourceActions = async (path: string, kinds: readonly string[]): Promise<void> => {
+    const actions = await lsp.sourceActions(path, kinds);
+    for (const action of actions) await applyCodeAction(path, action);
+  };
+
   return {
     importInstallActions,
     spellingQuickFixes,
@@ -226,5 +259,6 @@ export function createEditorFixes(deps: EditorFixesDeps) {
     runOrganizeImports,
     runRefactor,
     runRefactorMenu,
+    runSourceActions,
   };
 }

@@ -11,6 +11,8 @@ import { focusOwner, returnFocus } from './focus-return';
  */
 export type PopupMenuItem =
   | { separator: true }
+  /** Заголовок группы: не выбирается, нужен только чтобы разбить длинный список (виды правок). */
+  | { heading: true; label: string }
   | {
       label: string;
       /** Подсказка справа: горячая клавиша или пояснение. */
@@ -86,6 +88,12 @@ function buildLevel(level: Level): void {
   for (const item of level.items) {
     if ('separator' in item) {
       menu.appendChild(h('div', { class: 'context-separator' }));
+      continue;
+    }
+    // Заголовок группы — только текст: не кнопка, не в `entries` (клавиатура его
+    // пропускает, иначе стрелки останавливались бы на невыбираемой строке).
+    if ('heading' in item) {
+      menu.appendChild(h('div', { class: 'context-heading', role: 'presentation' }, item.label));
       continue;
     }
 
@@ -314,17 +322,20 @@ export function showPopupMenu(items: readonly PopupMenuItem[], x: number, y: num
 
 /** Пункт доступен, если поле не задано или истинно. */
 function selectable(item: PopupMenuItem): boolean {
-  return !('separator' in item) && item.enabled !== false;
+  if ('separator' in item || 'heading' in item) return false;
+  return item.enabled !== false;
 }
 
-/** Первый пункт, который можно нажать: разделители и серые пропускаем. */
+/** Первый пункт, который можно нажать (индекс среди реальных пунктов `entries`). */
 function firstSelectable(levelIndex: number): number {
   const level = levels[levelIndex];
+  // Разделители и заголовки в `entries` не попадают, поэтому индекс среди пунктов
+  // меню (`items`) и индекс кнопки расходятся — считаем сразу по `entries`.
+  const actionable = (level?.items ?? []).filter((item) => !('separator' in item) && !('heading' in item));
   // Ни одного доступного — подсвечиваем первый как есть: пустое меню с невидимым
   // фокусом хуже, чем подсвеченный серый пункт, который никуда не ведёт.
-  const index = level?.items.findIndex(selectable) ?? 0;
-  const any = level?.items.findIndex((item) => !('separator' in item)) ?? 0;
-  return index >= 0 ? index : any < 0 ? 0 : any;
+  const index = actionable.findIndex(selectable);
+  return index >= 0 ? index : 0;
 }
 
 export function closePopupMenu(): void {

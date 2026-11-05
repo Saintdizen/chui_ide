@@ -1266,6 +1266,15 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Сохранение'),
       switchRow('Форматировать при сохранении', editor.formatOnSave, (value) => editable({ formatOnSave: value })),
+      switchRow(
+        'Организовать импорты при сохранении',
+        editor.codeActionsOnSave.includes('source.organizeImports'),
+        (value) =>
+          editable({ codeActionsOnSave: withSaveKind(editor.codeActionsOnSave, 'source.organizeImports', value) }),
+      ),
+      switchRow('Исправлять всё при сохранении', editor.codeActionsOnSave.includes('source.fixAll'), (value) =>
+        editable({ codeActionsOnSave: withSaveKind(editor.codeActionsOnSave, 'source.fixAll', value) }),
+      ),
       switchRow('Форматировать при вставке', editor.formatOnPaste, (value) => editable({ formatOnPaste: value })),
       h(
         'div',
@@ -2324,4 +2333,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   }
 
   return { element: modal.element, open, close, applySettings };
+}
+
+/** Достать/убрать вид действия в списке `codeActionsOnSave`, сохраняя прочие виды. */
+function withSaveKind(kinds: readonly string[], kind: string, on: boolean): string[] {
+  const rest = kinds.filter((item) => item !== kind);
+  return on ? [...rest, kind] : rest;
 }

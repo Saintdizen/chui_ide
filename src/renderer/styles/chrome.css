@@ -1079,6 +1079,25 @@ textarea {
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 74%, 0 100%);
 }
 
+/* Лампочка быстрых правок: есть на строке, где сервер знает пометку.
+   Слабее точки останова, запуска и теста, сильнее закладки (см. buildGlyphs). */
+.code-action-glyph {
+  position: relative;
+  cursor: pointer;
+}
+
+.code-action-glyph::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 7px;
+  height: 9px;
+  border-radius: 50% 50% 45% 45%;
+  background: var(--yellow_prime_background, #d7a21a);
+  opacity: 0.85;
+}
+
 /* Строка, где стоит отладчик: подсвечиваем всю строку, а не только жёлоб. */
 .debug-line {
   background: var(--debug_line_background);

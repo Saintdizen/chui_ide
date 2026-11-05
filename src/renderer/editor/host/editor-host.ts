@@ -1698,6 +1698,14 @@ export class EditorHost {
     for (const line of this.bookmarks.get(path) ?? []) {
       glyphs.set(line, { line, className: 'bookmark-glyph', tooltip: 'Закладка' });
     }
+    // Лампочка — там, где языковой сервер знает пометки: кликом открываются быстрые
+    // правки этой строки. Слабее точки останова и запуска, сильнее закладки.
+    const seen = new Set<number>();
+    for (const item of this.externalMarkers.get(path) ?? []) {
+      if (seen.has(item.line)) continue;
+      seen.add(item.line);
+      glyphs.set(item.line, { line: item.line, className: 'code-action-glyph', tooltip: 'Быстрые правки' });
+    }
     for (const item of this.breakpoints.get(path) ?? []) {
       glyphs.set(item.line, {
         line: item.line,
@@ -2097,6 +2105,16 @@ export class EditorHost {
     if (test) {
       this.testMarkerEmitter.fire({ path, line, selector: test.selector, name: test.name });
       return;
+    }
+    // Лампочка: строка с пометками сервера, но без запуска, теста и точки останова.
+    // Левый клик — быстрые правки этой строки; правый — обычное меню точки.
+    if (!menu && !this.bookmarks.get(path)?.includes(line)) {
+      const marked = this.externalMarkers.get(path)?.some((item) => item.line === line) === true;
+      const busy = this.breakpoints.get(path)?.some((item) => item.line === line) === true;
+      if (marked && !busy) {
+        this.codeActions?.(path, { line, column: 1 });
+        return;
+      }
     }
     const hasBreakpoint = this.breakpoints.get(path)?.some((item) => item.line === line) === true;
     if (menu && hasBreakpoint) {

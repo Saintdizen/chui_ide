@@ -77,6 +77,53 @@ export function sortCodeActions(items: readonly CodeActionItem[]): CodeActionIte
   return [...items].sort((a, b) => Number(b.preferred) - Number(a.preferred) || a.title.localeCompare(b.title));
 }
 
+/**
+ * Группа действий одного вида: `kind` — общий для всех (пустой — сервер не сказал).
+ * Порядок групп — там, где собрана разметка (`groupCodeActions`).
+ */
+export interface CodeActionGroup {
+  kind: string;
+  /** Заголовок группы для меню: «Быстрое исправление», «Рефакторинг», … */
+  label: string;
+  actions: CodeActionItem[];
+}
+
+/**
+ * Разложить действия по видам: `quickfix`, `refactor`, `source`, остальное — в конец.
+ * Вид держим головой `kind` (до первой точки): `refactor.extract` и `refactor.inline`
+ * — одна группа. Сами группы упорядочены по известности вида, внутри — как пришли
+ * (уже через `sortCodeActions`): список читают глазами.
+ */
+export function groupCodeActions(actions: readonly CodeActionItem[]): CodeActionGroup[] {
+  const byKind = new Map<string, CodeActionItem[]>();
+  for (const action of actions) {
+    const head = action.kind.split('.')[0] ?? '';
+    const bucket = byKind.get(head);
+    if (bucket) bucket.push(action);
+    else byKind.set(head, [action]);
+  }
+  const order = ['quickfix', 'refactor', 'source'];
+  const rank = (kind: string): number => {
+    const at = order.indexOf(kind);
+    return at < 0 ? order.length : at;
+  };
+  return [...byKind.entries()]
+    .map(([kind, list]) => ({ kind, label: groupLabel(kind), actions: list }))
+    .sort((a, b) => rank(a.kind) - rank(b.kind));
+}
+
+/** Заголовок группы: «быстрое исправление» → «Быстрое исправление» (Заглавная — в заголовке). */
+function groupLabel(kind: string): string {
+  if (kind === '') return 'Прочее';
+  const label = codeActionKindLabel(kind);
+  const head = kind.split('.')[0] ?? '';
+  // Известные виды дали русское слово — пишем его в заголовке с большой буквы; незнакомый
+  // `kind` оставляем как есть (это идентификатор сервера, а не текст для человека).
+  return head === 'quickfix' || head === 'refactor' || head === 'source' || head === 'notebook'
+    ? label.charAt(0).toUpperCase() + label.slice(1)
+    : label;
+}
+
 /** Команда сервера из действия: только с непустым именем, аргументы — всегда массив. */
 function toCommand(raw: unknown): CodeActionCommand | null {
   if (!raw || typeof raw !== 'object') return null;

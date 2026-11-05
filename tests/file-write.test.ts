@@ -40,7 +40,12 @@ function setup(
   options: {
     docs?: Doc[];
     saveResult?: 'saved' | 'conflict';
-    policy?: { trimTrailingWhitespace?: boolean; insertFinalNewline?: boolean; formatOnSave?: boolean };
+    policy?: {
+      trimTrailingWhitespace?: boolean;
+      insertFinalNewline?: boolean;
+      formatOnSave?: boolean;
+      codeActionsOnSave?: string[];
+    };
     confirm?: boolean;
     saveBeforeCommit?: boolean;
     saveBeforeCheckout?: boolean;
@@ -60,11 +65,13 @@ function setup(
     refreshed: 0,
     saved: [] as { path: string; force: boolean }[],
     asked: [] as string[],
+    codeActions: [] as string[][],
   };
   const policy = {
     trimTrailingWhitespace: false,
     insertFinalNewline: false,
     formatOnSave: false,
+    codeActionsOnSave: [] as string[],
     ...options.policy,
   };
 
@@ -97,7 +104,13 @@ function setup(
       },
     },
     openEditors: { close: (path: string) => rec.closed.push(path) },
-    save: { policy: () => policy, format: async () => undefined },
+    save: {
+      policy: () => policy,
+      format: async () => undefined,
+      codeActions: async (_document: Doc, kinds: readonly string[]) => {
+        rec.codeActions.push([...kinds]);
+      },
+    },
     git: {
       saveBeforeCommit: () => options.saveBeforeCommit,
       saveBeforeCheckout: () => options.saveBeforeCheckout,
@@ -344,5 +357,22 @@ describe('file-write: сохранение перед git', () => {
     const { fileWrite, rec } = setup({ docs: [ro], confirm: true });
     expect(await fileWrite.prepareCheckout()).toBe(false);
     expect(rec.saved).toHaveLength(0);
+  });
+
+  it('сохранение применяет действия сервера по видам — до записи на диск', async () => {
+    const d = doc('/proj/a.ts', 'код');
+    const { fileWrite, rec } = setup({
+      docs: [d],
+      policy: { codeActionsOnSave: ['source.organizeImports', 'source.fixAll'] },
+    });
+    expect(await fileWrite.saveDocument(d)).toBe(true);
+    expect(rec.codeActions).toEqual([['source.organizeImports', 'source.fixAll']]);
+  });
+
+  it('пустой список видов — сервер не дёргаем вовсе', async () => {
+    const d = doc('/proj/a.ts', 'код');
+    const { fileWrite, rec } = setup({ docs: [d] });
+    expect(await fileWrite.saveDocument(d)).toBe(true);
+    expect(rec.codeActions).toHaveLength(0);
   });
 });

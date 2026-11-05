@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   codeActionKindLabel,
+  groupCodeActions,
   sortCodeActions,
   toCodeActions,
   toLspDiagnostics,
@@ -134,5 +135,26 @@ describe('пометки в форме LSP для запроса', () => {
         message: 'замечание',
       },
     ]);
+  });
+
+  it('группировка: заголовки по видам в порядке quickfix → refactor → source → прочее', () => {
+    const item = (kind: string, title: string): CodeActionItem => ({
+      title,
+      kind,
+      preferred: false,
+      edits: null,
+      command: null,
+      diagnostics: [],
+    });
+    const groups = groupCodeActions([
+      item('source.fixAll', 'Исправить всё'),
+      item('refactor.extract', 'Извлечь переменную'),
+      item('quickfix', 'Убрать импорт'),
+      item('', 'Без вида'),
+      item('refactor.inline', 'Развернуть'),
+    ]);
+    expect(groups.map((group) => group.label)).toEqual(['Быстрое исправление', 'Рефакторинг', 'Источник', 'Прочее']);
+    // Порядок внутри группы — как пришёл: список строит вызывающий по предпочтению.
+    expect(groups[1]?.actions.map((action) => action.title)).toEqual(['Извлечь переменную', 'Развернуть']);
   });
 });

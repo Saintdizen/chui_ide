@@ -53,6 +53,29 @@ describe('контекстное меню', () => {
     expect(labels(menu as HTMLElement)).toEqual(['Открыть', 'Переименовать', 'Ещё']);
   });
 
+  it('заголовок группы — не пункт: стрелки его пропускают, в `context-item` он не попадает', async () => {
+    showPopupMenu(
+      [
+        { heading: true, label: 'Рефакторинг' },
+        { label: 'Извлечь', onSelect: vi.fn() },
+        { label: 'Развернуть', onSelect: vi.fn() },
+      ],
+      10,
+      10,
+    );
+    const [menu] = menus();
+    // Заголовок есть в DOM, но своим классом — его не нажать и не подсветить.
+    expect((menu as HTMLElement).querySelector('.context-heading')?.textContent).toBe('Рефакторинг');
+    expect(labels(menu as HTMLElement)).toEqual(['Извлечь', 'Развернуть']);
+
+    await press('ArrowDown');
+    // Подсвечен всегда настоящий пункт (`context-item`), заголовок — никогда.
+    const highlighted = Array.from((menu as HTMLElement).querySelectorAll<HTMLElement>('.is-highlighted'));
+    expect(highlighted).toHaveLength(1);
+    expect(highlighted[0]!.className).toContain('context-item');
+    expect(highlighted[0]!.textContent).not.toContain('Рефакторинг');
+  });
+
   it('быстрый вызов заменяет прежнее меню, а не плодит второе', () => {
     showPopupMenu(menuItems(), 10, 10);
     showPopupMenu([{ label: 'Один', onSelect: vi.fn() }], 50, 50);

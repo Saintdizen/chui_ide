@@ -354,6 +354,23 @@ export class LspFeatures {
   }
 
   /**
+   * Действия по видам на весь документ (`source.organizeImports`, `source.fixAll`):
+   * так сохранение с `codeActionsOnSave` просит сервер привести файл в порядок.
+   * Диапазон — весь файл (сервер смотрит `textDocument`), `only` сужает то, что
+   * готов применить: чужие `quickfix` в ответ не попадают.
+   */
+  async sourceActions(path: string, kinds: readonly string[]): Promise<CodeActionItem[]> {
+    if (kinds.length === 0) return [];
+    const result = await this.request(path, 'textDocument/codeAction', {
+      textDocument: { uri: pathToUri(path) },
+      // Весь файл: от начала до очень далёкого конца — сервер обрезает сам.
+      range: { start: { line: 0, character: 0 }, end: { line: 100000, character: 0 } },
+      context: { diagnostics: [], only: [...kinds], triggerKind: 1 },
+    });
+    return toCodeActions(await this.resolveActions(path, result), uriToPath);
+  }
+
+  /**
    * Дотянуть действия, которые сервер отдал без правок и команды.
    *
    * Так устроен `codeAction/resolve`: автоимпорт `typescript-language-server` в

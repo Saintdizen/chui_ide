@@ -460,14 +460,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     печати внутри строкового литерала, показывает текущий параметр.
     Источник: VS Code `edit-evolved` (parameter info).
 
-76. **Code actions: лампочка, `Ctrl+.`, сохранение с действиями.** Подача в
-    редакторе: подчёркивание, лампочка у проблемной строки, `Ctrl+.` открывает
-    быстрые правки с группировкой по `kind` (quickfix, refactor, source),
-    повторное применение той же правки. `codeActionsOnSave` применяет выбранные
-    `source.*` при сохранении.
-    Источник: VS Code `edit-evolved` (lightbulb, code actions on save),
-    Zed `diagnostics`.
-
 ---
 
 ## Правила работы со списком
