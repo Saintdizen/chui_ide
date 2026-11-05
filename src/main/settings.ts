@@ -273,6 +273,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     renderWhitespace: 'none',
     // Миникарта по умолчанию выключена: узкий файл она только заслоняет.
     minimap: false,
+    // Полоса меток выключена по умолчанию: это ещё одна узкая колонка справа,
+    // и место в узком окне дороже, чем польза от меток.
+    overviewRuler: false,
     // Перенос длинных строк выключен: по умолчанию строку не ломают, её тянут вбок.
     wordWrap: false,
     // Плавная прокрутка включена: дальний прыжок так читается, а быстрый набор она не
@@ -583,6 +586,7 @@ export class SettingsStore {
       if (patch.editor.renderWhitespace !== undefined)
         next.renderWhitespace = normalizeWhitespaceMode(patch.editor.renderWhitespace);
       if (patch.editor.minimap !== undefined) next.minimap = patch.editor.minimap === true;
+      if (patch.editor.overviewRuler !== undefined) next.overviewRuler = patch.editor.overviewRuler === true;
       if (patch.editor.wordWrap !== undefined) next.wordWrap = patch.editor.wordWrap === true;
       if (patch.editor.smoothScroll !== undefined) next.smoothScroll = patch.editor.smoothScroll === true;
       // Задержка ховера — число из формы: 0 допустим (показывать сразу), остальное поджимаем.
@@ -1085,6 +1089,7 @@ function loadSettings(filePath: string): StoredSettings {
       fileAssociations: normalizeFileAssociations(parsed.editor?.fileAssociations),
       renderWhitespace: normalizeWhitespaceMode(parsed.editor?.renderWhitespace),
       minimap: parsed.editor?.minimap === true,
+      overviewRuler: parsed.editor?.overviewRuler === true,
       wordWrap: parsed.editor?.wordWrap === true,
       // Плавная прокрутка выключена только явным `false`: старый settings.json её не знает.
       smoothScroll: parsed.editor?.smoothScroll !== false,

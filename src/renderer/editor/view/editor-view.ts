@@ -54,6 +54,7 @@ import type { DocumentColor } from '../../../shared/lsp-document-color';
 import { enclosingFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
 import { whitespaceMarks, type WhitespaceMode } from './whitespace';
 import { Minimap } from './minimap';
+import { OverviewRuler, type OverviewState } from './overview';
 
 /** Класс корня и его частей — за него цепляется оформление (`styles/editor.css`). */
 const ROOT_CLASS = 'own-editor';
@@ -74,6 +75,8 @@ export interface EditorViewOptions {
   whitespace?: WhitespaceMode;
   /** Показывать ли миникарту — сжатый вид всего файла у правого края. */
   minimap?: boolean;
+  /** Полоса меток справа (ошибки, поиск, правки git). По умолчанию скрыта. */
+  overview?: boolean;
   /** Включать ли лигатуры шрифта (`=>`, `!=`, `->` одним знаком). */
   ligatures?: boolean;
 }
@@ -245,6 +248,8 @@ export class EditorView {
   /** Миникарта: холст со сжатыми строками и ползунком видимой части. */
   private readonly minimap: Minimap;
   private minimapVisible = false;
+  private readonly overview: OverviewRuler;
+  private overviewVisible = false;
   /** Подсказки-вставки по строкам (inlay hints): место, текст, ширина и класс. */
   private inlayByLine = new Map<number, readonly InlayItem[]>();
   /**
@@ -398,6 +403,16 @@ export class EditorView {
     this.root.insertBefore(this.minimap.element, this.stickyLayer);
     this.minimapVisible = options.minimap ?? false;
     this.minimap.element.hidden = !this.minimapVisible;
+    // Полоса меток — ещё уже миникарты, сразу за ней. Содержимое равно обновлять не
+    // надо: `editor-host` зовёт её `setOverviewState` на каждую прокрутку и правку,
+    // зная и диагностики, и поиск, и правки git.
+    this.overview = new OverviewRuler((line) => {
+      this.stopScrollAnimation();
+      this.viewport.scrollTop = (line - 1) * this.metrics.lineHeight;
+    });
+    this.root.insertBefore(this.overview.element, this.stickyLayer);
+    this.overviewVisible = options.overview ?? false;
+    this.overview.element.hidden = !this.overviewVisible;
     this.setLigatures(options.ligatures ?? false);
     this.host.append(this.root);
 
@@ -1265,6 +1280,9 @@ export class EditorView {
     // Миникарта рисуется по ВСЕМУ файлу и едет вместе с прокруткой: перерисовываем
     // её тем же кадром, что и строки, — иначе ползунок отставал бы от прокрутки.
     if (this.minimapVisible) this.minimap.render();
+    // Полоса меток едет вместе с прокруткой так же: её рамочка видимой части
+    // должна совпадать с тем, что сейчас на экране.
+    this.renderOverview();
   }
 
   /** Размер полотна: высота — по числу строк, ширина — по самой широкой известной строке. */
@@ -1698,6 +1716,43 @@ export class EditorView {
     if (this.whitespace === mode) return;
     this.whitespace = mode;
     this.rerender();
+  }
+
+  /** Текущая прокрутка в пикселях. */
+  get scrollTopPx(): number {
+    return this.viewport.scrollTop;
+  }
+
+  /** Высота полотна видимой части в пикселях (для рамки на полосе меток). */
+  get viewportHeightPx(): number {
+    return this.viewport.clientHeight;
+  }
+
+  /** Полная высота разложенного файла в пикселях. */
+  get contentHeightPx(): number {
+    return this.content.clientHeight;
+  }
+
+  /** Метки полосы (ошибки, поиск, правки git) — см. `overview.ts`. */
+  setOverviewState(state: OverviewState): void {
+    this.overview.setState(state);
+  }
+
+  /** Показана ли полоса: host не считает метки, пока её не видно. */
+  get overviewShown(): boolean {
+    return this.overviewVisible;
+  }
+
+  /** Показать или спрятать полосу меток. */
+  setOverview(on: boolean): void {
+    if (this.overviewVisible === on) return;
+    this.overviewVisible = on;
+    this.overview.element.hidden = !on;
+    if (on) this.renderOverview();
+  }
+
+  private renderOverview(): void {
+    if (this.overviewVisible) this.overview.render();
   }
 
   /** Показать или спрятать миникарту. */

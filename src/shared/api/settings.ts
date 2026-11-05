@@ -249,6 +249,8 @@ export interface EditorSettings {
   renderWhitespace: WhitespaceMode;
   /** Миникарта справа: сжатый вид всего файла. */
   minimap: boolean;
+  /** Полоса меток справа: ошибки, поиск, правки git. */
+  overviewRuler: boolean;
   /** Перенос длинных строк: строка шире окна ломается на несколько рядов. */
   wordWrap: boolean;
   /**

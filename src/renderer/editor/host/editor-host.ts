@@ -29,6 +29,7 @@ import type { FoldRange } from '../../../shared/fold-ranges';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import type { CompletionContext } from '../../../shared/lsp-completions';
 import type { GitLineChange } from '../../../shared/git-line-changes';
+import type { OverviewInput } from '../view/overview';
 import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-lens';
 import type { SignatureContext, SignatureHelp } from '../../../shared/lsp-signature';
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
@@ -182,6 +183,7 @@ export interface EditorHostOptions {
   whitespace?: WhitespaceMode;
   /** Показывать ли миникарту — сжатый вид всего файла справа. */
   minimap?: boolean;
+  overview?: boolean;
   /** Переносить ли длинные строки (word wrap). */
   wordWrap?: boolean;
   /** Плавная прокрутка: прыжок курсора ведёт текст разгоном. */
@@ -732,11 +734,18 @@ export class EditorHost {
     this.view = new EditorView(container, buffer, {
       whitespace: normalizeWhitespaceMode(options.whitespace),
       minimap: options.minimap,
+      overview: options.overview,
       ligatures: options.ligatures,
     });
     this.view.setWordWrap(options.wordWrap === true);
     this.view.setSmoothScroll(options.smoothScroll === true);
     this.minimapWanted = options.minimap === true;
+    // Метки полосы считаются по требованию (`refreshOverview`): пока её не видно,
+    // ни поиск, ни диагностики в неё не собираются.
+    if (options.overview !== undefined) {
+      this.view.setOverview(options.overview);
+      if (options.overview) this.refreshOverview();
+    }
     if (options.fontSize !== undefined) this.view.setFontSize(options.fontSize);
     if (options.lineHeight !== undefined) this.view.setLineHeight(options.lineHeight);
     if (options.cursorStyle !== undefined) this.view.setCursorStyle(options.cursorStyle);
@@ -1289,6 +1298,8 @@ export class EditorHost {
     rulers?: readonly number[];
     whitespace?: WhitespaceMode;
     minimap?: boolean;
+    /** Полоса меток справа (ошибки, поиск, правки git). */
+    overview?: boolean;
     wordWrap?: boolean;
     smoothScroll?: boolean;
     /** Задержка подсказки при наведении, мс. */
@@ -1690,6 +1701,41 @@ export class EditorHost {
     decorations.setLinks(this.buildLinks(path));
 
     if (this.path === path) this.view.setDecorations(decorations);
+    if (this.path === path) this.refreshOverview();
+  }
+
+  /**
+   * Полоса меток справа: ошибки и предупреждения, совпадения поиска, правки git.
+   *
+   * Источники уже есть по отдельности (волнистые подчёркивания, полоски git, поиск
+   * в буфере); здесь они складываются в одно — уже жёлоба и без текста. Порядок
+   * наложения — от спокойного к важному: правки git (их на экране много и они
+   * тихие), затем поиск, сверху — диагностики: ошибка важнее всего.
+   */
+  private refreshOverview(): void {
+    const path = this.activePath;
+    if (!path) return;
+    // Метки нужны только у показанной полосы: без неё весь этот пересчёт впустую.
+    if (!this.view.overviewShown) return;
+    const buffer = this.controller.bufferRef;
+    const marks: OverviewInput[] = [];
+
+    for (const change of this.lineChanges.get(path) ?? []) marks.push({ line: change.line, kind: change.kind });
+
+    // Совпадения поиска: строку берём от начала совпадения. Сюда попадаем только
+    // для активного файла (см. `refreshDecorations`), и поиск идёт ровно по нему.
+    for (const match of this.find.matches) marks.push({ line: match.line, kind: 'search' });
+
+    // Пометки сервера (`setMarkers`). Строка — с единицы, как и у остальных.
+    for (const item of this.externalMarkers.get(path) ?? []) marks.push({ line: item.line, kind: item.severity });
+
+    this.view.setOverviewState({
+      marks,
+      lineCount: buffer.lineCount,
+      scrollTop: this.view.scrollTopPx,
+      viewportHeight: this.view.viewportHeightPx,
+      contentHeight: this.view.contentHeightPx,
+    });
   }
 
   /** Полоски изменений git: добавлено / изменено / удалено относительно HEAD. */

@@ -104,6 +104,8 @@ export interface EditorWorkspaceOptions {
   whitespace?: WhitespaceMode;
   /** Показывать ли миникарту — сжатый вид всего файла справа. */
   minimap?: boolean;
+  /** Полоса меток справа: ошибки, поиск, правки git (см. `view/overview.ts`). */
+  overview?: boolean;
   /** Переносить ли длинные строки (word wrap). */
   wordWrap?: boolean;
   /** Плавная прокрутка: прыжок курсора ведёт текст разгоном. */
@@ -299,6 +301,7 @@ export class EditorWorkspace {
   /** Невидимые знаки: панели равны, как отступы и кегль. */
   private readonly whitespace: WhitespaceMode | undefined;
   private readonly minimap: boolean | undefined;
+  private readonly overview: boolean | undefined;
   private readonly wordWrap: boolean | undefined;
   private readonly smoothScroll: boolean | undefined;
   private readonly hoverDelayMs: number | undefined;
@@ -453,6 +456,7 @@ export class EditorWorkspace {
     this.rulers = options.rulers;
     this.whitespace = options.whitespace;
     this.minimap = options.minimap;
+    this.overview = options.overview;
     this.wordWrap = options.wordWrap;
     this.smoothScroll = options.smoothScroll;
     this.hoverDelayMs = options.hoverDelayMs;
@@ -570,6 +574,7 @@ export class EditorWorkspace {
       rulers: this.rulers,
       whitespace: this.whitespace,
       minimap: this.minimap,
+      overview: this.overview,
       wordWrap: this.wordWrap,
       smoothScroll: this.smoothScroll,
       hoverDelayMs: this.hoverDelayMs,
@@ -1139,6 +1144,7 @@ export class EditorWorkspace {
     rulers?: readonly number[];
     whitespace?: WhitespaceMode;
     minimap?: boolean;
+    overview?: boolean;
     wordWrap?: boolean;
     smoothScroll?: boolean;
     /** Задержка подсказки при наведении, мс. */

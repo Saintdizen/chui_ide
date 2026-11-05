@@ -1187,6 +1187,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'помогает увидеть хвосты, которые убирает сохранение.',
       ),
       switchRow('Миникарта', editor.minimap, (value) => editable({ minimap: value })),
+      switchRow('Полоса меток справа', editor.overviewRuler, (value) => editable({ overviewRuler: value })),
       switchRow('Перенос длинных строк', editor.wordWrap, (value) => editable({ wordWrap: value })),
       switchRow('Плавная прокрутка', editor.smoothScroll, (value) => editable({ smoothScroll: value })),
       field(

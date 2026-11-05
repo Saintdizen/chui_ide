@@ -429,6 +429,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     rulers: settings.editor.rulers,
     whitespace: settings.editor.renderWhitespace,
     minimap: settings.editor.minimap,
+    overview: settings.editor.overviewRuler,
     wordWrap: settings.editor.wordWrap,
     smoothScroll: settings.editor.smoothScroll,
     hoverDelayMs: settings.editor.hoverDelayMs,
@@ -3626,6 +3627,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       rulers: next.editor.rulers,
       whitespace: next.editor.renderWhitespace,
       minimap: next.editor.minimap,
+      overview: next.editor.overviewRuler,
       wordWrap: next.editor.wordWrap,
       smoothScroll: next.editor.smoothScroll,
       hoverDelayMs: next.editor.hoverDelayMs,
@@ -3638,6 +3640,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Миникарта в дзене спрятана, но настройку не отменяет: пока режим включён, живой
     // правкой её не показать — панели пересоберутся при возвращении раскладки.
     if (!layout.root.classList.contains('is-zen')) editors.applyOptions({ minimap: next.editor.minimap });
+    editors.applyOptions({ overview: next.editor.overviewRuler });
     // Ассоциации могли смениться: пересчитываем язык открытых файлов и документов
     // (по нему работают подсветка, подсказки и сервер) — иначе ждали бы переоткрытия.
     setFileAssociations(next.editor.fileAssociations);

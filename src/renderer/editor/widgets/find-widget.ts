@@ -46,6 +46,11 @@ export class FindWidget {
   /** Куда вернуть фокус после закрытия — задаёт тот, кто виджет создал. */
   onClose: (() => void) | null = null;
 
+  /** Совпадения текущего поиска — полосе меток нужно знать, где они в файле. */
+  get matches(): readonly FindMatch[] {
+    return this.state.snapshot.matches;
+  }
+
   constructor(view: EditorView, controller: EditorController, buffer: TextBuffer) {
     this.view = view;
     this.controller = controller;
