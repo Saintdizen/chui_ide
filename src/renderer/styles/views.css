@@ -1980,6 +1980,26 @@
   font-size: var(--font_labels_size);
 }
 
+/*
+ * Действие внутри пустого состояния: «Проблем нет» и «Ничего не найдено» —
+ * разные состояния с разными следующими шагами, и выход должен быть рядом
+ * с текстом, а не только в палитре команд.
+ */
+.problems-empty-action {
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--link_color);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.problems-empty-action:hover {
+  text-decoration-thickness: 2px;
+}
+
 /* Заголовок файла в списке: имя важнее отдельных строк под ним. */
 .problem-group-head {
   display: flex;

@@ -29,6 +29,17 @@ export interface ProblemPanelDeps {
   reveal: (path: string, line: number, column: number) => void;
   /** Короткая подпись файла — в приложении путь от корня проекта. */
   label: (path: string) => string;
+  /**
+   * Почему пусто — по мнению прохода проверки (строка с причиной) или `null`.
+   * `ProjectCheck.unchecked()` уже умеет отличить «ещё не проверяли», «проверка
+   * упала» и «проверять нечем»: выдумывать свой признак незачем.
+   */
+  unchecked?: () => string | null;
+  /**
+   * Запустить проверку проекта — действие пустого состояния (п.10).
+   * Без него «Проблем нет» не отличить от «ещё не проверяли».
+   */
+  check?: () => void;
 }
 
 export interface ProblemPanel {
@@ -45,6 +56,55 @@ export interface ProblemPanel {
  * заголовке и видно по счётчикам, но построчно не рисуется.
  */
 const MAX_ROWS = 500;
+
+export interface ProblemEmptyState {
+  markers: number;
+  filter: string;
+  /**
+   * Проверка проекта уже проходила. Без этого признака «Проблем нет» —
+   * утверждение, которое нечем подтвердить: до первого прохода список пуст
+   * просто потому, что его никто не заполнял.
+   */
+  checked?: boolean;
+  /** Готовая причина от прохода проверки: важнее нашего «ещё не шла». */
+  uncheckedNote?: string | null;
+  /** Сброс фильтра — действие пустого состояния по фильтру. */
+  reset?: () => void;
+  /** Запуск проверки — действие пустого состояния до первой проверки. */
+  check?: () => void;
+}
+
+/**
+ * Что показать в пустой панели проблем (п.10).
+ *
+ * Три разных исхода — три разных текста и три разных действия: «до проверки»,
+ * «фильтр отсёк всё», «всё чисто». Одна строка «Проблем нет.» на все три
+ * утверждала чистоту, не посмотрев ни одного файла.
+ */
+export function problemEmptyPlan(state: ProblemEmptyState): {
+  text: string;
+  action: string;
+  run(): void;
+} {
+  if (state.markers === 0) {
+    if (!state.checked) {
+      return {
+        // Причину знает проход проверки (`ProjectCheck.unchecked`): «ещё не
+        // проверяли», «проверка упала» и «проверять нечем» — три разных беды,
+        // и совет «Запустить проверку» верен не для всех.
+        text: state.uncheckedNote ?? 'Проверка ещё не шла.',
+        action: 'Проверить проект',
+        run: () => state.check?.(),
+      };
+    }
+    return { text: 'Проблем нет.', action: '', run: () => undefined };
+  }
+  return {
+    text: 'Ничего не найдено по фильтру.',
+    action: 'Сбросить фильтр',
+    run: () => state.reset?.(),
+  };
+}
 
 export function createProblemPanel(deps: ProblemPanelDeps): ProblemPanel {
   const summary = h('span', { class: 'problems-summary' });
@@ -134,13 +194,40 @@ export function createProblemPanel(deps: ProblemPanelDeps): ProblemPanel {
     summary.textContent = problemsSummary(counts);
 
     if (markers.length === 0) {
-      list.appendChild(h('div', { class: 'problems-empty' }, 'Проблем нет.'));
+      // Текст и действие берём из плана: до первой проверки это не «проблем нет»,
+      // а «ещё не смотрели» — утверждать чистоту, не посмотрев файлов, нельзя.
+      const plan = problemEmptyPlan({
+        markers: 0,
+        filter: '',
+        // «Не проверено» — не наша догадка, а состояние прохода (`ProjectCheck`).
+        uncheckedNote: deps.unchecked?.() ?? null,
+        check: deps.check,
+      });
+      const box = h('div', { class: 'problems-empty' }, plan.text);
+      if (plan.action) {
+        box.appendChild(
+          h('button', { class: 'problems-empty-action', type: 'button', onClick: plan.run }, plan.action),
+        );
+      }
+      list.appendChild(box);
       return;
     }
 
     const groups = groupProblems(markers, filter.value, deps.label, activeFilter());
     if (groups.length === 0) {
-      list.appendChild(h('div', { class: 'problems-empty' }, 'Ничего не найдено по фильтру.'));
+      // Сброс фильтра — прямо здесь: «Ничего не найдено» без выхода из
+      // этого состояния заставляло искать причину глазами по панели.
+      const plan = problemEmptyPlan({
+        markers: markers.length,
+        filter: filter.value,
+        reset: () => {
+          filter.value = '';
+          render();
+        },
+      });
+      const box = h('div', { class: 'problems-empty' }, plan.text);
+      box.appendChild(h('button', { class: 'problems-empty-action', type: 'button', onClick: plan.run }, plan.action));
+      list.appendChild(box);
       return;
     }
 

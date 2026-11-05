@@ -1382,6 +1382,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Из панели файла может и не быть на экране — открываем его тем же путём, что и всё.
     reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
     label: (path) => workspace.relative(path),
+    // Действие пустого состояния (п.10): до первой проверки список честно пуст,
+    // и «Проблем нет» без кнопки читалось как «всё чисто».
+    check: () => void commands.execute('project.check'),
+    // «Проблем нет» до первой проверки было утверждением, а не фактом: список
+    // пуст ещё и потому, что проект не проверяли.
+    unchecked: () => projectCheck.unchecked(),
   });
   // Проверка всего проекта: линтер по корню и сверка зависимостей с `node_modules`.
   // Пометки обычных источников (языковой сервер, проверка импортов) приходят только

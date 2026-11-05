@@ -49,6 +49,26 @@ const MIN_QUERY = 2;
 /** Пауза после нажатия: серверу тоже нужно время, а список — не мгновенный. */
 const DEBOUNCE = 250;
 
+/**
+ * Почему список символов пуст (п.10).
+ *
+ * Без этого на три разных события показывалось одно «Ничего не найдено»,
+ * и человек с пустого экрана не понимал, что делать: набрать точнее, снять
+ * `@вид` или сменить проект — шаги разные.
+ */
+export function symbolEmptyReason(state: {
+  /** Символов в источнике (проекте или языке). */
+  found: number;
+  /** Был запрос вида `@метод`: именно он мог отсечь всё. */
+  kindQuery?: string;
+  /** Сколько прошло фильтр по виду. */
+  kindSize?: number;
+}): string {
+  if (state.found === 0) return 'В проекте не нашлось символов этого языка';
+  if (state.kindQuery && state.kindSize === 0) return `Символов вида «${state.kindQuery}» нет`;
+  return 'Ничего не найдено — попробуйте короче';
+}
+
 export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
   const input = h('input', {
     class: 'palette-input',
@@ -60,6 +80,14 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
   const overlay = h('div', { class: 'overlay', hidden: true }, h('div', { class: 'palette' }, input, list));
 
   let matches: ProjectSymbol[] = [];
+  /** Сколько символов вернул источник и сколько из них прошло фильтр по виду. */
+  let sourceSize = 0;
+  let kindSize = 0;
+  /**
+   * Запомненный фильтр по виду (`@метод`): `render` рисует пустой экран уже
+   * после фильтра, и без этого поля не отличить «вид не совпал» от «текст не совпал».
+   */
+  let kindQuery: string | undefined;
   let cursor = 0;
   let timer: number | null = null;
   /** Номер последнего запроса: старый ответ не должен затирать новый. */
@@ -88,7 +116,11 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
     }
 
     if (matches.length === 0) {
-      list.appendChild(h('div', { class: 'palette-empty' }, 'Ничего не найдено'));
+      // Причина важнее вывода (п.10): «Ничего не найдено» на проекте без
+      // символов и на неудачном запросе — разные вещи с разным следующим шагом.
+      list.appendChild(
+        h('div', { class: 'palette-empty' }, symbolEmptyReason({ found: sourceSize, kindSize, kindQuery })),
+      );
       return;
     }
 
@@ -132,10 +164,14 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
     if (id !== requestId) return;
     loading = false;
     // Фильтр по виду символа: `@метод` (женский/мужской падеж — по началу слова).
-    const kindQuery = /@(\S+)/.exec(query)?.[1];
+    kindQuery = /@(\S+)/.exec(query)?.[1];
     const text = query.replace(/@\S*/, '').trim();
-    const byKind = kindQuery ? found.filter((s) => s.kind.toLowerCase().startsWith(kindQuery.toLowerCase())) : found;
+    const byKind = kindQuery ? found.filter((s) => s.kind.toLowerCase().startsWith(kindQuery!.toLowerCase())) : found;
     matches = filterSymbols(byKind, text);
+    // Запоминаем размеры: без них пустой экран не отличить от «символов нет
+    // вовсе» и от «не совпал вид».
+    sourceSize = found.length;
+    kindSize = byKind.length;
     render();
   }
 
