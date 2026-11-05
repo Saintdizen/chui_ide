@@ -817,6 +817,8 @@ export interface ChuiMethods {
   'lsp.willSaveWaitUntil': { params: { path: string; text: string }; result: TextEdit[] };
   'lsp.willRenameFiles': { params: { oldPath: string; newPath: string }; result: FileEdit[] | null };
   'lsp.restart': { params: void; result: LspStatus };
+  /** Остановить поднятые серверы: следующий открытый файл поднимет их снова. */
+  'lsp.stop': { params: void; result: LspStatus };
   'lsp.status': { params: void; result: LspStatus };
   /**
    * Прогреть серверы языков проекта, не дожидаясь открытия файлов (см. `LspService.prewarm`).

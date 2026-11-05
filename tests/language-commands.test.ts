@@ -17,6 +17,7 @@ function setup(options: { aiOn?: boolean; code?: string; testPath?: string | nul
       request: async (method: string) => {
         log.push(`rpc:${method}`);
         if (method === 'lsp.restart') return { running: [{ label: 'tsserver' }], servers: [{ label: 'tsserver' }] };
+        if (method === 'lsp.stop') return { running: [], servers: [{ label: 'tsserver' }] };
         if (method === 'ai.generateTest') return { code: 'test("x", () => {});' };
         return { ok: true };
       },
@@ -46,9 +47,9 @@ function setup(options: { aiOn?: boolean; code?: string; testPath?: string | nul
 }
 
 describe('registerLanguageCommands', () => {
-  it('регистрирует три команды', () => {
+  it('регистрирует четыре команды', () => {
     const { commands } = setup();
-    expect([...commands.keys()].sort()).toEqual(['ai.generateTest', 'lsp.restart', 'tests.open']);
+    expect([...commands.keys()].sort()).toEqual(['ai.generateTest', 'lsp.restart', 'lsp.stop', 'tests.open']);
   });
 
   it('панель тестов — это показ дока, без запросов', () => {
@@ -62,6 +63,13 @@ describe('registerLanguageCommands', () => {
     await commands.get('lsp.restart')!();
     expect(log).toEqual(['rpc:lsp.restart', 'applyLsp', 'refreshLsp']);
     expect(toasts).toEqual(['Серверы: tsserver']);
+  });
+
+  it('остановка серверов показывает пустой список и не перепроверяется', async () => {
+    const { commands, log, toasts } = setup();
+    await commands.get('lsp.stop')!();
+    expect(log).toEqual(['rpc:lsp.stop', 'applyLsp']);
+    expect(toasts).toEqual(['Языковые серверы остановлены']);
   });
 
   it('при выключенном ИИ генерация не идёт в main', async () => {

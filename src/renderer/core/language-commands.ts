@@ -28,6 +28,7 @@ export interface LanguageDeps {
   dock: { show(view: 'tests'): void };
   rpc: {
     request(method: 'lsp.restart'): Promise<LspStatus>;
+    request(method: 'lsp.stop'): Promise<LspStatus>;
     request(method: 'ai.generateTest', payload: unknown): Promise<{ code: string }>;
     request(method: 'workspace.createFile', payload: { path: string; contents: string }): Promise<unknown>;
   };
@@ -64,6 +65,24 @@ export function registerLanguageCommands(define: DefineCommand, deps: LanguageDe
     // Серверы поднимаются лениво, при открытии файлов: перепроверим, когда поднимутся.
     deps.schedule(1500, () => deps.refreshLspStatus());
   });
+
+  /**
+   * Остановка — не выключатель и не запрет: следующий файл этого языка поднимет
+   * сервер снова. Нужна, когда сервер мешает, но не сломан: занял ядро, спорит
+   * за индекс с другим клиентом — человек выключает и решает потом.
+   */
+  define(
+    { id: 'lsp.stop', title: 'Языковые серверы: остановить', category: 'Языки', keywords: ['lsp', 'стоп'] },
+    async () => {
+      const result = await rpc.request('lsp.stop');
+      deps.applyLspStatus(result);
+      showToast(
+        result.running.length > 0
+          ? `Остановлены не все: работают ${result.running.join(', ')}`
+          : 'Языковые серверы остановлены',
+      );
+    },
+  );
 
   /**
    * Тест к коду: берём выделение, а если его нет — активный файл целиком; тест

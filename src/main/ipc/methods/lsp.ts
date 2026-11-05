@@ -30,6 +30,7 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
   // файлах (`workspace/willRenameFiles`). Применяет их renderer до `fs.rename`.
   router.register('lsp.willRenameFiles', (params) => deps.lsp?.willRenameFiles(params.oldPath, params.newPath) ?? null);
   router.register('lsp.restart', () => deps.lsp?.restart() ?? NO_LSP_STATUS);
+  router.register('lsp.stop', () => deps.lsp?.stopAll() ?? NO_LSP_STATUS);
   router.register('lsp.status', () => deps.lsp?.status() ?? NO_LSP_STATUS);
   // Прогрев: поднять серверы языков проекта, не дожидаясь открытия файлов.
   router.register('lsp.prewarm', async (params) => {

@@ -2241,6 +2241,24 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     // Живой статус: какие серверы подняты прямо сейчас, и кнопка их перезапуска.
     // Перезапуск нужен, когда сервер завис или подхватил не то окружение.
     const restartButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Перезапустить');
+    // Остановка — не выключатель: следующий файл своего языка поднимет сервер
+    // снова. Нужна, когда сервер мешает, но не сломан: занял ядро, спорит
+    // за индекс с другим клиентом.
+    const stopButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Остановить');
+    stopButton.addEventListener('click', () => {
+      stopButton.disabled = true;
+      void deps.rpc
+        .request('lsp.stop')
+        .then((result) => {
+          lspRunning = result.running;
+          render();
+          showToast('Серверы остановлены — поднимутся заново при открытии файла');
+        })
+        .catch((error) => {
+          showToast(error instanceof Error ? error.message : String(error), 'error');
+          stopButton.disabled = false;
+        });
+    });
     restartButton.addEventListener('click', () => {
       restartButton.disabled = true;
       void deps.rpc
@@ -2248,7 +2266,11 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         .then((result) => {
           lspRunning = result.running;
           render();
-          showToast('Серверы остановлены — поднимутся заново при следующем открытии проекта или файла');
+          showToast(
+            result.running.length > 0
+              ? `Серверы: ${result.servers.map((server) => server.label).join(', ')}`
+              : 'Ни один сервер не поднялся — причина в журнале',
+          );
         })
         .catch((error) => {
           showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -2271,7 +2293,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'Его пометки показываются в редакторе рядом с собственными.',
       ),
       h('div', { class: 'field-hint' }, statusText),
-      field('Перезапустить', restartButton),
+      field('Перезапустить', h('div', { class: 'field-row' }, restartButton, stopButton)),
       switchRow('Журнал обмена с серверами (отладка)', lsp.trace, (value) => void patch({ lsp: { trace: value } })),
       h(
         'div',
