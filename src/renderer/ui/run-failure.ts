@@ -41,7 +41,11 @@ export interface RunFailure {
  */
 function detect(raw: string): FailureKind {
   const text = raw.toLowerCase();
-  if (/40[13]|unauthori[sz]ed|forbidden|api[ _-]?key|invalid[_ ]key|неверн\p{Alpha}* ключ|биллинг|billing|quota|insufficient[_ ](funds|quota)/u.test(text)) {
+  if (
+    /40[13]|unauthori[sz]ed|forbidden|api[ _-]?key|invalid[_ ]key|неверн\p{Alpha}* ключ|биллинг|billing|quota|insufficient[_ ](funds|quota)/u.test(
+      text,
+    )
+  ) {
     return 'access';
   }
   if (/429|rate[ _-]?limit|too many requests|слишком много запросов|overloaded|перегруз/u.test(text)) {
@@ -53,7 +57,11 @@ function detect(raw: string): FailureKind {
   if (/context[_ ](length|window)|too many tokens|maximum context|контекст/u.test(text)) {
     return 'context';
   }
-  if (/econnrefused|etimedout|enotfound|econnreset|network|fetch failed|socket|offline|нет сети|не удалось соединиться/u.test(text)) {
+  if (
+    /econnrefused|etimedout|enotfound|econnreset|network|fetch failed|socket|offline|нет сети|не удалось соединиться/u.test(
+      text,
+    )
+  ) {
     return 'network';
   }
   return 'other';

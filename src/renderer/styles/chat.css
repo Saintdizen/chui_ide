@@ -2612,7 +2612,7 @@
   background: var(--element_background_hover);
 }
 
-.composer-fold[aria-pressed='true'] {
+.composer-fold[aria-pressed="true"] {
   color: var(--text_color_secondary);
 }
 

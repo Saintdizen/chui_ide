@@ -244,7 +244,8 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
    * Развернуть/свернуть блоки файла. Список перерисовывается и приходит новый,
    * поэтому состояние живёт в `expanded`, а не в самом DOM.
    */
-  async function toggleHunks(target: string): Promise<void> {    if (expanded === target) {
+  async function toggleHunks(target: string): Promise<void> {
+    if (expanded === target) {
       expanded = null;
       hunks = null;
       hunksError = false;
@@ -275,8 +276,7 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
     if (element.hidden) return;
     if (!popover.isOpen) popover.toggle(toggle);
     if (!path) return;
-    const known =
-      lastSource.touched.has(path) || lastSource.files.some((file) => file.path === path);
+    const known = lastSource.touched.has(path) || lastSource.files.some((file) => file.path === path);
     if (!known) return;
     // Уже развёрт — не схлопываем повторным кликом: из ленты пришли посмотреть,
     // а не переключить.
