@@ -11,6 +11,7 @@ function setup(opts: { active?: { path: string } | null } = {}) {
   const log: string[] = [];
   const toasts: string[] = [];
   let uiScale = 1;
+  let editorFont = 14;
   let zen: ZenSnapshot | null = null;
   /** Классы, реально висящие на корне: `contains` обязан отвечать правдой. */
   const zenClass = new Set<string>();
@@ -106,9 +107,24 @@ function setup(opts: { active?: { path: string } | null } = {}) {
         log.push(`scale:${value}`);
       },
     },
+    editorFont: {
+      get: () => editorFont,
+      set: (value: number) => {
+        editorFont = value;
+        log.push(`font:${value}`);
+      },
+    },
   } as unknown as ViewCommandDeps;
   registerViewCommands(define, deps);
-  return { commands, log, toasts, visible, zen: () => zen, scale: () => uiScale };
+  return {
+    commands,
+    log,
+    toasts,
+    visible,
+    zen: () => zen,
+    scale: () => uiScale,
+    font: () => editorFont,
+  };
 }
 
 const run = (f: ReturnType<typeof setup>, id: string) => f.commands.get(id)!();
@@ -130,6 +146,26 @@ describe('registerViewCommands', () => {
     run(f, 'view.zoomIn');
     expect(f.scale()).toBeGreaterThan(1);
     expect(f.toasts.at(-1)).toContain('Масштаб интерфейса');
+  });
+
+  it('Ctrl+= и Ctrl+- меняют кегль ТЕКСТА, а не масштаб окна', () => {
+    // Раньше шаг был только у `Ctrl+колеса` над редактором. Кегль и масштаб окна —
+    // разные вещи, и путать их нельзя: команда вида не должна трогать оболочку.
+    const f = setup();
+    run(f, 'editor.fontZoomIn');
+    expect(f.font()).toBe(15);
+    expect(f.scale()).toBe(1);
+    run(f, 'editor.fontZoomOut');
+    run(f, 'editor.fontZoomOut');
+    expect(f.font()).toBe(13);
+    expect(f.scale()).toBe(1);
+  });
+
+  it('у границы кегля тост говорит цифру, а настройка не меняется', () => {
+    const f = setup();
+    for (let i = 0; i < 100; i += 1) run(f, 'editor.fontZoomIn');
+    expect(f.font()).toBe(72);
+    expect(f.toasts.at(-1)).toContain('72 px');
   });
 
   it('сброс масштаба — ровно 100 %', () => {

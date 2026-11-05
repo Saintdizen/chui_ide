@@ -1,3 +1,4 @@
+import { editorFontSizeLabel, stepEditorFontSize } from '../../shared/editor-font-scale';
 import { stepUiScale, uiScaleLabel } from '../../shared/ui-scale';
 import type { SidebarPosition } from '../../shared/api/settings';
 import type { ToastKind, ToastOptions } from '../ui/toast';
@@ -69,6 +70,11 @@ export interface ViewCommandDeps {
   uiScale: {
     get(): number;
     set(scale: number): void;
+  };
+  /** Кегль редактора: читаем текущий и меняем на ступень (`editor.fontSize`). */
+  editorFont: {
+    get(): number;
+    set(size: number): void;
   };
 }
 
@@ -189,13 +195,13 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
     const after = stepUiScale(before, direction);
     if (after === before) return;
     deps.uiScale.set(after);
-    // Подпись обязательна: без неё Ctrl+= на максимуме выглядит как «клавиша не работает».
+    // Подпись обязательна: без неё `Ctrl+Shift+=` на максимуме выглядит как «клавиша не работает».
     deps.showToast(`Масштаб интерфейса: ${uiScaleLabel(after)}`);
   };
-  // БЕЗ `keybinding`. Эти сочетания уже заняты пунктами меню с ролью Electron
-  // (`role: 'zoomIn'`) — и они РАБОТАЮТ: меняют масштаб всего окна. Своё
-  // сочетание здесь отняло бы у них клавишу и сделало бы две правки масштаба,
-  // которые не знают друг о друге (см. ниже).
+  // БЕЗ `keybinding`. Сочетания заданы пунктами меню с ролью Electron
+  // (`Ctrl+Shift+=` / `Ctrl+Shift+-`, `role: 'zoomIn'`): роль держит клавишу до
+  // renderer, и своё привязанное сочетание здесь молча не сработало бы. Своя
+  // клавиша занята кеглем текста (см. ниже) — это разные величины.
   define({ id: 'view.zoomIn', title: 'Крупнее', category: 'Вид' }, () => {
     zoom(1);
   });
@@ -204,6 +210,29 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
   });
   define({ id: 'view.zoomReset', title: 'Масштаб 100 %', category: 'Вид' }, () => {
     zoom(0);
+  });
+
+  // Кегль ТЕКСТА — не то же, что масштаб оболочки: у редактора свой размер, и
+  // `Ctrl+=`/`Ctrl+-` меняют именно текст (в меню «Крупнее»/«Мельче», см.
+  // `shared/app-menu.ts`). Масштаб окна ушёл на `Ctrl+Shift+=`/`Ctrl+Shift+-`:
+  // роль Electron держит клавишу до renderer, и двум действиям на одном сочетании
+  // места нет — одно из них молча не сработало бы.
+  const zoomFont = (direction: -1 | 1): void => {
+    const before = deps.editorFont.get();
+    const after = stepEditorFontSize(before, direction);
+    // У границы не молчим, а говорим «дальше некуда»: иначе клавиша выглядит сломанной.
+    if (after === before) {
+      deps.showToast(editorFontSizeLabel(after));
+      return;
+    }
+    deps.editorFont.set(after);
+    deps.showToast(editorFontSizeLabel(after));
+  };
+  define({ id: 'editor.fontZoomIn', title: 'Шрифт редактора крупнее', category: 'Вид', keybinding: 'Ctrl+=' }, () => {
+    zoomFont(1);
+  });
+  define({ id: 'editor.fontZoomOut', title: 'Шрифт редактора мельче', category: 'Вид', keybinding: 'Ctrl+-' }, () => {
+    zoomFont(-1);
   });
 
   define({ id: 'view.notebooks', title: 'Ячейки ноутбука', category: 'Вид' }, () => {

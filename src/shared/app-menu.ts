@@ -120,9 +120,16 @@ const VIEW: MenuNode = {
     { label: 'Перезагрузить', accelerator: 'Ctrl+R', role: 'reload' },
     { label: 'Инструменты разработчика', accelerator: 'Ctrl+Shift+I', role: 'toggleDevTools' },
     { separator: true },
+    // `Ctrl+=`/`Ctrl+-` масштабируют ТЕКСТ (кегль редактора), а окно целиком —
+    // `Ctrl+Shift+=`/`Ctrl+Shift+-`: кегль нужен куда чаще, и именно его ждут от
+    // привычного сочетания. Роли `zoomIn`/`zoomOut` держат клавишу до renderer,
+    // поэтому текст идёт командой, а масштаб окна — отдельными клавишами.
     { label: 'Обычный масштаб', accelerator: 'Ctrl+0', role: 'zoomReset' },
-    { label: 'Крупнее', accelerator: 'Ctrl+=', role: 'zoomIn' },
-    { label: 'Мельче', accelerator: 'Ctrl+-', role: 'zoomOut' },
+    { label: 'Крупнее', accelerator: 'Ctrl+=', command: 'editor.fontZoomIn' },
+    { label: 'Мельче', accelerator: 'Ctrl+-', command: 'editor.fontZoomOut' },
+    { separator: true },
+    { label: 'Масштаб окна крупнее', accelerator: 'Ctrl+Shift+=', role: 'zoomIn' },
+    { label: 'Масштаб окна мельче', accelerator: 'Ctrl+Shift+-', role: 'zoomOut' },
     { separator: true },
     // Без акселератора: `F11` держит шаг отладки с заходом (`debug.stepInto`) —
     // привычное сочетание. Полный экран остаётся пунктом меню, а не клавишей.

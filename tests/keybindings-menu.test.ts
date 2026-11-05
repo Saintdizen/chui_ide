@@ -71,6 +71,16 @@ describe('bindingConflicts', () => {
 });
 
 describe('menuAccelerators', () => {
+  it('Ctrl+= и Ctrl+- достались кеглю текста, а масштаб окна — с Shift', () => {
+    // Раньше эти клавиши держали роли `zoomIn`/`zoomOut` (масштаб всего окна), и
+    // нажатие до renderer не доходило вовсе. Теперь текст идёт командой, а окно —
+    // отдельными сочетаниями; иначе кегль редактора клавишами не поменять никак.
+    const accelerators = menuAccelerators();
+    expect(accelerators.get('editor.fontZoomIn')).toBe('Ctrl+=');
+    expect(accelerators.get('editor.fontZoomOut')).toBe('Ctrl+-');
+    expect(accelerators.has('view.zoomIn')).toBe(false);
+  });
+
   it('собирает встроенные клавиши команд из всех групп меню', () => {
     const map = menuAccelerators();
     expect(map.get('file.save')).toBe('Ctrl+S');

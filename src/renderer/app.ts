@@ -10,6 +10,7 @@ import {
 import { mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { aiPanelPlan } from '../shared/ai-panel';
 import { settingsPlan } from '../shared/settings-plan';
+import { sanitizeEditorFontSize } from '../shared/editor-font-scale';
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
 import { symbolIndexChip, type SymbolIndexStatus } from '../shared/symbol-index';
 import { createSymbolPoller } from './core/symbol-poll';
@@ -3102,6 +3103,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       // `settings.json`. Иначе команда показала бы одно, а окно настроек — другое.
       set: (scale) => void saveSettingsPatch({ appearance: { uiScale: scale } }),
     },
+    // Кегль текста: тот же путь, что у поля в настройках и у `Ctrl+колеса` над
+    // редактором. Запись идёт через `zoomFontByWheel` — одна правка на всех.
+    editorFont: {
+      get: () => settings.editor.fontSize,
+      set: (size) => zoomFontByWheel(size - settings.editor.fontSize),
+    },
   });
 
   // Флаг режима: чтение и запись одним местом. Запись обновляет и локальные
@@ -3120,7 +3127,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
    */
   const zoomFontByWheel = (step: number): void => {
     const current = settings.editor.fontSize;
-    const next = Math.min(72, Math.max(6, current + step));
+    // Границы и шаг — в `shared/editor-font-scale.ts`: тем же путём идут клавиши,
+    // и разойтись им нельзя — иначе колесо и `Ctrl+=` упирались бы в разные пределы.
+    const next = sanitizeEditorFontSize(current + step);
     if (next === current) return;
     settings = { ...settings, editor: { ...settings.editor, fontSize: next } };
     // Применяем сразу: ждать записи на диск, чтобы увидеть шаг, — не то, чего ждёшь от колеса.
