@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CommandDescriptor } from '../src/renderer/core/commands';
-import { rankCommandMatches, rankCommands } from '../src/renderer/core/palette-rank';
+import { RECENT_GROUP, groupCommands, rankCommandMatches, rankCommands } from '../src/renderer/core/palette-rank';
 import { orderByRecent } from '../src/renderer/core/recent-commands';
 
 /**
@@ -115,5 +115,46 @@ describe('недавние поднимаются наверх', () => {
     const listed = orderByRecent(many, ['нет-такой', 'a']);
     expect(listed).toHaveLength(many.length);
     expect(listed[0]?.id).toBe('a');
+  });
+});
+
+describe('группы по категориям', () => {
+  const mixed: CommandDescriptor[] = [
+    command('file.save', 'Сохранить', { category: 'Файл' }),
+    command('view.zen', 'Дзен', { category: 'Вид' }),
+    command('file.close', 'Закрыть', { category: 'Файл' }),
+    command('nav.symbol', 'Символ', { category: 'Навигация' }),
+    command('file.new', 'Новый', { category: 'Файл' }),
+  ];
+
+  it('категория не повторяется: группа одна, что бы ни было в реестре', () => {
+    // Команды регистрируются файлами, поэтому «Файл» идёт вразбивку: заголовок
+    // «при смене» дал бы его трижды.
+    const groups = groupCommands(mixed);
+    expect(groups.map((group) => group.header)).toEqual(['Файл', 'Вид', 'Навигация']);
+    expect(groups[0]?.items.map((item) => item.id)).toEqual(['file.save', 'file.close', 'file.new']);
+  });
+
+  it('порядок внутри группы — порядок реестра', () => {
+    const groups = groupCommands(mixed);
+    expect(groups[0]?.items[0]?.id).toBe('file.save');
+  });
+
+  it('недавние идут отдельной группой первой и не повторяются ниже', () => {
+    const groups = groupCommands(mixed, ['file.new', 'nav.symbol']);
+    expect(groups[0]?.header).toBe(RECENT_GROUP);
+    expect(groups[0]?.items.map((item) => item.id)).toEqual(['file.new', 'nav.symbol']);
+    const rest = groups.slice(1).flatMap((group) => group.items.map((item) => item.id));
+    expect(rest).toEqual(['file.save', 'file.close', 'view.zen']);
+  });
+
+  it('история из чужой версии настроек не создаёт пустую группу', () => {
+    const groups = groupCommands(mixed, ['нет-такой']);
+    expect(groups.map((group) => group.header)).toEqual(['Файл', 'Вид', 'Навигация']);
+  });
+
+  it('пустая категория не даёт заголовок-дырку', () => {
+    const groups = groupCommands([command('x', 'Без категории', { category: '  ' })]);
+    expect(groups[0]?.header).toBe('Прочее');
   });
 });

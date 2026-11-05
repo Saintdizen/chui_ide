@@ -88,16 +88,26 @@ app.whenReady().then(async () => {
   await wait(800);
 
   // Общий счёт и разрез по категориям: так видно, что перенос случился.
+  // При пустом вводе палитра группирует список, и категория стоит заголовком
+  // группы, а не подписью пункта — считаем оба места.
   const summary = await ask(
     ide,
     `(() => {
       const items = [...document.querySelectorAll('.palette-item')];
+      const groups = [...document.querySelectorAll('.palette-group')];
       const categories = {};
       for (const item of items) {
-        const category = item.querySelector('.palette-item-category')?.textContent ?? '(нет)';
+        const own = item.querySelector('.palette-item-category')?.textContent;
+        // Заголовок группы действует на все пункты до следующего заголовка.
+        const category = own ?? '(группа)';
         categories[category] = (categories[category] ?? 0) + 1;
       }
-      return { видно: items.length, категории: categories };
+      return {
+        видно: items.length,
+        групп: groups.length,
+        заголовки: groups.map((group) => group.textContent),
+        категории: categories,
+      };
     })()`,
   );
   console.log(`[проба] пунктов в палитре: ${JSON.stringify(summary, null, 2)}`);

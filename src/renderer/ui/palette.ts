@@ -1,6 +1,5 @@
 import type { CommandDescriptor, CommandRegistry } from '../core/commands';
-import { rankCommandMatches, type RankedCommand } from '../core/palette-rank';
-import { orderByRecent } from '../core/recent-commands';
+import { groupCommands, rankCommandMatches, type RankedCommand } from '../core/palette-rank';
 import { clear, h } from './dom';
 import { focusOwner, returnFocus } from './focus-return';
 
@@ -87,27 +86,29 @@ export function createPalette(deps: {
     // каждый раз искать их заново. С запросом порядок задаёт совпадение —
     // иначе редкая команда с точным совпадением пряталась бы под привычными.
     const ranked = rankCommandMatches(deps.commands.list(), query, recent, MAX_ITEMS);
-    matches = ranked
-      ? [...ranked]
-      : orderByRecent(deps.commands.list(), recent)
-          .slice(0, MAX_ITEMS)
-          .map((descriptor) => ({ descriptor, positions: [] }));
-
-    cursor = Math.min(cursor, Math.max(matches.length - 1, 0));
-
     // Заголовки групп — только без запроса: с запросом порядок задаёт
     // релевантность, и заголовок разорвал бы её. А пустой экран — это больше
     // двухсот команд подряд, и категории в нём единственный ориентир.
     const grouped = query === '';
-    const pinned = new Set(recent);
+
+    // Одна раскладка на всё: из неё же берётся и порядок пунктов, и где ставить
+    // заголовок. Считать её дважды — значит рано или поздно показать заголовок
+    // не от той группы.
+    const groups = grouped ? groupCommands(deps.commands.list(), recent) : [];
+    const headers: (string | null)[] = grouped ? groups.flatMap((group) => group.items.map(() => group.header)) : [];
+    matches = grouped
+      ? groups
+          .flatMap((group) => group.items.map((descriptor) => ({ descriptor, positions: [] as number[] })))
+          .slice(0, MAX_ITEMS)
+      : [...(ranked ?? [])];
+
+    cursor = Math.min(cursor, Math.max(matches.length - 1, 0));
 
     matches.forEach(({ descriptor, positions }, index) => {
-      if (grouped) {
-        const header = pinned.has(descriptor.id) ? 'Недавние' : descriptor.category;
-        if (header !== lastHeader) {
-          lastHeader = header;
-          list.appendChild(h('div', { class: 'palette-group' }, header));
-        }
+      const header = headers[index];
+      if (header && header !== lastHeader) {
+        lastHeader = header;
+        list.appendChild(h('div', { class: 'palette-group' }, header));
       }
       const disabled = !deps.commands.isEnabled(descriptor.id);
       const item = h(

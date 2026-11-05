@@ -204,3 +204,42 @@ export function rankCommands(
   const ranked = rankCommandMatches(commands, query, recent, limit);
   return ranked ? ranked.map((item) => item.descriptor) : null;
 }
+
+/** Заголовок группы недавних: команды отсюда уже запускали. */
+export const RECENT_GROUP = 'Недавние';
+
+/**
+ * Разложить команды по категориям для пустого ввода.
+ *
+ * «Заголовок при смене категории» на этих данных врёт: команды регистрируются
+ * файлами (`file-commands`, `view-commands`, ...), поэтому «Файл» встречается
+ * семь раз вперемешку с другими. Группа должна быть настоящей: сначала
+ * недавние (в порядке свежести), затем категории в порядке первого появления,
+ * внутри категории — порядок реестра.
+ *
+ * Категория без названия собирается под «Прочее»: пустой заголовок выглядел бы
+ * как сбой отрисовки.
+ */
+export function groupCommands(
+  descriptors: readonly CommandDescriptor[],
+  recent: readonly string[] = [],
+): { header: string; items: CommandDescriptor[] }[] {
+  const byId = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]));
+  const groups: { header: string; items: CommandDescriptor[] }[] = [];
+
+  const fresh = recent.map((id) => byId.get(id)).filter((descriptor) => descriptor !== undefined);
+  if (fresh.length > 0) groups.push({ header: RECENT_GROUP, items: fresh });
+
+  const taken = new Set(fresh.map((descriptor) => descriptor.id));
+  for (const descriptor of descriptors) {
+    if (taken.has(descriptor.id)) continue;
+    const header = descriptor.category.trim() === '' ? 'Прочее' : descriptor.category;
+    const group = groups.find((item) => item.header === header);
+    if (group) {
+      group.items.push(descriptor);
+      continue;
+    }
+    groups.push({ header, items: [descriptor] });
+  }
+  return groups;
+}
