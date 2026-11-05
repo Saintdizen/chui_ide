@@ -199,9 +199,14 @@ export function serverCandidates(
   const own = configured.filter((server) => server.language === language);
   if (own.length > 0 && !own.some((server) => server.enabled && server.command.trim())) return [];
 
+  // Приоритет: больше — раньше. Без числа серверы идут в порядке списка, а
+  // сортировка устойчивая — равные приоритеты не переставляются.
+  const priority = (server: LspServerConfig): number => server.priority ?? 0;
+  const ordered = [...own].sort((left, right) => priority(right) - priority(left));
+
   const seen = new Set<string>();
   const result: LspServerConfig[] = [];
-  for (const server of [...own, ...alternates]) {
+  for (const server of [...ordered, ...alternates]) {
     if (server.language !== language) continue;
     if (!server.enabled || !server.command.trim()) continue;
     const key = `${server.command}\0${server.args.join('\0')}`;

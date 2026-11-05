@@ -1,6 +1,7 @@
 import { NO_LSP_STATUS } from '../../../shared/lsp-status';
 import { EMPTY_INDEX_STATUS, type InheritedResult } from '../../../shared/symbol-index';
 import { detectLspSources } from '../../lsp/detect';
+import { checkLspCommand } from '../../lsp/check';
 import { mergeByPriority } from '../../../shared/lsp-bundled';
 import type { RpcServices } from '../context';
 import type { RpcRouter } from '../router';
@@ -116,4 +117,14 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
     const sources = await detectLspSources(deps.workspace.rootPath(), process.platform);
     return mergeByPriority(sources);
   });
+
+  // «Проверить» в окне настроек: есть ли такая команда и что она о себе говорит.
+  // Проверка идёт от корня проекта — относительный путь в настройке живёт рядом с ним.
+  router.register('lsp.check', (params) =>
+    checkLspCommand({
+      command: params.command,
+      args: params.args,
+      cwd: deps.workspace.rootPath() ?? process.cwd(),
+    }),
+  );
 }

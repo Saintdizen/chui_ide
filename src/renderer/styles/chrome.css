@@ -1627,6 +1627,33 @@ textarea {
   margin: 2.5px 5px;
 }
 
+/* Карточка языкового сервера: поля одного сервера читаются как одно целое,
+   иначе «команда» из одного языка висит рядом с аргументами другого. */
+.lsp-servers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lsp-server {
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_xs);
+  padding: 6px;
+}
+
+.lsp-server-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2.5px 5px;
+}
+
+.lsp-server-lang {
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+}
+
 /* Предупреждение о столкновении сочетаний: цветом, а не только текстом —
    иначе строка тонет среди подсказок того же вида. */
 .field-hint.st-ui-warn {

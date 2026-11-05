@@ -848,6 +848,14 @@ export interface ChuiMethods {
   /** Найти в PATH известные языковые серверы и вернуть готовые конфигурации. */
   'lsp.detect': { params: void; result: LspServerConfig[] };
   /**
+   * Проверить команду сервера до сохранения: есть ли она, исполняема ли и что
+   * говорит о себе в `--version` (если аргументы пусты). См. `main/lsp/check.ts`.
+   */
+  'lsp.check': {
+    params: { command: string; args?: string[] };
+    result: { ok: boolean; resolved: string; version: string; error: string };
+  };
+  /**
    * Прокси-запрос к языковому серверу открытого файла: подсказки, наведение,
    * переход к определению. Форму params/result задаёт LSP, детали — в renderer.
    */

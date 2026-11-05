@@ -560,7 +560,16 @@ export class SettingsStore {
         requestTimeoutMs: this.data.lsp.requestTimeoutMs,
         inlayHintsOff: [...(this.data.lsp.inlayHintsOff ?? [])],
         codeLensOff: [...(this.data.lsp.codeLensOff ?? [])],
-        servers: this.data.lsp.servers.map((server) => ({ ...server, args: [...server.args] })),
+        // Копия: снимок настроек не должен меняться вслед за правкой списка —
+        // это касается и вложенных полей сервера (среды, доводов к `initialize`,
+        // дополнительных корней).
+        servers: this.data.lsp.servers.map((server) => ({
+          ...server,
+          args: [...server.args],
+          ...(server.env ? { env: { ...server.env } } : {}),
+          ...(server.extraFolders ? { extraFolders: [...server.extraFolders] } : {}),
+          ...(server.initializationOptions ? { initializationOptions: { ...server.initializationOptions } } : {}),
+        })),
       },
       // Копия: снимок настроек не должен меняться вслед за правкой списка.
       keybindings: { overrides: this.data.keybindings.overrides.map((item) => ({ ...item })) },
@@ -1299,6 +1308,8 @@ function sanitizeLsp(value: LspSettings): LspSettings {
           ...(isPlainObject(server.initializationOptions)
             ? { initializationOptions: server.initializationOptions }
             : {}),
+          ...(Array.isArray(server.extraFolders) ? { extraFolders: normalizeFolders(server.extraFolders) } : {}),
+          ...(Number.isFinite(server.priority) ? { priority: server.priority } : {}),
         }))
     : [];
   // Выключено только явным `false`: отсутствие поля читаем как «включено» — серверы
@@ -1318,10 +1329,26 @@ function sanitizeLsp(value: LspSettings): LspSettings {
   return {
     enabled: value.enabled !== false,
     trace: value.trace === true,
+    // Сторож запросов терялся при сохранении — хотя main его читает
+    // (`lsp.ts`, `DEFAULT_REQUEST_TIMEOUT_MS`). Настройка молча не работала.
+    ...(Number.isFinite(value.requestTimeoutMs) && (value.requestTimeoutMs as number) > 0
+      ? { requestTimeoutMs: value.requestTimeoutMs }
+      : {}),
     inlayHintsOff: normalizeLanguages(value.inlayHintsOff),
     codeLensOff: normalizeLanguages(value.codeLensOff),
     servers,
   };
+}
+
+/** Дополнительные корни сервера: строки без пробелов по краям, без повторов. */
+function normalizeFolders(value: unknown[]): string[] {
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (trimmed) seen.add(trimmed);
+  }
+  return [...seen];
 }
 
 /** Запись «строка → строка»: так приходит окружение сервера из файла настроек. */

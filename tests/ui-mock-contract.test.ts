@@ -86,6 +86,7 @@ const NOT_MOCKED: Record<string, string[]> = {
     'workspace.updateImports',
   ],
   'внешние инструменты (MCP) — процессы запускает main': ['ai.mcpTools'],
+  'проверка команды сервера — запускает процесс в main, в моке такого нет': ['lsp.check'],
   'нужен настоящий репозиторий и клиент git — в моке их нет': [
     'git.bisectMark',
     'git.bisectReset',

@@ -1661,9 +1661,31 @@ export class LspService {
     return runtime;
   }
 
+  /**
+   * Папки области сервера: корень проекта первым, за ним `extraFolders` настройки.
+   *
+   * Зачем: в монорепе сервер часто один на весь репозиторий, но подсказки нужны и
+   * в пакетах, куда он из корня не смотрит; `workspaceFolders` — единственный
+   * способ сказать это по протоколу. Относительные пути считаем от корня,
+   * несуществующие пропускаем молча (настройка живёт дольше папки), повторы
+   * убираем — тот же корень, названный дважды, сервер отверг бы как ошибку.
+   */
+  private workspaceFoldersOf(config: LspServerConfig, cwd: string): { uri: string; name: string }[] {
+    const folders: { uri: string; name: string }[] = [{ uri: pathToFileURL(cwd).toString(), name: path.basename(cwd) }];
+    const seen = new Set<string>([path.resolve(cwd)]);
+    for (const raw of config.extraFolders ?? []) {
+      const resolved = path.resolve(cwd, raw);
+      if (seen.has(resolved) || !existsSync(resolved)) continue;
+      seen.add(resolved);
+      folders.push({ uri: pathToFileURL(resolved).toString(), name: path.basename(resolved) });
+    }
+    return folders;
+  }
+
   private async initialize(runtime: ServerRuntime, cwd: string): Promise<void> {
     const python = this.pythonPath();
     const rootUri = pathToFileURL(cwd).toString();
+    const workspaceFolders = this.workspaceFoldersOf(runtime.config, cwd);
     const result = (await withTimeout(
       runtime.connection.request(
         'initialize',
@@ -1676,7 +1698,7 @@ export class LspService {
           // и не разрешает импорты вида `tests.v2.page`, оставляя подсказки пустыми).
           rootUri,
           rootPath: cwd,
-          workspaceFolders: [{ uri: rootUri, name: path.basename(cwd) }],
+          workspaceFolders,
           clientInfo: { name: 'chui_iDE' },
           // Возможности клиента — это РАЗРЕШЕНИЕ серверу отдать больше. Чего здесь нет,
           // того сервер прислать не вправе: без `documentationFormat` не будет описаний,

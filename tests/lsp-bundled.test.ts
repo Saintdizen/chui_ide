@@ -141,6 +141,33 @@ describe('serverCandidates', () => {
     const chain = serverCandidates([], [server('python', '  '), server('python', 'pyright')], 'python');
     expect(chain.map((item) => item.command)).toEqual(['pyright']);
   });
+
+  it('приоритет поднимает сервер выше списка', () => {
+    // Два сервера одного языка в настройках: первый в списке пробуется последним,
+    // если у второго приоритет выше.
+    const chain = serverCandidates(
+      [
+        { ...server('python', 'pylsp'), priority: 1 },
+        { ...server('python', 'pyright'), priority: 10 },
+      ],
+      [],
+      'python',
+    );
+    expect(chain.map((item) => item.command)).toEqual(['pyright', 'pylsp']);
+  });
+
+  it('равный приоритет — порядок списка', () => {
+    const chain = serverCandidates(
+      [
+        { ...server('python', 'first'), priority: 5 },
+        { ...server('python', 'second'), priority: 5 },
+        { ...server('python', 'third') },
+      ],
+      [],
+      'python',
+    );
+    expect(chain.map((item) => item.command)).toEqual(['first', 'second', 'third']);
+  });
 });
 
 /**

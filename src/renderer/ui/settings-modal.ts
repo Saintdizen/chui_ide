@@ -278,6 +278,14 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     ];
   }
 
+  /** «--stdio --log-level=warn» -> отдельные аргументы, как в командной строке. */
+  function splitWords(value: string): string[] {
+    return value
+      .split(/\s+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
   function textInput(value: string, onCommit: (next: string) => void): HTMLInputElement {
     const input = h('input', { class: 'field-input', type: 'text', spellcheck: false });
     input.value = value;
@@ -2164,6 +2172,72 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         });
     });
 
+    // Форма по серверам: то, что правят чаще всего — команда, аргументы, лишние
+    // корни, приоритет. JSON ниже остаётся для остального (`env`,
+    // `initializationOptions`): форма не притворяется полной и не прячет JSON.
+    const current = [...visible];
+    /** Записать список серверов сразу: правка поля — уже настройка, без «Сохранить». */
+    const writeServers = (next: LspServerConfig[]): void => {
+      current.length = 0;
+      current.push(...next);
+      servers.value = JSON.stringify(current, null, 2);
+      void patch({ lsp: { servers: [...foreign, ...current] } }, true);
+    };
+    const updateServer = (index: number, change: Partial<LspServerConfig>): void => {
+      writeServers(current.map((server, at) => (at === index ? { ...server, ...change } : server)));
+    };
+    const serverCards = current.map((server, index) => {
+      const verdict = h('div', { class: 'field-hint' }, '');
+      const check = h('button', { class: 'btn btn-small', type: 'button' }, 'Проверить');
+      check.addEventListener('click', () => {
+        check.disabled = true;
+        verdict.textContent = 'Проверяю…';
+        void deps.rpc
+          .request('lsp.check', { command: server.command, args: server.args })
+          .then((result) => {
+            verdict.textContent = result.ok
+              ? `Найден: ${result.resolved}${result.version ? ` — ${result.version}` : ''}`
+              : result.error;
+          })
+          .catch((error) => {
+            verdict.textContent = error instanceof Error ? error.message : String(error);
+          })
+          .finally(() => {
+            check.disabled = false;
+          });
+      });
+      return h(
+        'div',
+        { class: 'lsp-server' },
+        h('div', { class: 'lsp-server-head' }, h('span', { class: 'lsp-server-lang' }, server.language), check),
+        field(
+          'Команда',
+          textInput(server.command, (v) => updateServer(index, { command: v })),
+        ),
+        field(
+          'Аргументы',
+          textInput(server.args.join(' '), (v) => updateServer(index, { args: splitWords(v) })),
+        ),
+        field(
+          'Доп. папки',
+          textInput((server.extraFolders ?? []).join(', '), (v) =>
+            updateServer(index, { extraFolders: splitLanguages(v) }),
+          ),
+        ),
+        h(
+          'div',
+          { class: 'field-hint' },
+          'Папки, которые сервер увидит вместе с корнем проекта — через запятую. Относительные считаются от корня.',
+        ),
+        field(
+          'Приоритет',
+          numberInput(server.priority ?? 0, -1000, 1000, 1, (value) => updateServer(index, { priority: value })),
+        ),
+        switchRow('Включён', server.enabled, (value) => updateServer(index, { enabled: value })),
+        verdict,
+      );
+    });
+
     // Живой статус: какие серверы подняты прямо сейчас, и кнопка их перезапуска.
     // Перезапуск нужен, когда сервер завис или подхватил не то окружение.
     const restartButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Перезапустить');
@@ -2222,6 +2296,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         textInput((lsp.codeLensOff ?? []).join(', '), (v) => void patch({ lsp: { codeLensOff: splitLanguages(v) } })),
       ),
       h('div', { class: 'field-hint' }, 'Языки, где код-линзы («3 ссылки» над объявлением) не нужны.'),
+      field('Серверы', h('div', { class: 'lsp-servers' }, ...serverCards)),
       field('Серверы (JSON)', servers),
       languages
         ? h(
