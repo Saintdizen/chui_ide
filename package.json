@@ -124,7 +124,8 @@
     "dist:mac": "npm run build && electron-builder --mac dmg --publish never",
     "smoke:proxy": "npm run build:main && node scripts/proxy-smoke.cjs",
     "usage": "tsx scripts/agent-usage.ts",
-    "census": "tsx scripts/call-census.ts"
+    "census": "tsx scripts/call-census.ts",
+    "probe:quick-open": "npm run build && electron scripts/quick-open-probe.cjs"
   },
   "engines": {
     "node": ">=20"

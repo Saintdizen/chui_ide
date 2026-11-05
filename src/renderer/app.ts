@@ -2349,11 +2349,42 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // История открытых файлов (MRU): пустая палитра идёт по ней, а не по алфавиту. Живёт
   // в памяти этого окна; отметку ставит `openPath`, поэтому история видит все входы —
   // дерево, чат, переход по ошибке, а не только саму палитру.
+  // Один ввод: файлы, `>` команды, `@` символы файла, `#` поиск по тексту проекта.
+  // Реестр идёт сюда же, что и в палитру: два списка команд разошлись бы.
   const quickOpen = createQuickOpen({
     rpc,
     workspace,
     openFile: (path) => openPath(path),
     recentFiles: () => recentFiles.paths(),
+    commands: {
+      list: () => commands.list(),
+      isEnabled: (id) => commands.isEnabled(id),
+      run: (id) => void commands.execute(id),
+    },
+    recentCommands: () => recentCommands.ids(),
+    symbols: async (query) => {
+      const path = editors.currentPath;
+      if (!path) return [];
+      const symbols = await lsp.documentSymbols(path);
+      return filterSymbols(flattenFileSymbols(symbols, path), query).map((symbol) => ({
+        path: symbol.path,
+        line: symbol.line,
+        column: symbol.column,
+        label: symbol.name,
+        detail: symbol.kind,
+      }));
+    },
+    search: async (query) => {
+      const found = await rpc.request('workspace.search', { query, maxResults: 50 });
+      return (found.hits ?? []).map((hit) => ({
+        path: hit.path,
+        line: hit.line,
+        column: hit.column,
+        label: hit.text.trim(),
+        detail: workspace.relative(hit.path),
+      }));
+    },
+    reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
   });
   document.body.appendChild(quickOpen.element);
 

@@ -1152,6 +1152,39 @@ body > .overlay {
   padding: 6px;
 }
 
+/* Подвал: какие режимы есть и какой сейчас. Без него `>` в поле выглядит
+   опечаткой, а `#` — будто поиск сломался. */
+.palette-footer {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--separator_color);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+}
+
+.palette-mode {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.palette-mode.is-active {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.palette-mode kbd {
+  padding: 0 4px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_xs);
+  background: var(--sunken_background);
+  font-family: var(--font_mono);
+  font-size: var(--font_micro_size);
+}
+
 /* Заголовок группы: без запроса в палитре больше двухсот команд, и категория —
    единственный ориентир, по которому видно, где кончается одна и начинается другая. */
 .palette-group {
