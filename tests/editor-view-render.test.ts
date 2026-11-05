@@ -25,7 +25,10 @@ const METRICS = {
   charWidth: 8,
   lineHeight: 20,
   tabSize: 4,
-  widthOf: (codePoint: number) => (codePoint > 0x2e80 ? 2 : 1),
+  // `widthOf` отдаёт ПИКСЕЛИ (ширину знака), а не число клеток: так его считает
+  // `GlyphMetrics`. Раньше здесь стояло «1/2», и строка из 400 знаков выходила
+  // шириной 400 px — перенос не срабатывал вовсе, хотя выглядел рабочим.
+  widthOf: (codePoint: number) => (codePoint > 0x2e80 ? 16 : 8),
 };
 
 function makeView(text: string, options: { gutter?: boolean } = {}) {
@@ -122,6 +125,53 @@ describe('отрисовка редактора', () => {
     installMiniDom();
   });
 
+  describe('мягкая линейка переноса', () => {
+    /**
+     * TASKS 49. Перенос строк был и разрезал длинную строку на ряды, но продолжение
+     * было не отличить от новой строки того же блока. Теперь у рядов-продолжений есть
+     * «мягкая» линейка, а направляющие отступов на них не повторяются.
+     *
+     * Метрики в тесте: знак 8 px, поле прокрутки в мини-DOM — 800 px (`clientWidth`),
+     * значит при отступе 4 линейка встаёт на 32 px.
+     */
+    const LONG = `    ${'x'.repeat(400)}\n    next`;
+    const wrappedRows = (lines: () => HTMLElement[]) =>
+      lines().filter((line) => line.classList.contains('own-editor-line-wrapped'));
+
+    it('длинная строка с отступом режется на ряды, продолжение помечено', () => {
+      const { view, lines } = makeView(LONG);
+      view.setWordWrap(true);
+      expect(wrappedRows(lines).length).toBeGreaterThan(0);
+    });
+
+    it('линейка стоит в колонке отступа, в пикселях строки', () => {
+      const { view, lines } = makeView(LONG);
+      view.setWordWrap(true);
+      const row = wrappedRows(lines)[0] as unknown as {
+        querySelector(s: string): { style: { left: string } } | null;
+      };
+      const guide = row.querySelector('.own-editor-wrap-guide');
+      expect(guide).not.toBeNull();
+      expect(guide?.style.left).toBe('32px');
+    });
+
+    it('на рядах-продолжениях направляющие отступов не повторяются', () => {
+      // Отступ один на строку: если штрихи продолжать, перенесённый кусок читается
+      // как отдельная строка внутри блока.
+      const { view, lines } = makeView(LONG);
+      view.setWordWrap(true);
+      for (const row of wrappedRows(lines)) {
+        expect(row.querySelectorAll('.own-editor-indent-guide').length).toBe(0);
+      }
+    });
+
+    it('без переноса линейки нет', () => {
+      const { view, root } = makeView(LONG);
+      expect(view.wordWrap).toBe(false);
+      expect(root.querySelectorAll('.own-editor-wrap-guide').length).toBe(0);
+    });
+  });
+
   it('вид собирается и показывает строки буфера', () => {
     const { lines } = makeView('one\ntwo\nthree');
 
@@ -167,13 +217,13 @@ describe('отрисовка редактора', () => {
 
   it('широкий знак занимает две клетки', () => {
     // Если считать иероглиф за одну клетку, каретка и выделение разъедутся с текстом.
-    // Ширина считается раскладкой строки — она и есть правда о колонках.
-    // `layoutLine` отдаёт смещения в КОЛОНКАХ, а `widthOf` — число клеток знака.
+    // `layoutLine` отдаёт смещения в ПИКСЕЛЯХ, а `widthOf` — ширину знака в пикселях
+    // (`cellsOf × charWidth`). Два обычных знака равны одному широкому: 16 px.
     const narrow = layoutLine('aa', METRICS, []);
     const wide = layoutLine('漢', METRICS, []);
 
-    expect(narrow[2]! - narrow[0]!).toBe(2);
-    expect(wide[1]! - wide[0]!).toBe(2);
+    expect(narrow[2]! - narrow[0]!).toBe(16);
+    expect(wide[1]! - wide[0]!).toBe(16);
   });
 
   it('без жёлоба вид всё равно собирается', () => {

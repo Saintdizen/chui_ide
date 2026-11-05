@@ -46,6 +46,7 @@ import { caret, isEmpty, rangesRects, selectionEnd, selectionStart, type Selecti
 import { clamp, contentHeight, lineAtY, maxScrollLeft, maxScrollTop, revealLine, visibleLines } from './viewport';
 import { FoldModel } from './fold-model';
 import { RowMap } from './row-map';
+import { wrapGuideX } from './wrap-guide';
 import { segmentIndexForColumn, wrapSegments, type WrapSegment } from './wrap-model';
 import { BracketDepth, RAINBOW_SIZE } from './bracket-rainbow';
 import { todoMarks } from '../../../shared/todo-comments';
@@ -1327,7 +1328,11 @@ export class EditorView {
         if (width > this.widest) this.widest = width;
         const row = document.createElement('div');
         row.className = `${ROOT_CLASS}-line`;
-        this.fillLine(row, text, line, segment);
+        // У рядов-продолжений — свой класс: по нему CSS гасит направляющие отступов
+        // (отступ один на строку) и рисует «мягкую» линейку переноса.
+        const continued = segment.startColumn > 0;
+        if (continued) row.classList.add(`${ROOT_CLASS}-line-wrapped`);
+        this.fillLine(row, text, line, segment, continued);
         fragment.append(row);
       }
     }
@@ -1354,7 +1359,7 @@ export class EditorView {
    * Подпись blame дописывается после содержимого строки отдельным куском: она не часть
    * файла и в раскладку кода не входит — как подпись после содержимого строки.
    */
-  private fillLine(row: HTMLElement, text: string, line: number, segment: WrapSegment): void {
+  private fillLine(row: HTMLElement, text: string, line: number, segment: WrapSegment, continued = false): void {
     const line0 = line - 1;
     const tokens = this.highlighter.tokensFor(line0);
     const after = this.decorations.afterFor(line);
@@ -1418,7 +1423,20 @@ export class EditorView {
     // Направляющие отступов — первыми: они фон, текст идёт поверх. Рисуем только по
     // живому отступу строки (см. `indent-guides.ts`), а закрывающие скобки подтягиваем к
     // глубине предыдущей строки — иначе линия обрывалась бы ровно на `}`.
-    this.appendIndentGuides(fragment, text, line);
+    this.appendIndentGuides(fragment, text, line, continued);
+
+    // «Мягкая» линейка переноса: у куска-продолжения тонкий штрих в колонке отступа —
+    // иначе продолжение строки не отличить от новой строки того же блока.
+    const guideX = wrapGuideX(text, continued ? 2 : 1, {
+      charWidth: this.metrics.charWidth,
+      tabSize: this.metrics.tabSize,
+    });
+    if (guideX !== null) {
+      const guide = document.createElement('span');
+      guide.className = `${ROOT_CLASS}-wrap-guide`;
+      guide.style.left = `${guideX}px`;
+      fragment.append(guide);
+    }
 
     // Семантические токены сервера — поверх грамматики: где он высказался, его роль важнее.
     const semantic = this.semantic.get(line0);
@@ -1480,7 +1498,11 @@ export class EditorView {
   }
 
   /** Номер строки — с единицы, как у буфера: от него же берётся предыдущая строка. */
-  private appendIndentGuides(fragment: DocumentFragment, text: string, line: number): void {
+  private appendIndentGuides(fragment: DocumentFragment, text: string, line: number, continued: boolean): void {
+    // Продолжение строки отступ не повторяет: направляющие отступов принадлежат её
+    // началу. Иначе под текстом продолжали бы идти три-четыре штриха отступа, и
+    // перенесённый кусок читался бы как отдельная строка внутри блока.
+    if (continued) return;
     const options = { indentSize: this.metrics.tabSize };
     const previous = line > 1 ? this.buffer.lineText(line - 1) : null;
     const guides = indentGuides(text, options, this.offsetsFor(line - 1), this.metrics.charWidth, previous);
