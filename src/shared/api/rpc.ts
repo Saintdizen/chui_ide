@@ -576,6 +576,8 @@ export interface ChuiMethods {
   'git.worktreeRemove': { params: { path: string; force?: boolean }; result: GitWorktree[] };
   /** Убрать записи о каталогах, которых уже нет на диске. */
   'git.worktreePrune': { params: void; result: GitWorktree[] };
+  /** Влить ветку задачи в текущую; конфликт отдаём как есть, не разрешая сами. */
+  'git.mergeBranch': { params: { branch: string }; result: { ok: boolean; conflict: boolean; message: string } };
   /**
    * Какие из путей игнорируются git (`.gitignore`). Спрашиваем только про видимые
    * в дереве пути: полный список игнорируемого читать незачем.

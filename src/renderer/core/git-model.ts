@@ -388,6 +388,11 @@ export class GitModel {
     return this.rpc.request('git.worktreePrune');
   }
 
+  /** Влить ветку задачи в текущую (кнопка «применить» у места работы). */
+  mergeBranch(branch: string): Promise<{ ok: boolean; conflict: boolean; message: string }> {
+    return this.rpc.request('git.mergeBranch', { branch });
+  }
+
   /** Какие из путей git считает игнорируемыми: их дерево показывает приглушённо. */
   checkIgnore(paths: readonly string[]): Promise<string[]> {
     if (paths.length === 0) return Promise.resolve([]);

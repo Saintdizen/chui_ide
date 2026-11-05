@@ -2831,6 +2831,48 @@
   margin-left: 0;
 }
 
+/* Место задачи: «ветка chui/x» или «отдельная ветка». В главном дереве чип
+   тише — это не событие, а справка; в отдельном каталоге он ярче: там человек
+   правит копию файлов, а не свои. */
+.branch-space {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.branch-space[data-worktree="yes"] {
+  color: var(--text_color);
+}
+
+.branch-space-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.branch-space-action {
+  background: none;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_xs);
+  color: inherit;
+  cursor: pointer;
+  font-size: var(--font_small_size);
+  padding: 1px 6px;
+}
+
+.branch-space-action:hover {
+  background: var(--element_background_hover);
+}
+
+.branch-space-action[disabled] {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .composer-status-item {
   display: inline-flex;
   align-items: center;

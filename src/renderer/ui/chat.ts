@@ -42,6 +42,7 @@ import type { EditorApi } from '../core/editor-api';
 import type { HostService } from '../core/host';
 import type { WorkspaceModel } from '../core/workspace-model';
 import type { GitModel } from '../core/git-model';
+import { createChatBranchSpace } from './chat-branch-space';
 import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
@@ -1296,7 +1297,25 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    * там он не занимает высоту панели. Композер отдаёт готовую строку наружу
    * (`statusElement`), а окно «Информация о сессии» раскрывается вверх от неё же.
    */
-  const statusElement = h('div', { class: 'chat-status' }, contextRing.element, sessionInfo.element);
+  // Место, где идёт задача: ветка, а если задача уведена — отдельный каталог.
+  // Живёт рядом со статусом: человек видит, какие файлы он правит, без меню.
+  const branchSpace = deps.git
+    ? createChatBranchSpace({
+        git: deps.git,
+        workspace: deps.workspace,
+        confirm: deps.confirm,
+        notify: (message, kind) => showToast(message, kind),
+        sessionTitle: () => active().title || '',
+      })
+    : null;
+
+  const statusElement = h(
+    'div',
+    { class: 'chat-status' },
+    branchSpace?.element ?? null,
+    contextRing.element,
+    sessionInfo.element,
+  );
 
   function sessionInfoData(session: ChatSession = active(), pending = ''): SessionInfoData {
     return {

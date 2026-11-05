@@ -405,6 +405,28 @@ export class GitService {
     return pruneWorktrees(this.gitContext());
   }
 
+  /**
+   * Влить ветку в текущую — так задача из отдельного дерева возвращается назад.
+   *
+   * `--no-ff`: отдельный коммит слияния оставляет в истории след «здесь была
+   * задача», и откатить её одним движением. Конфликт не разрешаем сами: сказать
+   * человеку — работа, гадать за него — порча файлов.
+   */
+  async mergeBranch(branch: string): Promise<{ ok: boolean; conflict: boolean; message: string }> {
+    const repoRoot = this.requireRoot();
+    const result = await execGit(['merge', '--no-ff', '--no-edit', this.nameArg(branch)], repoRoot, {
+      allowFailure: true,
+    });
+    const output = `${result.stdout}\n${result.stderr}`.trim();
+    const conflict = !result.ok && /conflict|конфликт/i.test(output);
+    await this.refresh();
+    return {
+      ok: result.ok,
+      conflict,
+      message: output.split('\n').filter(Boolean).slice(-4).join('\n'),
+    };
+  }
+
   /* ── отдельные коммиты и теги ─────────────────────────────────────────── */
 
   /** Перенести один коммит в текущую ветку. */

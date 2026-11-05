@@ -74,6 +74,7 @@ export function registerGitMethods(router: RpcRouter, deps: RpcServices): void {
   );
   router.register('git.worktreeRemove', (params) => deps.git.worktreeRemove(params.path, params.force));
   router.register('git.worktreePrune', () => deps.git.worktreePrune());
+  router.register('git.mergeBranch', (params) => deps.git.mergeBranch(params.branch));
   router.register('git.reflog', (params) => deps.git.reflog(params.limit));
   router.register('git.logGraph', (params) => deps.git.logGraph(params.limit));
   router.register('git.conflictParts', (params) => deps.git.conflictParts(params.path));

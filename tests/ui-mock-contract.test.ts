@@ -93,6 +93,7 @@ const NOT_MOCKED: Record<string, string[]> = {
     'git.bisectReset',
     'git.bisectStart',
     'git.bisectState',
+    'git.mergeBranch',
     'git.rebase',
     'git.rebaseAbort',
     'git.rebaseContinue',
