@@ -7,6 +7,8 @@
  * и уводят не туда.
  */
 
+import { matchName } from './tree-filter';
+
 /** Сколько помнить набранное, если пауза. */
 export const TYPEAHEAD_RESET_MS = 800;
 
@@ -44,6 +46,9 @@ export function typeaheadPress(state: TypeaheadState, char: string, now: number)
  *
  * Ищется по ИМЕНИ, а не по полному пути: набравшие «a.ts» не хотят прыгать в
  * `src/app/a.ts` вместо `a.ts` из-за того, что путь начинается с `src`.
+ *
+ * Набранное с `*` или `?` сравнивается шаблоном по всему имени, а не по началу:
+ * иначе `*.test.ts` не нашёл бы ничего — ни одно имя с него не начинается.
  */
 export function typeaheadTarget(
   rows: readonly { readonly path: string; readonly name: string }[],
@@ -52,12 +57,14 @@ export function typeaheadTarget(
 ): string | null {
   if (buffer.length === 0 || rows.length === 0) return null;
   const needle = buffer.toLowerCase();
+  const glob = needle.includes('*') || needle.includes('?');
   const start = current === null ? -1 : rows.findIndex((row) => row.path === current);
   // Смотрим все строки, начиная со следующей за текущей, и заворачиваем на начало.
   for (let step = 1; step <= rows.length; step += 1) {
     const index = (start + step) % rows.length;
     const row = rows[index]!;
-    if (row.name.toLowerCase().startsWith(needle)) return row.path;
+    const hit = glob ? matchName(row.name, needle).matched : row.name.toLowerCase().startsWith(needle);
+    if (hit) return row.path;
   }
   return null;
 }

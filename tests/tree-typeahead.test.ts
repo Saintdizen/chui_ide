@@ -85,4 +85,25 @@ describe('куда прыгнуть', () => {
   it('регистр не важен', () => {
     expect(typeaheadTarget(ROWS, null, 'B')).toBe('src/b.ts');
   });
+
+  it('шаблон `*` прыгает по концу имени, а не по началу', () => {
+    const rows = [
+      { path: 'a1', name: 'app.ts' },
+      { path: 'a2', name: 'app.test.ts' },
+    ];
+    // Ни одно из имён не начинается с `*.test.ts` — сравнение идёт по всему имени.
+    expect(typeaheadTarget(rows, null, '*.test.ts')).toBe('a2');
+  });
+
+  it('`?` — ровно один символ', () => {
+    const rows = [
+      { path: 'a1', name: 'app.ts' },
+      { path: 'a2', name: 'a.ts' },
+    ];
+    expect(typeaheadTarget(rows, null, '?.ts')).toBe('a2');
+  });
+
+  it('шаблон без совпадений — никуда не прыгаем', () => {
+    expect(typeaheadTarget(ROWS, 'src/a.ts', '*.nope')).toBeNull();
+  });
 });

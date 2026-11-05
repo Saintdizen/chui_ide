@@ -2317,6 +2317,14 @@ textarea {
   text-overflow: ellipsis;
 }
 
+/* Совпавшее с фильтром: подсветка отвечает на вопрос «почему эта строка осталась». */
+.tree-name mark {
+  padding: 0;
+  border-radius: var(--radius_xs);
+  background: var(--highlight_background);
+  color: inherit;
+}
+
 /* Игнорируемое git (`.gitignore`) — приглушаем: файл видно и можно открыть, но он
    не отвлекает. Значок и стрелку тоже гасим, иначе цветной значок перетягивал бы
    взгляд к тому, что обычно и не нужно. */

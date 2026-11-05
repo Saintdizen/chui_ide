@@ -39,7 +39,7 @@ import { badgeFor, badgeTitle } from '../../shared/icon-badges';
 import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
 import { sortTree } from '../core/tree-sort';
 import { computeWindow } from '../core/tree-window';
-import { filterTreePaths } from '../core/tree-filter';
+import { filterTreePaths, matchName } from '../core/tree-filter';
 import { movePlan } from '../core/tree-move';
 import {
   clickSelection,
@@ -1118,7 +1118,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         : svgIcon(isDirectory ? 'folder' : 'file', 15),
       // Цепочка — одна строка на весь путь `a/b/c`; полный путь в подсказке,
       // иначе по склеенной подписи не понять, где она кончается.
-      h('span', { class: 'tree-name' }, flags.chain ?? entry.name),
+      // Подсветка — по тому имени, которое видно: у сжатой вложенности это цепочка.
+      h('span', { class: 'tree-name' }, ...nameWithHits(flags.chain ?? entry.name)),
       // Метка — цветной ярлык: первая среди правых отметок, если она есть.
       label ? h('span', { class: `tree-label is-${label}`, title: `Метка: ${fileLabelName(label)}` }) : null,
       badge
@@ -1329,6 +1330,29 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    * очистка запроса возвращает дерево ровно в то состояние, в каком оно было.
    */
   let filterQuery = '';
+
+  /**
+   * Имя с подсветкой совпадений фильтра — видно, ПОЧЕМУ строка осталась.
+   *
+   * Без этого запрос `*.test.ts` оставлял на экране десяток похожих имён, и
+   * приходилось вчитываться, чтобы понять, что именно совпало. Подсветка —
+   * ответ на этот вопрос, и она же показывает, что папка осталась только ради
+   * потомка: её собственное имя не подсвечено.
+   */
+  function nameWithHits(text: string): (Node | string)[] {
+    if (filterQuery.trim() === '') return [text];
+    const { ranges } = matchName(text, filterQuery);
+    if (ranges.length === 0) return [text];
+    const parts: (Node | string)[] = [];
+    let at = 0;
+    for (const [start, end] of ranges) {
+      if (start > at) parts.push(text.slice(at, start));
+      parts.push(h('mark', {}, text.slice(start, end)));
+      at = end;
+    }
+    if (at < text.length) parts.push(text.slice(at));
+    return parts;
+  }
   /** Поле фильтра — нужно, чтобы Ctrl+F из дерева ставил в него фокус. */
   let filterInput: HTMLInputElement | null = null;
   /** Высота строки в пикселях: меряется по отрисованной строке (зависит от плотности). */
@@ -1813,8 +1837,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         h('input', {
           class: 'field-input tree-filter',
           type: 'search',
-          placeholder: 'Фильтр…',
-          title: 'Фильтр по дереву (Ctrl+F)',
+          placeholder: 'Фильтр: имя, *шаблон, слова через пробел',
+          title: 'Фильтр по дереву (Ctrl+F): имя, *любой хвост, ?один символ, слова через пробел',
           value: filterQuery,
           onInput: (event: Event) => {
             const next = (event.target as HTMLInputElement).value;
