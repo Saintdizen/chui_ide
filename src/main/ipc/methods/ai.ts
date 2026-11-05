@@ -103,6 +103,8 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
 
   router.register('ai.chat', (request: ChatRequest, ctx) => {
     requireAiEnabled();
+    /** Чья беседа спрашивает: по ней окно выбирает ленту для карточки решения. */
+    const conversation = request.conversationUid;
     return deps.ai
       .chat(
         request,
@@ -110,10 +112,12 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
         ctx.signal,
         // Правки и подтверждения живут в renderer: там документная модель, undo и интерфейс.
         {
+          // Беседа едет в каждом вопросе к окну: при двух прогонах не иначе
+          // понять, в чью ленту класть карточку решения.
           applyEdits: (edits, autoApprove) =>
-            deps.host.request(ctx.sender, 'ai.applyEdits', { edits, autoApprove }, ctx.signal),
+            deps.host.request(ctx.sender, 'ai.applyEdits', { edits, autoApprove, conversation }, ctx.signal),
           applyPatches: (patches, autoApprove) =>
-            deps.host.request(ctx.sender, 'ai.applyPatches', { patches, autoApprove }, ctx.signal),
+            deps.host.request(ctx.sender, 'ai.applyPatches', { patches, autoApprove, conversation }, ctx.signal),
           // Команду сперва смотрит модель (если человек включил проверку), и только
           // если она не решилась — спрашиваем человека. Необратимые команды идут к
           // человеку сразу: `rm -rf` — не тот случай, где модель судья.
@@ -130,7 +134,12 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
             const decision = await deps.host.request(
               ctx.sender,
               'ai.confirmCommand',
-              { command, cwd: deps.workspace.rootPath() ?? undefined, review: verdict ?? undefined },
+              {
+                command,
+                cwd: deps.workspace.rootPath() ?? undefined,
+                review: verdict ?? undefined,
+                conversation,
+              },
               ctx.signal,
             );
             // «Больше не спрашивать» — решение человека, и его надо записать ДО
@@ -143,15 +152,17 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
           rememberCommandGrant: (grant) => rememberCommandGrant(grant),
           confirmBrowser: (action) =>
             deps.host
-              .request(ctx.sender, 'ai.confirmBrowser', { action }, ctx.signal)
+              .request(ctx.sender, 'ai.confirmBrowser', { action, conversation }, ctx.signal)
               .then((decision) => decision.allowed),
           ask: (question, options) =>
-            deps.host.request(ctx.sender, 'ai.ask', { question, options }, ctx.signal).then((result) => result.answer),
+            deps.host
+              .request(ctx.sender, 'ai.ask', { question, options, conversation }, ctx.signal)
+              .then((result) => result.answer),
           // Утверждение плана: решение принимает renderer (он же переключает режим), а
           // сюда оно возвращается уже проверенным — «да» только при явном `approved`.
           exitPlan: (plan) =>
             deps.host
-              .request(ctx.sender, 'ai.exitPlan', { plan }, ctx.signal)
+              .request(ctx.sender, 'ai.exitPlan', { plan, conversation }, ctx.signal)
               .then((result) => sanitizePlanExitDecision(result)),
           getDiagnostics: (path) => deps.host.request(ctx.sender, 'ai.getDiagnostics', { path }, ctx.signal),
           openFile: (path, line, column) =>

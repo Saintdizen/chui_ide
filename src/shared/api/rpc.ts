@@ -124,7 +124,7 @@ import type {
 /* ── Хост-вызовы main → renderer ────────────────────────────────────────── */
 
 /** Аргументы `ai.applyEdits`: то, что агент просит применить к документам. */
-export interface ApplyEditsHostParams {
+export interface ApplyEditsHostParams extends RunScopedHostParams {
   edits: FileEdit[];
   /** Полный доступ: применить сразу, без экрана ревью. */
   autoApprove?: boolean;
@@ -150,14 +150,23 @@ export interface ApplyEditsHostResult {
 }
 
 /** Аргументы `ai.applyPatches`: правки по якорю, без позиций. */
-export interface ApplyPatchesHostParams {
+export interface ApplyPatchesHostParams extends RunScopedHostParams {
   patches: PatchFile[];
   /** Полный доступ: применить сразу, без экрана ревью. */
   autoApprove?: boolean;
 }
 
+/**
+ * Беседа, из которой пришёл вопрос агента. С параллельными прогонами без неё
+ * не понять, в какую ленту положить карточку решения: открытая беседа и
+ * спросившая могут быть разными.
+ */
+interface RunScopedHostParams {
+  conversation?: string;
+}
+
 /** Аргументы `ai.confirmCommand`: команда, которую просит выполнить агент. */
-export interface ConfirmCommandHostParams {
+export interface ConfirmCommandHostParams extends RunScopedHostParams {
   command: string;
   /**
    * Что сказала проверка модели, если она не решилась разрешить сама. Причина
@@ -181,7 +190,7 @@ export interface ConfirmCommandHostResult {
 }
 
 /** Аргументы `ai.confirmBrowser`: действие в браузере, которое просит выполнить агент. */
-export interface ConfirmBrowserHostParams {
+export interface ConfirmBrowserHostParams extends RunScopedHostParams {
   action: string;
 }
 
@@ -190,7 +199,7 @@ export interface ConfirmBrowserHostResult {
 }
 
 /** Аргументы `ai.ask`: вопрос ассистента и, если есть, готовые варианты ответа. */
-export interface AskHostParams {
+export interface AskHostParams extends RunScopedHostParams {
   question: string;
   /** Готовые варианты (до 5) — показываются кнопками. */
   options?: readonly string[];
@@ -202,7 +211,7 @@ export interface AskHostResult {
 }
 
 /** Аргументы `ai.exitPlan`: план, который агент отдаёт человеку на утверждение. */
-export interface ExitPlanHostParams {
+export interface ExitPlanHostParams extends RunScopedHostParams {
   /** План словами. Пусто — человек видит только чек-лист шагов. */
   plan: string;
 }

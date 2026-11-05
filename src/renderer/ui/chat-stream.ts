@@ -64,6 +64,27 @@ export interface StreamModes {
  * Что стримингу нужно от панели. Специально действия, а не объекты: сам стриминг
  * не хранит ни состояние беседы, ни панели — он только рисует ответ.
  */
+/** Строка работы ассистента под сообщением: «думает…», «шаг 7 из 24». */
+interface Activity {
+  element: HTMLElement;
+  /** Сменное действие: «думает…», «выполняю: read_file». */
+  state(label: string): void;
+  /** Постоянная часть: «шаг 7 из 24». Не перебивается действием. */
+  step(label: string | null): void;
+  hide(): void;
+  dispose(): void;
+}
+
+/**
+ * Состояние отрисовки одного прогона: текст текущего шага и кадр анимации.
+ * Раньше жило одно на панель — при двух беседах текст одной попадал в пузырь
+ * другой, поэтому теперь создаётся в `run()`.
+ */
+interface RunRender {
+  buffer: string;
+  frame: number;
+}
+
 /**
  * Ручка открытого потока: то, чем «стоп» гасит СВОЙ прогон, а не последний
  * открытый. Панели шире ничего не нужно — отмены по id достаточно.
@@ -93,7 +114,7 @@ export interface StreamHost {
    */
   presentArtifacts(items: NonNullable<ChatToolResultPayload['presented']>, session: ChatSession): void;
   /** Чем агент занят прямо сейчас (`null` — работа кончилась). */
-  busyHint(hint: string | null): void;
+  busyHint(hint: string | null, session: ChatSession): void;
   /** Переключить «занято»: панель по этому гасит ввод и меняет кнопку. */
   setBusy(value: boolean, session: ChatSession): void;
   /**
@@ -109,7 +130,11 @@ export interface StreamHost {
   /** Закрыть открытые ожидания подтверждений (ревью правок, команда). */
   closeApprovals(): void;
   /** Сессия, которая сейчас стримит; `null` — стрим закончился. */
-  setStreaming(session: ChatSession | null): void;
+  /**
+   * Начать прогон беседы (`session`) или закончить (`null`). Второй довод —
+   * чья именно беседа кончилась: прогонов может идти два.
+   */
+  setStreaming(session: ChatSession | null, ended?: ChatSession): void;
   /** Действия под готовым ответом: копировать, повторить, оценить. */
   attachActions(messageEl: HTMLElement, session: ChatSession): void;
   /** Кнопка «Продолжить» при обрыве: тот же путь, что обычный вопрос. */
@@ -157,7 +182,7 @@ export interface StreamRunner {
    * длинного вызова или терминала это минута, и всё это время в ленте висело
    * «думает…», то есть строка продолжала утверждать, что работа идёт.
    */
-  notePause(value: boolean): void;
+  notePause(value: boolean, session?: ChatSession): void;
 }
 
 /**
@@ -221,28 +246,15 @@ function failureBlock(reason: string, onRetry: () => void): HTMLElement {
 
 export function createStreamRunner(host: StreamHost): StreamRunner {
   /**
-   * Буфер текущего текстового сегмента и кадр отложенной отрисовки. Живут в
-   * модуле, а не в панели: вне стрима они не нужны никому.
+   * Живые строки работы по беседам: нужны вне `run`, потому что пауза приходит
+   * отдельным уведомлением из main и должна попасть в ту строку, к которой
+   * относится. При двух прогонах одна переменная показала бы паузу не той
+   * беседе.
    */
-  let buffer = '';
-  let frame = 0;
-  /**
-   * Живая строка работы текущего прогона. Нужна вне `run`: пауза приходит
-   * отдельным уведомлением из main, а не событием стрима, и должна попасть
-   * в ту же строку, не дожидаясь границы шага.
-   */
-  let liveActivity: ReturnType<typeof createActivity> | null = null;
+  const activities = new Map<number, Activity>();
 
   /** Индикатор работы ассистента: живёт внизу сообщения всю генерацию. */
-  function createActivity(): {
-    element: HTMLElement;
-    /** Сменное действие: «думает…», «выполняю: read_file». */
-    state(label: string): void;
-    /** Постоянная часть: «шаг 7 из 24». Не перебивается действием. */
-    step(label: string | null): void;
-    hide(): void;
-    dispose(): void;
-  } {
+  function createActivity(): Activity {
     const stepLabel = h('span', { class: 'msg-activity-step', hidden: true });
     const label = h('span', { class: 'msg-activity-label' });
     const dots = h('span', { class: 'msg-activity-dots' }, h('i', {}), h('i', {}), h('i', {}));
@@ -284,7 +296,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     messageEl.appendChild(segment);
     // Индикатор работы держим внизу сообщения: новые сегменты вставляем перед ним.
     const activity = createActivity();
-    liveActivity = activity;
+    activities.set(session.id, activity);
     messageEl.appendChild(activity.element);
     activity.state('думает…');
     // Сессия прогона — ДО ленты вызовов: первый же `tool_start` зовёт
@@ -300,7 +312,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       (path, position) => host.openFile(path, position),
       // «Что именно идёт» — наружу, в шапку панели и док: свёрнутую группу
       // видит только тот, кто смотрит на ленту.
-      (hint) => host.busyHint(hint),
+      (hint) => host.busyHint(hint, session),
       // Раскрытие ленты — свойство беседы: режим спрашивает каждая новая
       // группа, и он же берёт уже созданные при смене.
       session.fold,
@@ -315,6 +327,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
      * Заслон от повторов. Одна лента — один заслон: два прогона в разных
      * вкладках не должны делить память о своих шагах.
      */
+    // Своё состояние отрисовки у каждого прогона: два прогона в разных беседах
+    // не должны делить буфер текста.
+    const render: RunRender = { buffer: '', frame: 0 };
     const dedupe = createStreamDedupe();
     /** Размышления: строка живёт в ленте действий — заводим её лениво. */
     const pushReasoning = (text: string): void => {
@@ -326,7 +341,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       reasoningView = null;
     };
 
-    buffer = '';
+    render.buffer = '';
     host.hidePlan(session);
     host.scrollToEnd(session);
     // Ждём первого куска текста: ожидание человека видно в замерax.
@@ -334,8 +349,8 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     let firstTokenSeen = false;
 
     const flushSegment = (): void => {
-      cancelFrame();
-      host.markdown.renderInto(segment, buffer);
+      cancelFrame(render);
+      host.markdown.renderInto(segment, render.buffer);
     };
 
     host.setBusy(true, session);
@@ -395,7 +410,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
                 // слипнутся в один абзац, и будет не видно, где модель
                 // останавливалась.
                 flushSegment();
-                buffer = '';
+                render.buffer = '';
                 segment = h('div', { class: 'msg-body' });
                 messageEl.insertBefore(segment, activity.element);
                 host.scrollToEnd(session);
@@ -427,7 +442,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
               return;
             }
             if (event === ChatStreamEvent.Delta) {
-              cancelFrame();
+              cancelFrame(render);
               collapseReasoning();
               activity.hide();
               // Пошёл текст ответа — цепочка вызовов закончилась.
@@ -437,8 +452,8 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
                 firstTokenSeen = true;
                 perf.end('chat:first-token');
               }
-              buffer += (payload as ChatDeltaPayload).text;
-              scheduleRender(segment, session);
+              render.buffer += (payload as ChatDeltaPayload).text;
+              scheduleRender(render, segment, session);
               return;
             }
             if (event === ChatStreamEvent.ToolStart) {
@@ -450,7 +465,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
               // Новый вызов — новый текстовый сегмент. Буфер держит текст ТОЛЬКО
               // текущего шага: иначе в следующий сегмент выльется весь предыдущий
               // текст и ответ будет повторяться в каждом пузыре.
-              buffer = '';
+              render.buffer = '';
               // Размышления пошаговые: закрываем текущую часть, следующая врезка
               // ляжет отдельным абзацем в ту же строку ленты.
               reasoningView?.part();
@@ -537,7 +552,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         // Продолжение — часть ТОГО ЖЕ ответа: новый сегмент в том же пузыре.
         segment = h('div', { class: 'msg-body' });
         messageEl.insertBefore(segment, activity.element);
-        buffer = '';
+        render.buffer = '';
         host.scrollToEnd(session);
       }
 
@@ -577,7 +592,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         outcome = 'stopped';
         segment.appendChild(h('div', { class: 'field-hint' }, 'генерация остановлена'));
         // Оборвали с самого начала — текста нет, и пустой реплике в истории не место.
-        if (buffer) session.history.push({ role: 'assistant', content: buffer });
+        if (render.buffer) session.history.push({ role: 'assistant', content: render.buffer });
         host.runEndNote(session, 'stopped');
       } else {
         clear(segment);
@@ -595,13 +610,13 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       host.hidePlan(session);
       activity.dispose();
       // Строка ушла вместе с прогоном: пауза, пришедшая после конца, ей не адресована.
-      if (liveActivity === activity) liveActivity = null;
+      if (activities.get(session.id) === activity) activities.delete(session.id);
       // ПОРЯДОК ВАЖЕН: `setStreaming(null)` обнуляет сессию прогона, а
       // `setBusy(false)` по ней решает, звать ли `finishRun` (заметка о конце
       // прогона, метка в доке, заголовок окна). Поменяй местами — и `finishRun`
       // не сработает никогда: условие `session === streamingSession` уже ложно.
       host.setBusy(false, session);
-      host.setStreaming(null);
+      host.setStreaming(null, session);
       // Правки агента на диск не пишем: сохранение — решение человека (кнопка
       // «Сохранить» в панели изменений). Здесь только обновляем вид панели.
       host.afterStream(session);
@@ -629,26 +644,33 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     );
   }
 
-  function scheduleRender(target: HTMLElement, session: ChatSession): void {
-    if (frame) return;
-    frame = requestAnimationFrame(() => {
-      frame = 0;
+  function scheduleRender(render: RunRender, target: HTMLElement, session: ChatSession): void {
+    if (render.frame) return;
+    render.frame = requestAnimationFrame(() => {
+      render.frame = 0;
       // Промежуточный кадр: незакрытый блок кода показываем без подсветки.
-      host.markdown.renderInto(target, buffer, { streaming: true });
+      host.markdown.renderInto(target, render.buffer, { streaming: true });
       host.scrollToEnd(session);
     });
   }
 
-  function cancelFrame(): void {
-    if (frame) cancelAnimationFrame(frame);
-    frame = 0;
+  function cancelFrame(render: RunRender): void {
+    if (render.frame) cancelAnimationFrame(render.frame);
+    render.frame = 0;
   }
 
   return {
     run,
-    notePause(value: boolean) {
-      if (!liveActivity) return;
-      liveActivity.state(value ? 'пауза · продолжить — кнопка внизу' : 'думает…');
+    notePause(value: boolean, session?: ChatSession) {
+      // Без беседы — по единственному живому прогону: так зовут старые вызовы.
+      if (!session) {
+        if (activities.size !== 1) return;
+        for (const activity of activities.values()) {
+          activity.state(value ? 'пауза · продолжить — кнопка внизу' : 'думает…');
+        }
+        return;
+      }
+      activities.get(session.id)?.state(value ? 'пауза · продолжить — кнопка внизу' : 'думает…');
     },
   };
 }

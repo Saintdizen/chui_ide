@@ -14,6 +14,7 @@ import {
 import { sanitizeToolPreset, toolPresetSpec, type ToolPresetId } from '../../shared/tool-presets';
 import type { ApplyFailure, FileEdit } from '../../shared/edits';
 import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectCommand } from '../../shared/commands';
+import { parallelRunNotice } from '../../shared/parallel-runs';
 import { sessionAttachment } from '../../shared/session-context';
 import { leaveQuestion, type RunLeaving } from '../../shared/run-keep';
 import { composerAction, feedAction, focusAfterCard, recallStep, type ComposerAction } from '../../shared/run-keys';
@@ -141,8 +142,9 @@ export interface ChatView {
    * Событие `paused` внутри стрима не заменяет его: оно приходит только
    * на границе шага, а между нажатием и ею может пройти минуту (идёт терминал
    * или длинный вызов). До этого момента человек не знает, успело ли нажатие.
+   * `uid` — чья пауза: при двух прогонах main адресует её беседе.
    */
-  setPaused(value: boolean): void;
+  setPaused(value: boolean, uid?: string): void;
   /** Открыть окно «Прогон» для активной беседы (трасса последнего хода). */
   openRunLog(): void;
   askAboutSelection(mode: 'explain' | 'fix'): Promise<void>;
@@ -264,7 +266,16 @@ const COMPACT_CONTINUE_PROMPT = [
  */
 export function createChatPanel(deps: ChatDeps): ChatView {
   let settings = deps.settings;
+  /**
+   * Идёт ли прогон в АКТИВНОЙ беседе — по нему живёт поле ввода и кнопка.
+   * Прогоны соседних бесед считаются в `runningIds`: они идут, но это не повод
+   * гасить ввод там, где человек сейчас печатает.
+   */
   let busy = false;
+  /** Беседы, в которых прямо сейчас идёт прогон. */
+  const runningIds = new Set<number>();
+  /** Где какой прогон: по беседе — чтобы конец одного не стирал другой. */
+  const runningSessions = new Map<number, ChatSession>();
   /**
    * Тянем ли ленту вниз автоматически. Пользователь прокрутил вверх —
    * стрим не дёргает ленту; вернулся к низу (или нажал кнопку) — снова тянем.
@@ -840,7 +851,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       sessions.map((session) => ({
         id: session.id,
         title: session.title,
-        streaming: session.id === streamingSession?.id,
+        streaming: runningIds.has(session.id),
       })),
       activeId,
     );
@@ -883,6 +894,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     closeApprovals();
     menu.hide();
     activeId = id;
+    // Поле и кнопка — про эту беседу: у соседней прогон может идти, а здесь — нет.
+    syncBusy();
 
     for (const session of sessions) session.thread.hidden = session.id !== id;
     const next = active();
@@ -986,11 +999,18 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // обрываются молча — вопрос, на который всегда жмут «да», перестаёт
     // читаться, и в тот раз, когда он важен, его прожмут так же.
     const leavingRun = sessions[index]!;
-    if (leavingRun.id === streamingSession?.id && !safelyLeaveRun(leavingRun)) return;
+    // Прогон — по беседе, а не по «одной живой»: при двух задачах закрытие
+    // вкладки с чужой беседы не должно ни спрашивать, ни обрывать её.
+    if (runningIds.has(leavingRun.id) && !safelyLeaveRun(leavingRun)) return;
 
     const [removed] = sessions.splice(index, 1);
     removed?.thread.remove();
-    if (removed?.id === streamingSession?.id) deps.rpc.cancelActive();
+    if (removed) {
+      runningIds.delete(removed.id);
+      runningSessions.delete(removed.id);
+      // Гасим именно её поток, если вкладку закрыли посреди прогона.
+      liveStreams.get(removed.id)?.cancel();
+    }
 
     if (activeId === id) {
       activeId = sessions[Math.min(index, sessions.length - 1)]!.id;
@@ -2613,6 +2633,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       return 'unavailable';
     }
 
+    // Вторая задача в том же каталоге — не запрет, но и не тишина: правки обеих
+    // лягут в одни файлы, и человек должен узнать об этом сейчас, а не на diff.
+    const notice = parallelRunNotice(runningIds.size + 1);
+    if (notice) showToast(notice, 'info');
+
     // Не влезает в окно — сначала освобождаем контекст, потом спрашиваем.
     // Вес самого вопроса тоже учитываем: в историю он попадёт лишь ниже.
     // Сжать не вышло — не отправляем: иначе запрос уйдёт обрезанным.
@@ -2742,7 +2767,17 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   function setBusy(value: boolean, session: ChatSession = active()): void {
+    if (value) runningIds.add(session.id);
+    else runningIds.delete(session.id);
+    // Прогон в соседней беседе — её дело: у активной поле должно остаться живым,
+    // иначе человек не сможет поставить вторую задачу, пока идёт первая.
+    if (session.id !== activeId) {
+      if (!value && session === streamingSession) finishRun(session);
+      renderTabs();
+      return;
+    }
     busy = value;
+    renderTabs();
     // Искра в кнопке «Информация о сессии»: цвет говорит, что ассистент работает.
     aiSparkle.classList.toggle('is-busy', busy);
     aiSparkle.title = busy ? 'AI: генерация…' : 'AI: готов';
@@ -2760,6 +2795,17 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // уже null, условие не срабатывало НИКОГДА, и заметка о конце прогона
     // не выходила вовсе.
     if (!value && session === streamingSession) finishRun(session);
+  }
+
+  /** Пересчитать «занято» по активной беседе: при переключении вкладки оно разное. */
+  function syncBusy(): void {
+    const value = runningIds.has(activeId);
+    if (value === busy) return;
+    busy = value;
+    aiSparkle.classList.toggle('is-busy', busy);
+    aiSparkle.title = busy ? 'AI: генерация…' : 'AI: готов';
+    composer.setBusy(value);
+    if (!value) composer.setPaused(false);
   }
 
   /**
@@ -2806,12 +2852,25 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   let paused = false;
 
-  function setPaused(value: boolean, _session: ChatSession = active()): void {
-    paused = value;
-    composer.setPaused(value);
+  function setPaused(value: boolean, session: ChatSession = active()): void {
+    // Пауза принадлежит беседе: при двух прогонах жать её по всей панели нельзя —
+    // человек поставил её одной задаче, а встали бы обе.
+    if (session.id === activeId) {
+      paused = value;
+      composer.setPaused(value);
+    }
     // И строку в ленте — сразу, не на границе шага. `stream` создан ниже, но
     // эта функция зовётся только из уведомления main, то есть после старта.
-    stream.notePause(value);
+    stream.notePause(value, session);
+  }
+
+  /** Найти беседу по uid — по нему main адресует паузу и события прогона. */
+  function sessionByUid(uid: string | undefined): ChatSession {
+    if (uid) {
+      const found = sessions.find((item) => item.uid === uid);
+      if (found) return found;
+    }
+    return active();
   }
 
   /** Выполнить действие, выбранное по клавише в поле ввода. */
@@ -2836,7 +2895,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Пауза, поставленная перед стопом, осталась бы в main и ждала неведомо кого.
     // Снимаем её тем же способом, каким ставили.
     if (paused) setPaused(false);
-    const running = streamingSession ?? active();
+    // Останавливаем свою беседу: при двух прогонах «текущая» — та, что видна.
+    const running = active();
     void deps.rpc.request('ai.setPaused', { paused: false, conversation: running.uid }).catch(() => undefined);
     // Гасим свой поток. Своей ручки нет (прогон открылся до этой правки или уже
     // закрылся) — бьём по последнему открытому, как раньше.
@@ -2938,7 +2998,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // переключить вкладку: беседу берёт замыкание `mount`.
   const approvals: ApprovalHost = {
     readText: currentText,
-    mount: (block) => currentTurn(streamingSession ?? active()).appendChild(block),
+    // Чья беседа спросила — туда и карточка: при двух прогонах вопрос фоновой
+    // задачи не должен всплыть поверх открытой.
+    mount: (block, session) => currentTurn(session ?? streamingSession ?? active()).appendChild(block),
     // Ответ на карточку стёр кнопку вместе с фокусом. Куда его вернуть,
     // решает shared/run-keys: идёт прогон — в ленту (следующий вопрос придёт
     // туда), прогон кончился — в поле ввода (самое время писать дальше).
@@ -2970,26 +3032,26 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // `review` приходит, только если проверка модели не решилась разрешить сама:
     // её причина нужна человеку в карточке. `cwd` — чтобы предложить «больше не
     // спрашивать в этой папке».
-    commandApproval.confirm(params.command, params.review?.reason, params.cwd),
+    commandApproval.confirm(params.command, params.review?.reason, params.cwd, sessionByUid(params.conversation)),
   );
 
   // Действия в браузере — тоже карточка в ленте: страница может сделать что угодно
   // от имени пользователя, поэтому вопрос задаётся тем же способом.
   deps.host.handle('ai.confirmBrowser', async (params) => ({
-    allowed: await commandApproval.confirmBrowser(params.action),
+    allowed: await commandApproval.confirmBrowser(params.action, sessionByUid(params.conversation)),
   }));
 
   // Вопрос агенту к человеку: карточка с полем ввода (и кнопками вариантов).
   // Ответ уходит модели результатом вызова — прогон ждёт его и продолжается.
   deps.host.handle('ai.ask', async (params) => ({
-    answer: await askPrompt.ask(params.question, params.options),
+    answer: await askPrompt.ask(params.question, params.options, sessionByUid(params.conversation)),
   }));
 
   // «Утвердить план»: карточка с планом и решением. Утверждение переводит композер
   // в «Агента» — режим обещал чтение без изменений, и дальше он уже врёт. Режим
   // меняется здесь, а не в main: композер живёт в renderer.
   deps.host.handle('ai.exitPlan', async (params) => {
-    const decision = await planApproval.ask(params.plan);
+    const decision = await planApproval.ask(params.plan, sessionByUid(params.conversation));
     if (decision.approved) composer.setMode('agent');
     return decision;
   });
@@ -3027,7 +3089,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     );
     const approved = trustAll ? params.edits : params.edits.filter((file) => trusted.has(file.path));
     const asks = trustAll ? [] : params.edits.filter((file) => !trusted.has(file.path));
-    const reviewed = asks.length > 0 ? await editReview.review(asks) : [];
+    const reviewed = asks.length > 0 ? await editReview.review(asks, sessionByUid(params.conversation)) : [];
     // Разрешённые файлы применяются даже при отмене остального: «Отмена»
     // относится к карточке, а не к прошлому решению человека.
     const selected = [...approved, ...(reviewed ?? [])];
@@ -3203,14 +3265,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       if (session.id === activeId) deps.artifacts?.set(session.artifacts ?? []);
     },
     setBusy,
-    setPaused,
-    busyHint: (hint) => {
+    // Событие паузы внутри стрима приходит от конкретной беседы.
+    setPaused: (value, session) => setPaused(value, session),
+    busyHint: (hint, session) => {
       // Запоминаем в сессии, а не только в UI: прогон мог идти в фоновой вкладке,
       // и при переключении туда шапка должна сразу показать работу, а не ждать
       // следующего вызова инструмента — его может и не быть.
-      const session = streamingSession;
-      if (session) session.busyHint = hint ?? undefined;
-      if (session && session.id !== activeId) return;
+      // Сессия — из довода: при двух прогонах `streamingSession` уже не одна.
+      session.busyHint = hint ?? undefined;
+      if (session.id !== activeId) return;
       deps.onBusyHint?.(hint);
     },
     trackStream: (session, handle) => {
@@ -3220,8 +3283,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       else liveStreams.delete(session.id);
     },
     closeApprovals,
-    setStreaming: (session) => {
-      streamingSession = session;
+    setStreaming: (session, ended) => {
+      // Прогонов может быть два: конец одного не должен стирать сессию другого.
+      // Держим их по беседе, а `streamingSession` — та, что идёт сейчас и видна.
+      if (session) runningSessions.set(session.id, session);
+      if (ended) runningSessions.delete(ended.id);
+      streamingSession = runningSessions.get(activeId) ?? [...runningSessions.values()][0] ?? null;
     },
     attachActions: (messageEl, session) =>
       attachAssistantActions(
@@ -3458,7 +3525,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     stop,
     flushHistory,
     currentToolPreset,
-    setPaused,
+    setPaused: (value, uid) => setPaused(value, sessionByUid(uid)),
     askAboutSelection,
     openRunLog: () => {
       // Трасса есть только у прогонов этого запуска: она живёт в памяти беседы,

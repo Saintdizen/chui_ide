@@ -9,6 +9,7 @@ import {
 } from '../../shared/agent-grants';
 import { commandConsequence, editsConsequence, type DangerLevel } from '../../shared/step-consequence';
 import { fileWord } from './chat-text';
+import type { ChatSession } from './chat-session';
 import { h, svgIcon, type IconName } from './dom';
 
 /**
@@ -39,8 +40,11 @@ export interface EditPreviewFile {
 export interface ApprovalHost {
   /** Текущий текст файла: открытый документ или с диска. `null` — прочитать не вышло. */
   readText(path: string): Promise<string | null>;
-  /** Вставить карточку решения в ленту. */
-  mount(block: HTMLElement): void;
+  /**
+   * Вставить карточку решения в ленту. `session` — чья беседа спросила: при двух
+   * прогонах карточка обязана попасть туда, откуда вопрос, а не в открытую.
+   */
+  mount(block: HTMLElement, session?: ChatSession): void;
   /** Прокрутить ленту к карточке. */
   scrollToEnd(): void;
   /** Зарегистрировать отмену; возвращает функцию снятия регистрации. */
@@ -92,11 +96,11 @@ export interface EditReview {
    * Показать предложенные правки и дождаться решения. Ничего не применяет — это
    * делает вызывающий. Возвращает выбранные файлы или `null`, если отклонили всё.
    */
-  review(fileEdits: readonly FileEdit[]): Promise<FileEdit[] | null>;
+  review(fileEdits: readonly FileEdit[], session?: ChatSession): Promise<FileEdit[] | null>;
 }
 
 export function createEditReview(host: ApprovalHost): EditReview {
-  async function review(fileEdits: readonly FileEdit[]): Promise<FileEdit[] | null> {
+  async function review(fileEdits: readonly FileEdit[], session?: ChatSession): Promise<FileEdit[] | null> {
     const files = await Promise.all(fileEdits.map(async (file) => previewFile(file, await host.readText(file.path))));
 
     const block = h('div', { class: 'review' });
@@ -245,7 +249,7 @@ export function createEditReview(host: ApprovalHost): EditReview {
     }
 
     block.appendChild(h('div', { class: 'review-actions' }, applyButton, rejectButton, allButton, folderButton));
-    host.mount(block);
+    host.mount(block, session);
     host.scrollToEnd();
 
     return decision;
@@ -285,9 +289,9 @@ export interface CommandApproval {
    * `review` — причина, по которой проверка модели не разрешила команду сама;
    * `cwd` — папка запуска, чтобы предложить «больше не спрашивать здесь».
    */
-  confirm(command: string, review?: string, cwd?: string): Promise<ConfirmCommandAnswer>;
+  confirm(command: string, review?: string, cwd?: string, session?: ChatSession): Promise<ConfirmCommandAnswer>;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
-  confirmBrowser(action: string): Promise<boolean>;
+  confirmBrowser(action: string, session?: ChatSession): Promise<boolean>;
 }
 
 /**
@@ -310,7 +314,11 @@ interface GrantOption {
  */
 export function createCommandApproval(host: ApprovalHost): CommandApproval {
   /** Общая карточка: рисуем, ждём нажатия, отдаём ответ обещанием. */
-  function show(request: ApprovalRequest, grants: readonly GrantOption[] = []): Promise<ConfirmCommandAnswer> {
+  function show(
+    request: ApprovalRequest,
+    grants: readonly GrantOption[] = [],
+    session?: ChatSession,
+  ): Promise<ConfirmCommandAnswer> {
     const block = h('div', { class: 'approval' });
     block.appendChild(h('div', { class: 'approval-head' }, svgIcon('warning', 13), h('span', {}, request.title)));
     block.appendChild(h('pre', { class: 'approval-command' }, request.body));
@@ -391,14 +399,14 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
     const unregister = host.register(abort);
 
     block.appendChild(h('div', { class: 'approval-actions' }, runButton, ...grantButtons, skipButton));
-    host.mount(block);
+    host.mount(block, session);
     host.scrollToEnd();
 
     return decision;
   }
 
   return {
-    confirm: (command, review, cwd) =>
+    confirm: (command, review, cwd, session) =>
       show(
         {
           title: 'Ассистент просит выполнить команду',
@@ -420,16 +428,21 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
               { scope: 'all', label: describeGrant({ scope: 'all' }) },
             ]
           : [],
+        session,
       ),
-    confirmBrowser: async (action) =>
+    confirmBrowser: async (action, session) =>
       (
-        await show({
-          title: 'Ассистент просит действие в браузере',
-          body: action,
-          hint: 'Действие выполнится в отдельном браузере IDE — он не видит ваши сессии и закладки.',
-          done: 'Действие в браузере',
-          icon: 'search',
-        })
+        await show(
+          {
+            title: 'Ассистент просит действие в браузере',
+            body: action,
+            hint: 'Действие выполнится в отдельном браузере IDE — он не видит ваши сессии и закладки.',
+            done: 'Действие в браузере',
+            icon: 'search',
+          },
+          [],
+          session,
+        )
       ).allowed,
   };
 }
@@ -462,11 +475,11 @@ export function approvalReviewNote(command: string, reason: string): HTMLElement
  */
 export interface AskPrompt {
   /** Задать вопрос и дождаться ответа. Пустая строка — ответа не будет. */
-  ask(question: string, options?: readonly string[]): Promise<string>;
+  ask(question: string, options?: readonly string[], session?: ChatSession): Promise<string>;
 }
 
 export function createAskPrompt(host: ApprovalHost): AskPrompt {
-  function ask(question: string, options?: readonly string[]): Promise<string> {
+  function ask(question: string, options?: readonly string[], session?: ChatSession): Promise<string> {
     const block = h('div', { class: 'ask' });
     block.appendChild(
       h('div', { class: 'approval-head' }, svgIcon('bubble', 13), h('span', {}, 'Ассистент спрашивает')),
@@ -539,7 +552,7 @@ export function createAskPrompt(host: ApprovalHost): AskPrompt {
 
     block.appendChild(h('div', { class: 'ask-input' }, input));
     block.appendChild(h('div', { class: 'approval-actions' }, answerButton, skipButton));
-    host.mount(block);
+    host.mount(block, session);
     host.scrollToEnd();
     input.focus();
 
@@ -560,11 +573,11 @@ export function createAskPrompt(host: ApprovalHost): AskPrompt {
  */
 export interface PlanApproval {
   /** Отдать план на решение. «Да» — только явное нажатие «Утвердить». */
-  ask(plan: string): Promise<PlanExitDecision>;
+  ask(plan: string, session?: ChatSession): Promise<PlanExitDecision>;
 }
 
 export function createPlanApproval(host: ApprovalHost): PlanApproval {
-  function ask(plan: string): Promise<PlanExitDecision> {
+  function ask(plan: string, session?: ChatSession): Promise<PlanExitDecision> {
     const block = h('div', { class: 'ask plan-exit' });
     block.appendChild(
       h('div', { class: 'approval-head' }, svgIcon('checklist', 13), h('span', {}, 'План готов — утвердить?')),
@@ -629,7 +642,7 @@ export function createPlanApproval(host: ApprovalHost): PlanApproval {
 
     block.appendChild(h('div', { class: 'ask-input' }, note));
     block.appendChild(h('div', { class: 'approval-actions' }, approveButton, reworkButton));
-    host.mount(block);
+    host.mount(block, session);
     host.scrollToEnd();
     note.focus();
 

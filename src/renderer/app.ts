@@ -3818,8 +3818,10 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         // main принял паузу. Событие внутри стрима придёт позже — на границе шага,
         // а пока идёт длинный вызов или терминал, человек без этого не знает,
         // услышали его или нет.
-        const payload = message.payload as { paused?: boolean };
-        chat.setPaused(payload?.paused === true);
+        const payload = message.payload as { paused?: boolean; conversation?: string };
+        // Беседа в доводе: с параллельными прогонами паузу ставили одной задаче,
+        // и вставать должны только она.
+        chat.setPaused(payload?.paused === true, payload?.conversation);
         break;
       }
       case PushTopic.SettingsChanged:
