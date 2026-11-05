@@ -36,6 +36,8 @@ export interface SourceControlDeps {
   askText?(options: { title: string; label: string; value: string }): Promise<string | null>;
   /** Сообщить о сбое рядом с панелью. */
   notify?(message: string, kind?: 'info' | 'error'): void;
+  /** Подсказка с сочетанием для кнопки (п.1: клавиши открываемы). */
+  shortcutHint?(label: string, command: string): string;
   /**
    * Пакеты проекта: в монорепо правки раскладываются по ним, а не идут одним списком.
    * Нет модели — список остаётся плоским (обычный репозиторий).
@@ -60,6 +62,8 @@ export interface SourceControlView {
  * она шлёт команды, поэтому то же действие доступно из палитры и от ассистента.
  */
 export function createSourceControl(deps: SourceControlDeps): SourceControlView {
+  // Без зависимости подсказка остаётся прежней: сочетание не выдумываем.
+  const shortcutHint = deps.shortcutHint ?? ((label: string) => label);
   const branchName = h('span', { class: 'sc-branch-name', title: 'Правый клик — действия с ветками' });
   const branchSelect = createSelect({ title: 'Текущая ветка', placeholder: 'нет ветки', class: 'sc-branch-select' });
   const branchInput = h('input', {
@@ -89,7 +93,8 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     {
       class: 'btn btn-primary sc-commit',
       type: 'button',
-      title: 'Закоммитить проиндексированное',
+      // Сочетание — в подсказке (п.1): спрятанное действие не находят.
+      title: shortcutHint('Закоммитить', 'git.commitStaged'),
       onClick: () => void commit(),
     },
     'Закоммитить',

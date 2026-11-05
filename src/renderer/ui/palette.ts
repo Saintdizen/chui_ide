@@ -3,10 +3,37 @@ import { groupCommands, rankCommandMatches, type RankedCommand } from '../core/p
 import { clear, h } from './dom';
 import { focusOwner, returnFocus } from './focus-return';
 
+/**
+ * Что делает клик по сочетанию (п.1).
+ *
+ * `reclaim` — первое нажатие после показа окна: браузер отдаёт кликом возврат
+ * фокуса в окно, и курсор может стоять где угодно. Выбирать строку в этот
+ * момент значит увести в настройки случайную команду.
+ */
+export function keyHintPlan(sinceOpenMs: number, freshMs = 250): 'settings' | 'reclaim' {
+  return sinceOpenMs < freshMs ? 'reclaim' : 'settings';
+}
+
+/**
+ * Подпись у команды без сочетания. Молчать нельзя: человек видит, что клавиши
+ * нет, и не знает, что её можно назначить — сочетание открываемо или никак.
+ */
+export function keyHintLabel(descriptor: CommandDescriptor): string {
+  return descriptor.keybinding ?? 'назначить клавишу';
+}
+
 export interface PaletteView {
   element: HTMLElement;
   open(): void;
   close(): void;
+  /**
+   * Когда палитру открыли (мс, `performance.now()`). Окно сверяет с ним первые
+   * клики: браузер отдаёт кликом возврат фокуса в окно, и первое такое нажатие
+   * не должно выбирать строку под курсором.
+   */
+  openedAt(): number | null;
+  /** Очистить запрос и вернуть фокус в поле — очередь «я ещё печатаю». */
+  clearQuery(): void;
 }
 
 /**
@@ -45,6 +72,11 @@ export function createPalette(deps: {
    * сохранить историю (одной записью, а не на каждый запуск) и обновить настройки.
    */
   onBeforeShow?: () => void;
+  /**
+   * Открыть настройки клавиш для команды (п.1: сочетание в палитре кликабельно)
+   * и вернуть признак «успели до того, как человек дописал запрос».
+   */
+  openKeybindingSettings?: (command: string) => boolean;
 }): PaletteView {
   const input = h('input', {
     class: 'palette-input',
@@ -141,9 +173,33 @@ export function createPalette(deps: {
         h('span', { class: 'palette-item-title' }, ...highlighted(descriptor.title, positions)),
         // Категория у пункта не нужна, когда она уже стоит заголовком группы.
         grouped ? null : h('span', { class: 'palette-item-category' }, descriptor.category),
-        descriptor.keybinding ? h('span', { class: 'palette-item-key' }, descriptor.keybinding) : null,
+        deps.openKeybindingSettings || descriptor.keybinding
+          ? h(
+              'span',
+              { class: `palette-item-key${descriptor.keybinding ? '' : ' is-unbound'}` },
+              keyHintLabel(descriptor),
+            )
+          : null,
       );
       item.addEventListener('click', () => run(descriptor));
+      // Клик по сочетанию уводит в настройки клавиш — там его и меняют. Внутри
+      // пункта, а не отдельной строкой: человек в этот момент смотрит на клавишу.
+      const keyHint = item.querySelector('.palette-item-key');
+      if (keyHint && deps.openKeybindingSettings) {
+        keyHint.addEventListener('click', (event) => {
+          event.stopPropagation();
+          // Решение — чистой функцией: в прогоне без DOM проверяется она одна.
+          if (keyHintPlan(performance.now() - (openedAt ?? 0)) === 'reclaim') {
+            clearQuery();
+            return;
+          }
+          close();
+          // Отказ приложения (окликнули повторно) — палитра вернула фокус в поле.
+          if (deps.openKeybindingSettings?.(descriptor.id) === false) {
+            open();
+          }
+        });
+      }
       item.addEventListener('mousemove', () => {
         if (cursor === index) return;
         cursor = index;
@@ -189,6 +245,12 @@ export function createPalette(deps: {
 
   // Чей был фокус до открытия: берём ДО того, как он уйдёт в поле запроса.
   let owner: HTMLElement | null = null;
+  /**
+   * Когда палитру открыли. Нужен, чтобы отличить клик по сочетанию от клика,
+   * которым человек просто возвращает фокус в окно: браузер отдаёт такое
+   * нажатие как click по тому, что окажется под курсором.
+   */
+  let openedAt: number | null = null;
 
   function open(): void {
     // Сначала повод приложению (сохранить историю, обновить настройки), потом список:
@@ -198,6 +260,7 @@ export function createPalette(deps: {
     overlay.hidden = false;
     input.value = '';
     cursor = 0;
+    openedAt = performance.now();
     render();
     input.focus();
   }
@@ -212,5 +275,13 @@ export function createPalette(deps: {
 
   render();
 
-  return { element: overlay, open, close };
+  function clearQuery(): void {
+    input.value = '';
+    cursor = 0;
+    openedAt = performance.now();
+    render();
+    input.focus();
+  }
+
+  return { element: overlay, open, close, openedAt: () => openedAt, clearQuery };
 }

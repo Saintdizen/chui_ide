@@ -18,6 +18,12 @@ export interface AppMenuDeps {
    * пункт получает отметку слева; нет — обычный пункт без отметки.
    */
   checks: Readonly<Record<string, boolean>>;
+  /**
+   * Подменённые сочетания из настроек (`menuAccelerators(overrides)`).
+   * Без карты пункт показывает своё штатное, а с ней — то, что человек
+   * назначил: меню и настройки не расходятся.
+   */
+  accelerators?: ReadonlyMap<string, string>;
 }
 
 export function showApplicationMenu(anchor: HTMLElement, deps: AppMenuDeps, onClose?: () => void): void {
@@ -26,6 +32,10 @@ export function showApplicationMenu(anchor: HTMLElement, deps: AppMenuDeps, onCl
 
 function toItems(nodes: readonly MenuNode[], deps: AppMenuDeps): PopupMenuItem[] {
   const items: PopupMenuItem[] = [];
+  // Назначенное в настройках главнее штатного: иначе меню покажет одну клавишу,
+  // а сработает другая.
+  const acceleratorOf = (node: MenuNode): string | undefined =>
+    (node.command ? deps.accelerators?.get(node.command) : undefined) ?? node.accelerator;
 
   for (const node of nodes) {
     if (node.separator) {
@@ -38,7 +48,7 @@ function toItems(nodes: readonly MenuNode[], deps: AppMenuDeps): PopupMenuItem[]
     }
     if (node.role) {
       const role = node.role;
-      items.push({ label: node.label ?? role, hint: node.accelerator, onSelect: () => deps.runRole(role) });
+      items.push({ label: node.label ?? role, hint: acceleratorOf(node), onSelect: () => deps.runRole(role) });
       continue;
     }
     if (node.command) {
@@ -46,7 +56,7 @@ function toItems(nodes: readonly MenuNode[], deps: AppMenuDeps): PopupMenuItem[]
       const checked = deps.checks[command];
       items.push({
         label: node.label ?? command,
-        hint: node.accelerator,
+        hint: acceleratorOf(node),
         onSelect: () => deps.execute(command),
         ...(checked === undefined ? {} : { checked }),
       });

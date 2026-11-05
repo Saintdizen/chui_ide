@@ -59,6 +59,9 @@ import { parseCoverageJson } from '../shared/coverage-json';
 import { parseNodeCoverage } from '../shared/node-coverage';
 import { diagnoseHighlighting, refreshHighlight } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
+import { menuAccelerators } from '../shared/app-menu';
+import { shortcutSources, tooltipFor, type ShortcutSource } from './core/shortcut-hints';
+import { menuComboOverrides } from '../shared/keybindings';
 import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
 import { attachDoubleShift } from './core/double-shift';
 import { languageFromPath, languageLabel, languageIndent } from './core/languages';
@@ -887,6 +890,25 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     },
   };
 
+  /**
+   * Все пары «команда -> сочетание» в одном месте (п.1). Домов два: клавиши,
+   * которые ловит renderer, и акселераторы меню (их держит Electron), и до сих
+   * пор их никто не сводил — меню, палитра и подсказки могли назвать три
+   * разные клавиши. Считается на спрос: настройки меняются по ходу работы.
+   *
+   * Объявлена ЗДЕСЬ, а не рядом с `KeybindingService` внизу: её спрашивают
+   * панели, которые создаются выше. Функция-выражение в TDZ — обращение до
+   * объявления роняет запуск целиком (`Cannot access 'mi' before initialization`).
+   */
+  const shortcuts = (): ShortcutSource =>
+    shortcutSources(commands.list(), menuAccelerators(menuComboOverrides(settings.keybindings.overrides)));
+  /**
+   * Сколько миллисекунд после показа окна нажатие считается «вернул фокус»,
+   * а не выбором. То же значение, что у двойного Shift: это одно и то же
+   * свойство OEM-нажатий — они приходят первыми и не по адресу.
+   */
+  const CLICK_AFTER_OPEN_MS = 250;
+
   // Окно Python-окружений: создание venv рядом с настройками, поверх всего.
   const venvModal = createVenvModal({
     rpc,
@@ -957,6 +979,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Соавторов спрашиваем тем же диалогом, что имя ветки и сообщение коммита.
     askText: (options) => promptValue(options),
     notify: (message, kind) => showToast(message, kind),
+    // Один источник сочетаний на программу: меню, палитра и подсказки кнопок
+    // берут его отсюда, иначе три места называют три разные клавиши.
+    shortcutHint: (label, command) => tooltipFor(label, command, shortcuts()),
     packages,
   });
 
@@ -1377,33 +1402,16 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // Проблемы: ошибки и предупреждения по всем открытым файлам, клик — переход к месту.
   // Панель ничего не знает ни о языковом сервере, ни о проверке импортов: берёт готовые
   // пометки у рабочего места и группирует их (правила — `shared/problem-list.ts`).
-  const problemPanel = createProblemPanel({
-    markers: () => editors.markers(),
-    // Из панели файла может и не быть на экране — открываем его тем же путём, что и всё.
-    reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
-    label: (path) => workspace.relative(path),
-    // Действие пустого состояния (п.10): до первой проверки список честно пуст,
-    // и «Проблем нет» без кнопки читалось как «всё чисто».
-    check: () => void commands.execute('project.check'),
-    // «Проблем нет» до первой проверки было утверждением, а не фактом: список
-    // пуст ещё и потому, что проект не проверяли.
-    unchecked: () => projectCheck.unchecked(),
-  });
+  //
   // Проверка всего проекта: линтер по корню и сверка зависимостей с `node_modules`.
   // Пометки обычных источников (языковой сервер, проверка импортов) приходят только
   // по открытым файлам, поэтому сразу после старта «Проблемы» пусты — эту дыру
   // закрывает один фон, запускаемый при открытии проекта (см. вызов ниже).
-  // Один источник для всех мест, где обновляется виджет: числа плюс признаки
-  // прохода. Иначе обновление по пометкам (ниже) стирало бы «проверяю…» и
-  // «не проверено», и виджет снова говорил бы «0 значит чисто».
-  const problemsStatus = () => ({
-    ...editors.problemCounts(),
-    checking: projectCheck.checking(),
-    unchecked: projectCheck.unchecked(),
-    partial: projectCheck.partial(),
-    // Два прохода сразу не запускаются: показываем тот, что идёт.
-    check: projectCheck.progress() ?? typeCheck.progress(),
-  });
+  //
+  // Объявлена ПЕРВОЙ из трёх: её спрашивают и панель проблем, и `problemsStatus`.
+  // `const` с функцией-выражением в TDZ ничем не отличается от обычной переменной —
+  // обращение раньше объявления роняет запуск целиком
+  // (`Cannot access 'W' before initialization`).
   const projectCheck = new ProjectCheck({
     root: () => workspace.root,
     // Потоком, а не обычным запросом: по событиям хода рисуется полоса в строке состояния.
@@ -1419,6 +1427,29 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       dock.refreshBadges();
       if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
     },
+  });
+  // Один источник для всех мест, где обновляется виджет: числа плюс признаки
+  // прохода. Иначе обновление по пометкам (ниже) стирало бы «проверяю…» и
+  // «не проверено», и виджет снова говорил бы «0 значит чисто».
+  const problemsStatus = () => ({
+    ...editors.problemCounts(),
+    checking: projectCheck.checking(),
+    unchecked: projectCheck.unchecked(),
+    partial: projectCheck.partial(),
+    // Два прохода сразу не запускаются: показываем тот, что идёт.
+    check: projectCheck.progress() ?? typeCheck.progress(),
+  });
+  const problemPanel = createProblemPanel({
+    markers: () => editors.markers(),
+    // Из панели файла может и не быть на экране — открываем его тем же путём, что и всё.
+    reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
+    label: (path) => workspace.relative(path),
+    // Действие пустого состояния (п.10): до первой проверки список честно пуст,
+    // и «Проблем нет» без кнопки читалось как «всё чисто».
+    check: () => void commands.execute('project.check'),
+    // «Проблем нет» до первой проверки было утверждением, а не фактом: список
+    // пуст ещё и потому, что проект не проверяли.
+    unchecked: () => projectCheck.unchecked(),
   });
   // Проверка типов — отдельный проход со своим владельцем пометок: tsc идёт десятками
   // секунд, поэтому только по команде, и его находки не затирают находки линтера.
@@ -2087,6 +2118,19 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       const recent = recentCommands.ids().filter((id) => known.has(id));
       if (JSON.stringify(recent) === JSON.stringify(settings.commandPalette?.recent ?? [])) return;
       void rpc.request('settings.update', { commandPalette: { recent } }).catch(() => undefined);
+    },
+    // П.1: сочетание в палитре кликабельно и ведёт туда, где его меняют.
+    // Возвращает ПРИЗНАК, и это не формальность. Браузер отдаёт клик в окно,
+    // которым человек всего лишь вернул фокус: если палитру окликнули повторно,
+    // первое такое нажатие — не выбор строки, а «отойди, я печатаю».
+    openKeybindingSettings: (command) => {
+      if (performance.now() - (palette.openedAt() ?? 0) < CLICK_AFTER_OPEN_MS) {
+        palette.clearQuery();
+        return false;
+      }
+      // Со второго параметра раздел открывается сразу на строке команды.
+      void settingsModal.open('keybindings', command);
+      return true;
     },
   });
   document.body.appendChild(palette.element);
@@ -3313,6 +3357,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       aiEnabled: aiEnabled(),
     }),
     menuAnchor: menuButton,
+    // Настройки хранят только ПОДМЕНЫ; штатные сочетания берутся из дерева меню.
+    menuAccelerators: () => menuAccelerators(menuComboOverrides(settings.keybindings.overrides)),
     execute: (command, ...args) => commands.execute(command, ...args),
     runMenuRole: (role) => {
       void rpc.request('menu.role', { role });

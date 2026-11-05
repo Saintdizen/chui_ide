@@ -105,7 +105,7 @@ export interface SettingsModalView {
    * раздел: по нему ведёт подсказка («серверы выключены»). Без него открывается
    * тот раздел, где человек был в прошлый раз.
    */
-  open(sectionId?: SectionId): Promise<void>;
+  open(sectionId?: SectionId, focusCommand?: string): Promise<void>;
   close(): void;
   /** Текущее состояние из main (push `settings:changed`). */
   applySettings(settings: Settings): void;
@@ -219,7 +219,8 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     modal.close();
   }
 
-  async function open(sectionId?: SectionId): Promise<void> {
+  async function open(sectionId?: SectionId, focusCommand?: string): Promise<void> {
+    keybindingFocus = focusCommand ?? null;
     // Раздел — до первой отрисовки: `render` ниже берёт текущее значение.
     if (sectionId) section = sectionId;
     modal.open();
@@ -1442,6 +1443,12 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
    * полю — и нажмите нужные клавиши. Backspace снимает сочетание, Esc — отмена набора.
    * Поиск прячет строки на месте, не перерисовывая раздел.
    */
+  /**
+   * Команда, к которой надо подъехать в разделе клавиш (п.1: клик по сочетанию
+   * в палитре). `null` — открыть раздел как обычно.
+   */
+  let keybindingFocus: string | null = null;
+
   function renderKeybindings(): Child[] {
     // Два рода клавиш в одном списке: `command` — сочетание renderer, `menu:command` —
     // клавиша пункта меню (её держит Electron). Оба хранятся в одних переопределениях.
@@ -1583,8 +1590,18 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         entry.element.hidden = !visible[index];
       });
     };
+    // Пришли из палитры по клику на сочетание — сразу к этой строке: искать
+    // глазами в списке из сотни строк пришлось бы самому.
+    const focus = keybindingFocus;
+    keybindingFocus = null;
+    if (focus) filter.value = focus;
     filter.addEventListener('input', applyFilter);
     applyFilter();
+    if (focus) {
+      const row = entries.find((entry) => entry.rowId === focus || entry.rowId === menuBindingId(focus));
+      // Прокрутка после раскладки: до неё у строки нет места на экране.
+      if (row) requestAnimationFrame(() => row.element.scrollIntoView({ block: 'center' }));
+    }
 
     const head: Child[] = [
       filter,

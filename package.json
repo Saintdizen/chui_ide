@@ -53,6 +53,7 @@
     "smoke:edits": "tsc scripts/edits-check.ts --ignoreConfig --module commonjs --target es2020 --strict --outDir node_modules/.cache/edits-check && node node_modules/.cache/edits-check/scripts/edits-check.js",
     "smoke:launcher": "npm run build && electron scripts/launcher-smoke.cjs",
     "probe:browser-view": "npm run build && electron scripts/browser-view-probe.cjs",
+    "probe:shortcuts": "npm run build && electron scripts/shortcuts-probe.cjs",
     "probe:markdown": "npm run build && electron scripts/markdown-preview-probe.cjs",
     "probe:office": "npm run build && electron scripts/office-preview-probe.cjs",
     "probe:agents": "npm run build && electron scripts/agents-probe.cjs",

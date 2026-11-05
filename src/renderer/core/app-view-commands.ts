@@ -27,6 +27,8 @@ export interface AppViewDeps {
   /** Действие, которое умеет только main: буфер обмена, масштаб, окно. */
   runMenuRole(role: MenuRole): void;
   promptValue(options: { title: string; label: string; value?: string }): Promise<string | null>;
+  /** Подменённые сочетания пунктов меню из настроек (п.1: показать то, что сработает). */
+  menuAccelerators?: () => ReadonlyMap<string, string>;
   openBrowserPage(value: string): void;
   browserTabs: { readonly list: readonly unknown[]; closeAll(): void };
   rpc: { request(method: 'browser.viewCloseAll', payload: undefined): Promise<unknown> };
@@ -77,6 +79,9 @@ export function registerAppViewCommands(define: DefineCommand, deps: AppViewDeps
         execute: (command) => void deps.execute(command),
         runRole: (role) => deps.runMenuRole(role),
         // Галки считаются в момент показа: состояние меняется от нажатия к нажатию.
+        // Назначенное в настройках главнее штатного: меню обязано показать ту
+        // клавишу, которая действительно сработает.
+        ...(deps.menuAccelerators ? { accelerators: deps.menuAccelerators() } : {}),
         checks: menuChecks({
           sidebar: state.sidebarVisible,
           aiPanel: state.aiEnabled && state.rightVisible,
