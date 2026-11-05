@@ -79,7 +79,7 @@ import { countLines, plural, snippetFor, titleFrom } from './chat-text';
 import { createChatTabs, type ChatSearchHit } from './chat-tabs';
 import { createRunInspector } from './run-inspector';
 import { createChatPersistence, newChatUid } from './chat-persistence';
-import { chatExportFileName, chatToMarkdown } from '../../shared/chat-export';
+import { type ChatExportFormat, chatExportFileName, chatToJson, chatToMarkdown } from '../../shared/chat-export';
 import { segmentsOf } from '../../shared/chat-find';
 import { promptNeighbour } from '../../shared/chat-nav';
 import { createChatFindBar } from './chat-find-bar';
@@ -566,13 +566,17 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     focusInput: () => input.focus(),
   });
 
-  /** Контекстное меню вкладки беседы: выгрузить в .md или закрыть. */
+  /** Контекстное меню вкладки беседы: выгрузить в .md или .json, либо закрыть. */
   function openTabMenu(id: number, event: MouseEvent): void {
     showContextMenu(
       [
         {
           label: 'Экспорт в Markdown…',
-          onSelect: () => void exportSession(id),
+          onSelect: () => void exportSession(id, 'markdown'),
+        },
+        {
+          label: 'Экспорт в JSON…',
+          onSelect: () => void exportSession(id, 'json'),
         },
         {
           label: 'Закрыть беседу',
@@ -586,13 +590,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /**
-   * Экспорт беседы в `.md`: путь спрашивает main (`chat.export`), файл пишет он же.
+   * Экспорт беседы (`.md` или `.json`): путь спрашивает main (`chat.export`), файл
+   * пишет он же.
    *
    * Берём `transcript`, а не `history`: после сжатия в контексте осталось резюме,
    * и выгружать оттуда — значит отдать файл, где половины разговора нет. Именно ту
    * половину и хотят показать.
    */
-  async function exportSession(id: number): Promise<void> {
+  async function exportSession(id: number, format: ChatExportFormat = 'markdown'): Promise<void> {
     const session = sessions.find((item) => item.id === id);
     if (!session) return;
 
@@ -605,17 +610,21 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Дата — в экспорте и в имени файла: два выгруза одной беседы за разные дни
     // не должны затирать друг друга в папке загрузок.
     const today = new Date().toISOString().slice(0, 10);
-    const contents = chatToMarkdown(messages, {
+    const meta = {
       title: session.title,
       date: today,
       model: currentModel(),
       workspace: deps.workspace.root ?? undefined,
-    });
+    };
+    // Форматов два и они расходятся не вёрсткой, а смыслом: Markdown — чтобы
+    // показать человеку, JSON — чтобы разобрать скриптом. Общая у них только
+    // выборка сообщений (видна в chat-export).
+    const contents = format === 'json' ? chatToJson(messages, meta) : chatToMarkdown(messages, meta);
 
     try {
       const result = await deps.rpc.request('chat.export', {
         contents,
-        name: chatExportFileName(session.title, today),
+        name: chatExportFileName(session.title, today, format),
       });
       // Отмена в диалоге — не ошибка и не повод для тоста.
       if (result.path) showToast(`Беседа выгружена: ${result.path}`, 'info');

@@ -46,10 +46,13 @@ export function registerDialogMethods(router: RpcRouter, deps: RpcServices): voi
   });
 
   router.register('chat.export', async (params: ParamsOf<'chat.export'>, ctx) => {
+    // Фильтр — по расширению, которое уже в имени: renderer выбрал формат
+    // (Markdown или JSON), и второе поле в протоколе было бы дублем.
+    const json = /\.[jJ][sS][oO][nN]$/.test(params.name);
     const result = await dialog.showSaveDialog(senderWindow(ctx), {
       title: 'Экспорт беседы',
       defaultPath: params.name,
-      filters: [{ name: 'Markdown', extensions: ['md'] }],
+      filters: [json ? { name: 'JSON', extensions: ['json'] } : { name: 'Markdown', extensions: ['md'] }],
     });
     if (result.canceled || !result.filePath) return { path: null };
     await fs.writeFile(result.filePath, params.contents, 'utf8');

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../src/shared/api';
-import { chatExportFileName, chatToMarkdown } from '../src/shared/chat-export';
+import { chatExportFileName, chatToJson, chatToMarkdown } from '../src/shared/chat-export';
 
 /**
  * Экспорт беседы в Markdown.
@@ -93,6 +93,38 @@ describe('chatToMarkdown', () => {
   });
 });
 
+describe('chatToJson', () => {
+  it('разбирается парсером и держит поля как есть', () => {
+    const json = JSON.parse(
+      chatToJson([user('поправь'), assistant('', { toolCalls: [{ id: '1', name: 'edit_file', arguments: '{}' }] })], {
+        title: 'Правка',
+        date: '2026-11-05',
+        model: 'gpt-5',
+      }),
+    );
+
+    expect(json.title).toBe('Правка');
+    expect(json.date).toBe('2026-11-05');
+    expect(json.model).toBe('gpt-5');
+    expect(json.messages).toHaveLength(2);
+    expect(json.messages[0]).toEqual({ role: 'user', content: 'поправь' });
+    expect(json.messages[1].toolCalls[0].name).toBe('edit_file');
+  });
+
+  it('пустые поля беседы не появляются вовсе', () => {
+    const json = JSON.parse(chatToJson([user('a')], { title: 'т' }));
+    expect('date' in json).toBe(false);
+    expect('model' in json).toBe(false);
+    expect('workspace' in json).toBe(false);
+  });
+
+  it('выборка сообщений та же, что у Markdown: дострой и пустышки не идут', () => {
+    const messages = [user('Продолжи с того места, где остановился.'), user('  '), assistant('ответ')];
+    const json = JSON.parse(chatToJson(messages, { title: 'т' }));
+    expect(json.messages).toEqual([{ role: 'assistant', content: 'ответ' }]);
+  });
+});
+
 describe('chatExportFileName', () => {
   it('чистит символы, недопустимые в имени файла', () => {
     // Заголовок беседы — первая строка вопроса: в нём запросто окажется `/` или `:`.
@@ -108,6 +140,12 @@ describe('chatExportFileName', () => {
   it('без заголовка даёт имя, а не голое «.md»', () => {
     expect(chatExportFileName('   ')).toBe('Беседа.md');
     expect(chatExportFileName('...')).toBe('Беседа.md');
+  });
+
+  it('по формату меняет расширение', () => {
+    expect(chatExportFileName('беседа', '2026-11-03', 'json')).toBe('беседа (2026-11-03).json');
+    expect(chatExportFileName('беседа', undefined, 'json')).toBe('беседа.json');
+    expect(chatExportFileName('беседа', undefined, 'markdown')).toBe('беседа.md');
   });
 
   it('обрезает длинный заголовок', () => {

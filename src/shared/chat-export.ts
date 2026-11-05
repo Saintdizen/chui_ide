@@ -42,6 +42,9 @@ const FOOTER = '---\n\nСгенерировано chui_iDE.';
  */
 const CONTINUE_PROMPT = 'Продолжи с того места, где остановился.';
 
+/** Формат выгрузки: человеку показать — Markdown, прогнать скриптом — JSON. */
+export type ChatExportFormat = 'markdown' | 'json';
+
 /**
  * Заголовки по ролям. Системных сообщений в переписке не бывает (они собираются
  * на отправке), а `tool` — это результат вызова; его место отдельной плашкой,
@@ -53,6 +56,22 @@ const ROLE_HEADING: Record<string, string> = {
   tool: 'Результат инструмента',
   system: 'Система',
 };
+
+/**
+ * Что попадает в выгрузку — общее для обоих форматов: иначе JSON и Markdown
+ * разошлись бы в том, какое сообщение считается пустым.
+ */
+function visibleMessages(messages: readonly ChatMessage[], withImages: boolean): ChatMessage[] {
+  return messages.filter(
+    (message) =>
+      // Служебный дострой — не вопрос человека.
+      !(message.role === 'user' && message.content === CONTINUE_PROMPT) &&
+      // Пустое сообщение без вызовов, картинок и текста выводить нечего.
+      (message.content.trim().length > 0 ||
+        (message.toolCalls?.length ?? 0) > 0 ||
+        (withImages && (message.images?.length ?? 0) > 0)),
+  );
+}
 
 export function chatToMarkdown(
   messages: readonly ChatMessage[],
@@ -72,15 +91,7 @@ export function chatToMarkdown(
   if (meta.workspace?.trim()) facts.push(`- **Папка:** \`${meta.workspace.trim()}\``);
   if (facts.length > 0) lines.push(...facts, '');
 
-  const visible = messages.filter(
-    (message) =>
-      // Служебный дострой — не вопрос человека.
-      !(message.role === 'user' && message.content === CONTINUE_PROMPT) &&
-      // Пустое сообщение без вызовов, картинок и текста выводить нечего.
-      (message.content.trim().length > 0 ||
-        (message.toolCalls?.length ?? 0) > 0 ||
-        (withImages && (message.images?.length ?? 0) > 0)),
-  );
+  const visible = visibleMessages(messages, withImages);
 
   if (visible.length === 0) lines.push('_В беседе ещё нет сообщений._', '');
 
@@ -115,13 +126,41 @@ export function chatToMarkdown(
 }
 
 /**
+ * Беседа в JSON — для скриптов и повторной загрузки, а не для чтения глазами.
+ *
+ * Поэтому сообщения идут без заголовков и вёрстки, зато с полями как есть:
+ * роль, текст, картинки, вызовы инструментов. `JSON.stringify(…, null, 2)` —
+ * файл должен читаться и без парсера.
+ */
+export function chatToJson(
+  messages: readonly ChatMessage[],
+  meta: ChatExportMeta,
+  options: ChatExportOptions = {},
+): string {
+  const withImages = options.images !== false;
+  const document = {
+    title: meta.title.trim() || 'Беседа',
+    ...(meta.date?.trim() ? { date: meta.date.trim() } : {}),
+    ...(meta.model?.trim() ? { model: meta.model.trim() } : {}),
+    ...(meta.workspace?.trim() ? { workspace: meta.workspace.trim() } : {}),
+    messages: visibleMessages(messages, withImages).map((message) => ({
+      role: message.role,
+      content: message.content,
+      ...(withImages && (message.images?.length ?? 0) > 0 ? { images: message.images } : {}),
+      ...((message.toolCalls?.length ?? 0) > 0 ? { toolCalls: message.toolCalls } : {}),
+    })),
+  };
+  return `${JSON.stringify(document, null, 2)}\n`;
+}
+
+/**
  * Имя файла для диалога сохранения: из заголовка, без запрещённых символов.
  *
  * Заголовок беседы — первая строка вопроса, и в нём запросто окажется `/` или
  * `:`. С таким именем диалог сохранения покажет пустое поле или того хуже
  * предложит неверный путь.
  */
-export function chatExportFileName(title: string, date?: string): string {
+export function chatExportFileName(title: string, date?: string, format: ChatExportFormat = 'markdown'): string {
   const clean = title
     .normalize('NFKC')
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
@@ -131,5 +170,6 @@ export function chatExportFileName(title: string, date?: string): string {
     .replace(/[. ]+$/, '');
   // Пустой заголовок — не повод для ошибки: диалогу нужно хоть какое-то имя.
   const base = clean.length > 0 ? clean.slice(0, 80) : 'Беседа';
-  return date?.trim() ? `${base} (${date.trim()}).md` : `${base}.md`;
+  const ext = format === 'json' ? 'json' : 'md';
+  return date?.trim() ? `${base} (${date.trim()}).${ext}` : `${base}.${ext}`;
 }
