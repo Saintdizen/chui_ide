@@ -20,7 +20,44 @@ import { encodeKey, encodeMouse, encodePaste, isPasteStroke } from '../terminal/
 import { TermView } from '../terminal/view/term-view';
 import { shortcutKey } from '../../shared/physical-key';
 import { h, svgIcon } from './dom';
+import { showPopupMenu, type PopupMenuItem } from './popup-menu';
 import { showToast } from './toast';
+
+/**
+ * Пункты меню по правому клику в консоли.
+ *
+ * Нарочно чистая: порядок и доступность пунктов видны из данных, а не только
+ * через живой pty. Пять действий — ровно те, что есть у клавиш и кнопок;
+ * третьего набора поведения не заводим (п.5).
+ *
+ * «Копировать» гаснет без выделения, а не пропадает: пропавший пункт двигал
+ * бы остальные под курсором (п.9 — пункты с сочетанием, разделители по смыслу).
+ */
+export interface TerminalMenuActions {
+  hasSelection: boolean;
+  /** Процесс закончился: завершать нечего, пункт гаснет, но остаётся на месте. */
+  exited: boolean;
+  copy(): void;
+  paste(): void;
+  find(): void;
+  clear(): void;
+  kill(): void;
+}
+
+export function terminalMenuItems(actions: TerminalMenuActions): PopupMenuItem[] {
+  return [
+    // Вставка и копирование — одна группа: работа с буфером.
+    { label: 'Копировать', hint: 'Ctrl+Shift+C', enabled: actions.hasSelection, onSelect: actions.copy },
+    { label: 'Вставить', hint: 'Ctrl+V', onSelect: actions.paste },
+    { separator: true },
+    // Найти и очистить — действия над экраном, а не над буфером.
+    { label: 'Найти в консоли', hint: 'Ctrl+F', onSelect: actions.find },
+    { label: 'Очистить экран', onSelect: actions.clear },
+    { separator: true },
+    // Последним, в опасной группе: уводит из запущенной программы.
+    { label: 'Завершить процесс', danger: true, enabled: !actions.exited, onSelect: actions.kill },
+  ];
+}
 
 export interface TerminalPanelView {
   element: HTMLElement;
@@ -42,7 +79,6 @@ export interface TerminalPanelView {
   /** Пересчитать размер: вызывать, когда панель стала видимой. */
   fit(): void;
   /** Сменить палитру консоли вместе с темой приложения. */
-  /** Перечитать палитру консоли после смены темы. */
   refreshTheme(): void;
   /** Включить или выключить лигатуры — по общей настройке редактора. */
   setLigatures(on: boolean): void;
@@ -262,6 +298,7 @@ export function createTerminalPanel(deps: {
       tabsHost.appendChild(tab);
 
       bindInput(entry);
+      bindMenu(entry);
 
       for (const chunk of orphanData.get(session.id) ?? []) term.write(chunk);
       orphanData.delete(session.id);
@@ -315,6 +352,40 @@ export function createTerminalPanel(deps: {
         if (text) writePaste(entry, text);
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * Меню консоли по правому клику.
+   *
+   * Его не было вообще: люди шли в хоткеи или в кнопки панели, а привычное
+   * место действий над консолью было пустым. Пункты — те же, что у клавиш и
+   * кнопок: третий набор поведения не заводим.
+   *
+   * «Копировать» — по выделению, а не по «есть ли в экране буквы»: в терминале
+   * `Ctrl+C` — сигнал, поэтому без меню выделенное не скопировать с мыши.
+   */
+  function bindMenu(entry: SessionView): void {
+    entry.view.element.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      showPopupMenu(
+        terminalMenuItems({
+          hasSelection: entry.view.hasSelection(),
+          exited: entry.exited,
+          copy: () => {
+            const text = entry.view.selectedText();
+            if (!text) return;
+            void navigator.clipboard.writeText(text).catch(() => undefined);
+            entry.view.clearSelection();
+          },
+          paste: () => pasteFromClipboard(entry),
+          find: () => openFind(),
+          clear: () => clearActive(),
+          kill: () => void killActive(),
+        }),
+        event.clientX,
+        event.clientY,
+      );
+    });
   }
 
   /** Клавиатура и вставка: событие с вида кодируется в байты и уходит в pty. */
