@@ -12,6 +12,22 @@ import type { Keybinding } from './keybindings';
  * Сочетание из этого списка человек может изменить в настройках; изменённое
  * накладывается сверху (`KeybindingService.effective`).
  */
+/**
+ * Команды, у которых клавиша есть И в меню, и здесь, но разные.
+ *
+ * Это не ошибка, а два входа: акселератор меню срабатывает всегда (даже когда
+ * фокус в дочернем окне), а здешняя клавиша — привычная тому, кто живёт в окне.
+ * В один список их не свести: у команды одна изменяемая клавиша. Поэтому пара
+ * объявлена здесь, и проверка `tests/keybindings-coherence.test.ts` считает
+ * расхождение допустимым только для перечисленных.
+ */
+export const SHARED_WITH_MENU: readonly { command: string; why: string }[] = [
+  {
+    command: 'search.project',
+    why: 'Ctrl+Shift+F — как принято в IDE; Alt+2 — рядом с Alt+1 среди представлений',
+  },
+];
+
 export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { combo: 'Alt+1', command: 'view.showExplorer' },
   { combo: 'Alt+2', command: 'search.project' },

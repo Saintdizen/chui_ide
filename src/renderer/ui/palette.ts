@@ -1,5 +1,5 @@
 import type { CommandDescriptor, CommandRegistry } from '../core/commands';
-import { rankCommands } from '../core/palette-rank';
+import { rankCommandMatches, type RankedCommand } from '../core/palette-rank';
 import { orderByRecent } from '../core/recent-commands';
 import { clear, h } from './dom';
 import { focusOwner, returnFocus } from './focus-return';
@@ -41,8 +41,12 @@ export function createPalette(deps: {
   const list = h('div', { class: 'palette-list' });
   const overlay = h('div', { class: 'overlay', hidden: true }, h('div', { class: 'palette' }, input, list));
 
-  let matches: CommandDescriptor[] = [];
+  // Совпадения вместе с тем, что подсветить: две формы одного списка
+  // разошлись бы на первой же правке.
+  let matches: RankedCommand[] = [];
   let cursor = 0;
+  /** Последний нарисованный заголовок группы: повтор подряд — это шум. */
+  let lastHeader = '';
 
   const run = (descriptor: CommandDescriptor): void => {
     // Недоступную команду не запускаем ни кликом, ни Enter: она уже показана серой.
@@ -52,20 +56,59 @@ export function createPalette(deps: {
     void deps.commands.execute(descriptor.id);
   };
 
+  /**
+   * Название с подсвеченными буквами. Позиции — индексы символов названия,
+   * уже переведённые из свёрнутой формы в исходную (`palette-rank`).
+   */
+  const highlighted = (title: string, positions: readonly number[]): (Node | string)[] => {
+    if (positions.length === 0) return [title];
+    const hits = new Set(positions);
+    const parts: (Node | string)[] = [];
+    let plain = '';
+    [...title].forEach((char, index) => {
+      if (hits.has(index)) {
+        if (plain) parts.push(plain);
+        plain = '';
+        parts.push(h('mark', {}, char));
+        return;
+      }
+      plain += char;
+    });
+    if (plain) parts.push(plain);
+    return parts;
+  };
+
   const render = (): void => {
     clear(list);
+    lastHeader = '';
     const query = input.value.trim();
     const recent = deps.recent?.ids() ?? [];
     // Без запроса ищем по истории: человек, живущий в двух командах, не должен
     // каждый раз искать их заново. С запросом порядок задаёт совпадение —
     // иначе редкая команда с точным совпадением пряталась бы под привычными.
-    matches =
-      rankCommands(deps.commands.list(), query, recent, MAX_ITEMS) ??
-      orderByRecent(deps.commands.list(), recent).slice(0, MAX_ITEMS);
+    const ranked = rankCommandMatches(deps.commands.list(), query, recent, MAX_ITEMS);
+    matches = ranked
+      ? [...ranked]
+      : orderByRecent(deps.commands.list(), recent)
+          .slice(0, MAX_ITEMS)
+          .map((descriptor) => ({ descriptor, positions: [] }));
 
     cursor = Math.min(cursor, Math.max(matches.length - 1, 0));
 
-    matches.forEach((descriptor, index) => {
+    // Заголовки групп — только без запроса: с запросом порядок задаёт
+    // релевантность, и заголовок разорвал бы её. А пустой экран — это больше
+    // двухсот команд подряд, и категории в нём единственный ориентир.
+    const grouped = query === '';
+    const pinned = new Set(recent);
+
+    matches.forEach(({ descriptor, positions }, index) => {
+      if (grouped) {
+        const header = pinned.has(descriptor.id) ? 'Недавние' : descriptor.category;
+        if (header !== lastHeader) {
+          lastHeader = header;
+          list.appendChild(h('div', { class: 'palette-group' }, header));
+        }
+      }
       const disabled = !deps.commands.isEnabled(descriptor.id);
       const item = h(
         'button',
@@ -74,8 +117,11 @@ export function createPalette(deps: {
           type: 'button',
           disabled,
         },
-        h('span', { class: 'palette-item-title' }, descriptor.title),
-        h('span', { class: 'palette-item-category' }, descriptor.category),
+        // Подсветка — ответ на «почему эта команда тут»: без неё нечёткое
+        // совпадение (`свн`) выглядит как случайная строка в списке.
+        h('span', { class: 'palette-item-title' }, ...highlighted(descriptor.title, positions)),
+        // Категория у пункта не нужна, когда она уже стоит заголовком группы.
+        grouped ? null : h('span', { class: 'palette-item-category' }, descriptor.category),
         descriptor.keybinding ? h('span', { class: 'palette-item-key' }, descriptor.keybinding) : null,
       );
       item.addEventListener('click', () => run(descriptor));
@@ -108,8 +154,8 @@ export function createPalette(deps: {
       render();
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      const descriptor = matches[cursor];
-      if (descriptor) run(descriptor);
+      const picked = matches[cursor];
+      if (picked) run(picked.descriptor);
     } else if (event.key === 'Escape') {
       event.preventDefault();
       close();

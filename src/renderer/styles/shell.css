@@ -1152,6 +1152,17 @@ body > .overlay {
   padding: 6px;
 }
 
+/* Заголовок группы: без запроса в палитре больше двухсот команд, и категория —
+   единственный ориентир, по которому видно, где кончается одна и начинается другая. */
+.palette-group {
+  padding: 6px 10px 2px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .palette-item {
   display: flex;
   align-items: center;
@@ -1183,6 +1194,14 @@ body > .overlay {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* Буквы, по которым нашлось: нечёткое совпадение иначе выглядит случайным. */
+.palette-item-title mark {
+  padding: 0;
+  border-radius: var(--radius_xs);
+  background: var(--highlight_background);
+  color: inherit;
 }
 
 /* Вид символа («класс», «функция») — короткая подпись перед путём. */
