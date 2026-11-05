@@ -38,6 +38,7 @@ import type { CursorStyle } from '../../../shared/cursor-style';
 import { measureFont, monospaceMetrics, type GlyphMetrics } from './glyph-metrics';
 import { scrollFinished, scrollStep } from './smooth-scroll';
 import { columnForX, layoutLine, xForColumn } from './line-layout';
+import { indentGuides } from './indent-guides';
 import { FileDecorations, squigglyRect, type LensDecoration, type LinkDecoration } from './decorations';
 import { offsetsAt } from '../../../shared/text-offsets';
 import { findBracketPair, findOccurrences, type BracketPair } from './context-highlight';
@@ -1396,6 +1397,11 @@ export class EditorView {
     if (cursor < to) pieces.push({ start: cursor, end: to, role: null });
     if (pieces.length === 0) pieces.push({ start: from, end: to, role: null });
 
+    // Направляющие отступов — первыми: они фон, текст идёт поверх. Рисуем только по
+    // живому отступу строки (см. `indent-guides.ts`), а закрывающие скобки подтягиваем к
+    // глубине предыдущей строки — иначе линия обрывалась бы ровно на `}`.
+    this.appendIndentGuides(fragment, text, line);
+
     // Семантические токены сервера — поверх грамматики: где он высказался, его роль важнее.
     const semantic = this.semantic.get(line0);
     const finalPieces = semantic ? overlayRanges(pieces, semantic) : pieces;
@@ -1453,6 +1459,19 @@ export class EditorView {
     }
 
     row.replaceChildren(fragment);
+  }
+
+  /** Номер строки — с единицы, как у буфера: от него же берётся предыдущая строка. */
+  private appendIndentGuides(fragment: DocumentFragment, text: string, line: number): void {
+    const options = { indentSize: this.metrics.tabSize };
+    const previous = line > 1 ? this.buffer.lineText(line - 1) : null;
+    const guides = indentGuides(text, options, this.offsetsFor(line - 1), this.metrics.charWidth, previous);
+    for (const guide of guides) {
+      const span = document.createElement('span');
+      span.className = `${ROOT_CLASS}-indent-guide`;
+      span.style.left = `${guide.x}px`;
+      fragment.append(span);
+    }
   }
 
   /** Добавить вставки-подсказки, привязанные к этой границе строки (их может быть несколько). */
