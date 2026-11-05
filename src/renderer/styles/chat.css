@@ -1929,6 +1929,50 @@
   border-top: 1px solid var(--separator_color);
 }
 
+/*
+ * Чем кончился прогон — последнее, что читают в ленте, поэтому блок стоит
+ * последним и отделён чертой. Цвет — только по краю: это не тревога на весь
+ * экран (работа уже остановилась), а пометка, к чему вернуться.
+ */
+.run-end {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background_2);
+  border-left: 3px solid var(--separator_color);
+}
+
+.run-end.is-failed {
+  border-left-color: var(--severity_error);
+}
+
+.run-end.is-stopped {
+  border-left-color: var(--severity_warning);
+}
+
+.run-end-title {
+  font-weight: 600;
+  color: var(--text_color);
+}
+
+.run-end-detail {
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.run-end-fact {
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+/* «Ничего не изменилось» — факт, но не тревожный: так и задумано. */
+.run-end-fact.is-none {
+  color: var(--text_color_tertiary);
+}
+
 /* ── вопрос агента человеку ─────────────────────────────────────────────── */
 
 /* Вопрос — не подтверждение: синяя рамка вместо жёлтой. Жёлтый — «деструктивное

@@ -24,6 +24,7 @@ import type { createMarkdownRenderer } from './chat-markdown';
 import type { ChatSession } from './chat-session';
 import { createToolFeed, toolLabel, type ReasoningRowView, type ToolCardView } from './chat-tools';
 import { createStreamDedupe } from './stream-dedupe';
+import type { RunEndHow } from './run-end';
 import { clear, h, svgIcon } from './dom';
 import { showToast } from './toast';
 
@@ -97,6 +98,13 @@ export interface StreamHost {
   continueAnswer(): void;
   /** Пост-обработка конца потока: вкладки, инфо о сессии, сохранение. */
   afterStream(session: ChatSession): void;
+  /**
+   * Лента кончилась неудачно: показать в ней, почему и что успело остаться.
+   *
+   * Зовётся из самого прогона, а не из `finishRun`: тот видит только `setBusy`,
+   * а причина (ошибка или отмена) известна только здесь и только в этот момент.
+   */
+  runEndNote(session: ChatSession, how: RunEndHow, reason?: string): void;
   /**
    * Открыть файл-результат агента (show с action present) — как клик по файлу.
    * Место необязательно: `present` его присылает, только если модель назвала строку.
@@ -481,10 +489,13 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         segment.appendChild(h('div', { class: 'field-hint' }, 'генерация остановлена'));
         // Оборвали с самого начала — текста нет, и пустой реплике в истории не место.
         if (buffer) session.history.push({ role: 'assistant', content: buffer });
+        host.runEndNote(session, 'stopped');
       } else {
         clear(segment);
         segment.appendChild(h('p', { class: 'msg-error' }, error instanceof Error ? error.message : String(error)));
         showToast('Не удалось получить ответ модели', 'error');
+        // Сводка идёт после строки ошибки: сначала что случилось, потом — что от работы осталось.
+        host.runEndNote(session, 'failed', error instanceof Error ? error.message : String(error));
       }
     } finally {
       // Прогон кончился — заслон больше не нужен: следующий начнётся с шага 1

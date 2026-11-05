@@ -54,6 +54,7 @@ import {
 import { MAX_RUN_ARTIFACTS, type RunArtifacts } from '../core/artifacts';
 import { createToolFeed, type ToolCardView } from './chat-tools';
 import { createRunFold, nextFoldIcon, nextFoldLabel } from './run-fold';
+import { runEndReport, type RunEndFile, type RunEndHow, type RunEndReport } from './run-end';
 import { createMarkdownRenderer } from './chat-markdown';
 import { createChatComposer } from './chat-composer';
 import { createComposerMenu } from './chat-composer-menu';
@@ -2191,6 +2192,29 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /* ── отправка ──────────────────────────────────────────────────────────── */
 
+  /**
+   * Сводка «чем кончилось» в конец ленты беседы.
+   *
+   * Показывается только при падении и остановке: удачный прогон и так виден —
+   * ответом и сделанными делами, а лишняя плашка в конце каждого раза была бы
+   * шумом. Своя для каждой беседы: прогоны в разных вкладках не смешиваются.
+   */
+  function threadEnd(session: ChatSession, how: RunEndHow, report: RunEndReport): void {
+    const block = h(
+      'div',
+      { class: `run-end is-${how}` },
+      h('div', { class: 'run-end-title' }, report.title),
+      h('div', { class: 'run-end-detail' }, report.detail),
+      ...(report.hasWork
+        ? report.facts.map((fact) => h('div', { class: 'run-end-fact' }, fact))
+        : [h('div', { class: 'run-end-fact is-none' }, 'Ничего не изменилось: файлов не трогали.')]),
+    );
+    session.thread.append(block);
+    // Конец прогона — событие, о котором можно не узнать, если смотреть выше.
+    // Прокрутка сама решит, активна ли эта вкладка и можно ли дёргать ленту.
+    scrollToEnd(session);
+  }
+
   /** Текст ответа из всех его сегментов — для «Копировать». */
   function assistantText(messageEl: HTMLElement): string {
     return [...messageEl.querySelectorAll('.msg-body')]
@@ -2987,6 +3011,43 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       renderChanges();
       syncSessionInfo();
       scheduleSave();
+    },
+    /*
+      Что осталось сделанным — прямо в ленте.
+
+      Собираем из того, что беседа уже знает: несохранённые правки (их надо
+      заметить первыми — они пропадут при закрытии окна), изменения файлов из
+      инструментов и предъявленные заметки. Ничего дополнительно не спрашиваем:
+      в момент падения ещё один запрос — лишняя точка отказа.
+    */
+    runEndNote: (session, how, reason) => {
+      const unsaved = [...session.touched.keys()].filter(
+        (path) => deps.documents.get(path)?.dirty === true,
+      );
+      // Правки буфера — отдельная карта с путём в ключе: у `ToggledFile`
+      // самого пути нет, его держит `touched`.
+      const unsavedPaths = new Set(unsaved);
+      const unsavedFiles: RunEndFile[] = [...session.touched.keys()].map((path) => ({
+        path,
+        kind: 'edited' as const,
+      }));
+      // Файловые операции — создано/удалено/перемещено: другой вид следа,
+      // и складывать его с правками в одно «изменено» нельзя.
+      const fileOps: RunEndFile[] = session.files.map((file) => ({ path: file.path, kind: file.kind }));
+      const files = [...fileOps, ...unsavedFiles.filter((file) => !unsavedPaths.has(file.path))];
+      const report = runEndReport({
+        how,
+        reason,
+        unsaved,
+        files,
+        artifacts: (session.artifacts ?? []).map((artifact) => artifact.path),
+      });
+      // Куда вставить: в конец ленты текущей беседы — сразу под ошибкой или
+      // пометкой об остановке. Беседа могла уже закрыться, пока прогон шёл:
+      // тогда показывать некому, и сводка не нужна — история всё равно не та.
+      const target = sessions.find((item) => item.id === session.id);
+      if (!target) return;
+      threadEnd(target, how, report);
     },
     modes: () => composer.modes(),
   });
