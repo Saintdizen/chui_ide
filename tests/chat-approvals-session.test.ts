@@ -39,7 +39,9 @@ describe('карточка решения знает свою беседу', () 
     const { host, mounted } = harness();
     const review = createEditReview(host);
     const target = session(7);
-    const edits: FileEdit[] = [{ path: 'a.ts', edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'a' }] }];
+    const edits: FileEdit[] = [
+      { path: 'a.ts', edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'a' }] },
+    ];
 
     const pending = review.review(edits, target);
     await tick();
@@ -69,7 +71,9 @@ describe('карточка решения знает свою беседу', () 
   it('без беседы адрес пуст — панель возьмёт открытую', async () => {
     const { host, mounted } = harness();
     const review = createEditReview(host);
-    const edits: FileEdit[] = [{ path: 'a.ts', edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'a' }] }];
+    const edits: FileEdit[] = [
+      { path: 'a.ts', edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'a' }] },
+    ];
 
     const pending = review.review(edits);
     await tick();
