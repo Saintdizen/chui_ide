@@ -151,9 +151,10 @@ button.status-item:focus-visible {
   cursor: pointer;
 }
 
+/* Подсветка при наведении — только цвет: заливку сосед не берёт, чтобы не
+   спорить с кнопкой окружения, стоящей рядом в той же полосе. */
 .status-no-highlight:hover {
-  color: var(--text_color_primary);
-  background: var(--element_background_hover);
+  color: var(--text_color_secondary);
 }
 
 /* Окружение Python — кнопка: клик открывает попап с подробностями. */

@@ -23,6 +23,7 @@ import { RpcError } from '../core/rpc';
 import type { createMarkdownRenderer } from './chat-markdown';
 import type { ChatSession } from './chat-session';
 import { createToolFeed, toolLabel, type ReasoningRowView, type ToolCardView } from './chat-tools';
+import { createStreamDedupe } from './stream-dedupe';
 import { clear, h, svgIcon } from './dom';
 import { showToast } from './toast';
 
@@ -225,6 +226,11 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     /** Размышления текущего шага: строка живёт в той же ленте, что и вызовы. */
     let reasoningView: ReasoningRowView | null = null;
     const toolCards = new Map<string, ToolCardView>();
+    /**
+     * Заслон от повторов. Одна лента — один заслон: два прогона в разных
+     * вкладках не должны делить память о своих шагах.
+     */
+    const dedupe = createStreamDedupe();
     /** Размышления: строка живёт в ленте действий — заводим её лениво. */
     const pushReasoning = (text: string): void => {
       (reasoningView ??= tools.reasoning()).push(text);
@@ -278,6 +284,11 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             conversationUid: session.uid,
           },
           (event, payload) => {
+            // Повтор после переподключения или второй подписки — одно событие
+            // должно дать одно действие в ленте: иначе две карточки одного
+            // вызова, два «шаг 7», две паузы. Заслон знает, что несёт
+            // идентичность, а что — просто текст.
+            if (!dedupe.accept(event, payload)) return;
             if (event === ChatStreamEvent.Reasoning) {
               pushReasoning((payload as ChatReasoningPayload).text);
               activity.state('размышляет…');
@@ -473,6 +484,10 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         showToast('Не удалось получить ответ модели', 'error');
       }
     } finally {
+      // Прогон кончился — заслон больше не нужен: следующий начнётся с шага 1
+      // и тех же номеров вызовов. Иначе первый же шаг нового прогона утонул бы
+      // в памяти прошлого и не дошёл до ленты.
+      dedupe.reset();
       host.hidePlan(session);
       activity.dispose();
       // Строка ушла вместе с прогоном: пауза, пришедшая после конца, ей не адресована.
