@@ -95,13 +95,81 @@ describe('registerFormatCommands', () => {
 
   it('нет инструмента в проекте — «unavailable», а не «менять нечего»', async () => {
     const { deps, doc } = setup({ rpcAnswer: null });
-    expect(await formatDocument(deps, doc as never)).toBe('unavailable');
+    expect((await formatDocument(deps, doc as never)).outcome).toBe('unavailable');
   });
 
   it('форматтер вернул тот же текст — «unchanged», текст не переписываем', async () => {
     const { deps, doc } = setup({ rpcAnswer: { tool: 'ruff', text: 'x=1' } });
-    expect(await formatDocument(deps, doc as never)).toBe('unchanged');
+    expect((await formatDocument(deps, doc as never)).outcome).toBe('unchanged');
     expect(doc.value).toBe('x=1');
+  });
+});
+
+describe('кто форматирует (настройка `editor.formatter`)', () => {
+  it('auto: сервер и инструмент умеют — берёт сервер, инструмент не зовёт', async () => {
+    const { deps, doc } = setup({
+      serverDocument: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 4, newText: 'x = 1' }],
+      rpcAnswer: { tool: 'ruff', text: 'ДРУГОЕ' },
+    });
+    let toolCalled = false;
+    (deps.rpc as { request: () => Promise<unknown> }).request = async () => {
+      toolCalled = true;
+      return { tool: 'ruff', text: 'ДРУГОЕ' };
+    };
+    expect((await formatDocument(deps, doc as never)).outcome).toBe('changed');
+    expect(doc.value).toBe('x = 1');
+    expect(toolCalled).toBe(false);
+  });
+
+  it('auto: сервер молчит — добирает инструментом', async () => {
+    const { deps, doc } = setup({ serverDocument: [], rpcAnswer: { tool: 'prettier', text: 'x = 1;' } });
+    expect((await formatDocument(deps, doc as never)).outcome).toBe('changed');
+    expect(doc.value).toBe('x = 1;');
+  });
+
+  it('lsp: инструмент не зовётся, даже когда сервер молчит', async () => {
+    const { deps, doc } = setup({ serverDocument: [], rpcAnswer: { tool: 'ruff', text: 'ДРУГОЕ' } });
+    let toolCalled = false;
+    (deps.rpc as { request: () => Promise<unknown> }).request = async () => {
+      toolCalled = true;
+      return { tool: 'ruff', text: 'ДРУГОЕ' };
+    };
+    (deps as { formatter?: unknown }).formatter = () => 'lsp';
+    expect((await formatDocument(deps, doc as never)).outcome).toBe('unavailable');
+    expect(toolCalled).toBe(false);
+    expect(doc.value).toBe('x=1');
+  });
+
+  it('tool: сервер не зовётся, даже когда он умеет', async () => {
+    const { deps, doc } = setup({ rpcAnswer: { tool: 'ruff', text: 'x = 1' } });
+    let serverCalled = false;
+    deps.lsp.formatDocument = async () => {
+      serverCalled = true;
+      return [];
+    };
+    (deps as { formatter?: unknown }).formatter = () => 'tool';
+    expect((await formatDocument(deps, doc as never)).outcome).toBe('changed');
+    expect(doc.value).toBe('x = 1');
+    expect(serverCalled).toBe(false);
+  });
+
+  it('выбранный источник недоступен — причина в отчёте, а не молчаливая подмена', async () => {
+    // Выбран инструмент, а в проекте его нет (rpc вернул null), сервер при этом умеет.
+    const { deps, doc } = setup({ rpcAnswer: null, serverDocument: [] });
+    (deps as { formatter?: unknown }).formatter = () => 'tool';
+    const result = await formatDocument(deps, doc as never);
+    expect(result.outcome).toBe('unavailable');
+    expect(result.problem).toContain('Инструмент проекта не найден');
+    expect(doc.value).toBe('x=1');
+  });
+
+  it('выбрал сервер, а тот не умеет — говорит об этом, инструмент молчит', async () => {
+    const { deps, doc } = setup({ rpcAnswer: { tool: 'ruff', text: 'ДРУГОЕ' } });
+    (deps as { formatter?: unknown }).formatter = () => 'lsp';
+    (deps as { lspCanFormat?: unknown }).lspCanFormat = () => false;
+    const result = await formatDocument(deps, doc as never);
+    expect(result.outcome).toBe('unavailable');
+    expect(result.problem).toContain('не умеет форматировать');
   });
 });
 

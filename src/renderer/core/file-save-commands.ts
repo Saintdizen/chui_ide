@@ -25,6 +25,11 @@ export interface FileSaveDeps {
   saveDocument(document: TextDocument): Promise<boolean>;
   saveDocumentAs(document: TextDocument): Promise<boolean>;
   revertFilesToDisk(targets: readonly string[]): Promise<void>;
+  /**
+   * Отформатировать буфер. Не задано — «Сохранить с форматированием» не появляется:
+   * без этого руками опции её делать нечем.
+   */
+  formatDocument?(document: TextDocument): Promise<{ outcome: string; problem: string | null }>;
   showToast(message: string, kind?: ToastKind, options?: ToastOptions): void;
 }
 
@@ -85,6 +90,33 @@ export function registerFileSaveCommands(define: DefineCommand, deps: FileSaveDe
         return;
       }
       for (const document of dirty) await saveDocument(document);
+    },
+  );
+
+  // Сохранение и форматирование — ОДНИМ действием, а не два шага подряд.
+  // Человек, однажды включив `formatOnSave`, ждёт от Ctrl+Alt+F именно этого, и
+  // важно одно: на диск уходит уже отформатированное, и отменять одну запись.
+  define(
+    {
+      id: 'file.saveWithFormatting',
+      title: 'Сохранить с форматированием',
+      category: 'Файл',
+      keybinding: 'Ctrl+Alt+F',
+      enabled: () => openEditors.active !== null && deps.formatDocument !== undefined,
+    },
+    async () => {
+      const document = openEditors.active;
+      if (!document) {
+        showToast('Нет открытого файла');
+        return;
+      }
+      const format = deps.formatDocument;
+      // Форматирование не вышло — сохраняем КАК ЕСТЬ и говорим почему: терять
+      // набранное из-за того, что prettier не нашёлся, нельзя.
+      const result = format ? await format(document) : { outcome: 'unavailable', problem: null };
+      await saveDocument(document);
+      if (result.problem) showToast(result.problem);
+      else if (result.outcome === 'unavailable') showToast('Сохранено без форматирования: форматировать нечем');
     },
   );
 

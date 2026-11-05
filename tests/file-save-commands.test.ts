@@ -5,7 +5,9 @@ import { registerFileSaveCommands, type FileSaveDeps } from '../src/renderer/cor
 type Run = (...args: unknown[]) => unknown;
 const doc = (path: string) => ({ path }) as never;
 
-function setup(opts: { active?: string | null; dirty?: string[] } = {}) {
+function setup(
+  opts: { active?: string | null; dirty?: string[]; format?: { outcome: string; problem: string | null } } = {},
+) {
   const commands = new Map<string, Run>();
   const define: DefineCommand = (descriptor, handler) => commands.set(descriptor.id, handler);
   const log: string[] = [];
@@ -29,6 +31,10 @@ function setup(opts: { active?: string | null; dirty?: string[] } = {}) {
     revertFilesToDisk: async (targets: readonly string[]) => {
       log.push(`revert:${targets.join('|')}`);
     },
+    formatDocument: async (document: { path: string }) => {
+      log.push(`format:${document.path}`);
+      return opts.format ?? { outcome: 'changed', problem: null };
+    },
     showToast: (message: string) => toasts.push(message),
   } as unknown as FileSaveDeps;
   registerFileSaveCommands(define, deps);
@@ -38,13 +44,14 @@ function setup(opts: { active?: string | null; dirty?: string[] } = {}) {
 const run = (f: ReturnType<typeof setup>, id: string, ...args: unknown[]) => f.commands.get(id)!(...args);
 
 describe('registerFileSaveCommands', () => {
-  it('регистрирует пять команд сохранения и перечитывания', () => {
+  it('регистрирует шесть команд сохранения и перечитывания', () => {
     expect([...setup().commands.keys()].sort()).toEqual([
       'file.revertAllFromDisk',
       'file.revertFromDisk',
       'file.save',
       'file.saveAll',
       'file.saveAs',
+      'file.saveWithFormatting',
     ]);
   });
 
@@ -79,5 +86,26 @@ describe('registerFileSaveCommands', () => {
     await run(f, 'file.revertFromDisk');
     await run(f, 'file.revertAllFromDisk');
     expect(f.log).toEqual(['revert:/p/c.ts', 'revert:/p/a.ts', 'revert:/p/b.ts|/p/c.ts']);
+  });
+
+  it('«Сохранить с форматированием»: форматирует, потом пишет — одним действием', async () => {
+    const f = setup({ active: '/p/a.ts' });
+    await run(f, 'file.saveWithFormatting');
+    expect(f.log).toEqual(['format:/p/a.ts', 'save:/p/a.ts']);
+    expect(f.toasts).toEqual([]);
+  });
+
+  it('форматтер не нашёлся — файл всё равно сохраняется, и сказано почему', async () => {
+    const f = setup({ active: '/p/a.ts', format: { outcome: 'unavailable', problem: 'Инструмент проекта не найден' } });
+    await run(f, 'file.saveWithFormatting');
+    // Набранное не теряем: на диск ушло как есть.
+    expect(f.log).toEqual(['format:/p/a.ts', 'save:/p/a.ts']);
+    expect(f.toasts).toEqual(['Инструмент проекта не найден']);
+  });
+
+  it('без причины «нечем» — общее сообщение, а не молчание', async () => {
+    const f = setup({ active: '/p/a.ts', format: { outcome: 'unavailable', problem: null } });
+    await run(f, 'file.saveWithFormatting');
+    expect(f.toasts).toEqual(['Сохранено без форматирования: форматировать нечем']);
   });
 });

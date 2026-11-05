@@ -1,6 +1,7 @@
 import type { CursorStyle } from '../cursor-style';
-import type { FileAssociation } from '../associations';
 import type { AutoSaveMode } from '../auto-save';
+import type { FormatterChoice } from '../formatter';
+import type { FileAssociation } from '../associations';
 import type { IconBadgeRule } from '../icon-badges';
 import type { Snippet } from '../snippets';
 import type { RunTelemetryRecord } from '../telemetry';
@@ -213,8 +214,13 @@ export interface EditorSettings {
   insertSpaces: boolean;
   /** Язык задаёт свои отступы: Python — 4 пробела, Makefile — символ табуляции. */
   languageIndent: boolean;
-  /** Форматировать документ при сохранении (ruff или black из окружения). */
+  /** Форматировать документ при сохранении. */
   formatOnSave: boolean;
+  /**
+   * Кто форматирует документ: `auto` — языковой сервер, иначе инструмент проекта;
+   * `lsp` / `tool` — только один источник, без тихой подмены (см. `shared/formatter.ts`).
+   */
+  formatter: FormatterChoice;
   /**
    * Действия языкового сервера при сохранении, по видам: `source.organizeImports`,
    * `source.fixAll` и прочие `source.*`. Пусто — ничего не делаем. Применяются

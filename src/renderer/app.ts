@@ -3168,6 +3168,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Лениво: `revertFilesToDisk` объявлена ниже этой строки, и брать ссылку сразу
     // нельзя — имена модулей сидят в замыкании, а не в моменте регистрации.
     revertFilesToDisk: (targets) => revertFilesToDisk(targets),
+    // Лениво по той же причине: `formatDeps` собирается ниже (и знает настройку).
+    formatDocument: (document) => formatDocument(formatDeps, document),
     showToast,
   });
 
@@ -3444,6 +3446,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     },
     workspace: { hasSelection: () => editors.hasSelection(), selectionRange: () => editors.selectionRange() },
     showToast,
+    // Кто форматирует — настройка `editor.formatter`: при двух готовых источниках
+    // (сервер и prettier/ruff) порядок больше не зашит в коде.
+    formatter: () => settings.editor.formatter,
   };
   registerFormatCommands(define, formatDeps);
 

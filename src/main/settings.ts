@@ -19,6 +19,7 @@ import {
   type WorkspaceSettings,
 } from '../shared/api';
 import { AUTO_SAVE_DELAY_MS, normalizeAutoSaveDelay, normalizeAutoSaveMode } from '../shared/auto-save';
+import { normalizeFormatterChoice } from '../shared/formatter';
 import { COMPACT_AT_TOKENS, COMPACT_EVERY_TURNS } from '../shared/context-fit';
 import { normalizeFavorites } from '../shared/favorites';
 import { parseFsAddress, formatFsAddress } from '../shared/fs-address';
@@ -252,6 +253,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Форматирование при сохранении по умолчанию выключено: правка пробелов
     // на каждое сохранение — заметное вмешательство, включается осознанно.
     formatOnSave: false,
+    // Кто форматирует: по умолчанию — как было, сервер, иначе инструмент проекта.
+    // Выбор нужен там, где оба умеют: у prettier свои правила, и он должен побеждать.
+    formatter: 'auto',
     // Действия сервера при сохранении тоже правят файл — по умолчанию не делаем
     // ничего: список видов пуст, включает человек.
     codeActionsOnSave: [],
@@ -590,6 +594,7 @@ export class SettingsStore {
       if (patch.editor.fontLigatures !== undefined) next.fontLigatures = patch.editor.fontLigatures === true;
       if (patch.editor.emmet !== undefined) next.emmet = patch.editor.emmet === true;
       if (patch.editor.formatOnPaste !== undefined) next.formatOnPaste = patch.editor.formatOnPaste === true;
+      if (patch.editor.formatter !== undefined) next.formatter = normalizeFormatterChoice(patch.editor.formatter);
       if (patch.editor.spellcheck !== undefined) next.spellcheck = patch.editor.spellcheck === true;
       if (patch.editor.spellWords !== undefined) next.spellWords = normalizeSpellWords(patch.editor.spellWords);
       // Автосохранение: режим — из известного списка, задержка — в разумных рамках.
@@ -1101,7 +1106,9 @@ function loadSettings(filePath: string): StoredSettings {
       cursorStyle: normalizeCursorStyle(parsed.editor?.cursorStyle),
       // Мигание включено только явным `true`: старый settings.json его не знает.
       cursorBlink: parsed.editor?.cursorBlink !== false,
-      // Автосохранение: файл могли править руками — берём только известный режим.
+      // Кто форматирует: файл могли править руками — берём только известный режим.
+      formatter: normalizeFormatterChoice(parsed.editor?.formatter),
+      // Автосохранение: режим — из известного списка, задержка — в разумных рамках.
       autoSave: normalizeAutoSaveMode(parsed.editor?.autoSave),
       autoSaveDelayMs: normalizeAutoSaveDelay(parsed.editor?.autoSaveDelayMs),
     },

@@ -1,6 +1,7 @@
 import type { DefineCommand } from './command-args';
 import type { TextDocument } from './document';
 import { formatEngine, formatToolNames, type FormatEngine } from '../../shared/format';
+import { planFormatting, type FormatterChoice } from '../../shared/formatter';
 import { applyTextEdits } from '../../shared/edits';
 import { lineEndingLabel, type LineEnding } from '../../shared/line-endings';
 import { languageLabel } from '../../shared/languages';
@@ -60,6 +61,10 @@ export interface FormatDeps {
   openEditors: FormatOpenEditors;
   workspace: FormatWorkspace;
   showToast(message: string, kind?: 'error'): void;
+  /** Кто форматирует (настройка `editor.formatter`). Не задано — `auto`. */
+  formatter?(document: TextDocument): FormatterChoice;
+  /** Умеет ли сервер форматировать этот файл. Не задано — считаем, что да. */
+  lspCanFormat?(path: string): boolean;
 }
 
 /**
@@ -106,51 +111,121 @@ export async function formatRangeWithServer(
 }
 
 /**
- * Отформатировать документ инструментом проекта. Правку проводим через документ:
- * так она попадает в undo и в сохранение.
+ * Отформатировать документ. Кто это делает — решает настройка `editor.formatter`
+ * (см. `shared/formatter.ts`): раньше порядок был зашит (сервер, при молчании —
+ * инструмент), и при двух готовых источниках «форматировал тот, кто первым ответил».
+ *
+ * `unavailable` теперь значит и «выбранный источник недоступен»: подставлять вместо
+ * него другой молча нельзя — человек выбрал явно. Причина уходит в `FormatResult`,
+ * чтобы команда сказала не просто «нечем», а кем именно не вышло.
  */
-export async function formatDocument(deps: FormatDeps, document: TextDocument): Promise<FormatOutcome> {
+export async function formatDocument(deps: FormatDeps, document: TextDocument): Promise<FormatResult> {
+  const problem = { message: null as string | null };
+  const outcome = await runFormat(deps, document, problem);
+  return { outcome, problem: problem.message };
+}
+
+/** Итог вместе с причиной: «нечем» бывает по разным поводам, и они не равны. */
+export interface FormatResult {
+  readonly outcome: FormatOutcome;
+  /** Почему не вышло: выбранный источник недоступен или сервер вернул мусор. */
+  readonly problem: string | null;
+}
+
+async function runFormat(
+  deps: FormatDeps,
+  document: TextDocument,
+  problem: { message: string | null },
+): Promise<FormatOutcome> {
   if (document.readOnly) return 'readonly';
   const engine = formatEngine(document.languageId);
-  // Языковой сервер знает про свой язык больше, чем сторонний инструмент: у Go это
-  // `gofmt` из gopls, у Rust — rustfmt, у C/C++ — clang-format. Раньше этот путь не
-  // пробовался вовсе: файлы без ruff/prettier в проекте получали `unavailable`,
-  // хотя сервер за них умел. Порядок именно такой — сервер первый: для `formatOnSave`
-  // важно, чтобы текст совпадал с тем, что видит сам сервер, и не возникало
-  // расхождений в диагностике.
-  const fromServer = await deps.lsp.formatDocument(document.path).catch(() => []);
-  if (fromServer.length > 0) {
-    const text = applyTextEdits(document.value, fromServer);
-    if (text === document.value) return 'unchanged';
-    document.setText(text, 'programmatic');
-    return 'changed';
+  const choice = deps.formatter?.(document) ?? 'auto';
+  const lspAvailable = deps.lspCanFormat?.(document.path) ?? true;
+  const plan = planFormatting({ choice, lspAvailable, toolAvailable: engine !== null });
+  if (!plan.first) {
+    problem.message = plan.complaint;
+    return 'unavailable';
   }
-  if (!engine) return 'unavailable';
+
+  // Сначала тот, кого выбрали; второй — только в `auto` и только если первый
+  // кончился молчанием (сервер с capability, но без правок).
+  const order = plan.fallback ? [plan.first, plan.fallback] : [plan.first];
+  for (const source of order) {
+    const outcome =
+      source === 'lsp'
+        ? await applyServerFormat(deps, document, problem)
+        : await applyToolFormat(deps, document, engine);
+    if (outcome) return outcome;
+  }
+  // Источник был выбран по языку, но в проекте оказался не установлен.
+  // Без этого человек видел бы голое «нечем», не зная, кого именно искать.
+  if (problem.message === null) {
+    problem.message =
+      plan.first === 'tool'
+        ? `Инструмент проекта не найден${engine ? `: ${formatToolNames(engine).join(' или ')}` : ''}`
+        : 'Языковой сервер не отдал форматирование';
+  }
+  return 'unavailable';
+}
+
+/** Правки сервера — в документ. `null` — сервер не дал ничего, можно спросить другого. */
+async function applyServerFormat(
+  deps: FormatDeps,
+  document: TextDocument,
+  problem: { message: string | null },
+): Promise<FormatOutcome | null> {
+  const fromServer = await deps.lsp.formatDocument(document.path).catch(() => []);
+  if (fromServer.length === 0) return null;
+  let text: string;
+  try {
+    text = applyTextEdits(document.value, fromServer);
+  } catch {
+    problem.message = 'Форматирование вернуло несогласованные правки';
+    return 'unavailable';
+  }
+  if (text === document.value) return 'unchanged';
+  document.setText(text, 'programmatic');
+  return 'changed';
+}
+
+/** Инструмент проекта — в документ. `null` — не нашёлся или не ответил. */
+async function applyToolFormat(
+  deps: FormatDeps,
+  document: TextDocument,
+  engine: FormatEngine | null,
+): Promise<FormatOutcome | null> {
+  if (!engine) return null;
   const method = engine === 'python' ? 'python.format' : 'node.format';
   // Ответ rpc не типизирован: инструмента могло не оказаться в проекте — это `unavailable`.
   const answer = (await deps.rpc.request(method, { path: document.path, text: document.value }).catch(() => null)) as {
     tool?: string;
     text?: string;
   } | null;
-  if (!answer?.tool || typeof answer.text !== 'string') return 'unavailable';
+  if (!answer?.tool || typeof answer.text !== 'string') return null;
   if (answer.text === document.value) return 'unchanged';
   document.setText(answer.text, 'programmatic');
   return 'changed';
 }
 
 /** Человеческий итог форматирования — одним сообщением. */
-export function formatOutcomeMessage(engine: FormatEngine, outcome: FormatOutcome): string {
+export function formatOutcomeMessage(engine: FormatEngine | null, outcome: FormatOutcome): string {
   if (outcome === 'changed') return 'Файл отформатирован';
   if (outcome === 'unchanged') return 'Менять нечего';
   if (outcome === 'readonly') return 'Файл открыт только для чтения — форматировать нечего';
+  if (!engine) return 'Нечем форматировать: инструмента проекта нет';
   return `Нечем форматировать: ${formatToolNames(engine).join(' и ')} в проекте нет`;
 }
 
 export function registerFormatCommands(define: DefineCommand, deps: FormatDeps): void {
   const { openEditors, workspace, showToast } = deps;
 
-  /** Ни файла, ни инструмента — одна проверка на обе команды. */
-  const engineOfActive = (): { document: TextDocument; engine: FormatEngine } | null => {
+  /**
+   * Ни файла, ни источника — одна проверка на обе команды.
+   *
+   * Инструмент проекта больше не обязателен: при `formatter: 'lsp'` файл форматирует
+   * сервер, и ruff/prettier в проекте может не быть вовсе.
+   */
+  const engineOfActive = (): { document: TextDocument; engine: FormatEngine | null } | null => {
     const document = openEditors.active;
     if (!document) {
       showToast('Нет открытого файла');
@@ -161,11 +236,26 @@ export function registerFormatCommands(define: DefineCommand, deps: FormatDeps):
       return null;
     }
     const engine = formatEngine(document.languageId);
-    if (!engine) {
-      showToast(`Не форматирую ${languageLabel(document.languageId)}: для него инструмента нет`);
+    const choice = deps.formatter?.(document) ?? 'auto';
+    const lspAvailable = deps.lspCanFormat?.(document.path) ?? true;
+    if (!engine && !lspAvailable && choice !== 'lsp') {
+      showToast(`Не форматирую ${languageLabel(document.languageId)}: для него нет ни сервера, ни инструмента`);
       return null;
     }
     return { document, engine };
+  };
+
+  /**
+   * Форматирование и итог: причина «нечем» (выбранный источник недоступен) важнее
+   * общего текста — иначе человек видел бы «инструмента нет», выбрав сервер.
+   */
+  const run = async (document: TextDocument): Promise<FormatOutcome> => {
+    const result = await formatDocument(deps, document);
+    if (result.problem) {
+      showToast(result.problem);
+      return 'changed';
+    }
+    return result.outcome;
   };
 
   define(
@@ -178,7 +268,7 @@ export function registerFormatCommands(define: DefineCommand, deps: FormatDeps):
     async () => {
       const ready = engineOfActive();
       if (!ready) return;
-      showToast(formatOutcomeMessage(ready.engine, await formatDocument(deps, ready.document)));
+      showToast(formatOutcomeMessage(ready.engine, await run(ready.document)));
     },
   );
 
@@ -209,7 +299,7 @@ export function registerFormatCommands(define: DefineCommand, deps: FormatDeps):
       if (!workspace.hasSelection()) {
         const ready = engineOfActive();
         if (!ready) return;
-        showToast(formatOutcomeMessage(ready.engine, await formatDocument(deps, ready.document)));
+        showToast(formatOutcomeMessage(ready.engine, await run(ready.document)));
         return;
       }
       await formatRangeWithServer(deps, document.path, workspace.selectionRange());

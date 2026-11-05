@@ -12,6 +12,7 @@ import type {
 import type { AiProviderPatch, AiProviderView, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
 import { formatBalance } from '../../shared/balance';
+import { FORMATTER_CHOICES, FORMATTER_LABELS, normalizeFormatterChoice } from '../../shared/formatter';
 import {
   findProviderPreset,
   offeredProviderPresets,
@@ -1277,6 +1278,14 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Сохранение'),
       switchRow('Форматировать при сохранении', editor.formatOnSave, (value) => editable({ formatOnSave: value })),
+      field(
+        'Кто форматирует',
+        selectInput(
+          FORMATTER_CHOICES.map((choice) => ({ value: choice, label: FORMATTER_LABELS[choice] })),
+          editor.formatter,
+          (value) => editable({ formatter: normalizeFormatterChoice(value) }),
+        ),
+      ),
       switchRow(
         'Организовать импорты при сохранении',
         editor.codeActionsOnSave.includes('source.organizeImports'),
