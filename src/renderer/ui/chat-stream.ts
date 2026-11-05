@@ -112,6 +112,11 @@ export interface StreamHost {
    */
   retryRun(session: ChatSession): void;
   /**
+   * Открыть список изменений беседы из ленты: «изменено файлов: 3».
+   * `path` — конкретный файл, если кликнули по нему в сообщении.
+   */
+  openChanges(session: ChatSession, path?: string): void;
+  /**
    * Открыть файл-результат агента (show с action present) — как клик по файлу.
    * Место необязательно: `present` его присылает, только если модель назвала строку.
    */
@@ -282,6 +287,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       // Раскрытие ленты — свойство беседы: режим спрашивает каждая новая
       // группа, и он же берёт уже созданные при смене.
       session.fold,
+      // Счётчик файлов в шапке группы ведёт в панель изменений: из сообщения
+      // видно, что правки были, и отсюда же надо уметь попасть в них.
+      (path) => host.openChanges(session, path),
     );
     /** Размышления текущего шага: строка живёт в той же ленте, что и вызовы. */
     let reasoningView: ReasoningRowView | null = null;

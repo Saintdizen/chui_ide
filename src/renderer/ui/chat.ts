@@ -3049,6 +3049,25 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       threadEnd(target, how, report);
     },
     /*
+      Счётчик файлов из шапки группы ведёт в панель изменений.
+
+      Свежесть — главное: панель одна на беседу и показывает её текущее
+      состояние, а сообщение, из которого кликнули, может быть старым. Поэтому
+      перед открытием перерисовываем панель по живой беседе: откатили файл
+      после ответа — раскроется то, что есть сейчас, и это правильный ответ.
+    */
+    openChanges: (session, path) => {
+      const live = sessions.find((item) => item.id === session.id);
+      // Беседа закрыта — открывать некуда.
+      if (!live) return;
+      changesPanel.render({
+        touched: live.touched,
+        files: live.files,
+        unsaved: [...live.touched.keys()].filter((path) => deps.documents.get(path)?.dirty).length,
+      });
+      changesPanel.open(path);
+    },
+    /*
       «Повторить» у ошибки. Идёт через `regenerate`, а не через новый `send`:
       вопрос уже лежит в истории, и повтор — тот же вопрос заново, а не второй.
 

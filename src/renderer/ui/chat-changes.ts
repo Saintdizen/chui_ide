@@ -62,6 +62,14 @@ export interface ChangesPanelView {
   element: HTMLElement;
   /** Отрисовать по текущему состоянию беседы. */
   render(source: ChangesSource): void;
+  /**
+   * Открыть список файлов снаружи — из ленты («изменено файлов: 3»).
+   *
+   * `path` — необязательный адрес: без него просто открывается список, с ним
+   * сразу разворачиваются блоки этого файла. Путь из сообщения может устареть
+   * (файл откатили позже) — тогда открывается список, а не пустой разворот.
+   */
+  open(path?: string): void;
 }
 
 export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
@@ -236,8 +244,7 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
    * Развернуть/свернуть блоки файла. Список перерисовывается и приходит новый,
    * поэтому состояние живёт в `expanded`, а не в самом DOM.
    */
-  async function toggleHunks(target: string): Promise<void> {
-    if (expanded === target) {
+  async function toggleHunks(target: string): Promise<void> {    if (expanded === target) {
       expanded = null;
       hunks = null;
       hunksError = false;
@@ -255,6 +262,25 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
       hunks = [];
     }
     render(lastSource);
+  }
+
+  /**
+   * Открыть список из ленты. Якорь — сама шапка: попап должен встать там, где
+   * человек видел счётчик, а не в углу экрана.
+   *
+   * Адрес проверяем по последнему состоянию беседы: файл из старого сообщения
+   * мог быть откачен, и раскрывать пустоту хуже, чем показать список.
+   */
+  function open(path?: string): void {
+    if (element.hidden) return;
+    if (!popover.isOpen) popover.toggle(toggle);
+    if (!path) return;
+    const known =
+      lastSource.touched.has(path) || lastSource.files.some((file) => file.path === path);
+    if (!known) return;
+    // Уже развёрт — не схлопываем повторным кликом: из ленты пришли посмотреть,
+    // а не переключить.
+    if (expanded !== path) void toggleHunks(path);
   }
 
   /** Строки блока — так, как человек видит их в редакторе (новые номера). */
@@ -414,5 +440,5 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
   }
 
   syncPanel();
-  return { element, render };
+  return { element, render, open };
 }

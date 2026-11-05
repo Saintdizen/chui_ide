@@ -338,11 +338,20 @@ export function installMiniDom(): { root: MiniNode; document: any; window: any }
       return [];
     }
   }
+  // `ResizeObserver` нужен попапам: они пересчитывают позицию, когда содержимое
+  // выросло (список окружений приходит позже открытия). В тесте размеров нет —
+  // наблюдать нечего, и обратный вызов не нужен.
+  class MiniResizeObserver {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
   // Глобальные имена, которые код берёт без `window.` (браузер отдаёт их так же).
   Object.assign(globalThis, {
     document,
     window,
     MutationObserver: MiniMutationObserver,
+    ResizeObserver: MiniResizeObserver,
     requestAnimationFrame: window.requestAnimationFrame,
     cancelAnimationFrame: window.cancelAnimationFrame,
     getComputedStyle: window.getComputedStyle,

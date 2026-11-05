@@ -155,3 +155,78 @@ describe('createChangesPanel — блоки изменений', () => {
     expect(document.body.textContent).toContain('Не удалось');
   });
 });
+
+/**
+ * Переход из ленты: «изменено файлов: 3» в шапке группы действий.
+ *
+ * Счётчик был только надписью — человек читал, что правки были, и шёл искать их
+ * руками. Здесь проверяем, что панель умеет открыться снаружи и раскрыть файл.
+ */
+describe('createChangesPanel — переход из ленты', () => {
+  const two: ChangesSource = {
+    touched: new Map([
+      ['src/a.ts', { added: 3, removed: 1, original: '' }],
+      ['src/b.ts', { added: 1, removed: 0, original: '' }],
+    ]),
+    files: [],
+  };
+
+  it('без пути открывает список', () => {
+    const panel = createChangesPanel({ reveal() {}, onRevert() {}, onSave() {} });
+    panel.render(two);
+
+    panel.open();
+
+    expect(document.querySelectorAll('.changes-row').length).toBe(2);
+  });
+
+  it('с известным путём разворачивает именно его, а не соседний', async () => {
+    const list = vi.fn(async () => hunks([5, 1, 5, 2]));
+    const panel = createChangesPanel({ reveal() {}, onRevert() {}, onSave() {}, hunks: list });
+    panel.render(two);
+
+    panel.open('src/b.ts');
+    await settle();
+
+    expect(list).toHaveBeenCalledWith('src/b.ts');
+    expect(document.querySelectorAll('.changes-hunk').length).toBe(1);
+  });
+
+  it('устаревший путь из старого сообщения открывает список, а не пустоту', async () => {
+    const list = vi.fn(async () => hunks([1, 1, 1, 1]));
+    const panel = createChangesPanel({ reveal() {}, onRevert() {}, onSave() {}, hunks: list });
+    panel.render(two);
+
+    // Файл откатили после ответа — в беседе его больше нет.
+    panel.open('src/удалён.ts');
+    await settle();
+
+    expect(list).not.toHaveBeenCalled();
+    // Список на месте: человек всё равно должен попасть в правки.
+    expect(document.querySelectorAll('.changes-row').length).toBe(2);
+  });
+
+  it('повторный переход к тому же файлу не схлопывает уже раскрытый', async () => {
+    const list = vi.fn(async () => hunks([1, 1, 1, 1]));
+    const panel = createChangesPanel({ reveal() {}, onRevert() {}, onSave() {}, hunks: list });
+    panel.render(two);
+
+    panel.open('src/a.ts');
+    await settle();
+    panel.open('src/a.ts');
+    await settle();
+
+    // Из ленты пришли посмотреть, а не переключить: второй щелчок не прячет.
+    expect(document.querySelectorAll('.changes-hunk').length).toBe(1);
+  });
+
+  it('нечего показывать — панель спрятана, открывать некуда', () => {
+    const list = vi.fn(async () => hunks([1, 1, 1, 1]));
+    const panel = createChangesPanel({ reveal() {}, onRevert() {}, onSave() {}, hunks: list });
+    panel.render({ touched: new Map(), files: [] });
+
+    panel.open('src/a.ts');
+
+    expect(list).not.toHaveBeenCalled();
+  });
+});

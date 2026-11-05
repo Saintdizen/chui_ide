@@ -1419,6 +1419,43 @@
   text-align: left;
 }
 
+/*
+  Счётчик файлов — отдельная кнопка рядом с шапкой, а не часть её.
+
+  Вложить кнопку в кнопку нельзя: вложенная ловит клик, и клик по числу то
+  раскрывал бы группу, то переходил к изменениям — как повезёт. Рядом — оба
+  действия живут каждое своё.
+*/
+.tool-group-files {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 0 0 2px 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_pill);
+  background: transparent;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.tool-group-files:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.tool-group-files-count {
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-weight: 600;
+}
+
+.tool-group-files[hidden] {
+  display: none;
+}
+
 .tool-group-head:hover {
   background: var(--element_background_hover);
 }

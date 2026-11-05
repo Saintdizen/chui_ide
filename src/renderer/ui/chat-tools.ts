@@ -373,6 +373,12 @@ function createToolGroup(
    * следующая — появившаяся через секунду работы — снова была бы свёрнутой.
    */
   fold: RunFold | undefined,
+  /**
+   * Перейти к изменениям из сообщения. Счётчик файлов в шапке — не только
+   * надпись: у него есть куда вести, и это главное для кого-то, кто смотрит
+   * на ответ со стороны.
+   */
+  onOpenChanges: ((path?: string) => void) | undefined,
 ): ToolGroupView {
   let count = 0;
   let pending = 0;
@@ -382,6 +388,11 @@ function createToolGroup(
   let negative = 0;
   /** Сколько файлов тронули вызовы группы: видно в сводке, когда группа свёрнута. */
   let changedFiles = 0;
+  /**
+   * Файл, к которому ведёт счётчик. Не все сразу: в шапке один счётчик, и он
+   * ведёт туда, где видны остальные.
+   */
+  let lastTouched: string | undefined;
   /**
    * Раскрыта ли группа. По умолчанию свёрнута: в шапке видно ЧТО делал агент и
    * сколько, а десяток строк под ней — шум, который мешает читать ответ. Открыть
@@ -505,7 +516,38 @@ function createToolGroup(
     chevron,
   );
 
-  const root = h('div', { class: 'tool-group' }, head, body);
+  const filesButton = h(
+    'button',
+    {
+      class: 'tool-group-files',
+      type: 'button',
+      hidden: true,
+      title: 'Показать изменённые файлы',
+      onClick: () => onOpenChanges?.(),
+    },
+    svgIcon('file', 12),
+    h('span', { class: 'tool-group-files-count' }),
+    h('span', { class: 'tool-group-files-word' }),
+  );
+
+  const root = h('div', { class: 'tool-group' }, head, filesButton, body);
+
+  /**
+   * Счётчик файлов готов к клику или прячется.
+   *
+   * Без перехода (`onOpenChanges` не дали) кнопка не нужна — но и терять число
+   * нельзя: оно остаётся в сводке шапки (`changedFiles` в brief).
+   */
+  const syncFilesButton = (): void => {
+    const show = changedFiles > 0 && onOpenChanges !== undefined;
+    filesButton.hidden = !show;
+    if (!show) return;
+    filesButton.querySelector('.tool-group-files-count')!.textContent = String(changedFiles);
+    filesButton.querySelector('.tool-group-files-word')!.textContent = fileWord(changedFiles);
+    filesButton.title = lastTouched
+      ? `Изменено файлов: ${changedFiles} — открыть ${lastTouched}`
+      : `Изменено файлов: ${changedFiles}`;
+  };
   // Группа свёрнута по умолчанию: приводим тело и шеврон к состоянию `expanded`.
   applyExpanded();
   /**
@@ -555,8 +597,12 @@ function createToolGroup(
     // Отрицательный итог — не ошибка инструмента, поэтому и слово другое: иначе
     // упавший тест читался бы как поломка вызова.
     if (negative > 0) briefParts.push(`с отрицательным итогом: ${negative}`);
-    if (changedFiles > 0) briefParts.push(`${changedFiles} ${fileWord(changedFiles)}`);
+    if (changedFiles > 0 && onOpenChanges === undefined) {
+      briefParts.push(`${changedFiles} ${fileWord(changedFiles)}`);
+    }
     setBrief(briefParts.length > 0 ? `· ${briefParts.join(' · ')}` : '');
+    // Счётчик файлов: без перехода — просто надпись, с переходом — кнопка.
+    syncFilesButton();
 
     if (pending > 0) {
       paintToolState(state, 'tool-group-state', 'running');
@@ -712,7 +758,13 @@ function createToolGroup(
         // Тронутые файлы отдельным рядом не показываем: список — в сводке шапки
         // (счётчиком) и в панели «Изменён N файл» композера. Ряд чипов дублировал
         // её и растягивал ленту на строку под каждым вызовом.
-        if (result.ok) changedFiles += touchedFiles(call.name, call.args, result.changes).length;
+        if (result.ok) {
+          const touched = touchedFiles(call.name, call.args, result.changes);
+          changedFiles += touched.length;
+          // Последний тронутый — адрес для перехода. Не все файлы сразу: в
+          // шапке один счётчик, и он ведёт туда, где видны остальные.
+          lastTouched = touched[0]?.path ?? lastTouched;
+        }
         sync();
       },
     };
@@ -764,6 +816,8 @@ export function createToolFeed(
   onBusyHint?: BusyHintHandler,
   /** Общий режим раскрытия ленты — кнопка «свернуть всё» над беседой. */
   fold?: RunFold,
+  /** Перейти к изменениям из сообщения — счётчик файлов в шапке группы. */
+  onOpenChanges?: (path?: string) => void,
 ): {
   add(call: ChatToolStartPayload): ToolCardView;
   reasoning(): ReasoningRowView;
@@ -771,7 +825,7 @@ export function createToolFeed(
 } {
   let current: ToolGroupView | null = null;
   const ensure = (): ToolGroupView =>
-    (current ??= createToolGroup(container, anchor, onUpdate, onOpenFile, onBusyHint, fold));
+    (current ??= createToolGroup(container, anchor, onUpdate, onOpenFile, onBusyHint, fold, onOpenChanges));
 
   return {
     add: (call) => ensure().add(call),
