@@ -111,8 +111,7 @@ import {
 import { pricingAt } from '../../shared/providers';
 import { repairToolPairs } from '../../shared/chat-sanitize';
 import { ProjectMemory } from './project-memory';
-import { PauseGate } from './pause';
-import { InterjectQueue } from './interject';
+import { RunControls, type RunEntry } from './run-controls';
 import { WorkspaceContext } from './workspace-context';
 import type { TelemetryStore } from './telemetry';
 import { createJobRegistry, type JobRegistry } from './jobs';
@@ -313,17 +312,14 @@ export class AiService {
    */
   private livePermission: PermissionPreset = 'ask';
   /**
-   * Пауза на границе шага (`ai.setPaused`). Живёт рядом с правами и по той же
-   * причине: renderer меняет её во время прогона, а прогон в окне один.
+   * Управление прогонами по отдельности — пауза и сказанное на ходу.
+   *
+   * Раньше оба были одно на сервис: пока прогон один, это верно. Со второй
+   * беседой общая пауза становится ошибкой — жмёшь «пауза» в одной задаче,
+   * встаёт другая (или обе), а сказанное на ходу уезжает не в тот разговор.
+   * Ключ — беседа (`conversationUid`), он есть и в запросе, и в `ai.setPaused`.
    */
-  private readonly pause = new PauseGate();
-
-  /**
-   * Сказанное на ходу (`ai.interject`): вопрос, который человек вставляет в идущий
-   * прогон. Живёт рядом с паузой и по той же причине — прогон в окне один, а
-   * renderer пишет в него, пока шаг уже идёт.
-   */
-  private readonly interject = new InterjectQueue();
+  private readonly runs = new RunControls();
 
   /**
    * Поправка к оценке токенов, выученная по `usage` провайдера: сколько наши
@@ -475,8 +471,8 @@ export class AiService {
    * недосказанное, пауза даёт текущему вызову доработать и держит следующий
    * шаг, пока человек не решит — продолжать, менять курс или всё-таки встать.
    */
-  setPaused(value: boolean): void {
-    this.pause.set(value);
+  setPaused(value: boolean, conversation?: string | null): void {
+    this.runs.setPaused(conversation, value);
   }
 
   /**
@@ -490,13 +486,13 @@ export class AiService {
    * Возвращает `false` на пустой текст и на прогон без слушателя: событие в ленту
    * посылается только когда реплику действительно приняли.
    */
-  interjectSaid(text: string): boolean {
-    return this.interject.push(text);
+  interjectSaid(text: string, conversation?: string | null): boolean {
+    return this.runs.interject(conversation, text);
   }
 
   /** Сколько сказанного на ходу ждёт границы шага. */
-  get interjectPending(): number {
-    return this.interject.size;
+  interjectPending(conversation?: string | null): number {
+    return this.runs.pending(conversation);
   }
 
   /**
@@ -506,17 +502,17 @@ export class AiService {
    * иначе реплика, не дождавшаяся границы шага, прозвучала бы в следующем
    * прогоне — как будто человек говорил её там.
    */
-  closeInterject(): void {
-    this.interject.close();
+  closeInterject(conversation?: string | null): void {
+    this.closeRun(conversation);
   }
 
-  /** Снять паузу в начале прогона: она принадлежит прошлому, а не этому. */
-  private clearPause(): void {
-    // Сказанное на ходу тоже принадлежит прошлому прогону: оно адресовано
-    // тому разговору, который уже кончился, и в новом прозвучит из ниоткуда.
-    this.interject.close();
-    if (!this.pause.isPaused) return;
-    this.pause.set(false);
+  /**
+   * Прогон беседы кончился: у записи больше нет слушателя, пауза снимается.
+   * Сказанное на ходу уходит вместе с ней — оно адресовано тому разговору,
+   * который уже кончился, и в следующем прозвучит из ниоткуда.
+   */
+  private closeRun(conversation: string | null | undefined): void {
+    this.runs.close(conversation);
   }
 
   /**
@@ -524,10 +520,14 @@ export class AiService {
    * человек видел «на паузе», а не «зависло»; прерывание (стоп, закрытие вкладки)
    * будит ожидание так же, как «продолжить».
    */
-  private async waitWhilePaused(emit: (event: string, payload: unknown) => void, signal: AbortSignal): Promise<void> {
-    if (!this.pause.isPaused || signal.aborted) return;
+  private async waitWhilePaused(
+    run: RunEntry,
+    emit: (event: string, payload: unknown) => void,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!run.pause.isPaused || signal.aborted) return;
     emit(ChatStreamEvent.Paused, { paused: true });
-    await this.pause.wait(signal);
+    await run.pause.wait(signal);
     if (!signal.aborted) emit(ChatStreamEvent.Paused, { paused: false });
   }
 
@@ -714,11 +714,10 @@ export class AiService {
     const requestGoal = sanitizeGoal(request.goal);
     // Текущие права запоминаем на сервисе: дальше их можно менять на лету.
     this.livePermission = permission;
-    // Пауза ушла вместе с прошлым прогоном: новый начинается с работы.
-    this.clearPause();
-    // Теперь есть кому говорить: сказанное на ходу доедет до модели на границе
+    // Управление принадлежит ЭТОМУ прогону: своя пауза, своя очередь сказанного.
+    // Теперь есть кому говорить: слова на ходу доедут до модели на границе
     // ближайшего шага. До этой строки такие слова отвергаются с ответом `false`.
-    this.interject.open();
+    const run = this.runs.open(request.conversationUid);
 
     const messages: ChatMessage[] = [];
     const systemPrompt = request.systemPrompt ?? settings.ai.systemPrompt;
@@ -1164,14 +1163,14 @@ export class AiService {
       // Пауза — только здесь: посередине шага не встаём, иначе оборвём вызов
       // инструмента или модель на полуслове. Стоп проверяется снова: пока стояли,
       // человек мог нажать «стоп» вместо «продолжить».
-      await this.waitWhilePaused(emit, signal);
+      await this.waitWhilePaused(run, emit, signal);
       if (signal.aborted) break;
 
       // Сказанное на ходу вклинивается в историю ЗДЕСЬ — на той же границе, где
       // стоит пауза: текущий вызов инструмента уже доработал, следующий запрос
       // к модели ещё не ушёл, и реплика человека попадает ровно между ними.
       // Не после прогона (это уже сделала очередь renderer'а), а внутрь него.
-      for (const said of this.interject.takeAll()) {
+      for (const said of run.interject.takeAll()) {
         // Пометка в тексте, а не в отдельном поле: провайдеры ролей-меток не знают,
         // а модель должна отличать поправку на ходу от вопроса, заданного заранее.
         messages.push({ role: 'user', content: `[сказано на ходу, шаг ${step + 1}] ${said}` });

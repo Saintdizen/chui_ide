@@ -25,6 +25,11 @@ export interface ChatComposerDeps {
   onSend(text: string): void;
   /** Остановить генерацию. */
   onStop(): void;
+  /**
+   * Беседа, к которой относится пауза. Пока прогон был один, это было неважно;
+   * с параллельными задачами кнопка иначе встаивает чужую.
+   */
+  conversationForPause?(): string | undefined;
   /** Открыть окно настроек (кнопка модели). */
   onOpenSettings(): void;
   /** Приложить контекст (скрепка — тот же список, что и «#»). */
@@ -134,7 +139,9 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     onClick: () => {
       // Отправляем в main, а состояние придёт обратно событием: если шаг сейчас
       // не границе (идёт терминал), встанет не сразу — и врать нажатием нельзя.
-      void deps.rpc.request('ai.setPaused', { paused: !paused }).catch(() => undefined);
+      void deps.rpc
+        .request('ai.setPaused', { paused: !paused, conversation: deps.conversationForPause?.() })
+        .catch(() => undefined);
     },
   });
 

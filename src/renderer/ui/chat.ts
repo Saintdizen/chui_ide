@@ -67,7 +67,7 @@ import { createComposerMenu } from './chat-composer-menu';
 import { createChangesPanel } from './chat-changes';
 import { archivePlan, createPlanPanel } from './chat-plan';
 import { createGoalPanel } from './chat-goal';
-import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
+import { CONTINUE_PROMPT, createStreamRunner, type StreamCancelHandle } from './chat-stream';
 import { contextIndexOf, findThreadIndex, scrollTargetFor } from './chat-session';
 import type { ChatSession } from './chat-session';
 import type { CodebasePlace } from '../../shared/meaning-search';
@@ -279,6 +279,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   /** Беседа, которая сейчас генерирует: хостовые вызовы приходят именно от неё. */
   let streamingSession: ChatSession | null = null;
   /**
+   * Открытые потоки по беседам: `cancelActive` гасит последний открытый, а при
+   * двух прогонах это может быть не та задача. Здесь у каждой беседы своя ручка.
+   */
+  const liveStreams = new Map<number, StreamCancelHandle>();
+  /**
    * Чем кончился последний прогон: `setBusy(false)` зовётся и в `finally` стрима, где
    * исхода уже не видно, а сказать в доке надо именно исход.
    */
@@ -333,6 +338,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     rpc: deps.rpc,
     onSend: (text) => void send(text),
     onStop: () => stop(),
+    conversationForPause: () => (streamingSession ?? active()).uid,
     onOpenSettings: () => deps.settingsModal.open(),
     onContext: () => menu.toggleContext(),
     onPasteImages: (files) => void attachments.attachFiles(files),
@@ -2692,7 +2698,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     input.value = '';
     const session = active();
     session.draft = '';
-    const answer = await deps.rpc.request('ai.interject', { text: written }).catch(() => ({ accepted: false }));
+    // Адресат — беседа, в которой пишет человек: при двух прогонах слова иначе
+    // уехали бы чужой задаче.
+    const answer = await deps.rpc
+      .request('ai.interject', { text: written, conversation: session.uid })
+      .catch(() => ({ accepted: false }));
     if (!answer.accepted) {
       // Прогон кончился между Enter и вызовом: сказанное стало обычным вопросом.
       enqueue(written);
@@ -2814,7 +2824,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     setPaused(next);
     // main подтвердит своё событием, но человек должен увидеть отклик СРАЗУ:
     // между нажатием и границей шага может пройти минута (идёт терминал).
-    void deps.rpc.request('ai.setPaused', { paused: next }).catch(() => undefined);
+    void deps.rpc.request('ai.setPaused', { paused: next, conversation: active().uid }).catch(() => undefined);
     showToast(next ? 'Пауза после текущего шага' : 'Продолжаем');
   }
 
@@ -2826,8 +2836,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Пауза, поставленная перед стопом, осталась бы в main и ждала неведомо кого.
     // Снимаем её тем же способом, каким ставили.
     if (paused) setPaused(false);
-    void deps.rpc.request('ai.setPaused', { paused: false }).catch(() => undefined);
-    deps.rpc.cancelActive();
+    const running = streamingSession ?? active();
+    void deps.rpc.request('ai.setPaused', { paused: false, conversation: running.uid }).catch(() => undefined);
+    // Гасим свой поток. Своей ручки нет (прогон открылся до этой правки или уже
+    // закрылся) — бьём по последнему открытому, как раньше.
+    const handle = liveStreams.get(running.id);
+    if (!handle || !handle.cancel()) deps.rpc.cancelActive();
   }
 
   /**
@@ -3198,6 +3212,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       if (session) session.busyHint = hint ?? undefined;
       if (session && session.id !== activeId) return;
       deps.onBusyHint?.(hint);
+    },
+    trackStream: (session, handle) => {
+      // Ручка прогона — на беседу, а не «одна на панель»: «стоп» должен бить
+      // по своему потоку, даже если вторым шагом открылся чужой.
+      if (handle) liveStreams.set(session.id, handle);
+      else liveStreams.delete(session.id);
     },
     closeApprovals,
     setStreaming: (session) => {

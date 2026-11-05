@@ -64,6 +64,14 @@ export interface StreamModes {
  * Что стримингу нужно от панели. Специально действия, а не объекты: сам стриминг
  * не хранит ни состояние беседы, ни панели — он только рисует ответ.
  */
+/**
+ * Ручка открытого потока: то, чем «стоп» гасит СВОЙ прогон, а не последний
+ * открытый. Панели шире ничего не нужно — отмены по id достаточно.
+ */
+export interface StreamCancelHandle {
+  cancel(): boolean;
+}
+
 export interface StreamHost {
   rpc: RpcClient;
   markdown: ReturnType<typeof createMarkdownRenderer>;
@@ -88,6 +96,14 @@ export interface StreamHost {
   busyHint(hint: string | null): void;
   /** Переключить «занято»: панель по этому гасит ввод и меняет кнопку. */
   setBusy(value: boolean, session: ChatSession): void;
+  /**
+   * Ручка открытого потока беседы; `null` — поток закрылся.
+   *
+   * Нужна «стопу»: `cancelActive` гасит последний открытый поток, а при двух
+   * прогонах это может быть чужая задача. Панель помнит ручку своей беседы
+   * и бьёт именно по ней.
+   */
+  trackStream(session: ChatSession, handle: StreamCancelHandle | null): void;
   /** Прогон встал на паузу или снялся с неё (кнопка в композере и строка статуса). */
   setPaused(value: boolean, session: ChatSession): void;
   /** Закрыть открытые ожидания подтверждений (ревью правок, команда). */
@@ -332,7 +348,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     try {
       for (;;) {
         const modes = host.modes();
-        done = await host.rpc.stream(
+        const handle = host.rpc.openStream(
           'ai.chat',
           {
             providerId,
@@ -463,6 +479,13 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             }
           },
         );
+        // Ручка наружу: пока шаг идёт, «стоп» в этой беседе бьёт по нему.
+        host.trackStream(session, handle);
+        try {
+          done = await handle.result;
+        } finally {
+          host.trackStream(session, null);
+        }
 
         flushSegment();
         collapseReasoning();

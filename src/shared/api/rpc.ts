@@ -1017,7 +1017,8 @@ export interface ChuiMethods {
    * Пауза на границе шага. Не то же, что обрыв стрима (стоп): прогон жив, текущий
    * вызов дорабатывает, следующий шаг ждёт снятия паузы — человека, а не удачи.
    */
-  'ai.setPaused': { params: { paused: boolean }; result: void };
+  /** Пауза одного прогона; без `conversation` — единственного (старые вызовы). */
+  'ai.setPaused': { params: { paused: boolean; conversation?: string }; result: void };
   /**
    * Сказать что-то в ИДУЩИЙ прогон: вопрос уйдёт к модели на границе шага.
    *
@@ -1026,7 +1027,8 @@ export interface ChuiMethods {
    * ещё работает, и успевает свернуть не туда. Если прогона нет — отказ: без
    * него сказанное в пустоту выглядело бы как принятое.
    */
-  'ai.interject': { params: { text: string }; result: { accepted: boolean } };
+  /** Сказать на ходу конкретному прогону; без `conversation` — единственному. */
+  'ai.interject': { params: { text: string; conversation?: string }; result: { accepted: boolean } };
   /** История бесед рабочей папки: renderer восстанавливает вкладки после запуска. */
   'ai.chats.load': { params: { root: string }; result: ChatHistory };
   /** Сохранение бесед: renderer — источник истины, main только пишет на диск. */

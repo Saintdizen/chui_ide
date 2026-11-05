@@ -71,19 +71,21 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
   });
   // Пауза, а не стоп: прогон не рвётся, следующий шаг ждёт «продолжить».
   router.register('ai.setPaused', (params) => {
-    deps.ai.setPaused(params.paused);
+    // Пауза адресована одной беседе: с параллельными прогонами «общая» пауза
+    // вставала бы у всех сразу, а человек этого не просил.
+    deps.ai.setPaused(params.paused, params.conversation);
     // Отвечаем в окно СРАЗУ, не дожидаясь границы шага. Цикл шагов пришлёт своё
     // событие `paused`, когда дойдёт до неё, но это может быть и через минуту
     // (идёт терминал или длинный вызов) — и всё это время человек, нажавший
     // паузу, не знает, приняли ли нажатие. Шлём факт «main услышал».
-    pushToRenderers(PushTopic.AiPaused, { paused: params.paused });
+    pushToRenderers(PushTopic.AiPaused, { paused: params.paused, conversation: params.conversation });
   });
   // Сказанное на ходу: человек правит курс агента, пока тот ещё работает.
   // Проверку «идёт ли прогон» делает сервис — здесь только ответ.
   router.register('ai.interject', (params) => {
     const text = params.text.trim();
     if (!text) return { accepted: false };
-    return { accepted: deps.ai.interjectSaid(text) };
+    return { accepted: deps.ai.interjectSaid(text, params.conversation) };
   });
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));
   // Проверка серверов MCP из настроек: поднимаем их и показываем инструменты.
@@ -161,7 +163,7 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
         // сказанное на ходу этому прогону больше не адресовано. Без закрытия реплика
         // висела бы и прозвучала бы в следующем прогоне, где её никто не говорил.
       )
-      .finally(() => deps.ai.closeInterject());
+      .finally(() => deps.ai.closeInterject(request.conversationUid));
   });
 
   // Inline-автодополнение: короткий запрос без истории и инструментов.

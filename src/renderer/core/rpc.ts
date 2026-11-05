@@ -36,6 +36,8 @@ export class RpcError extends Error {
 export class RpcClient {
   private sequence = 0;
   private activeStreamId: string | null = null;
+  /** Сколько потоков открыто прямо сейчас: стрим идёт, пока их больше нуля. */
+  private openCount = 0;
   private readonly streams = new Map<string, (event: string, payload: unknown) => void>();
   private readonly pushListeners = new Set<(message: PushMessage) => void>();
 
@@ -66,6 +68,22 @@ export class RpcClient {
     params: ParamsOf<M>,
     onEvent: (event: string, payload: unknown) => void,
   ): Promise<ResultOf<M>> {
+    return this.openStream(method, params, onEvent).result;
+  }
+
+  /**
+   * То же, но с ручкой на руках: `cancel()` бьёт по ЭТОМУ вызову.
+   *
+   * `cancelActive` умеет отменять только последний открытый поток. Пока прогон
+   * был один, этого хватало; с двумя беседами «стоп» в одной гасил бы другую —
+   * или не гасил вовсе, если последним открылся не тот. Поэтому кнопка «стоп»
+   * держит ручку своего потока и бьёт ею.
+   */
+  openStream<M extends MethodName>(
+    method: M,
+    params: ParamsOf<M>,
+    onEvent: (event: string, payload: unknown) => void,
+  ): { result: Promise<ResultOf<M>>; cancel(): boolean; readonly id: string } {
     const call: RpcCall = { id: this.nextId(), method, params, stream: true };
     /** Конец событий объявляет main: ответ на вызов приходит раньше них. */
     let endEvents: () => void = () => undefined;
@@ -80,29 +98,46 @@ export class RpcClient {
       onEvent(event, payload);
     });
     this.activeStreamId = call.id;
-    this.streamingEmitter.fire(true);
-    try {
-      const result = await this.bridge.call(call);
-      // Ответ и события идут разными каналами, и ответ их обгоняет: без этого
-      // ожидания последний `delta` приходил уже после того, как слушатель снят, —
-      // и ответ модели обрывался на середине (видно в ленте беседы).
-      await waitForEnd(ended);
-      return unwrap<M>(result);
-    } finally {
-      this.streams.delete(call.id);
-      if (this.activeStreamId === call.id) this.activeStreamId = null;
-      this.streamingEmitter.fire(false);
-    }
+    this.openCount += 1;
+    if (this.openCount === 1) this.streamingEmitter.fire(true);
+    const result = (async () => {
+      try {
+        const answer = await this.bridge.call(call);
+        // Ответ и события идут разными каналами, и ответ их обгоняет: без этого
+        // ожидания последний `delta` приходил уже после того, как слушатель снят, —
+        // и ответ модели обрывался на середине (видно в ленте беседы).
+        await waitForEnd(ended);
+        return unwrap<M>(answer);
+      } finally {
+        this.streams.delete(call.id);
+        if (this.activeStreamId === call.id) this.activeStreamId = null;
+        this.openCount -= 1;
+        // Гаснет только когда кончился ПОСЛЕДНИЙ: пока идёт второй прогон,
+        // «стрим идёт» — правда, и статусбар обязан это показывать.
+        if (this.openCount === 0) this.streamingEmitter.fire(false);
+      }
+    })();
+    return {
+      id: call.id,
+      result,
+      cancel: () => this.cancelStream(call.id),
+    };
   }
 
   cancelActive(): boolean {
     if (!this.activeStreamId) return false;
-    void this.bridge.cancel(this.activeStreamId);
+    return this.cancelStream(this.activeStreamId);
+  }
+
+  /** Отменить поток по его id — не спрашивая, последний ли он. */
+  cancelStream(id: string): boolean {
+    if (!this.streams.has(id)) return false;
+    void this.bridge.cancel(id);
     return true;
   }
 
   get isStreaming(): boolean {
-    return this.activeStreamId !== null;
+    return this.openCount > 0;
   }
 
   private nextId(): string {
