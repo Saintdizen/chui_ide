@@ -191,6 +191,13 @@ import { createPipelinesModal } from './ui/pipelines-modal';
 import { createNotificationsModal } from './ui/notifications-modal';
 import { createTextModal } from './ui/text-modal';
 import { createStatusBar } from './ui/statusbar';
+import {
+  indentAfterChoice,
+  isStatusChoice,
+  statusChoices,
+  statusLanguageLabel,
+  type StatusChoiceKind,
+} from './core/status-choices';
 import { needsLspRefresh, statusPatch } from './core/status-state';
 import type { SectionId, SettingsModalView } from './ui/settings-modal';
 import { createRecentFiles } from './core/recent-files';
@@ -253,6 +260,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     openNodeEnv: (anchor) => openNodeEnv(anchor),
     openProblems: () => editors.revealNextProblem(),
     openLsp: (anchor) => openLsp(anchor),
+    openChoice: (kind, anchor) => openStatusChoice(kind, anchor),
     // «Включить всё равно»: подсветку в крупном файле включаем для этого файла.
     forceHighlight: () => {
       editors.forceHighlight();
@@ -1112,6 +1120,85 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   function openLsp(anchor: HTMLElement): void {
     lspPopover.toggle(anchor);
   }
+
+  /**
+   * Клик по кодировке, отступу или языку в строке состояния.
+   *
+   * Список собирает `statusChoices` (там же — что делать после выбора), а рисует его
+   * общий попап окна: другие списки ведут себя так же (стрелки, Enter, Esc, клик мимо).
+   * Свой список означал бы третье поведение на три клика.
+   *
+   * Кодировка — единственное, чего менять нечем: писатель файлов всегда UTF-8. Не
+   * делаем вид, что есть выбор: показываем один пункт с пометкой и объяснением. Подмена
+   * кодировки без перекодирования байт на диске — это порча файла, а не сервис.
+   */
+  function openStatusChoice(kind: StatusChoiceKind, anchor: HTMLElement): void {
+    // Свойства берём у панели, которая в фокусе: именно её файл человек видит.
+    const pane = editors.pane;
+    if (!pane.activePath) {
+      showToast('Откройте файл: кодировка и отступы — свойства файла');
+      return;
+    }
+    const indentNow = pane.indentChoice();
+    const choices = statusChoices(kind, {
+      language: pane.documentLanguage,
+      // Писатель всегда кладёт на диск UTF-8 — другого у нас просто нет.
+      encoding: 'UTF-8',
+      tabSize: indentNow.tabSize,
+      useTabs: !indentNow.insertSpaces,
+    });
+    const rect = anchor.getBoundingClientRect();
+    showPopupMenu(
+      choices.map((choice) => ({
+        label: choice.label,
+        hint: choice.hint,
+        checked: choice.checked,
+        onSelect: () => {
+          // Чужой id молча не применяем: список — это закрытый набор, и если он
+          // разойдётся с тем, что умеет документ, человек увидит причину, а не тишину.
+          if (!isStatusChoice(kind, choice.id)) {
+            showToast(`Этот ${kind === 'language' ? 'язык' : 'вариант'} сейчас не выбрать`);
+            return;
+          }
+          const message = applyStatusChoice(kind, choice.id, pane);
+          if (message) showToast(message);
+          refreshStatus();
+        },
+      })),
+      rect.left,
+      rect.top,
+      // Якорь сам сдвинет меню вверх: под полосой внизу окна места нет.
+      { anchor },
+    );
+  }
+
+  /**
+   * Что сделать с выбранным пунктом. Возвращает текст для человека или `null`.
+   *
+   * Отделено от попапа, потому что три ветки никак не связаны с разметкой: смена языка
+   * трогает подсветку, отступ — контроллер, кодировка вообще только обьясняет.
+   */
+  function applyStatusChoice(
+    kind: StatusChoiceKind,
+    id: string,
+    pane: typeof editors.pane,
+  ): string | null {
+    if (kind === 'language') {
+      pane.setLanguageOf(id);
+      return `Язык файла: ${statusLanguageLabel(id)}`;
+    }
+    if (kind === 'indent') {
+      const indent = pane.indentChoice();
+      const next = indentAfterChoice(id, { tabSize: indent.tabSize, useTabs: !indent.insertSpaces });
+      // Тот же отступ — не повод трогать файл: молчим, а не сообщаем «сделано».
+      if (!next) return null;
+      pane.setIndentChoice(next.tabSize, !next.useTabs);
+      return next.useTabs ? 'Отступ: табуляция' : `Отступ: ${next.tabSize} пробела`;
+    }
+    // Кодировка: писатель всегда UTF-8, выбора нет. Говорим это прямо.
+    return id === 'utf-8' ? null : 'Файлы пишутся только в UTF-8 — другой кодировки нет';
+  }
+
 
   /**
    * Окружение проекта читаем при его открытии, а не только по клику на чип: иначе

@@ -498,8 +498,8 @@ export class EditorHost {
   /** Дзен-режим включён: вид урезан до текста. */
   private zen = false;
 
-  /** Язык панели: подсветка, подсказки и слова — от него же. */
-  private setLanguageOf(languageId: string): void {
+  /** Язык панели — наружу: строка состояния меняет его кликом по надписи языка. */
+  setLanguageOf(languageId: string): void {
     this.view.setLanguage(languageId);
     this.assistant.setLanguage(languageId);
     this.languageId = languageId;
@@ -541,6 +541,31 @@ export class EditorHost {
     this.indentSize = style.tabSize;
     this.controller.setTabSize(style.tabSize);
     this.view.setTabSize(style.tabSize);
+  }
+
+  /**
+   * Отступ выбран человеком — перебивает и содержимое, и язык.
+   *
+   * Почему не `applyIndentStyle`: тот каждый раз угадывает по содержимому и языку. После
+   * явного выбора угадывать нечего — человек уже сказал. Иначе следующий пересчёт
+   * вернул бы прежний отступ, и клик выглядел бы как «не сработало».
+   */
+  setIndentChoice(tabSize: number, insertSpaces: boolean): void {
+    this.controller.setIndentStyle(insertSpaces);
+    this.indentSize = tabSize;
+    this.controller.setTabSize(tabSize);
+    this.view.setTabSize(tabSize);
+  }
+
+  /**
+   * Чем сейчас набирается отступ в этом файле.
+   *
+   * Спрашиваем у контроллера, а не у `indentSize`: размер мы помним, а пробелы-табы
+   * живут только у него, и второй источник правды разошёлся бы с первым при
+   * пересчёте по содержимому.
+   */
+  indentChoice(): { tabSize: number; insertSpaces: boolean } {
+    return { tabSize: this.indentSize, insertSpaces: this.controller.insertSpaces() };
   }
 
   /**

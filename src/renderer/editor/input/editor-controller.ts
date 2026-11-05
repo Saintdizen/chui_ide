@@ -208,6 +208,11 @@ export class EditorController {
     this.useTabs = !insertSpaces;
   }
 
+  /** Чем отступ сейчас: важно строке состояния, иначе она покажет не то, что ставится. */
+  insertSpaces(): boolean {
+    return !this.useTabs;
+  }
+
   /** Переключить режим «только чтение»: панель открывает файл, большой или обычный. */
   setReadOnly(readOnly: boolean): void {
     this.readOnly = readOnly;

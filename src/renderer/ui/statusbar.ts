@@ -126,11 +126,21 @@ export interface StatusBarDeps {
    * Выполнить команду по клику на слот статус-бара.
    *
    * Слот, у которого есть действие, должен им пользоваться: полоса из одних
-   * подписей — это справка, а не орган управления. Нет команды — слот остаётся
-   * текстом (кодировку пока менять нечем, и притворяться нельзя).
+   * подписей — это справка, а не орган управления.
    */
   runCommand(id: string, anchor: HTMLElement): void;
+  /**
+   * Клик по кодировке, отступам или языку — выбор из списка у кнопки.
+   *
+   * Отдельный канал, а не `runCommand`: варианты приходят не из реестра команд, а
+   * из состояния документа (её кодировка, её отступ, язык по расширению), и
+   * рисовать их должен тот же попап, что у остальных списков окна.
+   */
+  openChoice(kind: StatusChoiceKind, anchor: HTMLElement): void;
 }
+
+/** Что именно выбираем кликом по слоту. */
+export type StatusChoiceKind = 'encoding' | 'indent' | 'language';
 
 /** Русское склонение по числу: 1 ошибка, 2 ошибки, 5 ошибок. */
 /**
@@ -208,9 +218,24 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
         event.currentTarget as HTMLElement,
       ),
   });
-  const encodingItem = h('span', { class: 'status-item' });
-  const indentItem = h('span', { class: 'status-item' });
-  const languageItem = h('span', { class: 'status-item' });
+  const encodingItem = h('button', {
+    class: 'status-item',
+    type: 'button',
+    title: 'Выбрать кодировку',
+    onClick: (event: Event) => deps.openChoice('encoding', event.currentTarget as HTMLElement),
+  });
+  const indentItem = h('button', {
+    class: 'status-item',
+    type: 'button',
+    title: 'Выбрать отступы',
+    onClick: (event: Event) => deps.openChoice('indent', event.currentTarget as HTMLElement),
+  });
+  const languageItem = h('button', {
+    class: 'status-item',
+    type: 'button',
+    title: 'Сменить язык файла',
+    onClick: (event: Event) => deps.openChoice('language', event.currentTarget as HTMLElement),
+  });
   // Языковой сервер: какой обслуживает открытый язык и откуда он взят. Упавший сервер
   // показываем тоже — это и есть ответ на вопрос «почему тут нет подсказок».
   const lspItem = h(
