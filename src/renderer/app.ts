@@ -249,6 +249,11 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     openNodeEnv: (anchor) => openNodeEnv(anchor),
     openProblems: () => editors.revealNextProblem(),
     openLsp: (anchor) => openLsp(anchor),
+    // «Включить всё равно»: подсветку в крупном файле включаем для этого файла.
+    forceHighlight: () => {
+      editors.forceHighlight();
+      refreshStatus();
+    },
     // Клик по слоту — та же дорога, что и из меню редактора: команды редактора
     // живут в его собственных командах, а не в общем реестре приложения.
     runCommand: (id) => {
@@ -437,6 +442,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     vimMode: settings.editor.vimMode,
     // Смена режима Vim обновляет значок в строке состояния.
     onVimModeChange: () => refreshStatus(),
+    // Подсветку выключил размер файла — строка состояния скажет почему и даст выход.
+    onHighlightStatus: () => refreshStatus(),
     emacsMode: settings.editor.emacsMode,
     tabMovesFocus: settings.editor.tabMovesFocus,
     ligatures: settings.editor.fontLigatures,
@@ -3601,6 +3608,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       projectKind: projectScan?.kind ?? null,
       problems: problemsStatus(),
       vim: settings.editor.vimMode ? editors.vimMode() : null,
+      highlightOff: active ? editors.highlightStatus().offReason : null,
       macro: editors.isRecordingMacro() ? { steps: editors.macroSteps().length } : null,
       tools: projectTools,
       configuredPython: settings.run.pythonPath,

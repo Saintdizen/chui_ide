@@ -6,6 +6,7 @@ import type { CheckProgressInput } from './check-progress';
 import { problemsWidget } from './problems-widget';
 import type { ProjectProblemCounts } from './problems-widget';
 import type { VimMode } from '../editor/input/vim';
+import { highlightOffChip, type HighlightOffReason } from '../../shared/large-file';
 
 // Вид счётчиков живёт в чистом модуле, а тип — там же: его читают тесты без DOM.
 export type { ProjectProblemCounts };
@@ -79,6 +80,11 @@ export interface StatusState {
    * тоже: он говорит, что модальность включена и что дальше можно набирать текст.
    */
   vim: VimMode | null;
+  /**
+   * Подсветка выключена из-за размера файла и почему. `null` — подсветка есть
+   * (или языка нет — про это молчит другой виджет). Клик по чипу включает всё равно.
+   */
+  highlightOff: HighlightOffReason | null;
 }
 
 export interface StatusBarView {
@@ -112,6 +118,8 @@ export interface StatusBarDeps {
   openNodeEnv(anchor: HTMLElement): void;
   /** Клик по счётчику проблем — переход к первой пометке. */
   openProblems(anchor: HTMLElement): void;
+  /** Человек нажал «включить всё равно»: подсветить крупный файл несмотря на порог. */
+  forceHighlight: () => void;
   /** Клик по чипу языкового сервера — попап со списком серверов и действиями. */
   openLsp(anchor: HTMLElement): void;
   /**
@@ -150,6 +158,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     symbols: null,
     macro: null,
     vim: null,
+    highlightOff: null,
     problems: { errors: 0, warnings: 0 },
     check: null,
   };
@@ -242,6 +251,12 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const macroCount = macroItem.querySelector<HTMLElement>('.status-macro-count')!;
   // Режим Vim: короткое слово (НОРМ, ВСТАВКА, ВИЗУАЛ) в левой части полосы.
   const vimItem = h('span', { class: 'status-item status-vim' });
+  // Подсветка выключена из-за размера файла. Нарочно КЛИКАБЕЛЬНЫЙ: сказать «почему
+  // её нет» мало — человек пришёл читать код, и ему нужен выход (``включить всё равно``).
+  const highlightItem = h('button', {
+    class: 'status-item status-no-highlight',
+    type: 'button',
+  });
   const readOnlyItem = h('span', { class: 'status-item status-readonly' });
   const versionItem = h('span', { class: 'status-item status-muted' });
   // Проблемы — значок и числа: цвет различает ошибку и предупреждение, а количество
@@ -270,6 +285,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       'div',
       { class: 'status-group' },
       vimItem,
+      highlightItem,
       meterItem,
       macroItem,
       problemsItem,
@@ -322,6 +338,17 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     vimItem.hidden = vim === null;
     vimItem.textContent = vim ? VIM_LABEL[vim] : '';
     vimItem.title = vim ? `Vim: ${VIM_TITLE[vim]}` : '';
+
+    // Подсветка выключена размером — говорим почему и даём выход. Текст короткий:
+    // место в полосе дорогое, а причина — в подсказке.
+    const off = state.highlightOff;
+    highlightItem.hidden = off === null;
+    if (off) {
+      const chip = highlightOffChip(off);
+      highlightItem.textContent = chip.label;
+      highlightItem.title = chip.title;
+      highlightItem.onclick = () => deps.forceHighlight();
+    }
     readOnlyItem.textContent = state.readOnly ? 'Только чтение' : '';
     readOnlyItem.hidden = !state.readOnly;
     readOnlyItem.title = state.readOnly ? 'Файл слишком большой для правки — открыт только для чтения' : '';

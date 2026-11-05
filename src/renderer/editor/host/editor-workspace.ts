@@ -69,6 +69,7 @@ import {
 import type { CursorStyle } from '../../../shared/cursor-style';
 import type { MacroStep } from '../input/macro';
 import type { VimMode } from '../input/vim';
+import type { HighlightOffReason } from '../../../shared/large-file';
 import type { WhitespaceMode } from '../view/whitespace';
 
 /** Значение выражения для подсказки отладчика: что показать и какого типа. */
@@ -116,6 +117,8 @@ export interface EditorWorkspaceOptions {
   vimMode?: boolean;
   /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
   onVimModeChange?: (mode: VimMode) => void;
+  /** Подсветка выключена (напр. файл слишком велик): `null` — всё в порядке. */
+  onHighlightStatus?: (offReason: HighlightOffReason | null) => void;
   /** Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода (настройка `editor.emacsMode`). */
   emacsMode?: boolean;
   /** Включать ли лигатуры шрифта. */
@@ -315,6 +318,7 @@ export class EditorWorkspace {
   private readonly hoverDelayMs: number | undefined;
   private readonly vimModeInitial: boolean | undefined;
   private readonly vimModeChange: ((mode: VimMode) => void) | undefined;
+  private readonly highlightStatusChange: ((offReason: HighlightOffReason | null) => void) | undefined;
   private readonly emacsMode: boolean | undefined;
   /** Включён ли Emmet — живой геттер: его меняют в настройках без пересоздания панели. */
   private readonly emmetEnabled: (() => boolean) | undefined;
@@ -471,6 +475,7 @@ export class EditorWorkspace {
     this.hoverDelayMs = options.hoverDelayMs;
     this.vimModeInitial = options.vimMode;
     this.vimModeChange = options.onVimModeChange;
+    this.highlightStatusChange = options.onHighlightStatus;
     this.emacsMode = options.emacsMode;
     this.emmetEnabled = options.emmetEnabled;
     this.spell = options.spellcheck;
@@ -590,6 +595,7 @@ export class EditorWorkspace {
       hoverDelayMs: this.hoverDelayMs,
       vimMode: this.vimModeInitial,
       onVimModeChange: this.vimModeChange,
+      onHighlightStatus: this.highlightStatusChange,
       emacsMode: this.emacsMode,
       emmetEnabled: this.emmetEnabled,
       spellcheck: this.spell,
@@ -1126,6 +1132,16 @@ export class EditorWorkspace {
   /** Включить или выключить Vim-режим во всех панелях. */
   setVimMode(on: boolean): void {
     for (const pane of this.panes) pane.setVimMode(on);
+  }
+
+  /** Язык подсветки и причина, почему её нет (крупный файл) — для строки состояния. */
+  highlightStatus(): { language: string | null; offReason: HighlightOffReason | null } {
+    return this.pane.highlightStatus();
+  }
+
+  /** «Включить всё равно»: подсветить крупный файл несмотря на порог размера. */
+  forceHighlight(): void {
+    this.pane.forceHighlight();
   }
 
   /** Включить или выключить Emacs-режим во всех панелях. */

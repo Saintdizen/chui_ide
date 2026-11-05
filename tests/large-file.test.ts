@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   LARGE_FILE_BYTES,
+  MAX_HIGHLIGHT_CHARS,
   MAX_OPEN_BYTES,
   MAX_WRAP_LINE_CHARS,
   MAX_WRAP_LINES,
+  highlightOffChip,
+  highlightOffText,
+  highlightPolicy,
   isReadOnlySize,
   withinOpenLimit,
   wrapsByLineCount,
@@ -91,5 +95,46 @@ describe('порог по длине строки', () => {
   it('порог ниже, чем файл вообще разрешено открыть', () => {
     // Строка не может быть длиннее файла: если файл открывают, порог обязан сработать.
     expect(MAX_WRAP_LINE_CHARS).toBeLessThan(MAX_OPEN_BYTES);
+  });
+});
+
+describe('подсветка: порог и причина', () => {
+  it('обычный файл подсвечивается', () => {
+    expect(highlightPolicy(1_000, false)).toEqual({ on: true, reason: null });
+    expect(highlightPolicy(MAX_HIGHLIGHT_CHARS, false)).toEqual({ on: true, reason: null });
+  });
+
+  it('файл сверх порога — без подсветки, и причина названа', () => {
+    expect(highlightPolicy(MAX_HIGHLIGHT_CHARS + 1, false)).toEqual({
+      on: false,
+      reason: 'too-large',
+    });
+  });
+
+  it('«включить всё равно» перебивает порог', () => {
+    // Порог — не запрет: человек вправе доплатить временем за подсветку.
+    expect(highlightPolicy(MAX_HIGHLIGHT_CHARS * 10, true)).toEqual({ on: true, reason: null });
+  });
+
+  it('у каждой причины есть человеческая фраза', () => {
+    for (const reason of ['too-large', 'unsupported'] as const) {
+      const text = highlightOffText(reason);
+      expect(text.length).toBeGreaterThan(10);
+      expect(text).not.toContain('undefined');
+    }
+  });
+});
+
+describe('чип «подсветка выключена»', () => {
+  it('подпись короткая, причина — в подсказке', () => {
+    const chip = highlightOffChip('too-large');
+    // Место в полосе дорогое: подпись не должна расти с размером файла.
+    expect(chip.label.length).toBeLessThan(20);
+    expect(chip.title).toContain('МБ');
+    expect(chip.title).toContain('включить всё равно');
+  });
+
+  it('у разных причин разные подсказки', () => {
+    expect(highlightOffChip('too-large').title).not.toBe(highlightOffChip('unsupported').title);
   });
 });

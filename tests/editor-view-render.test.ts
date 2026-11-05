@@ -1,5 +1,6 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: узлы мини-DOM приходят из
 // заглушки DOM — тип у них шире настоящего намеренно, вне этого файла не нужен.
+import { MAX_HIGHLIGHT_CHARS } from '../src/shared/large-file';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { EditorView } from '../src/renderer/editor/view/editor-view';
 import { TextBuffer } from '../src/renderer/editor/core/text-buffer';
@@ -442,5 +443,31 @@ describe('огромная строка не тормозит вид', () => {
     view.setWordWrap(true);
     expect(() => view.scrollToLine(2)).not.toThrow();
     expect(view.firstVisibleLine()).toBe(2);
+  });
+});
+
+describe('подсветка крупного файла', () => {
+  it('файл сверх порога: подсветка гаснет, причина видна снаружи', () => {
+    // 4 МБ текста — дороже, чем даёт подсветка: строка состояния должна сказать
+    // почему, а не оставить человека гадать, отчего всё серое.
+    const { view } = makeView('a'.repeat(MAX_HIGHLIGHT_CHARS + 10));
+    view.setLanguage('typescript');
+    expect(view.highlightStatus.offReason).toBe('too-large');
+    expect(view.highlightLanguage).toBeNull();
+  });
+
+  it('«включить всё равно» снимает порог для этого файла', () => {
+    const { view } = makeView('a'.repeat(MAX_HIGHLIGHT_CHARS + 10));
+    view.setLanguage('typescript');
+    expect(view.highlightStatus.offReason).toBe('too-large');
+    view.forceHighlight();
+    // Решение принято — чип больше не нужен, даже если грамматика ещё грузится.
+    expect(view.highlightStatus.offReason).toBeNull();
+  });
+
+  it('обычный файл: причина не выдумана', () => {
+    const { view } = makeView('const x = 1;\n');
+    view.setLanguage('typescript');
+    expect(view.highlightStatus.offReason).toBeNull();
   });
 });

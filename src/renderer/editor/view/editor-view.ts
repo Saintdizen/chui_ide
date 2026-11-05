@@ -25,7 +25,12 @@
  * (`line-layout.ts`, `viewport.ts`, `selection.ts`) и проверяется в тестах без окна.
  */
 
-import { wrapsByLineCount, wrapsByLineLength } from '../../../shared/large-file';
+import {
+  highlightPolicy,
+  wrapsByLineCount,
+  wrapsByLineLength,
+  type HighlightOffReason,
+} from '../../../shared/large-file';
 import type { TextBuffer } from '../core/text-buffer';
 import { LineHighlighter } from '../highlight/highlighter';
 import { sharedTokens } from '../highlight/token-cache';
@@ -881,16 +886,63 @@ export class EditorView {
 
   private languageId: string | null = null;
 
+  /**
+   * Человек попросил включить подсветку всем несмотря на размер («включить всё равно»).
+   * Ставится на текущий файл и живёт до следующего `setLanguage` на большом файле.
+   */
+  private highlightForced = false;
+  /** Почему подсветки нет (`null` — есть или не запрашивали). */
+  private highlightOffReason: HighlightOffReason | null = null;
+  /** Грамотность сменилась асинхронно — сказать хозяину (он обновит строку состояния). */
+  onHighlightStatusChange: ((offReason: HighlightOffReason | null) => void) | null = null;
+
   /** Сменить язык подсветки (открыли другой файл в этой же вкладке). */
   setLanguage(languageId: string): void {
+    this.languageId = languageId;
+    // Новый файл — новый размер и новый выбор: `forced` относится к прошлому файлу.
+    this.highlightForced = false;
+    this.applyLanguage();
+  }
+
+  /**
+   * Включить подсветку на этом файле, несмотря на размер.
+   *
+   * Крупнее порога подсветка дорога: разбор идёт по всем строкам и при каждом
+   * открытии. Поэтому это выбор человека, а не молчаливое действие редактора —
+   * и он помнится (внешнее состояние выходит через `highlightStatus`).
+   */
+  forceHighlight(): void {
+    if (this.highlightForced) return;
+    this.highlightForced = true;
+    this.applyLanguage();
+  }
+
+  /** Что про подсветку сейчас: язык, причина отказа — для строки состояния. */
+  get highlightStatus(): { language: string | null; offReason: HighlightOffReason | null } {
+    return { language: this.highlighter.language, offReason: this.highlightOffReason };
+  }
+
+  /** Поставить грамматику по текущему языку с учётом порога размера. */
+  private applyLanguage(): void {
+    const languageId = this.languageId ?? 'plaintext';
+    const policy = highlightPolicy(this.buffer.length, this.highlightForced);
+    this.highlightOffReason = policy.reason;
     this.highlighter.setGrammar(null);
+    if (!policy.on) {
+      this.rerender();
+      return;
+    }
     void languageGrammar(languageId).then((grammar) => {
       if (this.languageId !== languageId) return;
       this.highlighter.setGrammar(grammar);
+      // Грамматики нет (язык без подсветки) — говорим почему, а не молчим.
+      // `plaintext` — это осознанно без подсветки, а не отказ: про него не пишем.
+      this.highlightOffReason = grammar || languageId === 'plaintext' ? null : 'unsupported';
       this.bracketDepth.reset();
       this.rerender();
+      // Причина `unsupported` выясняется только здесь, когда грамматика не пришла.
+      this.onHighlightStatusChange?.(this.highlightOffReason);
     });
-    this.languageId = languageId;
   }
 
   /** Сменить схему оформления: цвета токенов берутся из темы и её надо переставить. */

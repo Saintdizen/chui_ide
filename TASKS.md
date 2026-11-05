@@ -244,10 +244,6 @@
     «окно задумалось». Источник: Zed `development/ui-checklist` (Performance),
     JetBrains `progress-indicators`.
 
-39. **Порог подсветки виден.** Файл без подсветки из-за размера говорит
-    почему; есть кнопка «включить всё равно» с предупреждением.
-    Источник: VS Code `edit-evolved` (large file optimizations).
-
 ### Правка кода
 
 ---

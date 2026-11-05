@@ -68,3 +68,60 @@ export function wrapsByLineCount(lineCount: number): boolean {
 export function wrapsByLineLength(length: number): boolean {
   return length <= MAX_WRAP_LINE_CHARS;
 }
+
+/**
+ * Размер файла (в знаках), выше которого подсветка не включается сама.
+ *
+ * Подсветка разбирает строки при отрисовке, и её цена растёт с числом строк,
+ * а не с числом видимых. На крупном файле (минифицированный бандл, дамп БД,
+ * лог) разбор каждой строки при каждом открытии задерживает первую картинку
+ * больше, чем она стоит. Порог нарочно высокий (четыре мегабайта): обычные
+ * исходники — десятки-сотни килобайт, а такой файл всё равно не читают глазами.
+ *
+ * Это НЕ запрет: подсветку можно включить руками (`highlightPolicy`), и выбор
+ * помнится для файла.
+ */
+export const MAX_HIGHLIGHT_CHARS = 4_000_000;
+
+/** Почему подсветки нет — чтобы вид и строка состояния сказали одно и то же. */
+export type HighlightOffReason = 'unsupported' | 'too-large';
+
+/**
+ * Человеческая причина отсутствия подсветки. Живёт рядом с типом, а не в виджете:
+ * одна и та же фраза нужна и строке состояния, и уведомлению при открытии.
+ */
+const HIGHLIGHT_OFF_TEXT: Record<HighlightOffReason, string> = {
+  'too-large': `Файл больше ${MAX_HIGHLIGHT_CHARS / 1_000_000} МБ — подсветка выключена, чтобы файл открывался быстро.`,
+  unsupported: 'Для этого языка нет грамматики подсветки.',
+};
+
+/** Готовая фраза про отсутствие подсветки. */
+export function highlightOffText(reason: HighlightOffReason): string {
+  return HIGHLIGHT_OFF_TEXT[reason];
+}
+
+/**
+ * Содержимое чипа в строке состояния: подпись, подсказка и что скажет клик.
+ *
+ * Вынесено из виджета в чистый модуль затем, что `statusbar.ts` требует DOM, а
+ * прогон идёт без него (`environment: 'node'`): решение проверяемо, а рисование — нет.
+ */
+export interface HighlightOffChip {
+  readonly label: string;
+  readonly title: string;
+}
+
+export function highlightOffChip(reason: HighlightOffReason): HighlightOffChip {
+  return {
+    // Место в полосе дорогое, а причина — в подсказке.
+    label: 'Подсветка выкл.',
+    title: `${highlightOffText(reason)} Нажмите, чтобы включить всё равно.`,
+  };
+}
+
+/** Решение о подсветке файла такого размера. */
+export function highlightPolicy(size: number, forced: boolean): { on: boolean; reason: HighlightOffReason | null } {
+  if (forced) return { on: true, reason: null };
+  if (size > MAX_HIGHLIGHT_CHARS) return { on: false, reason: 'too-large' };
+  return { on: true, reason: null };
+}

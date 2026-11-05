@@ -23,6 +23,7 @@
 
 import type { CursorPosition, LspDiagnostic } from '../../../shared/api';
 import { languageFromPath, languageIndent } from '../../core/languages';
+import type { HighlightOffReason } from '../../../shared/large-file';
 import { detectIndent, resolveIndent } from '../../../shared/indent';
 import type { TextEdit } from '../../../shared/edits';
 import type { FoldRange } from '../../../shared/fold-ranges';
@@ -196,6 +197,8 @@ export interface EditorHostOptions {
   tabMovesFocus?: boolean;
   /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
   onVimModeChange?: (mode: VimMode) => void;
+  /** Подсветка выключена (напр. файл слишком велик): `null` — всё в порядке. */
+  onHighlightStatus?: (offReason: HighlightOffReason | null) => void;
   /** Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода (настройка `editor.emacsMode`). */
   emacsMode?: boolean;
   /** Включать ли лигатуры шрифта. */
@@ -500,6 +503,24 @@ export class EditorHost {
     this.view.setLanguage(languageId);
     this.assistant.setLanguage(languageId);
     this.languageId = languageId;
+    // После смены языка `highlightForced` сброшен — скажем строке состояния заново.
+    this.emitHighlightStatus();
+  }
+
+  /** Подсветка: язык и почему её нет. Строка состояния спрашивает через `highlightStatus`. */
+  highlightStatus(): { language: string | null; offReason: HighlightOffReason | null } {
+    return this.view.highlightStatus;
+  }
+
+  /** «Включить всё равно»: подсветить крупный файл несмотря на порог размера. */
+  forceHighlight(): void {
+    this.view.forceHighlight();
+    this.emitHighlightStatus();
+  }
+
+  /** Сказать наружу, что с подсветкой, — если хозяин подписан на это. */
+  private emitHighlightStatus(): void {
+    this.onHighlightStatus?.(this.view.highlightStatus.offReason);
   }
 
   /**
@@ -542,6 +563,8 @@ export class EditorHost {
   private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
   /** Диапазоны свёртки — от приложения (языковой сервер или отступы). */
   private readonly foldRanges: ((path: string, text: string) => Promise<readonly FoldRange[]>) | undefined;
+  /** Подсветка включилась/выключилась (язык или порог размера) — для строки состояния. */
+  private readonly onHighlightStatus: ((offReason: HighlightOffReason | null) => void) | undefined;
   /** Номер запроса диапазонов свёртки: ответ на прежний текст не показываем. */
   private foldRequestId = 0;
   /** Пауза перед пересчётом свёртки по правке: на каждое нажатие считать незачем. */
@@ -718,6 +741,7 @@ export class EditorHost {
     this.contextMenu = options.contextMenu;
     this.codeActions = options.codeActions;
     this.foldRanges = options.foldRanges;
+    this.onHighlightStatus = options.onHighlightStatus;
     this.codeLensSource = options.codeLenses;
     this.lensCommand = options.lensCommand;
     this.inlayHintSource = options.inlayHints;
@@ -743,6 +767,9 @@ export class EditorHost {
       overview: options.overview,
       ligatures: options.ligatures,
     });
+    // Причина может выясниться позже (грамматика приходит асинхронно) —
+    // тогда строке состояния сказать об этом уже некому без подписки.
+    this.view.onHighlightStatusChange = (offReason) => this.onHighlightStatus?.(offReason);
     this.view.setWordWrap(options.wordWrap === true);
     this.view.setSmoothScroll(options.smoothScroll === true);
     this.minimapWanted = options.minimap === true;

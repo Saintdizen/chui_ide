@@ -140,6 +140,22 @@ button.status-item:focus-visible {
   background: var(--element_background_hover);
 }
 
+/* Подсветка выключена (файл слишком велик) — кнопка: клик включает её всё равно.
+   Похожа на окружение, но с предупреждающим оттенком: это ограничение, а не состояние. */
+.status-no-highlight {
+  padding: 0 4px;
+  border: none;
+  border-radius: var(--radius_xs);
+  background: none;
+  color: var(--text_color_tertiary);
+  cursor: pointer;
+}
+
+.status-no-highlight:hover {
+  color: var(--text_color_primary);
+  background: var(--element_background_hover);
+}
+
 /* Окружение Python — кнопка: клик открывает попап с подробностями. */
 .status-env {
   padding: 0 4px;
