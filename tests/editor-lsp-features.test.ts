@@ -3,12 +3,12 @@ import { hoverText, LspFeatures } from '../src/renderer/editor/host/lsp-features
 import type { RpcClient } from '../src/renderer/core/rpc';
 
 /** Подставной rpc: запоминает запрос, отдаёт заданный ответ или ошибку. */
-function fakeRpc(answer: unknown, options: { fail?: boolean } = {}) {
+function fakeRpc(answer: unknown, options: { fail?: boolean; message?: string } = {}) {
   const calls: Array<{ method: string; params: unknown }> = [];
   const rpc = {
     request: vi.fn(async (method: string, params: unknown) => {
       calls.push({ method, params });
-      if (options.fail) throw new Error('нет сервера');
+      if (options.fail) throw new Error(options.message ?? 'нет сервера');
       return answer;
     }),
   } as unknown as RpcClient;
@@ -48,12 +48,23 @@ describe('prepareRename', () => {
     expect(params.params.position).toEqual({ line: 1, character: 4 });
   });
 
-  it('отказ сервера не срывает переименование: `message` есть, `word` нет', async () => {
-    // Сервер вправе ответить ошибкой (`RequestFailed`) — её ловит вызывающий и
-    // показывает как причину, а не обрывает команду.
-    const { rpc } = fakeRpc(null, { fail: true });
+  it('range отдаётся — чтобы подсветить им участок до ввода имени', async () => {
+    const range = { start: { line: 1, character: 4 }, end: { line: 1, character: 9 } };
+    const { rpc } = fakeRpc({ range, placeholder: 'value' });
     const features = new LspFeatures(rpc);
-    expect(await features.prepareRename('/p/a.py', { line: 1, column: 1 })).toBeNull();
+    const prepared = await features.prepareRename('/p/a.py', { line: 2, column: 5 });
+    // `character` сервера → `column` редактора (ноль-база та же).
+    expect(prepared?.range).toEqual({ start: { line: 1, column: 4 }, end: { line: 1, column: 9 } });
+  });
+
+  it('отказ сервера — это причина в `message`, а не «нечего переименовать»', async () => {
+    // Ошибка `RequestFailed` от сервера («это ключевое слово») должна доехать до
+    // человека текстом, а `null` зарезервирован за «переименовывать нечего».
+    const { rpc } = fakeRpc(null, { fail: true, message: 'Нельзя переименовать ключевое слово' });
+    const features = new LspFeatures(rpc);
+    const prepared = await features.prepareRename('/p/a.py', { line: 1, column: 1 });
+    expect(prepared?.word).toBeNull();
+    expect(prepared?.message).toBe('Нельзя переименовать ключевое слово');
   });
 });
 

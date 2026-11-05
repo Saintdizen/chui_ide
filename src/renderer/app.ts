@@ -585,6 +585,15 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
           showToast(prepared.message, 'error');
           return;
         }
+        // Сервер сказал, что именно переименует: подсвечиваем участок до ввода имени,
+        // чтобы человек видел, что заменится. Координаты сервера 0-based — host 1-based.
+        if (prepared.range) {
+          editors.selectSpan(
+            path,
+            { line: prepared.range.start.line + 1, column: prepared.range.start.column + 1 },
+            { line: prepared.range.end.line + 1, column: prepared.range.end.column + 1 },
+          );
+        }
         const newName = await promptValue({
           title: 'Переименовать символ',
           label: 'Новое имя',

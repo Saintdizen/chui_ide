@@ -85,11 +85,41 @@ export interface LspPosition {
   column: number;
 }
 
-/** Разбор `prepareRename`: имя для подстановки. `null` — сервер имени не дал. */
-function toPreparedRename(raw: unknown): { word: string; message: string | null } | null {
+/** Участок, который сервер собирается переименовать (`prepareRename.range`). */
+export interface PreparedRename {
+  word: string | null;
+  message: string | null;
+  /** Место под курсором, которое сервер считает символом: подсветить до ввода имени. */
+  range: { start: LspPosition; end: LspPosition } | null;
+}
+
+/** Разбор `prepareRename`: имя для подстановки, причина отказа и место символа. */
+function toPreparedRename(raw: unknown): PreparedRename | null {
   if (!raw || typeof raw !== 'object') return null;
   const word = (raw as { placeholder?: unknown }).placeholder;
-  return typeof word === 'string' ? { word, message: null } : null;
+  const message = (raw as { message?: unknown }).message;
+  return {
+    word: typeof word === 'string' ? word : null,
+    message: typeof message === 'string' ? message : null,
+    range: toPreparedRange((raw as { range?: unknown }).range),
+  };
+}
+
+/** Диапазон от сервера (0-based utf-16) — как он есть; разбираем мягко. */
+function toPreparedRange(raw: unknown): PreparedRename['range'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const start = (raw as { start?: unknown }).start;
+  const end = (raw as { end?: unknown }).end;
+  const point = (value: unknown): LspPosition | null => {
+    if (!value || typeof value !== 'object') return null;
+    const line = (value as { line?: unknown }).line;
+    const character = (value as { character?: unknown }).character;
+    if (typeof line !== 'number' || typeof character !== 'number') return null;
+    return { line, column: character };
+  };
+  const from = point(start);
+  const to = point(end);
+  return from && to ? { start: from, end: to } : null;
 }
 
 /**
@@ -164,14 +194,15 @@ export class LspFeatures {
    * Можно ли переименовать в этой точке (`prepareRename`): имя для подстановки и
    * причина отказа. `null` — сервер не умеет или в этом месте переименовывать нечего.
    */
-  async prepareRename(
-    path: string,
-    position: LspPosition,
-  ): Promise<{ word: string | null; message: string | null } | null> {
-    const result = await this.request(path, 'textDocument/prepareRename', {
-      textDocument: { uri: pathToUri(path) },
-      position: toLspPosition(position),
-    }).catch(() => null);
+  async prepareRename(path: string, position: LspPosition): Promise<PreparedRename | null> {
+    const params = { textDocument: { uri: pathToUri(path) }, position: toLspPosition(position) };
+    // Именно `rpc.request`, а не свой `request`: тот гасит ошибку в `null`, а здесь
+    // причина отказа («это ключевое слово») — то, ради чего спрашиваем.
+    const result = await this.rpc
+      .request('lsp.request', { path, method: 'textDocument/prepareRename', params })
+      .catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+    // Строка — причина отказа от сервера (см. main: отказ отдаёт message).
+    if (typeof result === 'string') return { word: null, message: result, range: null };
     return toPreparedRename(result);
   }
 

@@ -810,6 +810,11 @@ export class EditorWorkspace {
     this.reveal(path, line, column);
   }
 
+  /** Выделить участок в панели, где открыт файл (чужие панели не трогаем). */
+  selectSpan(path: string, from: { line: number; column: number }, to: { line: number; column: number }): void {
+    this.paneWith(path)?.selectSpan(path, from, to);
+  }
+
   // — команды редактора —
 
   /**

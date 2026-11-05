@@ -1157,6 +1157,20 @@ export class EditorHost {
     this.input.focus();
   }
 
+  /**
+   * Выделить участок (1-based строки/столбцы), не уводя прокрутку за экран: так
+   * подсвечиваем имя перед переименованием. Чужой файл — молча ничего: открытие
+   * и переход — дело хозяина вкладок.
+   */
+  selectSpan(path: string, from: { line: number; column: number }, to: { line: number; column: number }): void {
+    if (this.path !== path) return;
+    const start = this.controller.bufferRef.offsetAt(from);
+    const end = this.controller.bufferRef.offsetAt(to);
+    this.controller.selectRange(start, end);
+    this.view.revealOffset(start);
+    this.input.focus();
+  }
+
   /** Текст выделенного участка — для копирования. Пустая строка, если выделения нет. */
   selectedText(): string {
     return this.controller.selectedText();

@@ -468,11 +468,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     Источник: VS Code `edit-evolved` (lightbulb, code actions on save),
     Zed `diagnostics`.
 
-77. **Рефакторинг: извлечь/переименовать/обернуть.** «Extract variable/method»
-    и «Rename symbol» доступны, когда сервер их объявил; переименование —
-    инлайново с превью затронутых мест и отменой одним `Ctrl+Z`; `prepareRename`
-    подсвечивает диапазон. Источник: VS Code `refactoring`, Zed `editing-code`.
-
 ---
 
 ## Правила работы со списком

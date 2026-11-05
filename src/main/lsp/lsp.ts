@@ -798,15 +798,40 @@ function isUnresolvedSymbol(item: unknown): boolean {
  * Отказ приходит ОШИБКОЙ запроса (код `RequestFailed`) — её ловит вызывающий и
  * передаёт `message` человеку как причину.
  */
-function toPrepareRename(raw: unknown): { word: string; message: string | null } | null {
+/** Ответ `prepareRename` в том виде, в каком его ждёт рендер. */
+export interface PreparedRename {
+  word: string;
+  message: string | null;
+  /** Участок под курсором (0-based, кодировка сервера) — для подсветки. */
+  range: { start: { line: number; character: number }; end: { line: number; character: number } } | null;
+}
+
+/** Попозиционный сырой `Range`: без проверки кодировки — её знает рендер. */
+function toRawRange(raw: unknown): PreparedRename['range'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const start = (raw as { start?: { line?: unknown; character?: unknown } }).start;
+  const end = (raw as { end?: { line?: unknown; character?: unknown } }).end;
+  if (!start || !end) return null;
+  if (typeof start.line !== 'number' || typeof start.character !== 'number') return null;
+  if (typeof end.line !== 'number' || typeof end.character !== 'number') return null;
+  return {
+    start: { line: start.line, character: start.character },
+    end: { line: end.line, character: end.character },
+  };
+}
+
+function toPrepareRename(raw: unknown): PreparedRename | null {
   // Отказ сервера (`RequestFailed`) — не ответ, а ошибка запроса: текст причины
   // сообщает вызывающий, здесь её взять неоткуда.
-  if (typeof raw === 'string') return { word: '', message: raw };
+  if (typeof raw === 'string') return { word: '', message: raw, range: null };
   if (!raw || typeof raw !== 'object') return null;
   const word = (raw as { placeholder?: unknown }).placeholder;
   const asString = typeof word === 'string' ? word : '';
   const message = (raw as { message?: unknown }).message;
-  return { word: asString, message: typeof message === 'string' ? message : null };
+  // Сервер вправе вернуть участок, который он собирается переименовать: им мы
+  // подсвечиваем его до ввода имени.
+  const range = toRawRange((raw as { range?: unknown }).range);
+  return { word: asString, message: typeof message === 'string' ? message : null, range };
 }
 
 export class LspService {
@@ -2377,7 +2402,7 @@ export class LspService {
     text: string,
     line: number,
     column: number,
-  ): Promise<{ word: string; message: string | null } | null> {
+  ): Promise<PreparedRename | null> {
     const runtime = await this.runtimeForDocument(path, languageId);
     if (!runtime?.capabilities.renameProvider) return null;
     const position = positionOf(runtime, text, line, column);
@@ -2385,7 +2410,13 @@ export class LspService {
       runtime.connection
         .request('textDocument/prepareRename', { textDocument: { uri }, position })
         .then((raw) => toPrepareRename(raw))
-        .catch(() => null),
+        // Отказ сервера («нельзя: это ключевое слово») — не «нечего переименовать»:
+        // причину показываем человеку, а не гасим в `null`.
+        .catch((error: unknown) => ({
+          word: '',
+          message: error instanceof Error ? error.message : String(error),
+          range: null,
+        })),
     );
   }
   async rename(
