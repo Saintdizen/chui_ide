@@ -3339,6 +3339,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       root: () => workspace.root,
       relative: (path) => workspace.relative(path),
       saveDirtyForGit: () => fileWrite.saveDirtyForGit(),
+      // Возврат отката: в открытом редакторе после `git restore` лежит старый текст.
+      reloadIfOpen: (path) => edits.reloadFromDisk(path).then(() => undefined),
     },
     ai: {
       git,
@@ -4053,6 +4055,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     conditionInput,
     saveDocument: (document) => fileWrite.saveDocument(document),
     reloadIfOpen,
+    undoDiscard: (undo) => rpc.request('workspace.undoDiscard', { undo }),
     confirm: (options) => rpc.request('dialog.confirm', options),
   });
   // Место последнего нажатия — для меню жёлоба: у события контекстного меню нет

@@ -20,7 +20,10 @@ function setup(gitOver: Record<string, unknown> = {}, depsOver: Record<string, u
     init: async () => log.push('init'),
     stage: async (paths: string[]) => log.push(`stage:${paths.join(',')}`),
     unstage: async (paths: string[]) => log.push(`unstage:${paths.join(',')}`),
-    discard: async (paths: string[]) => log.push(`discard:${paths.join(',')}`),
+    discard: async (paths: string[]) => {
+      log.push(`discard:${paths.join(',')}`);
+      return { status: {} as never, undo: 'u-1' };
+    },
     commit: async (text: string, _paths?: unknown, amend?: boolean) => {
       log.push(`commit:${text}:${amend === true ? 'amend' : 'normal'}`);
       return { hash: 'd4e5f6a', summary: text || 'prev' };
@@ -29,7 +32,8 @@ function setup(gitOver: Record<string, unknown> = {}, depsOver: Record<string, u
   };
   const deps = {
     git,
-    showToast: (message: string, kind = 'info') => toasts.push(`${kind}:${message}`),
+    showToast: (message: string, kind = 'info', options?: { action?: { label: string }; run?: () => void }) =>
+      toasts.push(`${kind}:${message}${options?.action ? ` [${options.action.label}]` : ''}`),
     confirm: async () => true,
     root: () => '/p',
     relative: (path: string) => path.replace('/p/', ''),
@@ -89,28 +93,56 @@ describe('registerGitWriteCommands', () => {
     expect(toasts).toEqual(['info:Коммит d4e5f6a: тема']);
   });
 
-  it('отказ в диалоге останавливает и откат, и коммит', async () => {
+  it('отказ в диалоге останавливает коммит', async () => {
     const no = setup({ staged: [], unstaged: [{ path: '/p/a.ts' }] }, { confirm: async () => false });
-    await no.commands.get('git.discard')!.run('/p/a.ts', 'M');
     await no.commands.get('git.commit')!.run('тема');
     expect(no.log).toEqual([]);
   });
 
-  it('откат объясняет, что правки не вернуть', async () => {
-    const seen: { detail?: string }[] = [];
+  it('откат не спрашивает диалогом, а даёт «Отменить» в уведомлении', async () => {
+    const asked: unknown[] = [];
     const { commands, log, toasts } = setup(
       {},
       {
-        confirm: async (options: { detail?: string }) => {
-          seen.push(options);
+        confirm: async (options: unknown) => {
+          asked.push(options);
           return true;
         },
       },
     );
     await commands.get('git.discard')!.run('/p/a.ts', 'M');
-    expect(seen[0]?.detail).toContain('Вернуть правки будет нельзя');
+    // П8: подтверждение перед действием — лишний шаг там, где есть возврат.
+    expect(asked).toEqual([]);
     expect(log).toEqual(['discard:/p/a.ts']);
+    expect(toasts).toEqual(['info:Откатано: a.ts [Отменить]']);
+  });
+
+  it('без снимка кнопки «Отменить» нет: обещать возврат нечем', async () => {
+    const { commands, toasts } = setup({
+      discard: async () => ({ status: {} as never, undo: null }),
+    });
+    await commands.get('git.discard')!.run('/p/a.ts');
     expect(toasts).toEqual(['info:Откатано: a.ts']);
+  });
+
+  it('«Отменить» возвращает файл и перечитывает его в редакторе', async () => {
+    const undone: string[] = [];
+    const reloaded: string[] = [];
+    let action: { run: () => void } | null = null;
+    const { commands } = setup(
+      { undoDiscard: async (undo: string) => (undone.push(undo), '/p/a.ts') },
+      {
+        showToast: (_message, _kind, options) => {
+          action = options?.action ?? null;
+        },
+        reloadIfOpen: (path: string) => void reloaded.push(path),
+      },
+    );
+    await commands.get('git.discard')!.run('/p/a.ts');
+    action!.run();
+    await Promise.resolve();
+    expect(undone).toEqual(['u-1']);
+    expect(reloaded).toEqual(['/p/a.ts']);
   });
 
   it('пустой путь не доходит до модели git', async () => {

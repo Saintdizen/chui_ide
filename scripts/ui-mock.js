@@ -31,6 +31,9 @@
   /** Удалённое в мок-корзину: путь → содержимое, чтобы «Вернуть» работал. */
   const TRASHED = new Map();
 
+  /** Снимки перед откатом правок git: путь → содержимое. В браузере git нет, а возврат — есть. */
+  const DISCARDED = new Map();
+
   const FILES = new Map([
     [
       `${ROOT}/eslint.config.js`,
@@ -1115,6 +1118,21 @@ module.exports = [
         FILES.set(params.undo, text);
         TRASHED.delete(params.undo);
         addChild(params.undo);
+      }
+      return { path: params.undo };
+    },
+    'workspace.snapshotForDiscard': (params) => {
+      // Снимок перед откатом правок: в браузере нет git, но возврат может быть честным.
+      const text = FILES.get(params.path);
+      if (text === undefined) return { undo: null };
+      DISCARDED.set(params.path, text);
+      return { undo: params.path };
+    },
+    'workspace.undoDiscard': (params) => {
+      const text = DISCARDED.get(params.undo);
+      if (text !== undefined) {
+        FILES.set(params.undo, text);
+        DISCARDED.delete(params.undo);
       }
       return { path: params.undo };
     },

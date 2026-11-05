@@ -418,6 +418,15 @@ export interface ChuiMethods {
   /** Вернуть файл из своего хранилища возврата (не из корзины системы). */
   'workspace.undoTrash': { params: { undo: string }; result: { path: string } };
   /**
+   * Снимок рабочей копии файла перед откатом правок git и возврат из него.
+   *
+   * `git restore` стирает правку без следа, и отменить его нечем. Снимок берётся
+   * ДО отката, а тост «Отменить» возвращает ровно те байты. `null` — снимка
+   * нет (папка или больше `MAX_BYTES`), и тогда кнопка отмены не показывается.
+   */
+  'workspace.snapshotForDiscard': { params: { path: string }; result: { undo: string | null } };
+  'workspace.undoDiscard': { params: { undo: string }; result: { path: string } };
+  /**
    * Карта проекта: языки, манифесты, тесты и точки входа. Собирается обходом
    * имён без чтения содержимого — дёшево и без последствий для больших проектов.
    */
@@ -516,8 +525,17 @@ export interface ChuiMethods {
   'git.commitDiff': { params: void; result: GitCommitDiff };
   /** Блоки изменений файла: для действий прямо из жёлоба редактора. */
   'git.fileHunks': { params: { path: string }; result: GitFileHunks };
-  /** Откатить ОДИН блок файла в рабочем дереве (обратный `git apply -R`). */
-  'git.discardHunk': { params: { path: string; index: number }; result: GitStatus };
+  /**
+   * Откатить ОДИН блок файла в рабочем дереве (обратный `git apply -R`).
+   *
+   * В ответе — ручка возврата (`undo`): снимок файла взят ДО отката, и тост
+   * «Отменить» вернёт ровно те байты. `null` — снимка нет (папка, слишком
+   * большой файл), и тогда кнопку не показываем.
+   */
+  'git.discardHunk': {
+    params: { path: string; index: number };
+    result: { status: GitStatus; undo: string | null };
+  };
   /**
    * Сводка по всем корням рабочей области: какие папки — репозитории git, какие
    * в них ветки и сколько правок. Нужна панели изменений, чтобы видеть всю область
@@ -527,7 +545,13 @@ export interface ChuiMethods {
   'git.init': { params: void; result: GitStatus };
   'git.stage': { params: { paths: string[] }; result: GitStatus };
   'git.unstage': { params: { paths: string[] }; result: GitStatus };
-  'git.discard': { params: { paths: string[] }; result: GitStatus };
+  /**
+   * Откатить правки файлов; в ответе — свежий статус и ручка возврата.
+   *
+   * Снимок рабочей копии берётся ДО `git restore`, чтобы у тоста была кнопка
+   * «Отменить». `undo` — для ПЕРВОГО файла из `paths` (тост всегда про один).
+   */
+  'git.discard': { params: { paths: string[] }; result: { status: GitStatus; undo: string | null } };
   'git.commit': { params: { message: string; paths?: string[]; amend?: boolean }; result: GitCommitInfo };
   'git.diff': { params: { path: string; staged?: boolean; commit?: string }; result: GitDiff };
   'git.stageHunk': { params: { path: string; index: number }; result: GitStatus };

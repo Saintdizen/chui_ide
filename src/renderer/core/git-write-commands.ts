@@ -14,7 +14,7 @@ import type { ToastKind } from '../ui/toast';
  */
 export interface GitWriteDeps {
   git: GitModel;
-  showToast(message: string, kind?: ToastKind): void;
+  showToast(message: string, kind?: ToastKind, options?: { action?: { label: string; run: () => void } }): void;
   /** Системный диалог подтверждения: `dialog.confirm` в main. */
   confirm(options: { title: string; message: string; detail?: string; confirmLabel?: string }): Promise<boolean>;
   /** Корень проекта: без него создавать репозиторий негде. Функция, а не значение:
@@ -23,6 +23,8 @@ export interface GitWriteDeps {
   relative(path: string): string;
   /** Записать буферы на диск: git смотрит рабочее дерево, а не экран. */
   saveDirtyForGit(): Promise<boolean>;
+  /** Перечитать файл в открытом редакторе: после отката текст в буфере старый. */
+  reloadIfOpen(path: string): Promise<void> | void;
 }
 
 export function registerGitWriteCommands(define: DefineCommand, deps: GitWriteDeps): void {
@@ -62,21 +64,38 @@ export function registerGitWriteCommands(define: DefineCommand, deps: GitWriteDe
     if (target) await git.unstage([target]);
   });
 
-  define({ id: 'git.discard', title: 'Откатить правки файла', category: 'Git' }, async (path, label) => {
+  // Откат БОЛЬШЕ НЕ СПРАШИВАЕТСЯ диалогом — он возвращается.
+  //
+  // `git restore` стирает правку без следа, но `GitModel.discard` теперь берёт
+  // снимок ДО отката и отдаёт ручку возврата. Старый диалог с «вернуть будет
+  // нельзя» защищал именно от необратимости — а она исчезла: подтверждать
+  // то, что можно отменить, только мешает (п.8 — отмена кнопкой, не диалогом).
+  // Нет снимка (папка, слишком большой файл) — тогда «Отменить» не обещаем.
+  define({ id: 'git.discard', title: 'Откатить правки файла', category: 'Git' }, async (path) => {
     const target = asPath(path);
     if (!target) return;
 
-    // Откат необратим, поэтому спрашиваем системным диалогом, а не просто делаем.
-    const confirmed = await deps.confirm({
-      title: 'Откатить правки',
-      message: `Отменить правки в ${basename(target)}?`,
-      detail: `${deps.relative(target)}${typeof label === 'string' ? ` (${label})` : ''} — файл вернётся к состоянию последнего коммита. Вернуть правки будет нельзя.`,
-      confirmLabel: 'Откатить',
-    });
-    if (!confirmed) return;
-
-    await git.discard([target]);
-    showToast(`Откатано: ${basename(target)}`);
+    const { undo } = await git.discard([target]);
+    showToast(
+      `Откатано: ${basename(target)}`,
+      'info',
+      undo
+        ? {
+            action: {
+              label: 'Отменить',
+              run: () => {
+                void (async () => {
+                  await git.undoDiscard(undo);
+                  // Файл открыт в редакторе — там старый текст. Возврат без
+                  // перечитывания оставил бы человека с мыслью, что не сработало.
+                  await deps.reloadIfOpen(target);
+                  showToast(`Вернул: ${basename(target)}`);
+                })();
+              },
+            },
+          }
+        : undefined,
+    );
   });
 
   define({ id: 'git.commit', title: 'Закоммитить изменения', category: 'Git' }, async (messageArg) => {

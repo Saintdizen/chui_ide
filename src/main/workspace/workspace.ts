@@ -166,6 +166,15 @@ export class WorkspaceService {
    */
   private readonly trashUndo = new TrashUndo(() => path.join(app.getPath('userData'), 'trash-undo'));
 
+  /**
+   * Снимки файлов перед откатом правок git.
+   *
+   * Отдельная подпапка того же хранилища: откат возвращает не файл, а его
+   * содержимое, и вытеснение у него должно быть своё — иначе откат git затирал
+   * бы возврат удаления, и наоборот.
+   */
+  private readonly discardUndo = new TrashUndo(() => path.join(app.getPath('userData'), 'trash-undo'), 'discard');
+
   private readonly contents = new ContentCache();
   /**
    * Обход проекта для поисков по коду (структура, экспорты, наследование).
@@ -689,6 +698,27 @@ export class WorkspaceService {
   async undoTrash(undo: string): Promise<{ path: string }> {
     const restored = await this.trashUndo.restore(undo);
     if (!restored) throw new RpcFailure(RpcErrorCode.NotFound, 'Возвращать нечего: копия не найдена');
+    this.contents.invalidate(restored);
+    this.notifyChanged(restored, 1);
+    return { path: restored };
+  }
+
+  /**
+   * Снимок файла перед откатом правок git и возврат из этого снимка.
+   *
+   * `git restore` стирает правку без следа — отменить его нечем. Поэтому
+   * откат сначала запоминает содержимое рабочей копии (в том же хранилище, что
+   * и корзина), а тост «Отменить» возвращает эти байты обратно. Оговорок две,
+   * и обе честные: только файлы и только не больше `MAX_BYTES`; на всё
+   * остальное `snapshot` отвечает `null`, и кнопки отмены тогда нет.
+   */
+  snapshotForDiscard(target: string, signal?: AbortSignal): Promise<string | null> {
+    return this.discardUndo.snapshot(target, signal);
+  }
+
+  async undoDiscard(undo: string): Promise<{ path: string }> {
+    const restored = await this.discardUndo.restoreContent(undo);
+    if (!restored) throw new RpcFailure(RpcErrorCode.NotFound, 'Возвращать нечего: снимок не найден');
     this.contents.invalidate(restored);
     this.notifyChanged(restored, 1);
     return { path: restored };

@@ -55,7 +55,18 @@ export interface SnapshotContext {
  * Нужны и свежий статус (он один знает корень и относительный путь файла), и
  * рассылка `GitChanged` после каждого действия.
  */
-export interface WorktreeContext extends SnapshotContext, StatusContext {}
+export interface WorktreeContext extends SnapshotContext, StatusContext {
+  /**
+   * Копия файла в своём хранилище возврата — ДО отката правок. `null` — не
+   * вышло (папка, двоичный или слишком большой файл); тогда `undo` в ответе
+   * `null`, и renderer не обещает кнопку «Отменить».
+   *
+   * `git restore` уничтожает правку без следа: отменить его можно только тем,
+   * что было прочитано до него. Снимок живёт вне репозитория и его не видит
+   * ни git, ни обходчик файлов.
+   */
+  snapshot(absPath: string): Promise<string | null>;
+}
 
 /**
  * Чтение истории: «что было», а не «что поменять». Ничего не пишет и не
@@ -95,4 +106,4 @@ export interface NetContext extends RepositoryContext, RemoteContext, StatusCont
  * файл, о котором git уже что-то говорит, и заодно даёт корень и путь от него.
  * `refresh` — потому что `git add` меняет индекс, и UI узнаёт об этом из рассылки.
  */
-export interface ConflictContext extends WorktreeContext {}
+export interface ConflictContext extends Omit<WorktreeContext, 'snapshot'> {}

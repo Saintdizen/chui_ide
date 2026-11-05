@@ -104,3 +104,53 @@ describe('хранилище не растёт', () => {
     await expect(fs.stat(orphan)).rejects.toThrow();
   });
 });
+
+/**
+ * П.8: «Отмена — одна кнопка, а не диалог».
+ *
+ * `git restore` уничтожает правку без следа, поэтому кнопка «Отменить» честна
+ * только тогда, когда текст файла уже снят ДО отката. Снимок живёт в том же
+ * хранилище, что и удалённое, но в своей подпапке.
+ */
+describe('снимок перед откатом правок', () => {
+  let restore: TrashUndo;
+
+  beforeEach(() => {
+    restore = new TrashUndo(() => path.join(root, 'undo'), 'restore');
+  });
+
+  it('снимок возвращает ровно те байты, что были до отката', async () => {
+    const file = await makeFile('src/a.ts', 'до отката');
+    const undo = await restore.snapshot(file);
+    expect(undo).not.toBeNull();
+
+    // `git restore` переписал файл.
+    await fs.writeFile(file, 'после отката', 'utf8');
+
+    await expect(restore.restoreContent(undo!)).resolves.toBe(file);
+    await expect(fs.readFile(file, 'utf8')).resolves.toBe('до отката');
+  });
+
+  it('снимок не удаляет оригинал: откат делает git, а не мы', async () => {
+    const file = await makeFile('src/b.ts');
+    await restore.snapshot(file);
+    await expect(fs.readFile(file, 'utf8')).resolves.toBe('содержимое');
+  });
+
+  // Удаление и откат не должны вытеснять друг друга: это разные истории.
+  it('откаты и удалённое лежат в разных папках', async () => {
+    const file = await makeFile('src/c.ts');
+    const trash = await store.keep(file);
+    const undiscard = await restore.snapshot(file);
+
+    await expect(store.restoreContent(undiscard!)).resolves.toBeNull();
+    expect(trash).not.toBe(undiscard);
+  });
+
+  it('папку и слишком большой файл не снимаем — ручки нет', async () => {
+    await fs.mkdir(path.join(root, 'dir'));
+    expect(await restore.snapshot(path.join(root, 'dir'))).toBeNull();
+    const big = await makeFile('big2.bin', 'x'.repeat(MAX_BYTES + 1));
+    expect(await restore.snapshot(big)).toBeNull();
+  });
+});

@@ -189,9 +189,16 @@ export class GitModel {
     return this.rpc.request('git.fileHunks', { path });
   }
 
-  /** Откатить ОДИН блок файла в рабочем дереве. */
-  async discardHunk(path: string, index: number): Promise<GitStatus> {
-    return this.apply(await this.rpc.request('git.discardHunk', { path, index }));
+  /**
+   * Откатить ОДИН блок файла в рабочем дереве.
+   *
+   * Возвращает ручку возврата (её выдал снимок, снятый ДО отката) и статус.
+   * Раньше откат был необратим и спрашивал подтверждение; теперь есть чем
+   * отменить, и спрашивать не о чем.
+   */
+  async discardHunk(path: string, index: number): Promise<{ status: GitStatus; undo: string | null }> {
+    const { undo, status } = await this.rpc.request('git.discardHunk', { path, index });
+    return { status: this.apply(status), undo };
   }
 
   /** Diff будущего коммита: из него модель собирает сообщение (см. `git.generateCommitMessage`). */
@@ -216,8 +223,23 @@ export class GitModel {
     return this.apply(await this.rpc.request('git.unstage', { paths }));
   }
 
-  async discard(paths: string[]): Promise<GitStatus> {
-    return this.apply(await this.rpc.request('git.discard', { paths }));
+  /**
+   * Откатить правки файлов. В ответе — ручки возврата по путям (`null` там, где
+   * снимок не взялся: папка, двоичный или слишком большой файл).
+   */
+  async discard(paths: string[]): Promise<{ status: GitStatus; undo: string | null }> {
+    const { undo, status } = await this.rpc.request('git.discard', { paths });
+    return { status: this.apply(status), undo };
+  }
+
+  /**
+   * Вернуть файл из снимка, взятого перед откатом, и перечитать его статус.
+   * Путь возвращает main: снимок знает, куда класть, а renderer — только ручку.
+   */
+  async undoDiscard(undo: string): Promise<string> {
+    const { path } = await this.rpc.request('workspace.undoDiscard', { undo });
+    await this.refresh();
+    return path;
   }
 
   async commit(message: string, paths?: string[], amend = false): Promise<GitCommitInfo> {

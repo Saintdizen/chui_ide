@@ -16,4 +16,10 @@ export interface Source {
   status(): Promise<GitStatus>;
   gitPath(repoRoot: string, name: string): Promise<string | null>;
   remotes(): Promise<GitRemote[]>;
+  /**
+   * Снимок файла перед откатом правок. Живёт здесь, а не в `WorktreeContext`
+   * отдельно: `Source` — единственный набор, который класс собирает в одном
+   * месте, и модули берут из него только то, что объявили у себя.
+   */
+  snapshot(absPath: string): Promise<string | null>;
 }

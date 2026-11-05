@@ -137,6 +137,17 @@ export class GitService {
      * Без обработчика слежение не заводим: уведомлять некого.
      */
     onRepositoryChange: (() => void) | null = null,
+    /**
+     * Копия файла перед откатом правок — в чужое хранилище возврата.
+     *
+     * `git restore` стирает правку без следа, и отменить его нечем. Снимок делает
+     * `WorkspaceService` (его хранилище переживает перезапуск), а git только
+     * просит его до операции. Шов с нужной стороны: git и так умеет только `git`.
+     *
+     * Нет обработчика — откат работает как раньше: без возврата. Отказываться
+     * от операции из-за этого нельзя, но и обещать «Отменить» нельзя тоже.
+     */
+    private readonly snapshot: (absPath: string) => Promise<string | null> = async () => null,
   ) {
     this.watcher = new RepositoryWatcher(onRepositoryChange);
   }
@@ -290,6 +301,7 @@ export class GitService {
       status: () => this.refresh(),
       gitPath: (repoRoot: string, name: string) => this.gitPath(repoRoot, name),
       remotes: () => this.remotes(),
+      snapshot: (absPath: string) => this.snapshot(absPath),
     };
   }
 
@@ -800,7 +812,7 @@ export class GitService {
     return unstageHunk(this.gitContext(), filePath, index);
   }
 
-  async discardHunk(filePath: string, index: number): Promise<GitStatus> {
+  async discardHunk(filePath: string, index: number): Promise<{ status: GitStatus; undo: string | null }> {
     return discardHunk(this.gitContext(), filePath, index);
   }
 
@@ -808,7 +820,7 @@ export class GitService {
     return fileHunks(this.gitContext(), filePath);
   }
 
-  async discard(paths: string[]): Promise<GitStatus> {
+  async discard(paths: string[]): Promise<{ status: GitStatus; undo: string | null }> {
     return discard(this.gitContext(), paths);
   }
 

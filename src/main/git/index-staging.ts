@@ -66,12 +66,18 @@ export async function unstageHunk(ctx: WorktreeContext, filePath: string, index:
  * изменение» из жёлоба. Блок берётся из diff рабочего дерева против индекса:
  * откатывать имеет смысл только то, чего ещё нет в индексе.
  */
-export async function discardHunk(ctx: WorktreeContext, filePath: string, index: number): Promise<GitStatus> {
+export async function discardHunk(
+  ctx: WorktreeContext,
+  filePath: string,
+  index: number,
+): Promise<{ status: GitStatus; undo: string | null }> {
   const { repoRoot, relative } = await locateHunk(ctx, filePath);
   const patch = hunkPatch(await rawDiff(relative, repoRoot, { staged: false }), index);
   if (!patch) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Блок изменений не найден');
+  // Снимок ДО отката: `apply -R` стирает текста без следа, и вернуть его иначе нечем.
+  const undo = await ctx.snapshot(path.join(repoRoot, relative));
   await applyToWorktree(patch, repoRoot);
-  return ctx.refresh();
+  return { status: await ctx.refresh(), undo };
 }
 
 /**
@@ -98,7 +104,10 @@ export async function fileHunks(ctx: WorktreeContext, filePath: string): Promise
  * Откат правок: у отслеживаемых файлов — к состоянию HEAD, у новых — файл
  * отправляется в корзину. Совсем удалять чужие файлы IDE не должна.
  */
-export async function discard(ctx: WorktreeContext, paths: string[]): Promise<GitStatus> {
+export async function discard(
+  ctx: WorktreeContext,
+  paths: string[],
+): Promise<{ status: GitStatus; undo: string | null }> {
   const status = await ctx.status();
   const repoRoot = status.repository?.root;
   if (!repoRoot || !status.repository) {
@@ -117,6 +126,12 @@ export async function discard(ctx: WorktreeContext, paths: string[]): Promise<Gi
     else tracked.push(file.relative);
   }
 
+  // Снимок берём ДО отката и отдаём в renderer одну ручку: возвращается первый
+  // файл из списка. Откатывают обычно один файл; для нескольких лучше честная
+  // одна кнопка, чем обещание вернуть всё и молчание на остальное.
+  const first = tracked[0] ?? (loose[0] ? path.relative(repoRoot, loose[0]) : null);
+  const undo = first ? await ctx.snapshot(path.join(repoRoot, first)) : null;
+
   if (tracked.length) {
     await execGit(['restore', '--source=HEAD', '--staged', '--worktree', '--', ...tracked], repoRoot);
   }
@@ -125,7 +140,7 @@ export async function discard(ctx: WorktreeContext, paths: string[]): Promise<Gi
     await shell.trashItem(file).catch(() => undefined);
   }
 
-  return ctx.refresh();
+  return { status: await ctx.refresh(), undo };
 }
 
 /**

@@ -29,9 +29,15 @@ vi.mock('../src/renderer/ui/popup-menu', async (importOriginal) => {
 });
 
 const toasts: string[] = [];
+/**
+ * Третий аргумент `showToast` — действие кнопки. Мок его сохраняет: по нему
+ * проверяем «Отменить», а не диалог.
+ */
+const toastOptions: { action?: { label: string; run: () => void } }[] = [];
 vi.mock('../src/renderer/ui/toast', () => ({
-  showToast: (text: string) => {
+  showToast: (text: string, _kind?: string, options?: { action?: { label: string; run: () => void } }) => {
     toasts.push(text);
+    if (options) toastOptions.push(options);
   },
 }));
 
@@ -57,6 +63,7 @@ function setup(overrides: Partial<GutterMenusDeps> = {}) {
     conditionInput: { open: vi.fn() },
     saveDocument: vi.fn(async () => true),
     reloadIfOpen: vi.fn(async () => {}),
+    undoDiscard: vi.fn(async () => ({ path: '/p/a.ts' })),
     confirm: vi.fn(async () => ({ confirmed: true })),
     ...overrides,
   } as unknown as GutterMenusDeps;
@@ -142,6 +149,7 @@ describe('действия с блоком изменений', () => {
     installMiniDom();
     shown = [];
     toasts.length = 0;
+    toastOptions.length = 0;
   });
 
   async function open(overrides: Partial<GutterMenusDeps> = {}) {
@@ -176,18 +184,27 @@ describe('действия с блоком изменений', () => {
     expect(refreshContent).toHaveBeenCalled();
   });
 
-  it('откат без согласия ничего не делает', async () => {
-    const discardHunk = vi.fn(async () => ({}));
-    await open({
-      git: { discardHunk } as never,
-      confirm: vi.fn(async () => ({ confirmed: false })),
-    });
+  // П.8: откат БОЛЬШЕ НЕ СПРАШИВАЕТСЯ. Раньше здесь стоял диалог с «правки
+  // будут потеряны»; теперь снимок берётся до отката, а тост даёт «Отменить».
+  it('откат блока не спрашивает, а отдаёт «Отменить»', async () => {
+    const discardHunk = vi.fn(async () => ({ status: {}, undo: 'u-7' }));
+    const confirm = vi.fn(async () => ({ confirmed: true }));
+    const built = await open({ git: { discardHunk } as never, confirm });
 
     (item(shown[0], 'Откатить это изменение') as { onSelect?: () => void } | undefined)?.onSelect?.();
-    // Подтверждение — асинхронное: обработчик сам зовёт `void (async () => …)()`.
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(discardHunk).not.toHaveBeenCalled();
+    expect(discardHunk).toHaveBeenCalledWith('/p/a.ts', 0);
+    expect(confirm).not.toHaveBeenCalled();
+
+    // Возврат — из тоста: снимок возвращает файл, а открытый редактор иначе
+    // остался бы со старым текстом на экране.
+    const action = (toastOptions.at(-1) as { action?: { label: string; run: () => void } }).action;
+    expect(action?.label).toBe('Отменить');
+    action?.run();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(built.deps.undoDiscard).toHaveBeenCalledWith('u-7');
+    expect(built.deps.reloadIfOpen).toHaveBeenCalledWith('/p/a.ts');
   });
 
   it('согласие откатывает блок и перечитывает файл с диска', async () => {

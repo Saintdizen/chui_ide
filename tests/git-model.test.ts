@@ -37,10 +37,15 @@ function setup() {
   };
   const pushes: ((message: { topic: string; payload: unknown }) => void)[] = [];
   let answer: GitStatus = status([]);
+  /** Ответ по имени метода: у `git.discard*` форма своя (статус + ручка отмены). */
+  const extra: Record<string, unknown> = {};
   const rpc = {
     // Изменяющие запросы возвращают не статус, а пустой ответ: модель должна сама
     // перезапросить `git.status`, и тест это видит.
-    request: vi.fn(async (_method: string) => answer),
+    request: vi.fn(async (method: string) => {
+      if (method === 'git.discardHunk' || method === 'git.discard') return { status: answer, undo: 'u-2' };
+      return method in extra ? extra[method] : answer;
+    }),
     onPush: (listener: (message: { topic: string; payload: unknown }) => void) => {
       pushes.push(listener);
       return () => {};
@@ -142,7 +147,7 @@ describe('состояние git', () => {
     expect(git.deletedIn(`/p/src`).map((item) => item.path)).toEqual([`/p/src${SEP}gone.ts`]);
   });
 
-  it('откат одного блока возвращает обновлённый статус', async () => {
+  it('откат одного блока возвращает обновлённый статус и ручку отмены', async () => {
     const { model: git, setAnswer, rpc } = model();
     setAnswer(status([file('/p/a.ts')]));
 
@@ -150,7 +155,9 @@ describe('состояние git', () => {
 
     expect(rpc.request).toHaveBeenCalledWith('git.discardHunk', { path: '/p/a.ts', index: 2 });
     // Ответ запроса — не статус, поэтому модель обязана запросить статус заново.
-    expect(after.files).toHaveLength(1);
+    expect(after.status.files).toHaveLength(1);
+    // Без снимка откат необратим — модель обязана пробросить ручку втосту.
+    expect(after.undo).toBe('u-2');
   });
 });
 

@@ -27,9 +27,21 @@ interface Meta {
   readonly at: number;
 }
 
+/** Из id делаем безопасное имя папки: он приходит из renderer. */
+function safeId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9-]/g, '');
+}
+
 export class TrashUndo {
   /** Основа создаётся лениво: путь userData известен не в конструкторе. */
-  constructor(private readonly base: () => string) {}
+  constructor(
+    private readonly base: () => string,
+    /**
+     * Подпапка внутри основы. Удалённое и откаты правок лежат раздельно:
+     * вытеснение у каждого своё, иначе откат git затирал бы возврат удаления.
+     */
+    private readonly subfolder = '',
+  ) {}
 
   /**
    * Сохранить копию файла перед отправкой в корзину.
@@ -38,6 +50,39 @@ export class TrashUndo {
    * прочитать). Это не ошибка удаления: удаление идёт дальше, просто без возврата.
    */
   async keep(target: string, signal?: AbortSignal): Promise<string | null> {
+    const id = await this.save(target, signal);
+    // Сразу после записи — порядок вытеснения, как и было раньше.
+    if (id) await this.prune();
+    return id;
+  }
+
+  /**
+   * Снимок файла перед действием, которое может стереть правку.
+   *
+   * Отличается от `keep` нарочно: файл никуда не денется после вызова, и
+   * удалять запись за ним некому — `prune` вызывать ЗДЕСЬ нельзя, иначе запись
+   * переживёт всего один вызов (см. откат правок git).
+   */
+  snapshot(target: string, signal?: AbortSignal): Promise<string | null> {
+    return this.save(target, signal);
+  }
+
+  /**
+   * Текст снимка — для возврата содержимого файла, а не самого файла.
+   *
+   * Отменённый откат должен вернуть ровно тот байт-в-байт текст, который был
+   * на диске: перерисовка из редактора потеряла бы переводы строк и хвостовой
+   * перевод строки, а файл после такого «возврата» уже не тот.
+   */
+  async read(id: string): Promise<string | null> {
+    try {
+      return await fs.readFile(path.join(this.folder(id), 'content'), 'utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  private async save(target: string, signal?: AbortSignal): Promise<string | null> {
     try {
       const stat = await fs.stat(target);
       if (!stat.isFile() || stat.size > MAX_BYTES) return null;
@@ -48,10 +93,9 @@ export class TrashUndo {
       await fs.copyFile(target, path.join(folder, 'content'));
       const meta: Meta = { path: target, at: Date.now() };
       await fs.writeFile(path.join(folder, 'meta.json'), JSON.stringify(meta), 'utf8');
-      await this.prune();
       return id;
     } catch {
-      // Возврат — удобство, а не условие удаления: любая беда здесь молчит.
+      // Снимок — удобство, а не условие действия: любая беда здесь молчит.
       return null;
     }
   }
@@ -64,6 +108,25 @@ export class TrashUndo {
     try {
       // Родителя могло не стать вместе с файлом — создаём, иначе возврат упрётся.
       await fs.mkdir(path.dirname(meta.path), { recursive: true });
+      await fs.copyFile(path.join(folder, 'content'), meta.path);
+    } catch {
+      return null;
+    }
+    await this.drop(id);
+    return meta.path;
+  }
+
+  /**
+   * Записать снимок ОБРАТНО в файл и забыть его.
+   *
+   * В отличие от `restore`, путь берётся из meta самого снимка: откат git —
+   * не удаление, и файл на месте, его просто нужно вернуть к прежнему тексту.
+   */
+  async restoreContent(id: string): Promise<string | null> {
+    const folder = this.folder(id);
+    const meta = await this.readMeta(folder);
+    if (!meta) return null;
+    try {
       await fs.copyFile(path.join(folder, 'content'), meta.path);
     } catch {
       return null;
@@ -89,7 +152,7 @@ export class TrashUndo {
    * запусками, и порядок мог быть нарушен копированием руками.
    */
   private async prune(): Promise<void> {
-    const base = this.base();
+    const base = path.join(this.base(), this.subfolder);
     let names: string[];
     try {
       names = await fs.readdir(base);
@@ -113,8 +176,7 @@ export class TrashUndo {
   }
 
   private folder(id: string): string {
-    // id приходит из renderer: имя папки обязано быть без путей и без сюрпризов.
-    return path.join(this.base(), id.replace(/[^a-zA-Z0-9-]/g, ''));
+    return path.join(this.base(), this.subfolder, safeId(id));
   }
 
   private async readMeta(folder: string): Promise<Meta | null> {

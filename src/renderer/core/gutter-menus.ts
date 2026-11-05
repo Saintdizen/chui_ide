@@ -34,6 +34,8 @@ export interface GutterMenusDeps {
   saveDocument(document: TextDocument): Promise<boolean>;
   /** Перечитать файл в открытом редакторе, если он там есть. */
   reloadIfOpen(path: string): Promise<void> | void;
+  /** Вернуть файл из снимка, взятого перед откатом (`workspace.undoDiscard`). */
+  undoDiscard(undo: string): Promise<{ path: string }>;
   /** Общий диалог подтверждения (`dialog.confirm`). */
   confirm(options: {
     title: string;
@@ -45,7 +47,7 @@ export interface GutterMenusDeps {
 
 export function createGutterMenus(deps: GutterMenusDeps) {
   const { git, debug, workspace, explorer, editors, documents } = deps;
-  const { changeGutter, conditionInput, saveDocument, reloadIfOpen, confirm } = deps;
+  const { changeGutter, conditionInput, saveDocument, reloadIfOpen, undoDiscard } = deps;
 
   /** Меню точки останова по правому клику на поле номеров строк. */
   const openBreakpointMenu = ({ path, line }: { path: string; line: number }): void => {
@@ -160,22 +162,30 @@ export function createGutterMenus(deps: GutterMenusDeps) {
       });
     }
     if (unstagedIndex !== null) {
-      // Откат теряет правки безвозвратно — спрашиваем системным диалогом, как и у отката файла.
+      // Откат не спрашивает и не обещает «навсегда»: снимок файла уже взят
+      // перед `git apply -R`, и тост возвращает ровно те байты.
       items.push({ separator: true });
       items.push({
         label: 'Откатить это изменение',
         danger: true,
         onSelect: () => {
           void (async () => {
-            const { confirmed } = await confirm({
-              title: 'Откатить изменение',
-              message: `Вернуть строку к состоянию индекса?`,
-              detail: `${workspace.relative(path)} — блок изменений у строки ${line}. Правки в этом блоке будут потеряны.`,
-              confirmLabel: 'Откатить',
-            });
-            if (!confirmed) return;
-            await git.discardHunk(path, unstagedIndex);
+            const { undo } = await git.discardHunk(path, unstagedIndex);
             after(true);
+            showToast(`Откачена правка: ${workspace.relative(path)}:${line}`, 'success', {
+              action: undo
+                ? {
+                    label: 'Отменить',
+                    run: () => {
+                      void (async () => {
+                        const { path: restored } = await undoDiscard(undo);
+                        await reloadIfOpen(restored);
+                        after(false);
+                      })();
+                    },
+                  }
+                : undefined,
+            });
           })();
         },
       });
