@@ -222,6 +222,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       // «Что именно идёт» — наружу, в шапку панели и док: свёрнутую группу
       // видит только тот, кто смотрит на ленту.
       (hint) => host.busyHint(hint),
+      // Раскрытие ленты — свойство беседы: режим спрашивает каждая новая
+      // группа, и он же берёт уже созданные при смене.
+      session.fold,
     );
     /** Размышления текущего шага: строка живёт в той же ленте, что и вызовы. */
     let reasoningView: ReasoningRowView | null = null;

@@ -7,6 +7,7 @@ import { fileWord, plural } from './chat-text';
 import { basename, h, pulseOnClick, svgIcon, type IconName } from './dom';
 import { showToast } from './toast';
 import { fileIcon } from './file-icons';
+import type { RunFold } from './run-fold';
 
 /**
  * Карточки вызовов инструментов в ленте чата.
@@ -366,6 +367,12 @@ function createToolGroup(
   onOpenFile: OpenFileHandler | undefined,
   /** Чем группа занята сейчас — одной строкой, для шапки панели и дока. */
   onBusyHint: BusyHintHandler | undefined,
+  /**
+   * Общий режим раскрытия ленты. Группа спрашивает его при создании и слушает
+   * смену: иначе «свернуть всё» обходило бы только уже созданные группы, а
+   * следующая — появившаяся через секунду работы — снова была бы свёрнутой.
+   */
+  fold: RunFold | undefined,
 ): ToolGroupView {
   let count = 0;
   let pending = 0;
@@ -380,7 +387,7 @@ function createToolGroup(
    * сколько, а десяток строк под ней — шум, который мешает читать ответ. Открыть
    * их должен человек; во время работы состояние сами не трогаем.
    */
-  let expanded = false;
+  let expanded = fold?.mode() === 'expanded';
   const names: string[] = [];
 
   const title = h('span', { class: 'tool-group-title' }, 'Действия');
@@ -484,7 +491,7 @@ function createToolGroup(
     {
       class: 'tool-group-head',
       type: 'button',
-      'aria-expanded': 'false',
+      'aria-expanded': String(expanded),
       onClick: () => {
         expanded = !expanded;
         head.setAttribute('aria-expanded', String(expanded));
@@ -501,6 +508,21 @@ function createToolGroup(
   const root = h('div', { class: 'tool-group' }, head, body);
   // Группа свёрнута по умолчанию: приводим тело и шеврон к состоянию `expanded`.
   applyExpanded();
+  /**
+   * «Свернуть всё» — это указание, а не разовое действие: оно берёт и уже
+   * созданные группы, и все следующие (те спросят `mode()` при создании).
+   * `auto` возвращает каждой группе её естественное состояние — свёрнута.
+   */
+  const unlisten = fold?.onChange((next) => {
+    expanded = next === 'expanded';
+    head.setAttribute('aria-expanded', String(expanded));
+    applyExpanded();
+  });
+  // Подписка живёт вместе с группой. Снимаем её явно: там, где группа уходит
+  // (`seal` распускает одиночку) и при закрытии всего фида. Обойтись без этого
+  // нельзя: у `onChange` нет слабых ссылок, и перерисовка ленты оставила бы в
+  // слушателях мёртвые группы — «свернуть всё» ходило бы по отвязанным узлам.
+  const dropListen = (): void => unlisten?.();
   // Вставляем перед «якорем» низа (индикатор работы), а не в конец сообщения:
   // иначе карточки действий встают после всего текста, и ответ, написанный
   // ПОСЛЕ вызовов, оказывается выше них. С якорем порядок — порядок прихода.
@@ -704,12 +726,16 @@ function createToolGroup(
   const seal = (): void => {
     const items = count + (reasoningCard ? 1 : 0);
     if (items === 0) {
+      dropListen();
       root.remove();
       return;
     }
     if (items === 1) {
       const solo = reasoningCard ?? (body.querySelector('.tool-card') as HTMLElement | null);
       if (solo) {
+        // Одиночка выходит из группы и становится самостоятельной: режим
+        // раскрытия группы ей больше не указ, и слушатель ни к чему.
+        dropListen();
         solo.remove();
         root.replaceWith(solo);
       }
@@ -736,6 +762,8 @@ export function createToolFeed(
   onOpenFile?: OpenFileHandler,
   /** Чем агент занят сейчас — для шапки панели и дока, не только для ленты. */
   onBusyHint?: BusyHintHandler,
+  /** Общий режим раскрытия ленты — кнопка «свернуть всё» над беседой. */
+  fold?: RunFold,
 ): {
   add(call: ChatToolStartPayload): ToolCardView;
   reasoning(): ReasoningRowView;
@@ -743,7 +771,7 @@ export function createToolFeed(
 } {
   let current: ToolGroupView | null = null;
   const ensure = (): ToolGroupView =>
-    (current ??= createToolGroup(container, anchor, onUpdate, onOpenFile, onBusyHint));
+    (current ??= createToolGroup(container, anchor, onUpdate, onOpenFile, onBusyHint, fold));
 
   return {
     add: (call) => ensure().add(call),

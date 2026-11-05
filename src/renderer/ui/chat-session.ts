@@ -14,6 +14,7 @@ import type { ReadCoverageSnapshot } from '../../shared/read-coverage';
 import type { ToggledFile } from './chat-changes';
 import type { Checkpoint } from './chat-checkpoints';
 import type { RunArtifact } from '../core/artifacts';
+import type { RunFold } from './run-fold';
 
 /**
  * Беседа панели ассистента. Вкладок может быть много, поэтому всё, что относится
@@ -68,6 +69,14 @@ export interface ChatSession {
    * Не сохраняется: после перезапуска работы нет.
    */
   busyHint?: string;
+  /**
+   * Режим раскрытия ленты — своя на каждую беседу.
+   *
+   * В беседе, а не в панели: у вкладок разное содержимое. Свернул действия в
+   * одной беседе — вторая не должна сложиться заодно. Чистое состояние (без DOM)
+   * — см. `run-fold.ts`; не сохраняется: после перезапуска обычный вид.
+   */
+  fold?: RunFold;
   attachments: ChatAttachment[];
   /**
    * Приложенный контекст, переживший сжатие беседы. После сжатия больше не
