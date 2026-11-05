@@ -449,12 +449,6 @@ rename + prepareRename, diagnostics (push и pull), semanticTokens
     регистронезависимость и бонус за начало слова.
     Источник: VS Code `edit-evolved` (IntelliSense), Zed `editing-code`.
 
-74. **Дополнение после точки и автозапуск серверов.** Проверить цепочку
-    «точка → member-access → LSP», чтение `null`-ответов и повторный запрос
-    при отмене; сервер поднимается лениво для открытого файла и не блокирует
-    ввод. (В коде это есть — закрепить тестом на реальном сервере.)
-    Источник: VS Code `edit-evolved`, Zed `configuring-languages`.
-
 ---
 
 ## Правила работы со списком
