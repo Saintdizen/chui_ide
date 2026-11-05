@@ -40,6 +40,8 @@ void startApplication(mount, { probe: probeOn })
   })
   .catch((error: unknown) => {
     console.error('[chui] не удалось запустить приложение', error);
+    // Стек: по одной строке «reading 'fold'» причину не найти — нужно место.
+    if (error instanceof Error && error.stack) console.error(error.stack);
     const message = error instanceof Error ? error.message : String(error);
     mount.textContent = `Не удалось запустить приложение: ${message}`;
   });

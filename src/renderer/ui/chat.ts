@@ -1854,7 +1854,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     foldButton.setAttribute('aria-label', label);
     foldButton.setAttribute('aria-pressed', String(mode !== 'auto'));
   }
-  syncFoldButton(active());
+  // Панель собирается ДО первой беседы: восстановление и «новая беседа» создают
+  // её позже, а `active()` на пустом списке отдаёт undefined. Без сессии подписи
+  // ещё не про что — её поставит `activate()` (чат собирается без падения).
+  const initial = sessions[0];
+  if (initial) syncFoldButton(initial);
 
   /**
    * `Ctrl+F` — поиск по ленте открытой беседы.
@@ -3020,9 +3024,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       инструментов и предъявленные заметки. Ничего дополнительно не спрашиваем:
       в момент падения ещё один запрос — лишняя точка отказа.
     */
-    runEndNote: (session, how, reason) => {      const unsaved = [...session.touched.keys()].filter(
-        (path) => deps.documents.get(path)?.dirty === true,
-      );
+    runEndNote: (session, how, reason) => {
+      const unsaved = [...session.touched.keys()].filter((path) => deps.documents.get(path)?.dirty === true);
       // Правки буфера — отдельная карта с путём в ключе: у `ToggledFile`
       // самого пути нет, его держит `touched`.
       const unsavedPaths = new Set(unsaved);
