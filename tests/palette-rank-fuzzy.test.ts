@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CommandDescriptor } from '../src/renderer/core/commands';
 import { rankCommandMatches, rankCommands } from '../src/renderer/core/palette-rank';
+import { orderByRecent } from '../src/renderer/core/recent-commands';
 
 /**
  * Нечёткий поиск в палитре: буквы по порядку, но не подряд.
@@ -77,5 +78,42 @@ describe('что подсветить', () => {
 
   it('нет совпадений — пустой список: искали и не нашли', () => {
     expect(rankCommandMatches(registry, 'ъъъ')).toEqual([]);
+  });
+});
+
+describe('недавние поднимаются наверх', () => {
+  const many: CommandDescriptor[] = [
+    command('a', 'Сохранить'),
+    command('b', 'Сохранить всё'),
+    command('c', 'Сохранить как'),
+    command('d', 'Открыть'),
+  ];
+
+  it('пустой запрос — история впереди, в порядке свежести', () => {
+    // На пустом запросе палитра берёт `orderByRecent`: `rankCommandMatches` в
+    // этом случае отвечает `null` — «не искали».
+    expect(rankCommandMatches(many, '', ['c', 'a'])).toBeNull();
+    const listed = orderByRecent(many, ['c', 'a']);
+    expect(listed.slice(0, 2).map((item) => item.id)).toEqual(['c', 'a']);
+    // Остальные — после, в порядке реестра.
+    expect(listed.slice(2).map((item) => item.id)).toEqual(['b', 'd']);
+  });
+
+  it('при равном ранге недавняя команда выше', () => {
+    // «Сохранить» и «Сохранить всё» одинаково начинаются с запроса: решает история.
+    const ranked = rankCommandMatches(many, 'сохран', ['b']) ?? [];
+    expect(ranked[0]?.descriptor.id).toBe('b');
+  });
+
+  it('недавняя команда не перебивает точное совпадение', () => {
+    const ranked = rankCommandMatches(many, 'сохранить', ['b']) ?? [];
+    expect(ranked[0]?.descriptor.id).toBe('a');
+  });
+
+  it('история чужого проекта не ломает список', () => {
+    // Идентификаторы из settings могли прийти от другой версии: их просто нет.
+    const listed = orderByRecent(many, ['нет-такой', 'a']);
+    expect(listed).toHaveLength(many.length);
+    expect(listed[0]?.id).toBe('a');
   });
 });
