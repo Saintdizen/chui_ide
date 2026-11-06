@@ -296,6 +296,9 @@ export function createTabs(deps: TabsDeps): Tabs {
           ],
           event.clientX,
           event.clientY,
+          // Хозяин — сама вкладка: после Esc фокус возвращается в полосу (полоска, в
+          // отличие от редактора, всегда в документе), а с неё стрелки ведут дальше.
+          tab,
         );
       });
 

@@ -26,6 +26,12 @@ export interface GutterMenusDeps {
   workspace: WorkspaceModel;
   explorer: ExplorerView;
   editors: EditorWorkspace;
+  /**
+   * Куда вернуть клавиатуру после закрытия меню. Правый клик фокус не передаёт, и
+   * «что было в фокусе» — это `body`: без явного хозяина Esc бросал человека в тело
+   * окна, а не туда, откуда он позвал меню.
+   */
+  focusTarget(): Element | null;
   documents: DocumentStore;
   changeGutter: ChangeGutterController;
   /** Поле ввода под условие точки останова — общее окно приложения. */
@@ -107,6 +113,9 @@ export function createGutterMenus(deps: GutterMenusDeps) {
       ],
       lastPointer.x,
       lastPointer.y,
+      // Хозяин — редактор: правый клик по полю номеров фокус не даёт, а после Esc
+      // клавиатура должна оказаться в том же документе, а не в теле окна.
+      { owner: deps.focusTarget() },
     );
   };
 
@@ -191,7 +200,9 @@ export function createGutterMenus(deps: GutterMenusDeps) {
       });
     }
 
-    showPopupMenu(items, lastPointer.x, lastPointer.y);
+    // Хозяин — редактор: правый клик по жёлобу фокус не даёт, а после Esc клавиатура должна
+    // оказаться в том же документе, а не в теле окна.
+    showPopupMenu(items, lastPointer.x, lastPointer.y, { owner: deps.focusTarget() });
   };
   /** Запомнить место нажатия: у события контекстного меню координат окна нет. */
   const trackPointer = (x: number, y: number): void => {

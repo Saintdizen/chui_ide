@@ -35,12 +35,23 @@ export type PopupMenuItem =
       onSelect?(): void;
     };
 
-export interface PopupOptions {
+export type PopupOptions = {
   /** Элемент, от которого отсчитывается место: первая панель встаёт под ним. */
   anchor?: HTMLElement;
   /** Меню закрылось — неважно, выбором пункта, Esc или кликом вне. */
   onClose?(): void;
-}
+} & ({
+  /**
+   * Куда вернуть фокус после закрытия — когда «что было в фокусе» не годится: у правого
+   * клика фокус мог стоять на `body`, а у меню из панели — в её поле.
+   */
+  owner?: Element | null;
+  /**
+   * `false` — возвращать не надо: владельца вернёт панель, открывшая меню
+   * (см. `showDetachedMenu`), иначе меню перебило бы её хозяина.
+   */
+  restoreFocus?: boolean;
+});
 
 interface Level {
   menu: HTMLElement;
@@ -241,10 +252,16 @@ function activateHighlighted(levelIndex: number): void {
   else closeLevelsAbove(levelIndex);
 }
 
+function resolveOwner(options: PopupOptions): HTMLElement | null {
+  // Поле `restoreFocus: false` — владелец не нужен: вернёт панель.
+  if (options.restoreFocus === false) return null;
+  return focusOwner(options.owner === undefined ? null : options.owner);
+}
+
 export function showPopupMenu(items: readonly PopupMenuItem[], x: number, y: number, options: PopupOptions = {}): void {
   closePopupMenu();
   closed = options.onClose ?? null;
-  owner = focusOwner();
+  owner = resolveOwner(options);
 
   const anchor = options.anchor;
   if (anchor) {
@@ -344,11 +361,23 @@ export function closePopupMenu(): void {
   const to = owner;
   owner = null;
   while (levels.length > 0) levels.pop()?.menu.remove();
-  // Меню не забирает фокус (фокус остаётся на кнопке-якоре), но если его
-  // открыли иначе — вернуть всё равно надо: узел мог быть удалён из DOM.
-  returnFocus(to);
 
   const notify = closed;
   closed = null;
+  // Владельца забираем сразу: иначе вложенный показ (из пункта меню) вернёт фокус
+  // сюда второй раз — тем, кто был до нас, а не следующему меню.
+  const back = to;
   notify?.();
+  // Одно возвращение на закрытие: «вернуть сразу, а потом закрыть» уже стёрло бы
+  // фокус у только что созданного хозяина меню (быстрое открытие).
+  returnFocus(back);
+}
+
+/**
+ * Открыть меню для всплывающей панели: панель сама вернёт фокус туда, откуда
+ * её позвали (`focus-return`), поэтому меню восстановление отключает — иначе
+ * `owner` меню перебил бы владельца панели (меню забирает его из поля запроса).
+ */
+export function showDetachedMenu(items: readonly PopupMenuItem[], x: number, y: number): void {
+  showPopupMenu(items, x, y, { restoreFocus: false });
 }

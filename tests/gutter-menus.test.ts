@@ -57,7 +57,7 @@ function setup(overrides: Partial<GutterMenusDeps> = {}) {
     },
     workspace: { relative: (path: string) => path },
     explorer: { scheduleRefresh: vi.fn() },
-    editors: { setBreakpoints: vi.fn() },
+    focusTarget: () => null,
     documents: { get: vi.fn(() => null) },
     changeGutter: { refreshContent: vi.fn() },
     conditionInput: { open: vi.fn() },

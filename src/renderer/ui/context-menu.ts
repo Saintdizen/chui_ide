@@ -7,6 +7,20 @@ import { showPopupMenu, type PopupMenuItem } from './popup-menu';
  * а этот модуль оставлен ради привычных имён: пункты правого клика в проводнике,
  * вкладках и чате описываются теми же полями.
  */
-export function showContextMenu(items: readonly PopupMenuItem[], x: number, y: number): void {
-  showPopupMenu(items, x, y);
+/**
+ * Меню-привязка: контекстное меню строки, вкладки, жёлоба.
+ *
+ * Отличие от `showPopupMenu` — в том, что известно, кто хозяин: это не «что было
+ * в фокусе» (правый клик фокус не даёт — он может остаться на `body`), а сам элемент,
+ * по которому кликнули. Без него после `Esc` клавиатура терялась в теле окна.
+ */
+export function showContextMenu(
+  items: readonly PopupMenuItem[],
+  x: number,
+  y: number,
+  owner?: Element | null,
+): void {
+  // Владелец решается в самой панели (`resolveOwner`) — и до отрисовки: меню забирает
+  // фокус сразу, как только появится.
+  showPopupMenu(items, x, y, owner === undefined ? {} : { owner });
 }

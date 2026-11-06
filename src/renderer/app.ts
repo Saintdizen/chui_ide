@@ -2058,11 +2058,11 @@ export async function startApplication(
     });
     const island = layout.editorIsland;
     // Панель называет себя выбранной вкладкой: `aria-controls` ведёт от вкладки
-    // сюда, `aria-labelledby` — обратно. Имя берЁтся у той же вкладки, что
+    // сюда, `aria-labelledby` — обратно. Имя берётся у той же вкладки, что
     // показана на экране (включая страницу браузера и вкладку по умолчанию).
     const tabName = activeTabId(tabSources);
-    if (tabName === "") island.removeAttribute("aria-labelledby");
-    else island.setAttribute("aria-labelledby", tabName);
+    if (tabName === '') island.removeAttribute('aria-labelledby');
+    else island.setAttribute('aria-labelledby', tabName);
     island.classList.toggle("is-browser", plan.shown === "page");
     island.classList.toggle("is-image", plan.shown === "image");
     island.classList.toggle("is-doc", plan.shown === "doc");
@@ -4847,6 +4847,9 @@ export async function startApplication(
     documents,
     changeGutter,
     conditionInput,
+    // Хозяин возврата — поле ввода активной панели: правый клик по жёлобу фокус не
+    // передаёт, а после Esc клавиатура должна оказаться в тексте, а не в теле окна.
+    focusTarget: () => editors.pane.focusElement,
     saveDocument: (document) => fileWrite.saveDocument(document),
     reloadIfOpen,
     undoDiscard: (undo) => rpc.request("workspace.undoDiscard", { undo }),

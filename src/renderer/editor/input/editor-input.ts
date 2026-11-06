@@ -264,6 +264,11 @@ export class EditorInputBinding {
     this.input.focus();
   }
 
+  /** Поле ввода — цель возврата фокуса из меню (`ui/focus-return.ts`). */
+  get focusElement(): HTMLElement {
+    return this.input;
+  }
+
   dispose(): void {
     this.unsubscribe();
     this.input.removeEventListener('keydown', this.onKeyDown);
