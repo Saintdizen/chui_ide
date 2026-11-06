@@ -3119,6 +3119,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     commands,
     showToast,
     applySettings: (next) => applySettings(next),
+    // Лениво и по вызову, а не копией: команда читает ту настройку, что действует
+    // сейчас, а не ту, что была при регистрации команд.
+    settingsOf: () => rebuildSettings(),
     basename,
   });
 

@@ -28,6 +28,12 @@ export interface MatrixOptions {
   /** Скрытые по вложенности (`core/nesting.ts`) — только имена. */
   readonly hidden?: ReadonlySet<string>;
   readonly changeOf?: (path: string) => 'added' | 'modified' | 'deleted' | undefined;
+  /**
+   * Только изменённое по git. Папки остаются всегда: правка может лежать внутри,
+   * и решает уже их собственный список (там фильтр применится так же). Судить
+   * папку самой — значит спрятать ветку, в которой человек как раз работал.
+   */
+  readonly onlyChanged?: boolean;
 }
 
 /** Полка списка: либо обычные строки, либо подпись группы и её строки. */
@@ -42,13 +48,16 @@ export interface MatrixSection {
  * Порядок шагов — это и есть смысл:
  * 1. скрытые — ПЕРВЫМИ: иначе в группе остётся заголовок без ни одной строки;
  * 2. вложенность — до сортировки: свёрнутый файл — уже не строка списка;
- * 3. сортировка — внутри каждой полки, одна на все;
- * 4. группировка — последней, ибо она делит уже осмысленный список.
+ * 3. изменённое — там же, где скрытые: это тоже отбор, а не порядок;
+ * 4. сортировка — внутри каждой полки, одна на все;
+ * 5. группировка — последней, ибо она делит уже осмысленный список.
  */
 export function matrixSections(entries: readonly DirEntry[], options: MatrixOptions): MatrixSection[] {
   const visible = entries.filter((entry) => {
     if (!options.showHidden && entry.name.startsWith('.')) return false;
-    return !(options.hidden?.has(entry.name) ?? false);
+    if (options.hidden?.has(entry.name) ?? false) return false;
+    if (options.onlyChanged && !entryIsDirectory(entry)) return options.changeOf?.(entry.path) !== undefined;
+    return true;
   });
   const ordered = sortTree(visible, {
     foldersFirst: options.foldersFirst,

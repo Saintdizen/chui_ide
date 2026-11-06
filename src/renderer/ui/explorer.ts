@@ -106,6 +106,15 @@ export interface ExplorerView {
   restorePinned(paths: readonly string[]): void;
   /** Закрепить или открепить путь (пункт меню дерева). */
   togglePin(path: string): void;
+  /** Показать скрытые или спрятать их снова, не заходя в настройки. */
+  toggleHidden(): void;
+  /**
+   * Показать только изменённое по git и обратно. Не настройка: переключатель
+   * в настройках пережил бы сам взгляд (см. `onlyChanged`).
+   */
+  toggleOnlyChanged(): void;
+  /** Включён ли сейчас режим «только изменённые» (нужно подписи кнопки и команде). */
+  isOnlyChanged(): boolean;
   /**
    * «Избранное»: постоянный список мест. Живёт в настройках IDE и переживает смену
    * проекта — в отличие от закрепления, которое принадлежит сессии проекта
@@ -353,6 +362,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let labels: FileLabelRecord[] = [];
   /** Выделенные строки (Ctrl/Shift) и якорь диапазона; порядок — как в дереве. */
   let selection: TreeSelection = EMPTY_SELECTION;
+  /**
+   * Показывать только изменённое по git. Это НЕ настройка: взгляд «что я трогал»
+   * живёт минуты, а переключатель в настройках его бы пережил и потом удивлял.
+   */
+  let onlyChanged = false;
   /** Пути текущего перетаскивания: их и переносим при сбросе на папку. */
   let dragging: string[] = [];
   /** Ctrl (на macOS — Alt) во время протяжки: не перенос, а копирование. */
@@ -722,13 +736,27 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const shown = sortEntries(
       entries.filter((entry) => {
         if (!options.showHidden && entry.name.startsWith('.')) return false;
-        return !hidden.has(entry.name);
+        if (hidden.has(entry.name)) return false;
+        // «Только изменённые»: папку пропускаем — есть ли правка вглубь, тут
+        // не видно; решает раскрытая ветка (там тот же фильтр).
+        if (onlyChanged && !entryIsDirectory(entry) && !isChanged(entry.path)) return false;
+        return true;
       }),
     );
     return { shown, excluded: counted.count, patterns: [...counted.patterns] };
   };
 ;
 ;
+
+  /**
+   * Есть ли у пути правка по git. Спрашиваем модель точечно, а не перебираем
+   * весь статус: `visibleSplit` зовётся на каждую раскрытую папку и на каждую
+   * перерисовку, а изменённых в большом репозитории немало.
+   * Неотслеживаемый новый файл — тоже правка: просто её ещё не видно в
+   * `git status` без `-u`. Файл вне git правкой не считается — иначе режим без
+   * репозитория прятал бы всё подряд и выглядел сломанным.
+   */
+  const isChanged = (path: string): boolean => deps.git.statusOf(path) !== undefined;
 
   /** Путь от корня, которому принадлежит файл: по нему работают маски значков. */
   const relativeOf = (path: string): string => {
@@ -1022,6 +1050,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           { label: 'Новый файл…', onSelect: () => startCreateIn(parent, 'file') },
           { label: 'Новая папка…', onSelect: () => startCreateIn(parent, 'directory') },
           { separator: true as const },
+          // Скрытое прячет настройка (и точка в имени, и `files.exclude`), а не
+          // сам дерево: значит, и показать его — отсюда, без похода в настройки.
+          {
+            label: options.showHidden ? 'Скрыть скрытые файлы' : 'Показать скрытые файлы',
+            checked: options.showHidden,
+            onSelect: () => void deps.commands.execute('explorer.toggleHidden'),
+          },
           { label: 'Обновить', onSelect: () => void deps.commands.execute('workspace.refresh') },
         ];
 
@@ -2230,6 +2265,20 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           h(
             'button',
             {
+              // Кнопка — режим, а не действие: вид вкл/выкл задаёт is-active, а не
+              // другой класс. Подписи нет — в шапке 25-px квадраты, поэтому
+              // состояние говорит title и aria-pressed (для читалки).
+              class: onlyChanged ? 'icon-btn is-active tree-only-changed' : 'icon-btn tree-only-changed',
+              type: 'button',
+              title: onlyChanged ? 'Показать все файлы' : 'Показать только изменённые (git)',
+              'aria-pressed': onlyChanged ? 'true' : 'false',
+              onClick: () => toggleOnlyChanged(),
+            },
+            svgIcon('eye', 15),
+          ),
+          h(
+            'button',
+            {
               class: 'icon-btn',
               type: 'button',
               title: 'Обновить',
@@ -2449,6 +2498,21 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let ariaPlaces = new Map<string, AriaPosition>();
   const ariaPlace = (path: string): AriaPosition => ariaPlaces.get(path) ?? { level: 1, posInSet: 1, setSize: 1 };
 
+  /**
+   * Режим «только изменённые». Переключается полной перерисовкой (`render`), а не
+   * `renderWindow`: `buildFlat` перебирает только раскрытые папки из `children` и
+   * зовёт `visibleSplit` тогда же — строки получаются ДРУГИЕ, а не те же с другим
+   * классом, и окном их не пересобрать.
+   * Кэш прочитанных папок при этом цел: фильтр читается в момент сборки списка,
+   * а не при чтении папки — с диска ничего не перечитывается.
+   * Выделение снимаем: спрятанная режимом строка осталась бы выделенной невидимо.
+   */
+  const toggleOnlyChanged = (): void => {
+    onlyChanged = !onlyChanged;
+    if (onlyChanged) selection = EMPTY_SELECTION;
+    render();
+  };
+
   const applyWalk = (action: WalkAction, event?: KeyboardEvent): void => {
     switch (action.kind) {
       case 'move': {
@@ -2649,6 +2713,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       render();
     },
     togglePin: setPinned,
+    toggleOnlyChanged,
+    isOnlyChanged: () => onlyChanged,
+    /** Скрытые — только в слое дерева: настройку пишет команда `explorer.toggleHidden`. */
+    toggleHidden() {
+      options = { ...options, showHidden: !options.showHidden };
+      render();
+    },
     favorites: () => [...favorites],
     setFavorites(paths) {
       // Чужие и повторные пути отбрасываем тем же разбором, что у модели списка.

@@ -14,6 +14,11 @@ export interface ExplorerTree {
   toggleFavorite(path: string): void;
   pinnedPaths(): string[];
   togglePin(path: string): void;
+  /** Скрытое — режим показа, а не только настройка: иначе его нечем вернуть на месте. */
+  toggleHidden(): void;
+  /** «Только изменённые» — тоже режим: включается и выключается на ходу. */
+  toggleOnlyChanged(): void;
+  isOnlyChanged(): boolean;
 }
 
 /**
@@ -30,11 +35,13 @@ export interface ExplorerCommandDeps {
   commands: { execute(id: string, ...args: unknown[]): unknown };
   showToast(message: string, kind?: 'info' | 'error' | 'success'): void;
   applySettings(settings: Settings): void;
+  /** Текущие настройки: переключателю скрытых нужно оттолкнуться от них, а не от копии. */
+  settingsOf(): Settings;
   basename(path: string): string;
 }
 
 export function registerExplorerCommands(define: DefineCommand, deps: ExplorerCommandDeps): void {
-  const { workspace, explorer, editors, rpc, commands, showToast, applySettings, basename } = deps;
+  const { workspace, explorer, editors, rpc, commands, showToast, applySettings, settingsOf, basename } = deps;
 
   define({ id: 'workspace.openFolder', title: 'Открыть проект', category: 'Файл', keybinding: 'Ctrl+O' }, async () => {
     const path = await workspace.pick();
@@ -127,5 +134,23 @@ export function registerExplorerCommands(define: DefineCommand, deps: ExplorerCo
     const wasPinned = explorer.pinnedPaths().includes(target);
     explorer.togglePin(target);
     showToast(wasPinned ? 'Откреплено сверху дерева' : 'Закреплено сверху дерева');
+  });
+
+  // Скрытое — не только настройка: точка в имени и `files.exclude` прячут файлы,
+  // а увидеть их хочется сейчас и здесь, не ища ключ в настройках. Обратная
+  // дорога тоже нужна: включил, посмотрел — выключил. Пишется в настройки, потому
+  // что скрытость — свойство проекта, а не минутное настроение.
+  define({ id: 'explorer.toggleHidden', title: 'Показать / скрыть скрытые файлы', category: 'Вид' }, () => {
+    const settings = settingsOf();
+    applySettings({ ...settings, explorer: { ...settings.explorer, showHidden: !settings.explorer.showHidden } });
+    explorer.render();
+    showToast(settings.explorer.showHidden ? 'Скрытые файлы спрятаны' : 'Скрытые файлы показаны');
+  });
+
+  // «Только изменённые»: взгляд «что я трогал». Не настройка — в отличие от
+  // скрытых: этот режим нужен на минуту и потом мешает.
+  define({ id: 'explorer.toggleOnlyChanged', title: 'Только изменённые файлы (git)', category: 'Вид' }, () => {
+    explorer.toggleOnlyChanged();
+    showToast(explorer.isOnlyChanged() ? 'Показаны только изменённые' : 'Показаны все файлы');
   });
 }

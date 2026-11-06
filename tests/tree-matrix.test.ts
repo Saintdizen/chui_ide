@@ -145,3 +145,41 @@ describe('независимость от скорости чтения ФС', (
     }
   });
 });
+
+describe('матрица: «только изменённые» (п.18)', () => {
+  const base = { foldersFirst: true, sort: 'name' as TreeSort, groupByType: false, showHidden: false };
+  // Изменён только a.ts; папка src — правка внутри неё (git о папках молчит).
+  const changeOf = (path: string): 'added' | 'modified' | 'deleted' | undefined =>
+    path === '/p/a.ts' ? 'modified' : undefined;
+
+  it('файлы без правки уходят, файл с правкой остаётся', () => {
+    const shown = matrixVisible(matrixSections(SET, { ...base, changeOf, onlyChanged: true }));
+    expect(shown).toContain('a.ts');
+    expect(shown).not.toContain('b.ts');
+    expect(shown).not.toContain('README.md');
+  });
+
+  it('папки остаются, даже если у них самих правки нет', () => {
+    // Иначе ветка, в которой лежит изменённый файл, исчезла бы вместе с ним: git
+    // про папки не знает, и судить их по себе — значит спрятать работу человека.
+    const shown = matrixVisible(matrixSections(SET, { ...base, changeOf, onlyChanged: true }));
+    expect(shown).toContain('src');
+    expect(shown).toContain('docs');
+  });
+
+  it('включённый режим не пропускает лишнего: набор — подмножество обычного', () => {
+    const plain = new Set(matrixVisible(matrixSections(SET, base)));
+    const narrowed = matrixVisible(matrixSections(SET, { ...base, changeOf, onlyChanged: true }));
+    for (const name of narrowed) expect(plain.has(name)).toBe(true);
+  });
+
+  it('пустой статус не оставляет ни одного файла, но папки на месте', () => {
+    const shown = matrixVisible(matrixSections(SET, { ...base, changeOf: () => undefined, onlyChanged: true }));
+    expect(shown).toEqual(['docs', 'src']);
+  });
+
+  it('режим выключен — changeOf ни на кого не действует', () => {
+    const shown = matrixVisible(matrixSections(SET, { ...base, changeOf }));
+    expect(shown).toEqual(matrixVisible(matrixSections(SET, base)));
+  });
+});
