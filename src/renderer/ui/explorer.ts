@@ -85,6 +85,12 @@ const CHANGE_TITLE: Record<GitChange, string> = {
 export interface ExplorerView {
   element: HTMLElement;
   render(): void;
+  /**
+   * Увести фокус в дерево — вход с клавиатуры. Ставим его на выделенную строку,
+   * а если выделения нет — на первую: без этого после команды фокус оставался
+   * в пустоте, и следующая стрелка уходила в чужое место.
+   */
+  focus(): void;
   scheduleRefresh(): void;
   reveal(path: string): void;
   /** Создание с инлайн-вводом имени: цель — выбранная папка или её родитель. */
@@ -2685,6 +2691,20 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   return {
     element,
+    // Внутри дерева фокус живёт на самом контейнере (`tabindex=-1`), а строку
+    // выбирает изнутри `aria-activedescendant`: строки пересоздаются каждый
+    // paint, и держать фокус на них — значит терять его на каждой перерисовке.
+    focus() {
+      if (!selected && flatRows.length > 0) {
+        const first = flatRows.find((row) => row.kind === 'entry' && !row.deleted);
+        if (first && first.kind === 'entry') {
+          selected = first.entry.path;
+          selection = { paths: [selected], anchor: selected };
+          render();
+        }
+      }
+      treeEl?.focus();
+    },
     render,
     scheduleRefresh,
     reveal,

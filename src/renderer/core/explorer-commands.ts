@@ -9,6 +9,8 @@ import type { WorkspaceModel } from './workspace-model';
  */
 export interface ExplorerTree {
   render(): void;
+  /** Увести фокус в дерево — дверь для клавиатуры: Tab туда не заходит. */
+  focus(): void;
   reveal(path: string): void;
   favorites(): string[];
   toggleFavorite(path: string): void;
@@ -68,6 +70,18 @@ export function registerExplorerCommands(define: DefineCommand, deps: ExplorerCo
     await workspace.refresh();
     explorer.render();
   });
+
+  // Вход в дерево с клавиатуры. Без него дерево было недостижимо без мыши: его
+  // контейнер `tabindex=-1`, и Tab в него не заходит — так задумано (внутри свой
+  // обход стрелками), но тогда нужна дверь. `Ctrl+Shift+E` — тот же жест, что в
+  // VS Code и JetBrains.
+  define(
+    { id: 'explorer.focus', title: 'Фокус в проводник', category: 'Навигация', keybinding: 'Ctrl+Shift+E' },
+    () => {
+      void commands.execute('view.showExplorer');
+      explorer.focus();
+    },
+  );
 
   define({ id: 'workspace.revealPath', title: 'Показать в проводнике', category: 'Навигация' }, (path) => {
     if (typeof path === 'string') explorer.reveal(path);

@@ -79,3 +79,35 @@ describe('дескрипторы команд', () => {
     expect(duplicates).toEqual([]);
   });
 });
+
+/**
+ * Маршрут без мыши (п.15). Проверяем не «есть ли где-то такая строка», а то, что
+ * каждая точка маршрута имеет СВОЮ дверь с клавиатуры: команду с сочетанием.
+ * Двери живут в разных файлах и ломаются поодиночке — глазами такое не уловить.
+ */
+describe('маршрут без мыши', () => {
+  const doorOf = (id: string): Descriptor | undefined => all.find((item) => item.id === id);
+
+  // Точка маршрута → команда, которой в неё входят. `explorer.focus` не просто
+  // раскрывает панель, а ставит фокус в дерево: Tab туда не заходит, у дерева
+  // `tabindex=-1`, и без этой двери оно недостижимо без мыши.
+  const route: readonly (readonly [string, string])[] = [
+    ['проводник', 'explorer.focus'],
+    ['нижняя панель', 'view.toggleDock'],
+    ['палитра', 'palette.open'],
+    ['дерево символов', 'view.showOutline'],
+    ['поиск по проекту', 'search.project'],
+    ['изменения git', 'view.showChanges'],
+  ];
+
+  it.each(route)('в точку «%s» ведёт своя дверь с clавиши', (_point, id) => {
+    const door = doorOf(id);
+    expect(door, `нет команды ${id}`).toBeDefined();
+    expect(door?.keybinding, `у ${id} нет сочетания клавиш`).toBeTruthy();
+  });
+
+  it('Ни одна точка маршрута не делит дверь с другой', () => {
+    const keys = route.map(([, id]) => doorOf(id)?.keybinding);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});

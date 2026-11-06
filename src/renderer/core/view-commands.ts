@@ -34,6 +34,8 @@ export interface ViewDock {
   /** Запомнить место панели; ноль — забыть. */
   setHeight(height: number): void;
   show(id: string): void;
+  /** Показать вкладку и увести в неё фокус: шаг с клавиатуры, а не только вид. */
+  showAndFocus(id: string): void;
   hide(): void;
   toggle(id: string): void;
 }
@@ -173,9 +175,15 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
     dock.show('terminal');
   });
 
-  define({ id: 'view.showOutline', title: 'Структура файла', category: 'Вид' }, () => {
-    dock.toggle('outline');
-  });
+  // `Ctrl+Shift+O` занят быстрым открывателем (`app-view-commands`), `Ctrl+Shift+K`
+  // — удалением строки в редакторе, `Ctrl+Shift+M` — панелью проблем. Свободное
+  // `Ctrl+Shift+U` и стало дверью к структуре (`U` — как `outline` у штурвала).
+  define(
+    { id: 'view.showOutline', title: 'Структура файла', category: 'Вид', keybinding: 'Ctrl+Shift+U' },
+    () => {
+      dock.showAndFocus('outline');
+    },
+  );
 
   // Журнал LSP: туда ведёт «Показать» из уведомления о подключении серверов.
   // Команда, а не замыкание, потому что шаг должен переживать закрытие тоста.
@@ -241,8 +249,11 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
     zoomFont(-1);
   });
 
+  // Открытие панели с клавиатуры — это шаг в панель, а не только её появление:
+  // иначе человек вызвал панель, а следующий Tab уводит его из неё в обход окна.
+  // `show` остаётся для случаев, когда панель зовут фоном (ошибка LSP, отладка).
   define({ id: 'view.notebooks', title: 'Ячейки ноутбука', category: 'Вид' }, () => {
-    dock.show('notebooks');
+    dock.showAndFocus('notebooks');
   });
 
   define({ id: 'view.showMarkdownPreview', title: 'Предпросмотр Markdown', category: 'Вид' }, () => {
@@ -259,7 +270,7 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
   });
 
   define({ id: 'view.showProblems', title: 'Проблемы', category: 'Вид', keywords: ['ошибки', 'warning'] }, () => {
-    dock.show('problems');
+    dock.showAndFocus('problems');
   });
 
   // Задачи: список пометок TODO/FIXME/HACK/XXX по проекту — как панель «Проблемы»,
@@ -267,7 +278,7 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
   define(
     { id: 'view.showTodos', title: 'Задачи (TODO/FIXME)', category: 'Вид', keywords: ['todo', 'fixme', 'пометки'] },
     () => {
-      dock.show('todo');
+      dock.showAndFocus('todo');
     },
   );
 
@@ -275,7 +286,7 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
   // нижнюю панель с прежней вкладкой, а если она уже открыта — скрывает целиком.
   define({ id: 'view.toggleDock', title: 'Нижняя панель', category: 'Вид', keybinding: 'Alt+F12' }, () => {
     if (dock.visible) dock.hide();
-    else dock.show(dock.activeId ?? 'terminal');
+    else dock.showAndFocus(dock.activeId ?? 'terminal');
   });
 
   // Разделение области редактора: одна кнопка включает и выключает, как и у панелей.

@@ -72,6 +72,9 @@ function setup(opts: { active?: { path: string } | null } = {}) {
       height: 0,
       setHeight: (height: number) => log.push(`height:${height}`),
       show: (id: string) => log.push(`show:${id}`),
+      // Шаг в панель отличается от показа только фокусом; в журнале различаем,
+      // чтобы тесты видели, каким путём команда позвала панель.
+      showAndFocus: (id: string) => log.push(`showAndFocus:${id}`),
       hide: () => log.push('hide'),
       toggle: (id: string) => log.push(`toggle:${id}`),
     },
@@ -272,7 +275,7 @@ describe('registerViewCommands', () => {
     run(f, 'view.toggleDock');
     expect(f.log).toEqual(['hide']);
     f.commands.get('view.showOutline')!();
-    expect(f.log).toEqual(['hide', 'toggle:outline']);
+    expect(f.log).toEqual(['hide', 'showAndFocus:outline']);
   });
 
   it('предпросмотр Markdown без .md — отказ, с .md — открытие', () => {
