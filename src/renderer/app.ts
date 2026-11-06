@@ -584,6 +584,8 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // вариантов. Сам список зависит от языка файла — его знает редактор.
     surroundWith: () => surroundModal.open(),
     // Форматирование участка сервером: правки приходят готовыми — применяем обычным путём.
+    // Отступ по набранному знаку: сервер объявил триггеры — спрашиваем его сразу.
+    formatOnType: (path, line, column, ch) => lsp.formatOnType(path, line, column, ch),
     formatRange: (path, range) => void formatRangeWithServer(path, range),
     formatOnPaste: () => settings.editor.formatOnPaste,
     // Текст целевого файла для «заглядывания»: открытый берём из документа (в нём
@@ -4049,6 +4051,15 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         // видеть, но не красным.
         const kind = said.severity === 'error' ? 'error' : 'info';
         showToast(said.server ? `${said.server}: ${said.message}` : said.message, kind);
+        break;
+      }
+      case PushTopic.LspRefresh: {
+        // Сервер сам попросил пересчитать то, что отдаёт только по запросу: линзы,
+        // подсказки-вставки или подсветку. Без этого правка в другом файле оставляла
+        // их устаревшими до перезапуска сервера.
+        const refresh = message.payload as { method?: unknown } | null;
+        if (typeof refresh?.method !== 'string') break;
+        editors.refreshFromServer(refresh.method);
         break;
       }
       case PushTopic.LspServers:

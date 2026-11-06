@@ -44,6 +44,8 @@ import {
   skipClosing,
   type EditResult,
 } from './editing';
+import type { TextEdit } from '../../../shared/edits';
+import { translateEdits } from '../host/document-edits';
 import { toggleBlockComment, toggleLineComment } from './comments';
 import { reindentPasted } from './reindent';
 import { cleanPastedText } from '../../../shared/paste-clean';
@@ -92,6 +94,11 @@ export interface EditorControllerOptions {
   insertSpaces?: boolean;
   /** Предел истории в шагах. */
   historyLimit?: number;
+  /**
+   * Сервер поправит отступ по набранному знаку (`onTypeFormatting`). Позиция 1-based.
+   * Нет — печатаем как обычно.
+   */
+  onTypeFormat?: (line: number, column: number, ch: string) => Promise<TextEdit[]>;
 }
 
 /**
@@ -154,7 +161,10 @@ export class EditorController {
     this.tabSize = options.tabSize ?? 4;
     this.useTabs = options.insertSpaces === false;
     this.history = new EditHistory(options.historyLimit);
+    this.onTypeFormat = options.onTypeFormat;
   }
+
+  private readonly onTypeFormat?: (line: number, column: number, ch: string) => Promise<TextEdit[]>;
 
   get bufferRef(): TextBuffer {
     return this.buffer;
@@ -668,6 +678,42 @@ export class EditorController {
       }
     }
     this.type(text);
+  }
+
+  /**
+   * Набран знак: сервер может поправить отступ сразу (`textDocument/onTypeFormatting`).
+   * Спрашиваем только про одиночный знак и одиночную каретку — при мультикурсоре
+   * правка одного места рассыпала бы остальные. Ответ приходит позже набора: каретка
+   * могла уехать, поэтому правки применяем к тому месту, где они названы.
+   */
+  typeWithFormatting(text: string): void {
+    this.typeWithPairs(text);
+    if (text.length !== 1 || this.cursors.length !== 1) return;
+    const onType = this.onTypeFormat;
+    if (!onType) return;
+    const position = this.buffer.positionAt(this.selection.active);
+    void onType(position.line + 1, position.column + 1, text)
+      .then((edits) => {
+        // Тот же перевод, что и у прочих серверных правок: позиции в строках и
+        // столбцах могут разойтись с буфером, пока ответ ехал.
+        const { changes } = translateEdits(this.buffer, edits);
+        if (changes.length === 0 || this.readOnly) return;
+        // Правки — с конца: правка в начале сдвинула бы смещения соседних.
+        const ordered = [...changes].sort((a, b) => b.start - a.start);
+        const before = this.selection;
+        for (const change of ordered) {
+          this.buffer.replace(change.start, change.removed.length, change.inserted);
+        }
+        for (const change of ordered) this.noteEdit(this.primary.id, change, 'typing');
+        // Каретка едет за правкой, которая кончилась раньше неё.
+        const shift = ordered.reduce((sum, change) => {
+          const end = change.start + change.removed.length;
+          return end <= before.active ? sum + change.inserted.length - change.removed.length : sum;
+        }, 0);
+        const after = { anchor: before.anchor + shift, active: before.active + shift };
+        this.pushEntry(ordered.reverse(), [before], [after], 'typing');
+      })
+      .catch(() => undefined);
   }
 
   /** Ctrl+/ — переключить строчный комментарий у строк выделения. */

@@ -18,7 +18,10 @@
 возврат фокуса из палитры, breadcrumbs — всё это есть).
 
 Отсюда **правило**: пункт пишется только после `grep` и только если после
-него пусто или половина. Всё, что нашлось готовым, собрано в конце файла —
+него пусто или половина.
+
+Счёт на 2026-11-06: было 26 (18–43), закрыто два — 37 (пересчёт по
+просьбе сервера) и 38 (формат на лету); осталось 24 (18–36, 39–43). Всё, что нашлось готовым, собрано в конце файла —
 чтобы следующий заход начинал со списка «не трогать».
 
 ---
@@ -248,34 +251,6 @@ https://code.visualstudio.com/docs/sourcecontrol/overview
 
 ## Область 5. LSP и подсказки
 
-### 37. Сервер сам просит пересчитать
-
-**Дыра.** Самая большая и настоящая: `grep 'refresh' main/lsp/*.ts` пуст.
-Сервер не может попросить пересчитать **ни пометки
-(`workspace/diagnostic/refresh`), ни линзы (`codeLens/refresh`), ни
-подсказки (`inlayHint/refresh`), ни токены (`semanticTokens/refresh`)**.
-Из серверных запросов клиент умеет только
-`window/workDoneProgress/create` и `client/registerCapability`
-(`main/lsp/lsp.ts`). Пометки после правки в другом файле живут устаревшими
-до сохранения.
-
-**Уже есть:** `main/lsp/lsp.ts` (capabilities),
-`renderer/editor/host/lsp-features.ts`.
-
-**Источник:** LSP 3.17 `diagnostic/refresh`;
-https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/
-
-### 38. Форматирование на лету
-
-**Дыра.** `textDocument/onTypeFormatting` — `grep -rn` пуст в `main` и
-`renderer`: формат только по команде, отступ не проявляется при наборе.
-
-**Уже есть:** `textDocument/formatting`, `rangeFormatting` — в
-`main/lsp/lsp.ts`.
-
-**Источник:** LSP 3.17 `onTypeFormatting`;
-https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/
-
 ### 39. Пометка знает, кто её сказал
 
 **Дыра.** Диагностика с нескольких серверов сливается без `source`: в
@@ -364,6 +339,18 @@ https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/spe
 `prepareRename`, file operations, `workspace/configuration`,
 `didChangeWorkspaceFolders` — всё в `main/lsp/lsp.ts` и
 `renderer/editor/host/lsp-features.ts`.
+
+**Закрыто 2026-11-06 (было пунктами 37 и 38), не писать заново:**
+
+- подписки на пересчёт — `REFRESH_METHODS` в `main/lsp/lsp.ts`, колбэк
+  `onRefresh` в конструкторе, топик `PushTopic.LspRefresh`;
+  заявлены `resolveSupport` у `codeLens`/`inlayHint` и `refreshSupport` у
+  `semanticTokens`. В окне — `EditorHost.refreshFromServer(method)` и
+  `EditorWorkspace.refreshFromServer` через `case PushTopic.LspRefresh` в
+  `app.ts`. Тест: `tests/lsp-refresh-and-on-type.test.ts`.
+- форматирование на лету — `LspService.formatOnType()` (сверяет знак со
+  списком триггеров сервера), канал `lsp.formatOnType`, ввод идёт через
+  `EditorController.typeWithFormatting()`.
 
 **Прочее:** автосохранение (`shared/auto-save.ts`), история и blame
 (`core/blame.ts`, `ui/history-modal.ts`), source-control с коммитом,

@@ -39,6 +39,8 @@ export const PushTopic = {
   LspMessage: 'lsp:message',
   /** Состав серверов изменился: поднялся, исчез или упал — чип в статусбаре обновляется сам. */
   LspServers: 'lsp:servers',
+  /** Линзы, подсказки-вставки и подсветка устарели: та же тема, что и у пометок. */
+  LspRefresh: 'lsp:refresh',
   DebugState: 'debug:state',
   DebugStopped: 'debug:stopped',
   DebugOutput: 'debug:output',

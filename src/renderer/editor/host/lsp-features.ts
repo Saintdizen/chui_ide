@@ -573,6 +573,14 @@ export class LspFeatures {
     return this.rpc.request('lsp.formatRange', { path, ...range }).catch(() => []);
   }
 
+  /**
+   * Форматирование по набранному знаку (`textDocument/onTypeFormatting`). Пусто — сервер
+   * такого не умеет или знак не из его списка. Позиции 1-based, как везде у нас.
+   */
+  async formatOnType(path: string, line: number, column: number, ch: string): Promise<TextEdit[]> {
+    return this.rpc.request('lsp.formatOnType', { path, line, column, ch }).catch(() => []);
+  }
+
   /** Файл целиком (`textDocument/formatting`). Пусто — сервер не умеет. */
   async formatDocument(path: string): Promise<TextEdit[]> {
     return this.rpc.request('lsp.formatDocument', { path }).catch(() => []);

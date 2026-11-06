@@ -945,6 +945,14 @@ export interface ChuiMethods {
     params: { path: string; startLine: number; startColumn: number; endLine: number; endColumn: number };
     result: TextEdit[];
   };
+  /**
+   * Форматирование по набранному знаку (`textDocument/onTypeFormatting`). Пусто — сервер
+   * такого не умеет или этот знак не в его списке триггеров. Позиция 1-based.
+   */
+  'lsp.formatOnType': {
+    params: { path: string; line: number; column: number; ch: string };
+    result: TextEdit[];
+  };
   /** Файл целиком (`textDocument/formatting`). Пусто — сервер не умеет. */
   'lsp.formatDocument': { params: { path: string }; result: TextEdit[] };
 

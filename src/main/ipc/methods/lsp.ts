@@ -116,6 +116,12 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
       }) ?? [],
   );
 
+  // Знак набран: сервер может поправить отступ сразу (`onTypeFormatting`).
+  router.register(
+    'lsp.formatOnType',
+    (params) => deps.lsp?.formatOnType(params.path, { line: params.line, character: params.column }, params.ch) ?? [],
+  );
+
   // Файл целиком: тот же путь, что и участок, только без границ.
   router.register('lsp.formatDocument', (params) => deps.lsp?.formatDocument(params.path) ?? []);
 

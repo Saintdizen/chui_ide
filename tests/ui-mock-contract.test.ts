@@ -144,6 +144,7 @@ const NOT_MOCKED: Record<string, string[]> = {
   ],
   'точные данные от языкового сервера — в браузере сервера нет': [
     'lsp.formatRange',
+    'lsp.formatOnType',
     'lsp.formatDocument',
     'lsp.semanticTokens',
   ],

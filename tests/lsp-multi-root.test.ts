@@ -94,6 +94,7 @@ describe('мультикорень: свой сервер на корень', ()
       () => rootA,
       () => ({ enabled: true, servers: [server] }) as never,
       () => {},
+      () => {},
       () => null,
       async () => ({}),
       async () => [],
@@ -145,6 +146,7 @@ describe('мультикорень: свой сервер на корень', ()
     const lsp = new LspService(
       () => roots[0] ?? null,
       () => ({ enabled: true, servers: [server] }) as never,
+      () => {},
       () => {},
       () => null,
       async () => ({}),

@@ -140,6 +140,17 @@ const MAX_SERVER_INSTANCES = 8;
  * чем отвечает сервер, и досказывать то, что уже не нужно, — трата сил сервера. Прочие
  * запросы (initialize, rename, форматирование) не отменяем: у них результат нужен.
  */
+/**
+ * Уведомления «пересчитай»: сервер сообщает, что данные, которые отдаются только по
+ * запросу, устарели. Мы объявляем их в capabilities — без разбора они были бы пустыми.
+ */
+const REFRESH_METHODS = new Set([
+  'workspace/diagnostic/refresh',
+  'workspace/codeLens/refresh',
+  'workspace/inlayHint/refresh',
+  'workspace/semanticTokens/refresh',
+]);
+
 const CANCELLABLE_METHODS: ReadonlySet<string> = new Set([
   'textDocument/completion',
   'completionItem/resolve',
@@ -528,6 +539,14 @@ interface LspCapabilities {
     resolveProvider?: boolean;
   };
   hoverProvider?: boolean;
+  /**
+   * Сервер форматирует по ходу набора (`textDocument/onTypeFormatting`). Триггеры
+   * объявляет он сам: запрос на прочие знаки он отверг бы.
+   */
+  documentOnTypeFormattingProvider?: {
+    firstTriggerCharacter: string;
+    moreTriggerCharacter?: string[];
+  };
   /** Сервер умеет серые подсказки вперёд (`textDocument/inlineCompletion`). */
   inlineCompletionProvider?: unknown;
   definitionProvider?: boolean;
@@ -926,6 +945,12 @@ export class LspService {
     private readonly root: () => string | null,
     private readonly settings: () => LspSettings,
     private readonly publish: (topic: string, payload: unknown) => void,
+    /**
+     * Сервер попросил пересчитать то, что отдаёт только по запросу (уведомления
+     * `refresh`). Метод говорит, что именно стало неверным: пометки по проекту,
+     * линзы, подсказки-вставки или подсветка.
+     */
+    private readonly onRefresh: (method: string) => void = () => {},
     /**
      * Интерпретатор Python проекта. Нужен, чтобы сервер видел пакеты окружения:
      * без него подсказки по импортам не поднимутся. Возвращает null — окружения нет.
@@ -1827,7 +1852,9 @@ export class LspService {
               // Выделение по структуре: сервер отдаёт цепочку участков вокруг места —
               // слово, выражение, строка, блок (см. `LspFeatures.selectionRanges`).
               selectionRange: {},
-              codeLens: { dynamicRegistration: false },
+              // Линзы, подсказки-вставки и семантика пересчитываются сервером: без
+              // `refreshSupport` метки живут старыми до перезапуска сервера.
+              codeLens: { dynamicRegistration: false, resolveSupport: { properties: ['command'] } },
               codeAction: {
                 isPreferredSupport: true,
                 codeActionLiteralSupport: {
@@ -1846,6 +1873,7 @@ export class LspService {
                   },
                 },
               },
+              inlayHint: { dynamicRegistration: false, resolveSupport: { properties: ['tooltip'] } },
               callHierarchy: {},
               // Иерархия типов: надтипы и подтипы (команды «Иерархия типов» в палитре).
               typeHierarchy: {},
@@ -1868,6 +1896,9 @@ export class LspService {
               // их индексами в легенде, а мы сопоставим с ролями палитры.
               semanticTokens: {
                 requests: { full: true, range: true },
+                // Подсветку сервер пересчитывает сам, когда меняется то, чего в
+                // буфере нет: правка в другом файле меняет роли в этом.
+                refreshSupport: true,
                 tokenTypes: [...STANDARD_TOKEN_TYPES],
                 tokenModifiers: [...STANDARD_TOKEN_MODIFIERS],
               },
@@ -2027,6 +2058,31 @@ export class LspService {
             character: Math.max(0, range.endColumn - 1),
           },
         },
+        options: { tabSize: 4, insertSpaces: true },
+      });
+      return toFormatEdits(result);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Форматирование по набранному знаку (`textDocument/onTypeFormatting`).
+   * Шлём, только если знак входит в набор триггеров, объявленных сервером:
+   * иначе на каждый символ уходил бы запрос, который сервер отверг бы.
+   */
+  async formatOnType(path: string, position: { line: number; character: number }, ch: string): Promise<TextEdit[]> {
+    const runtime = this.runtimeForPath(path);
+    const provider = runtime?.capabilities.documentOnTypeFormattingProvider;
+    if (!provider) return [];
+    const triggers = [provider.firstTriggerCharacter, ...(provider.moreTriggerCharacter ?? [])];
+    if (!triggers.includes(ch)) return [];
+    await runtime.initialized.catch(() => undefined);
+    try {
+      const result = await runtime.connection.request('textDocument/onTypeFormatting', {
+        textDocument: { uri: pathToFileURL(path).toString() },
+        position,
+        ch,
         options: { tabSize: 4, insertSpaces: true },
       });
       return toFormatEdits(result);
@@ -2667,6 +2723,10 @@ export class LspService {
       // уведомлением с подписью сервера — иначе непонятно, кто говорит.
       const message = parseShowMessage(params, config ?? { language: '', command: '', label: 'Языковой сервер' });
       if (message) this.publish(PushTopic.LspMessage, message);
+      return;
+    }
+    if (REFRESH_METHODS.has(method)) {
+      this.onRefresh(method);
       return;
     }
     if (method !== 'textDocument/publishDiagnostics') return;

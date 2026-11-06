@@ -430,7 +430,8 @@ export class EditorInputBinding {
       // Набор с клавиши: за скобкой допишется пара, а закрывающая перешагнёт свою.
       if (data) {
         this.macro.push({ kind: 'insert', text: data });
-        this.controller.typeWithPairs(data);
+        // Печать идёт через форматирование: сервер может поправить отступ сразу.
+        this.controller.typeWithFormatting(data);
       }
       return;
     }

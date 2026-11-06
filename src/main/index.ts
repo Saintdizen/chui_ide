@@ -257,6 +257,9 @@ if (!app.requestSingleInstanceLock()) {
       () => workspace.rootPath(),
       () => settings.get().lsp,
       (topic, payload) => pushToRenderers(topic, payload),
+      // Пересчёт по просьбе сервера: окно знает, что у него открыто и какой язык
+      // чего умеет, поэтому наружу уходит сам метод.
+      (method) => pushToRenderers(PushTopic.LspRefresh, { method }),
       // Тот же выбор, что у запуска: настройка важнее окружения проекта. Иначе
       // подсказки шли бы с одного питона, а код запускался другим.
       () => pythonInterpreterFor(workspace.rootPath(), settings.get().run.pythonPath),
@@ -515,7 +518,11 @@ if (!app.requestSingleInstanceLock()) {
      */
     const reopenLastWorkspace = async (store: SettingsStore): Promise<boolean> => {
       const saved = store.get().workspace;
-      const plan = restoreRoots(saved.roots, saved.activeRoot, (root): boolean => statSync(root, { throwIfNoEntry: false })?.isDirectory() === true);
+      const plan = restoreRoots(
+        saved.roots,
+        saved.activeRoot,
+        (root): boolean => statSync(root, { throwIfNoEntry: false })?.isDirectory() === true,
+      );
       if (plan.roots.length === 0) return false;
       try {
         await openProjectFolder(deps, plan.roots[0]!);

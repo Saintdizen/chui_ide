@@ -265,6 +265,11 @@ export interface EditorWorkspaceOptions {
     path: string,
     range: { startLine: number; startColumn: number; endLine: number; endColumn: number },
   ) => void;
+  /**
+   * Сервер поправит отступ по набранному знаку (`onTypeFormatting`). Позиция 1-based.
+   * Нет — печатаем как обычно.
+   */
+  formatOnType?: (path: string, line: number, column: number, ch: string) => Promise<TextEdit[]>;
   /** Форматировать ли вставленный кусок (настройка `editor.formatOnPaste`). */
   formatOnPaste?: () => boolean;
   /** Короткий путь для подписи места в списке. */
@@ -369,6 +374,7 @@ export class EditorWorkspace {
   private readonly surroundWith: (() => void) | undefined;
   /** Шов форматирования участка — сервер и правки на стороне приложения. */
   private readonly formatRange: EditorWorkspaceOptions['formatRange'];
+  private readonly formatOnType: EditorWorkspaceOptions['formatOnType'];
   /** Живой геттер настройки «форматировать при вставке». */
   private readonly formatOnPaste: (() => boolean) | undefined;
   /** Быстрые исправления: шов к приложению (сервер, список, применение правок). */
@@ -514,6 +520,7 @@ export class EditorWorkspace {
     this.importAliases = options.importAliases;
     this.surroundWith = options.surroundWith;
     this.formatRange = options.formatRange;
+    this.formatOnType = options.formatOnType;
     this.formatOnPaste = options.formatOnPaste;
     this.relativePath = options.relativePath;
     this.onNotice = options.onNotice;
@@ -633,6 +640,7 @@ export class EditorWorkspace {
       onDidWriteFile: this.onDidWriteFile,
       surroundWith: this.surroundWith,
       formatRange: this.formatRange,
+      formatOnType: this.formatOnType,
       formatOnPaste: this.formatOnPaste,
       relativePath: this.relativePath,
       onNotice: this.onNotice,
@@ -677,6 +685,14 @@ export class EditorWorkspace {
   /** Пропустить событие украшения наружу, только если панель активна. */
   private forward<T>(index: number, emitter: Emitter<T>, hit: T): void {
     if (this.activeIndex === index) emitter.fire(hit);
+  }
+
+  /**
+   * Сервер попросил пересчитать (уведомления `refresh`): просьба общая, а не про файл, поэтому
+   * касается всех панелей — файл может быть открыт в каждой из них.
+   */
+  refreshFromServer(method: string): void {
+    for (const pane of this.panes) pane.refreshFromServer(method);
   }
 
   /** Перерисовать панели, кроме изменившейся, если в них открыт тот же файл. */

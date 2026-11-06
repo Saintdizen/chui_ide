@@ -335,6 +335,11 @@ export interface EditorHostOptions {
     range: { startLine: number; startColumn: number; endLine: number; endColumn: number },
   ) => void;
   /**
+   * Сервер поправит отступ по набранному знаку (`onTypeFormatting`). Позиция 1-based.
+   * Нет — печатаем как обычно: без сервера такой правки не бывает.
+   */
+  formatOnType?: (path: string, line: number, column: number, ch: string) => Promise<TextEdit[]>;
+  /**
    * Форматировать ли вставленный кусок. Живой геттер: настройку меняют в окне. Не задано —
    * не форматируем: правка чужого текста после вставки должна быть осознанной.
    */
@@ -722,6 +727,7 @@ export class EditorHost {
   private readonly surroundWithHandler: (() => void) | undefined;
   /** Шов форматирования участка: сервер и применение правок — на стороне приложения. */
   private readonly formatRangeHandler: EditorHostOptions['formatRange'];
+  private readonly formatOnTypeSource: EditorHostOptions['formatOnType'];
   /** Включено ли форматирование вставленного куска — живой геттер настройки. */
   private readonly formatOnPaste: (() => boolean) | undefined;
   /** Проверка орфографии: словарь и живая настройка. `undefined` — проверки нет. */
@@ -782,6 +788,7 @@ export class EditorHost {
     this.spellSaveWord = options.spellSaveWord;
     this.surroundWithHandler = options.surroundWith;
     this.formatRangeHandler = options.formatRange;
+    this.formatOnTypeSource = options.formatOnType;
     this.formatOnPaste = options.formatOnPaste;
 
     // До первого `open` редактор держит пустой буфер: слои не терпят «нет документа», а
@@ -852,6 +859,10 @@ export class EditorHost {
     this.controller = new EditorController(buffer, {
       tabSize: options.tabSize,
       insertSpaces: options.insertSpaces,
+      // Путь может смениться (панель переиспользуют), поэтому спрашиваем текущий.
+      onTypeFormat: this.formatOnTypeSource
+        ? (line, column, ch) => this.formatOnTypeSource!(this.path ?? '', line, column, ch)
+        : undefined,
     });
     // Документ (истина о содержимом) узнаёт о правке ПЕРВЫМ — раньше попапов.
     // Иначе запрос подсказок уходит серверу раньше синхронизации (`lsp.change`), и тот
@@ -1288,6 +1299,29 @@ export class EditorHost {
    */
   refreshText(): void {
     this.view.refresh();
+  }
+
+  /**
+   * Сервер попросил пересчитать то, что отдаёт только по запросу (уведомления `refresh`).
+   * Смысл наборе сводится к двум вещам: спросить заново у сервера нужное и
+   * перерисовать украшения. Неизвестный метод не трогаем — набор методов
+   * открыт, и чужая просьба не должна дёргать лишние запросы.
+   */
+  refreshFromServer(method: string): void {
+    if (this.readOnly) return;
+    switch (method) {
+      case 'workspace/codeLens/refresh':
+        void this.refreshLenses();
+        return;
+      case 'workspace/inlayHint/refresh':
+        void this.refreshInlayHints();
+        return;
+      case 'workspace/semanticTokens/refresh':
+        void this.refreshSemanticTokens();
+        return;
+      default:
+        return;
+    }
   }
 
   /**
