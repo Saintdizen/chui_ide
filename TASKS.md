@@ -16,17 +16,10 @@ Neovim).
 
 ### Без мыши и доступность
 
-16. **`role` и `aria` по шаблонам APG.** `treeview`, `tabs`, `dialog-modal`,
-    `listbox`: фокус внутри диалога, возврат фокуса, живые регионы, стрелки в
-    списках. Источник: VS Code `ux-accessibility`, Zed
-    `development/ui-checklist` (Accessibility).
-    **Сделано:** четыре оверлея (палитра, быстрое открытие, символы проекта,
-    поиск по смыслу) собираются через `dialogOverlay` в `ui/dom.ts` — `role=dialog`,
-    `aria-modal`, `aria-label` больше не забываются; `symbol-picker` и
-    `meaning-search` теперь возвращают фокус владельцу (`focus-return.ts`).
-    Стенд `mini-dom` научен фокусу: `focus()` пишет в `document.activeElement`.
-    **Осталось:** живые регионы (объявления для читалки), стрелки внутри списков,
-    `tabs`/`treeview` по APG.
+16. **`role` и `aria` по шаблонам APG: остаток.** `treeview` и `tabs` строго
+    по шаблону, стрелки внутри списков (`listbox`, дерево, палитра).
+    Источник: VS Code `ux-accessibility`, Zed `development/ui-checklist`
+    (Accessibility).
 
 17. **Текст интерфейса по одному своду.** Кнопка — глагол, сообщение называет
     причину и что делать, ошибка не обвиняет человека, без жаргона.
@@ -39,12 +32,8 @@ Neovim).
 
 ### Клавиши и навигация
 
-19. **Дерево: полный набор клавиш.** `↑/↓/←/→`, `Home/End`, `PageUp/Down`,
-    `Enter` на папке (раскрыть, а не открыть), `Ctrl+Enter` на файле,
-    `Shift+↑/↓` — выделение диапазона, буквенный переход по первой букве.
+19. **Дерево: `Enter` на папке.** Раскрыть, а не открыть.
     Источник: JetBrains `lists-and-trees` (Keyboard), Zed `project-panel`.
-    **Сделано:** всё, кроме `Enter` на папке; `Shift+↑/↓` — вход в готовое
-    правило `clickSelection(..., 'range')` из `ui/explorer.ts`.
 
 ## Правила работы со списком
 
