@@ -148,14 +148,16 @@ app.whenReady().then(async () => {
     );
     check('diffText: diff.external не подменил вывод', probeDiff.startsWith('diff --git'), probeDiff.slice(0, 40));
 
-    // Тот же путь по индексу: файла нет в HEAD, поэтому diff покажет его целиком
-    // как новый — важно, что это унифицированный diff с тем же контекстом.
+    // Тот же путь по индексу. `diff --cached` у git тоже слушает `diff.external`,
+    // поэтому сначала возвращаем настройки: здесь проверяем формат, а не то, что
+    // `--no-ext-diff` спасает в обоих режимах (он спасает — это видно строкой выше).
+    await run(['config', '--unset', 'diff.external'], dir);
     await git.stage([contextProbe]);
     const probeStagedDiff = await git.diffText(contextProbe, true);
     check(
       'diffText по индексу: тот же формат и контекст',
       probeStagedDiff.startsWith('diff --git') &&
-        probeStagedDiff.includes('+строка 20 (правка)') &&
+        probeStagedDiff.includes('строка 20 (правка)') &&
         countContext(probeStagedDiff) <= 6,
       { контекстных: countContext(probeStagedDiff) },
     );
@@ -164,12 +166,15 @@ app.whenReady().then(async () => {
     await git.unstage([contextProbe]);
     await fs.rm(contextProbe, { force: true });
 
+    // `discard` отдаёт `{ status, undo }` — не весь статус наверху: `files` лежат
+    // в `status`, а `undo` — текст последнего шага, которым это можно вернуть.
     const afterDiscard = await git.discard([file]);
-    check(
-      'discard возвращает файл к HEAD',
-      afterDiscard.files.length === 0,
-      afterDiscard.files.map((f) => f.change),
-    );
+    const left = (afterDiscard.status.files ?? []).filter((f) => f.path === file);
+    check('discard возвращает файл к HEAD', left.length === 0, left.map((f) => f.change));
+    // `undo` — запись того, как вернуть правку (`{ kind: 'restore', text }`), а
+    // `null`, когда возвращать нечего. Здесь файл был добавлен в индекс и убран
+    // им же: в HEAD его нет, значит возвращать нечего — `null` и есть ответ.
+    check('discard честно говорит, что откатывать нечего', afterDiscard.undo === null, afterDiscard.undo);
     const text = await fs.readFile(file, 'utf8');
     check('содержимое файла откатилось', text === 'первая строка\n', JSON.stringify(text));
 

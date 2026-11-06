@@ -29,7 +29,15 @@ const SECRET = 'chui-map-secret-marker';
 
 let failed = false;
 const check = (label, condition, extra) => {
-  console.log(`  ${condition ? 'ok  ' : 'FAIL'} ${label}${extra !== undefined ? `: ${JSON.stringify(extra)}` : ''}`);
+  const line = `  ${condition ? 'ok  ' : 'FAIL'} ${label}${extra !== undefined ? `: ${JSON.stringify(extra)}` : ''}`;
+  // Вывод бывает закрыт раньше времени: `| head`, закрытый терминал или пайп, у
+  // которого пропал читатель, — это EPIPE. Печатать некуда, но проверки идут
+  // дальше: валить прогон из-за этого значит спрятать настоящие расхождения.
+  try {
+    console.log(line);
+  } catch {
+    /* здесь писать некуда; итог всё равно вернёт код выхода */
+  }
   if (!condition) failed = true;
 };
 
@@ -136,7 +144,14 @@ app.whenReady().then(async () => {
       reasoningEffort: 'off',
       maxSteps: 8,
       confirmDangerous: true,
+      // Набор по умолчанию — как в приложении: «Все инструменты». Иначе проверка
+      // смотрит на урезанный ростер «Авто» и не видит того, что видит человек.
+      toolPreset: 'full',
       webSearch: { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false },
+      // Обзор страниц выключен: `toolEnv` читает `ai.browser.enabled`, и без этого
+      // блока прогон падал ещё до первого запроса к модели.
+      browser: { enabled: false },
+      webFetch: { enabled: false },
       // Песочница выключена: в этой проверке агент ходит на хост, как раньше.
       sandbox: { enabled: false, image: 'python:3.12-slim', workdir: '/workspace', network: true },
     },
@@ -212,13 +227,26 @@ app.whenReady().then(async () => {
       brief(run.prompt, 2),
     );
 
-    /* B. Инструмент: предлагается модели, отвечает тем же скан. */
-    check('project_map предлагается модели', run.toolNames.includes('project_map'), run.toolNames);
+    /* B. Инструмент: вызывается по имени, отвечает тем же скан. */
+    // Карту и так несёт системный промпт, поэтому в наборе «Все» `project_map`
+    // нарочно не значится: он в редко-простом, а тот зовётся по имени и
+    // выполняется сразу. Проверяем именно это, а не наличие в списке схем.
+    check(
+      'project_map живёт в редко-простом: по имени, а не в наборе',
+      !run.toolNames.includes('project_map') && run.results[0]?.name === 'project_map',
+      { tools: run.toolNames, called: run.results[0]?.name },
+    );
     const detail = String(run.results[0]?.detail ?? '');
     check('project_map исполнился успешно', run.results[0]?.ok === true, run.results[0]?.summary);
     check('подробная форма называет манифест', detail.includes('Манифесты: package.json'), detail);
     check('подробная форма даёт пример теста', detail.includes('tests/util.test.js'), detail);
-    check('подробная форма говорит, куда смотреть дальше', detail.includes('find_files'), detail);
+        // Совет в конце — про настоящие инструменты этой сборки: `list` с glob и
+    // `search`, а не про `find_files`, которого давно нет.
+    check(
+      'подробная форма говорит, куда смотреть дальше',
+      detail.includes('Дальше: list') && detail.includes('search (action code)'),
+      detail,
+    );
     check('содержимое файлов в ответ инструмента не попало', !detail.includes(SECRET), brief(detail));
     check('ответ инструмента ушёл модели', run.toModel.includes('Проект: Node.js'), brief(run.toModel));
     check(

@@ -86,3 +86,43 @@ describe('фоновый вывод тестов', () => {
     expect((await job.read()).detail).toContain('✓ installation complete');
   });
 });
+
+describe('terminalOutput открытой сессии', () => {
+  // Сессия — не задание: у неё нет статуса и кода выхода, но id человек видит и
+  // пишет по нему. Пока этой ветки не было, terminalOpen оставался тупиком.
+  const session = (read: () => { data: string; offset: number; alive: boolean; exitCode?: number }) =>
+    ({
+      terminals: {
+        list: () => [{ id: 't1', shell: 'bash', cwd: '/proj', pid: 1 }],
+        read,
+        write: () => {},
+        kill: () => {},
+      },
+    }) as unknown as ToolContext;
+
+  const read = (ctx: ToolContext, args: Record<string, unknown>) =>
+    runTool(ctx, 'terminalOutput', JSON.stringify(args));
+
+  it('отдаёт новый вывод сессии с позиции чтения', async () => {
+    const ctx = session(() => ({ data: 'hello\nworld\n', offset: 12, alive: true }));
+    const out = await read(ctx, { id: 't1', from: 0 });
+    expect(out.ok).toBe(true);
+    expect(out.detail).toContain('hello');
+    expect(out.detail).toMatch(/offset: \d+/);
+  });
+
+  it('пусто с прошлого чтения — так и говорит, без выдуманного текста', async () => {
+    const ctx = session(() => ({ data: '   ', offset: 12, alive: true }));
+    const out = await read(ctx, { id: 't1', from: 12 });
+    expect(out.ok).toBe(true);
+    expect(out.summary).toMatch(/нового вывода нет/);
+    expect(out.detail ?? '').not.toContain('hello');
+  });
+
+  it('без id и с сессией — список сессий, а не «задания недоступны»', async () => {
+    const ctx = session(() => ({ data: '', offset: 0, alive: true }));
+    const out = await read(ctx, {});
+    expect(out.ok).toBe(true);
+    expect(out.detail ?? '').toContain('bash');
+  });
+});

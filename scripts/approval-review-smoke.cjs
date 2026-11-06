@@ -15,7 +15,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 
 const { AiService } = require('../dist/main/ai/service.js');
-const { isDangerousCommand } = require('../dist/main/ai/agent-tools.js');
+const { isDangerousCommand } = require('../dist/main/ai/tool-rules.js');
 const { shouldReview } = require('../dist/shared/approval-review.js');
 const { WorkspaceService } = require('../dist/main/workspace/workspace.js');
 
@@ -175,7 +175,7 @@ async function main() {
 
   /* ── 6. правило «что вообще проверяем» ────────────────────────────────── */
 
-  // Ровно те две функции, которыми пользуется мост в main/ipc/register.ts.
+  // Ровно те две функции, которыми пользуется мост в main/ipc/methods/ai.ts.
   const gate = (command) => shouldReview(command, { enabled: true, dangerous: isDangerousCommand(command) });
   ok('обычная команда проверяется', gate('git status --short') === true);
   ok('сборка проверяется', gate('npm run build') === true);

@@ -23,6 +23,10 @@ const EXPECTED_KEYS = [
   'onHostRequest',
   'onPush',
   'onRpcEvent',
+  // Путь переташенного файла: у `File` в renderer пути нет, его знает только
+  // preload (`webUtils.getPathForFile`). Без этого метода перетаскивание извне
+  // доходит до страницы без пути, и открыть файл не по чему.
+  'pathForFile',
   'platform',
   'replyHostRequest',
   'versions',

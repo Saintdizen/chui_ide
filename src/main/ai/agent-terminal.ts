@@ -461,10 +461,55 @@ export function jobState(snapshot: JobSnapshot): string {
 // Курсор привязан к самому заданию, а не к id (в новом реестре id повторяются).
 export const jobOutputOffsets = new WeakMap<JobHandle, number>();
 
-export function terminalOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
-  if (!ctx.jobs) return { ok: false, summary: 'Задания недоступны' };
+/**
+ * Вывод уже открытой сессии — то, что `terminalOpen` попросил забрать через
+ * `terminalOutput`. Отдельно от заданий: у сессии нет статуса, начала и конца, есть
+ * только новый вывод с прошлого чтения. `from` у каждой сессии свой.
+ */
+function terminalSessionOutput(ctx: ToolContext, args: Record<string, unknown>, id: string): ToolOutcome {
+  const terminals = ctx.terminals;
+  if (!terminals) return { ok: false, summary: 'Терминал недоступен' };
+  const from = optionalInteger(args, 'from') ?? 0;
+  const { data, offset, alive, exitCode } = terminals.read(id, from);
+  if (data.trim().length === 0) {
+    return {
+      ok: true,
+      summary: alive ? `${id}: нового вывода нет` : `${id}: сессия завершена, нового вывода нет`,
+      detail: alive
+        ? `С прошлого чтения (позиция ${from}) вывода нет. Сессия ${id} жива; пиши через terminalWrite.`
+        : `С прошлого чтения (позиция ${from}) вывода нет. Сессия ${id} завершена${
+            exitCode === undefined ? '' : `, код ${exitCode}`
+          }.`,
+    };
+  }
+  const text = clipTail(ctx, 'terminalOutput', condenseOutput(stripAnsi(data)));
+  return {
+    ok: true,
+    summary: alive ? `${id}: ${text.split('\n').length} строк с позиции ${from}` : `${id}: вывод завершён`,
+    // Офсет — то, что человек прочитал: отдаём последний прочитанный символ, а не
+    // метку конца. В `from` для следующего чтения подставляется он, и `-1` у готового
+    // ответа означает «я это уже видел». Без этой строки курсор было негде взять.
+    detail: `${text}\noffset: ${Math.max(from, offset - 1)}${alive ? '' : ', сессия завершена'}`,
+  };
+}
 
+export function terminalOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
+  // С открытым `id` порядок такой: сначала задание фона, потом сессия — id у них из
+  // разных пространств и могут совпасть, а задание богаче (статус, код выхода).
   const id = optionalString(args, 'id')?.trim();
+  if (id && !ctx.jobs?.get(id) && ctx.terminals) {
+    const known = ctx.terminals.list().some((session) => session.id === id);
+    if (known) return terminalSessionOutput(ctx, args, id);
+  }
+
+  // Без `id` — список заданий, а если реестра заданий нет — список сессий: врать
+  // «нужен id» тому, кто просто спросил «что запущено», нельзя.
+  if (!ctx.jobs) {
+    const sessions = ctx.terminals?.list() ?? [];
+    if (sessions.length > 0) return terminalList(ctx);
+    return { ok: false, summary: 'Задания недоступны' };
+  }
+
   if (!id) {
     const all = ctx.jobs.list();
     if (all.length === 0)

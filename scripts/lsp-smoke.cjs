@@ -331,9 +331,15 @@ async function main() {
     () => root,
     () => ({ enabled: true, servers: [broken] }),
     (topic, payload) => fbEvents.push({ topic, payload }),
-    () => null,
-    async () => ({}),
-    async (language) => (language === 'python' ? [working] : []),
+
+    // Пять параметров по порядку: журнал обмена, Interpreter Python проекта,
+    // окружение из `.env` — и только затем запасные серверы. Перепутанный порядок
+    // (здесь раньше стоял `() => null` вместо `onRefresh`) и давал ту же ошибку:
+    // `alternates` оказывался не функцией, язык оставался без запасного сервера.
+    () => {}, // onRefresh
+    () => null, // pythonPath
+    async () => ({}), // env
+    async (language) => (language === 'python' ? [working] : []), // alternates
   );
   await fallback.open(sample, 'python', 'print(1)\n');
   await wait(700);

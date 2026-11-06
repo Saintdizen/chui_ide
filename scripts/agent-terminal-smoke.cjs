@@ -3,7 +3,9 @@
  * очистку ANSI, подтверждение ввода и остановку сессии. Настоящий pty покрыт
  * smoke:terminal, здесь важна логика самих инструментов.
  */
-const { runTool, isDangerousCommand } = require('../dist/main/ai/agent-tools.js');
+const { runTool } = require('../dist/main/ai/agent-tools.js');
+// Правила опасных команд живут отдельно от исполнителя: тот же модуль, что и в мосте.
+const { isDangerousCommand } = require('../dist/main/ai/tool-rules.js');
 
 let failures = 0;
 function ok(name, condition, extra) {
@@ -65,7 +67,7 @@ async function main() {
   };
 
   // 1. Старт сессии с командой: подтверждение + вывод без ANSI.
-  const started = await runTool(ctx, 'terminal_start', JSON.stringify({ command: 'echo hi' }));
+  const started = await runTool(ctx, 'terminalOpen', JSON.stringify({ command: 'echo hi' }));
   ok('сессия запущена', started.ok && /сессия t1/.test(started.summary), started.summary);
   ok('команда подтверждена', confirmations[0] === 'echo hi', confirmations[0]);
   ok('ANSI вычищен из вывода', started.detail.includes('hello world') && !started.detail.includes('\u001b['));
@@ -74,19 +76,27 @@ async function main() {
   ok('alive: true', /alive: true/.test(started.detail));
 
   // 2. Чтение с того же офсета — нового вывода нет.
-  const empty = await runTool(ctx, 'terminal_read', JSON.stringify({ id: 't1', from: offset }));
+  // Вывод открытой сессии — через `terminalOutput` с её id; без id и с id это разные
+  // ветки: без id — список (задания либо сессии), с id — новый вывод конкретного.
+  const empty = await runTool(ctx, 'terminalOutput', JSON.stringify({ id: 't1', from: offset }));
   ok('нет нового вывода', empty.ok && /нового вывода нет/.test(empty.summary), empty.summary);
 
   // 3. Ввод: подтверждается отдельно, затем виден в новом выводе.
-  const wrote = await runTool(ctx, 'terminal_write', JSON.stringify({ id: 't1', data: 'ls\n' }));
+  const wrote = await runTool(ctx, 'terminalWrite', JSON.stringify({ id: 't1', data: 'ls\n' }));
   ok('ввод отправлен', wrote.ok && wrote.summary.includes('t1'), wrote.summary);
   ok('ввод подтверждён', confirmations[1]?.includes('ls'), confirmations[1]);
-  const afterWrite = await runTool(ctx, 'terminal_read', JSON.stringify({ id: 't1', from: offset }));
+  const afterWrite = await runTool(ctx, 'terminalOutput', JSON.stringify({ id: 't1', from: offset }));
   ok('новый вывод виден', /hello world/.test(afterWrite.detail));
 
   // 4. Полный доступ: рядовой ввод без подтверждения.
   const autoCtx = { ...ctx, autoApprove: true, allowAll: true, confirmCommand: undefined };
-  const autoWrite = await runTool(autoCtx, 'terminal_write', JSON.stringify({ id: 't1', data: 'pwd\n' }));
+  // Полный доступ снимает вопрос, но мост подтверждений всё равно нужен: без него
+  // `confirmRun` честно отвечает «окно не подключено», и это не про права.
+  const autoWrite = await runTool(
+    { ...autoCtx, confirmCommand: async () => true },
+    'terminalWrite',
+    JSON.stringify({ id: 't1', data: 'pwd\n' }),
+  );
   ok('полный доступ не спрашивает', autoWrite.ok, autoWrite.summary);
 
   // 4а. Страховка (confirmDangerous): при полном доступе опасное всё равно спрашивает.
@@ -103,13 +113,13 @@ async function main() {
       return true;
     },
   };
-  const guarded = await runTool(guardedCtx, 'terminal_write', JSON.stringify({ id: 't1', data: 'sudo rm -rf /\n' }));
+  const guarded = await runTool(guardedCtx, 'terminalWrite', JSON.stringify({ id: 't1', data: 'sudo rm -rf /\n' }));
   ok(
     'страховка спросила при полном доступе',
     guarded.ok && guardedLog.some((c) => c.includes('sudo rm -rf /')),
     guardedLog.join('; '),
   );
-  const guardedPlain = await runTool(guardedCtx, 'terminal_write', JSON.stringify({ id: 't1', data: 'pwd\n' }));
+  const guardedPlain = await runTool(guardedCtx, 'terminalWrite', JSON.stringify({ id: 't1', data: 'pwd\n' }));
   ok(
     'рядовая команда прошла без вопроса',
     guardedPlain.ok && guardedLog.length === 1,
@@ -117,15 +127,15 @@ async function main() {
   );
 
   // 5. Список и остановка.
-  const list = await runTool(ctx, 'terminal_list', '{}');
+  const list = await runTool(ctx, 'terminalList', '{}');
   ok('список содержит сессию', list.ok && list.detail.includes('t1'), list.detail);
 
-  const stopped = await runTool(ctx, 'terminal_stop', JSON.stringify({ id: 't1' }));
+  const stopped = await runTool(ctx, 'terminalStop', JSON.stringify({ id: 't1' }));
   ok('сессия остановлена', stopped.ok && ctx.terminals.read('t1').alive === false);
 
   // 6. Пустой id отвергается понятной ошибкой.
-  const bad = await runTool(ctx, 'terminal_read', JSON.stringify({}));
-  ok('без id — ошибка', !bad.ok && /«id»/.test(bad.summary), bad.summary);
+  const bad = await runTool(ctx, 'terminalWrite', JSON.stringify({ id: 't1' }));
+  ok('без data — ошибка с подсказкой формы', !bad.ok && /data/.test(bad.summary), bad.summary);
 
   console.log(failures === 0 ? '\n[chui] терминальные инструменты агента работают' : `\n[chui] ошибок: ${failures}`);
   process.exit(failures === 0 ? 0 : 1);

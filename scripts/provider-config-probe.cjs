@@ -30,7 +30,15 @@ registerAppScheme();
 
 let failed = false;
 const check = (label, condition, extra) => {
-  console.log(`  ${condition ? 'ok  ' : 'FAIL'} ${label}${extra !== undefined ? `: ${JSON.stringify(extra)}` : ''}`);
+  const line = `  ${condition ? 'ok  ' : 'FAIL'} ${label}${extra !== undefined ? `: ${JSON.stringify(extra)}` : ''}`;
+  // Вывод бывает закрыт раньше времени: `| head`, закрытый терминал или пайп, у
+  // которого пропал читатель, — это EPIPE. Печатать некуда, но проверки идут
+  // дальше: валить прогон из-за этого значит спрятать настоящие расхождения.
+  try {
+    console.log(line);
+  } catch {
+    /* здесь писать некуда; итог всё равно вернёт код выхода */
+  }
   if (!condition) failed = true;
 };
 

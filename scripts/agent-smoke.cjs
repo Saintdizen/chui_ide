@@ -3,7 +3,7 @@
  * который сначала просит вызвать инструмент, а затем отвечает текстом.
  *
  * Проверяем:
- *  1. чтение файла (read_file), события tool_start/tool_result и полный ответ;
+ *  1. чтение файла (read), события tool_start/tool_result и полный ответ;
  *  2. apply_edit — правки уходят в renderer хостовым вызовом и возвращаются в диалог;
  *  3. отказ пользователя — это решение, а не ошибка приложения;
  *  4. битый аргумент не доходит до renderer;
@@ -47,7 +47,14 @@ const MARKER = 'chui-agent-marker';
 let failed = false;
 const check = (label, condition, extra) => {
   const mark = condition ? 'ok  ' : 'FAIL';
-  console.log(`  ${mark} ${label}${extra !== undefined ? `: ${JSON.stringify(extra)}` : ''}`);
+  const line = `  ${mark} ${label}${extra !== undefined ? `: ${JSON.stringify(extra)}` : ''}`;
+  // Вывод бывает уже закрыт: `| head` в оболочке или закрытый терминал дают EPIPE,
+  // и это не повод валить прогон вместе с окном Electron вместо итога проверки.
+  try {
+    console.log(line);
+  } catch {
+    /* писать некуда — итог всё равно вернёт код выхода */
+  }
   if (!condition) failed = true;
 };
 
@@ -78,7 +85,7 @@ function readBody(req) {
 }
 
 /** Что сервер «попросит» на первом шаге текущего сценария. */
-let requested = { name: 'read_file', args: {} };
+let requested = { name: 'read', args: {} };
 /** Если true — тот же вызов приходит и вторым шагом (проверка дедупликации). */
 let requestTwice = false;
 /** Если true — инструмент вызывается два шага подряд (проверка смены прав на лету). */
@@ -232,7 +239,7 @@ app.whenReady().then(async () => {
     if (subagentScript && isSubagent) {
       if (subTurn === 0) {
         subTurn += 1;
-        sendSse(res, toolCallSse('read_file', { path: file }));
+        sendSse(res, toolCallSse('read', { path: file }));
         return;
       }
       sendSse(res, textSse(`Отчёт подзадачи: нашёл ${MARKER} в notes.txt`));
@@ -276,6 +283,9 @@ app.whenReady().then(async () => {
       browser: { enabled: false, executable: '', headless: true },
       // Песочница: включается проверками ниже, вместе с заглушкой сервиса.
       sandbox: { enabled: false, image: 'python:3.12-slim', workdir: '/workspace', network: true },
+      // Набор по умолчанию — «Все инструменты»: только он обещает «чем богата эта
+      // сборка». Прежние умолчания росли, и без этой строки смешок проверял «Авто».
+      toolPreset: 'full',
     },
     get() {
       return this;
@@ -349,9 +359,9 @@ app.whenReady().then(async () => {
     await workspace.open(dir);
 
     /* 1. чтение файла */
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     let run = await chat(undefined);
-    check('модель запросила read_file', run.starts.length === 1 && run.starts[0].name === 'read_file');
+    check('модель запросила read', run.starts.length === 1 && run.starts[0].name === 'read');
     check('инструмент исполнился успешно', run.results.length === 1 && run.results[0].ok === true);
     check('содержимое файла ушло модели', String(run.results[0]?.detail ?? '').includes(MARKER));
     check('стрим склеился в полный ответ', run.streamed === run.done.text && run.streamed.includes(MARKER));
@@ -370,7 +380,7 @@ app.whenReady().then(async () => {
 
     // Память проекта: инструменты предлагаются, а записанная заметка попадает
     // в системный промпт — значит переживёт беседу и её сжатие.
-    check('mind предложен модели', run.toolNames.includes('mind'));
+    check('mind предложен модели', run.toolNames.includes('mind'), run.toolNames);
     await memory.remember(dir, 'В этом проекте договорились использовать pytest');
     run = await chat(undefined);
     check(
@@ -386,19 +396,19 @@ app.whenReady().then(async () => {
       run.reasoning,
     );
 
-    /* 1a. read_file диапазоном: только запрошенные строки, с номерами */
-    requested = { name: 'read_file', args: { path: file, startLine: 3, endLine: 3 } };
+    /* 1a. read диапазоном: только запрошенные строки, с номерами */
+    requested = { name: 'read', args: { path: file, startLine: 3, endLine: 3 } };
     run = await chat(undefined);
     const ranged = String(run.results[0]?.detail ?? '');
     check(
-      'read_file отдал только запрошенный диапазон с номерами',
+      'read отдал только запрошенный диапазон с номерами',
       ranged.includes('3 | строка три') && !ranged.includes('строка один'),
       ranged,
     );
 
     /* 1b. повторный одинаковый вызов не исполняется второй раз */
     requestTwice = true;
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     run = await chat(undefined);
     requestTwice = false;
     check(
@@ -489,7 +499,7 @@ app.whenReady().then(async () => {
       /parser\.py: 2 объявления/.test(String(run.results[0]?.summary ?? '')),
       run.results[0]?.summary,
     );
-    // Число строк то же, что покажет read_file: строка после последнего `\n`
+    // Число строк то же, что покажет read: строка после последнего `\n`
     // тоже считается строкой — иначе номера в скелете и в чтении разъедутся.
     check('скелет знает размер файла', outline.includes('из 4 строк'), outline.split('\n')[0]);
 
@@ -696,7 +706,7 @@ app.whenReady().then(async () => {
     /* 1е. вес описаний инструментов: main отдаёт факт, а не догадку. Панель
        «Информация о сессии» без него считала бы по всему списку и ошибалась бы
        в обе стороны — лишние выключенные плюс неучтённые внешние. */
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     run = await chat(externalHost);
     const tracked = run.done.trace?.toolsTokens;
     check('след прогона несёт вес описаний инструментов', typeof tracked === 'number' && tracked > 0, tracked);
@@ -739,7 +749,7 @@ app.whenReady().then(async () => {
 
     /* 1з. отказ вместо пустого прогона: если описания инструментов не влезают в
        окно, шага не получится вовсе, и об этом надо сказать словами. */
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     let tooSmall = '';
     // Окно заведомо меньше веса описаний (проверка выше показала реальный вес).
     settings.ai.contextWindow = 2_000;
@@ -766,10 +776,10 @@ app.whenReady().then(async () => {
 
     /* 1и. набор инструментов сужается выбором: схемы едут в КАЖДОМ запросе,
        и задаче «прочитай и объясни» не нужны ни терминал, ни браузер. */
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     const fullRun = await chat(externalHost);
     const readRun = await chat(externalHost, true, false, undefined, { toolPreset: 'read' });
-    check('набор «только чтение» предлагает чтение', readRun.toolNames.includes('read_file'), readRun.toolNames);
+    check('набор «только чтение» предлагает чтение', readRun.toolNames.includes('read'), readRun.toolNames);
     for (const name of ['run_terminal', 'apply_edit', 'git_commit', 'web_search']) {
       check(`набор «только чтение» не предлагает ${name}`, !readRun.toolNames.includes(name), readRun.toolNames);
     }
@@ -982,7 +992,7 @@ app.whenReady().then(async () => {
     check('отказ дошёл до подтверждения', denied.length === 1, denied);
 
     /* 7. без confirmCommand запуск команд не предлагается */
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
     check('без confirmCommand run_terminal не предлагается', !run.toolNames.includes('run_terminal'), run.toolNames);
 
@@ -1102,7 +1112,7 @@ app.whenReady().then(async () => {
     );
     check(
       'в режиме «План» чтение предлагается',
-      run.toolNames.includes('read_file') && run.toolNames.includes('update_plan'),
+      run.toolNames.includes('read') && run.toolNames.includes('update_plan'),
       run.toolNames,
     );
     check(
@@ -1175,12 +1185,12 @@ app.whenReady().then(async () => {
     );
     check('в выводе есть текст ошибки', String(run.results[0]?.detail ?? '').includes('не присваивается'));
 
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
     check('без моста checks (diagnostics) не предлагается', !run.toolNames.includes('checks'), run.toolNames);
 
     /* 12. вложения контекста */
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     await chat(undefined, true, false, [
       { kind: 'selection', label: 'выделение', title: 'Выделение из notes.txt', text: '```\nconst a = 1;\n```' },
     ]);
@@ -1199,7 +1209,7 @@ app.whenReady().then(async () => {
        Прошлый разговор может содержать что угодно — включая «забудь предыдущие
        указания». Поэтому он едет не в общем списке контекста, а блоком с
        trust="untrusted", ссылкой на источник и настоящим размером в байтах. */
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     run = await chat(undefined, true, false, [
       { kind: 'note', label: 'папка', title: 'Папка /src', text: 'index.ts' },
       {
@@ -1240,7 +1250,7 @@ app.whenReady().then(async () => {
     );
 
     /* 13. усилие размышления — только тем моделям, которые его понимают */
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     run = await chat(undefined, false, false, undefined, { model: 'o3-mini', reasoningEffort: 'high' });
     check(
       'reasoning_effort доехал до провайдера',
@@ -1345,7 +1355,7 @@ app.whenReady().then(async () => {
       ),
     );
     const subTools = (subBody?.tools ?? []).map((tool) => tool.function.name);
-    check('подзадача предлагается со своими инструментами чтения', subTools.includes('read_file'), subTools);
+    check('подзадача предлагается со своими инструментами чтения', subTools.includes('read'), subTools);
     check('у подзадачи нет самого task — без рекурсии', !subTools.includes('task'), subTools);
     check(
       'подзадаче не предлагают инструменты записи',
@@ -1566,7 +1576,7 @@ app.whenReady().then(async () => {
 
     // Без навыков инструмент не предлагается: лишний инструмент стоит токенов в каждом запросе.
     await fs.rm(path.join(dir, '.chui'), { recursive: true, force: true });
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     run = await chat(undefined);
     check('без навыков read_skill не предлагается', !run.toolNames.includes('read_skill'), run.toolNames);
 
@@ -1651,7 +1661,7 @@ app.whenReady().then(async () => {
     /* 19. цель с продолжением: пока цель открыта, законченный ход — не финал.
        Прогон продолжает сам, но не больше MAX_GOAL_CONTINUES раз, а закрытая
        цель останавливает продолжение сразу. */
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     run = await chat(undefined, true, false, undefined, { goal: 'Довести сборку до зелёного' });
     check(
       'цель ушла модели системной строкой',
@@ -1680,7 +1690,7 @@ app.whenReady().then(async () => {
     });
 
     // Без цели тот же сценарий кончается первым ответом: «шаг и ответ».
-    requested = { name: 'read_file', args: { path: file } };
+    requested = { name: 'read', args: { path: file } };
     run = await chat(undefined);
     check('без цели прогон не продолжается сам', run.bodies.length === 2, run.bodies.length);
 

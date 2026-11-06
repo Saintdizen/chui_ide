@@ -1600,6 +1600,7 @@ export class LspService {
 
   private async startLanguage(language: string, root: string | null): Promise<ServerRuntime | null> {
     if (!this.settings().enabled) return null;
+
     const runtimeKey = this.keyFor(language, root);
     // Потолок экземпляров: не стартуем новый, если уже много — отказываем понятной
     // причиной, а не плодим процессы. Уже поднятые продолжают работать как есть.
@@ -1628,7 +1629,16 @@ export class LspService {
       this.failed.delete(runtimeKey);
       return chosen;
     }
-    const alternates = serverCandidates([], await this.alternates(language), language);
+    // Запасные приходят извне (venv → поставка → PATH). Готового списка может и не
+    // быть — пусть это будет «запасных нет», а не падение уже после отказа первого
+    // сервера: причина отказа тогда осталась бы несказанной.
+    let spare: LspServerConfig[] = [];
+    try {
+      spare = (await this.alternates(language)) ?? [];
+    } catch {
+      spare = [];
+    }
+    const alternates = serverCandidates([], spare, language);
     const fallback = await attempt(alternates);
     if (fallback) {
       this.failed.delete(runtimeKey);
