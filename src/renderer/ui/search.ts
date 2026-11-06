@@ -5,6 +5,7 @@ import type { DocumentStore } from '../core/document-store';
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { clear, debounce, h, svgIcon } from './dom';
+import { groupHits, replaceInText } from '../core/multibuffer';
 import { createSelect } from './select';
 import { showToast } from './toast';
 import { errorText } from '../core/file-errors';
@@ -106,25 +107,36 @@ export function createSearchView(deps: SearchDeps): SearchView {
       return;
     }
 
-    const groups = new Map<string, typeof result.hits>();
-    for (const hit of result.hits) {
-      const bucket = groups.get(hit.path);
-      if (bucket) bucket.push(hit);
-      else groups.set(hit.path, [hit]);
-    }
+    const groups = groupHits(result.hits);
 
-    for (const [path, hits] of groups) {
+    for (const group of groups) {
+      const path = group.path;
+      const removeGroup = h(
+        'button',
+        {
+          class: 'btn btn-small search-file-replace',
+          type: 'button',
+          title: `Заменить совпадения в этом файле: ${deps.workspace.relative(path)}`,
+          'aria-label': `Заменить в файле ${deps.workspace.relative(path)}, совпадений: ${group.hits.length}`,
+        },
+        `Заменить здесь (${group.hits.length})`,
+      );
+      // Замена в одном файле — из мультибуфера: до неё был только «всё в проекте»,
+      // а выбор «только здесь» — самое частое, что нужно после поиска.
+      removeGroup.addEventListener('click', () => void replaceInFile(path, group.hits.length));
+
       results.appendChild(
         h(
           'div',
           { class: 'search-file', title: path },
           svgIcon('file', 12),
           h('span', { class: 'search-file-path' }, deps.workspace.relative(path)),
-          h('span', { class: 'search-count' }, String(hits.length)),
+          h('span', { class: 'search-count' }, String(group.hits.length)),
+          removeGroup,
         ),
       );
 
-      for (const hit of hits) {
+      for (const hit of group.hits) {
         const row = h(
           'button',
           { class: 'search-hit', type: 'button', title: `${path}:${hit.line}` },
@@ -133,13 +145,80 @@ export function createSearchView(deps: SearchDeps): SearchView {
         );
         row.addEventListener(
           'click',
-          () => void deps.commands.execute('file.revealAt', hit.path, hit.line, hit.column),
+          () => void deps.commands.execute('file.revealAt', path, hit.line, hit.column),
         );
         results.appendChild(row);
       }
     }
 
-    status.textContent = `${result.hits.length} совпадений в ${groups.size} файлах${result.truncated ? ' (список обрезан)' : ''}`;
+    status.textContent = `${result.hits.length} совпадений в ${groups.length} файлах${result.truncated ? ' (список обрезан)' : ''}`;
+  };
+
+  /**
+   * Прочитать файл с диска — для замены в файле, который не открыт в редакторе.
+   *
+   * Переводы строк приводим к `\n` — как это делает модель документа: замена
+   * смотрит на текст, а не на начертание, и позиция в CRLF-файле не должна
+   * съезжать относительно того, что видел поиск.
+   */
+  const readText = async (path: string): Promise<string | null> => {
+    try {
+      const file = await deps.rpc.request('workspace.readFile', { path });
+      return file.text.replace(/\r\n/g, '\n');
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Замена в одном файле мультибуфера — по кнопке у группы.
+   *
+   * Текст берётся из документа в памяти, если файл открыт: там могут быть
+   * несохранённые строки, и чтение с диска выдало бы чужой текст. Если файл не
+   * открыт — читаем с диска и пишем обратно, чтобы «Заменить здесь» работало и по
+   * результатам поиска, которого вы не открывали.
+   */
+  const replaceInFile = async (path: string, expected: number): Promise<void> => {
+    const query = input.value.trim();
+    if (!query) {
+      status.textContent = 'Введите, что искать';
+      return;
+    }
+    const document = deps.documents.all().find((item) => item.path === path);
+    const fromDisk = document ? null : await readText(path);
+    if (!document && !fromDisk) {
+      status.textContent = 'Не удалось прочитать файл';
+      return;
+    }
+
+    const outcome = replaceInText(document ? document.value : (fromDisk ?? ''), query, replaceInput.value, {
+      isRegex: regexOverride,
+      caseSensitive: true,
+    });
+    if (outcome.kind !== 'ok') {
+      status.textContent =
+        outcome.kind === 'same-text' ? 'Замена совпадает с запросом — менять нечего' : 'Нечего заменять';
+      return;
+    }
+
+    if (document) {
+      // Правка — одна и целым файлом: позиции попаданий посчитаны до неё, а замена
+      // их по одному месту съехала бы с первого же вхождения.
+      document.applyEdits(
+        [{ startLine: 1, startColumn: 1, endLine: document.lineCount + 1, endColumn: 1, newText: outcome.text }],
+        'user',
+      );
+    } else {
+      // Неоткрытый файл пишем на диск и сразу перечитываем: вкладка, если её потом
+      // откроют, возьмёт текст с диска, а не старый кусок из кэша.
+      await deps.rpc.request('workspace.writeFile', { path, text: outcome.text });
+      await deps.reloadFile?.(path);
+    }
+
+    showToast(`Заменено вхождений: ${outcome.count} · файл: ${deps.workspace.relative(path)}`, 'success');
+    // Список после замены — уже не тот: строки в нём прежние (их было `expected`).
+    // Пересобрать — единственный способ не врать человеку.
+    if (expected > 0) await search();
   };
 
   /**
