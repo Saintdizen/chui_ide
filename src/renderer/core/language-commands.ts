@@ -2,6 +2,7 @@ import type { LspStatus } from '../../shared/lsp-status';
 import { joinPath } from '../../shared/paths';
 import { isEmptyTest, suggestTestPath, truncateTestCode } from '../../shared/test-generation';
 import type { DefineCommand } from './command-args';
+import { errorText } from './file-errors';
 
 /**
  * Команды языка и тестов: панель тестов, перезапуск языковых серверов и
@@ -131,7 +132,7 @@ export function registerLanguageCommands(define: DefineCommand, deps: LanguageDe
           testPath: testRelative,
         });
       } catch (error) {
-        showToast(error instanceof Error ? error.message : String(error), 'error');
+        showToast(errorText(error), 'error');
         return;
       }
       if (isEmptyTest(result.code)) {
@@ -144,7 +145,7 @@ export function registerLanguageCommands(define: DefineCommand, deps: LanguageDe
         await rpc.request('workspace.createFile', { path: target, contents: `${result.code}\n` });
       } catch (error) {
         // Файл уже есть — не перетираем чужой тест, а честно об этом говорим.
-        showToast(error instanceof Error ? error.message : String(error), 'error');
+        showToast(errorText(error), 'error');
         return;
       }
 

@@ -73,3 +73,36 @@ export function describeFileError(error: unknown, what = 'файл'): string | n
       return code ? `Не удалось: система ответила ${code}.` : null;
   }
 }
+
+/**
+ * Текст отказа для человека — единый путь для всего отказов интерфейса.
+ *
+ * Свод: сообщение называет причину и что делать. Голый `error.message` от
+ * движка (`Error: EACCES: permission denied, open …`) этому не отвечает —
+ * машинный префикс ничего не говорит человеку. Поэтому:
+ *
+ * 1. знакомый код переводится в действие (`describeFileError`);
+ * 2. без кода остаётся сообщение, но без префикса движка (`Error: `);
+ * 3. совсем пустой отказ — не пустая строка, а честное `fallback`: пустой
+ *    тост читалка не прочитает, и человек решит, что ничего не произошло.
+ *
+ * `what` — подставляется в «что не удалось» для знакомых кодов (`saveFile`,
+ * «файл», автодополнение…). Тип `string`, а не `FileErrorLike`: ошибки приходят
+ * откуда угодно — от rpc, от git, от редактора.
+ */
+export function errorText(error: unknown, what = 'файл', fallback = 'Операция не выполнена'): string {
+  const reason = describeFileError(error, what);
+  if (reason !== null) return reason;
+  const raw =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : error === null || error === undefined
+          ? ''
+          : String(error);
+  // Просто `Error: ` без текста — не причина, а шелуха. Префикс снимаем и у тех
+  // строк, где имя ошибки своё (`RpcError: …`), иначе он утечёт в тост.
+  const message = raw.replace(/^[\w$.]*Error:\s*/, '').trim();
+  return message === '' ? fallback : message;
+}

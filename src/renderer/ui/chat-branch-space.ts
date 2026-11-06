@@ -3,6 +3,7 @@ import { describeBranchSpace, taskBranchName, uniqueBranchName, worktreePathFor 
 import type { GitModel } from '../core/git-model';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { h } from './dom';
+import { errorText } from '../core/file-errors';
 
 /**
  * Где живёт задача — в главном дереве или в отдельной ветке.
@@ -93,7 +94,7 @@ export function createChatBranchSpace(deps: ChatBranchSpaceDeps): ChatBranchSpac
       if (mainRoot && root !== mainRoot) await apply(mainRoot);
       else await isolate(root);
     } catch (error) {
-      deps.notify(`Не получилось: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      deps.notify(`Не получилось: ${errorText(error)}`, 'error');
     } finally {
       busy = false;
       draw();
@@ -149,7 +150,7 @@ export function createChatBranchSpace(deps: ChatBranchSpaceDeps): ChatBranchSpac
       deps.setSessionRoot?.(null);
       deps.notify('Окно вернулось в главное дерево');
     } catch (error) {
-      deps.notify(`Не получилось: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      deps.notify(`Не получилось: ${errorText(error)}`, 'error');
     } finally {
       busy = false;
       draw();
@@ -207,10 +208,7 @@ export function createChatBranchSpace(deps: ChatBranchSpaceDeps): ChatBranchSpac
       if (deps.workspace.root !== root) await deps.workspace.setActiveRoot(root);
       return true;
     } catch (error) {
-      deps.notify(
-        `Вторая задача осталась в общем каталоге: ${error instanceof Error ? error.message : String(error)}`,
-        'error',
-      );
+      deps.notify(`Вторая задача осталась в общем каталоге: ${errorText(error)}`, 'error');
       return false;
     } finally {
       busy = false;

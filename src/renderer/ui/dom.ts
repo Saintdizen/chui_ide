@@ -38,10 +38,7 @@ export function h<K extends keyof HTMLElementTagNameMap>(
  * `aria-modal` — не украшение: она говорит читалке не читать остальное окно
  * за подложкой. Пока панель скрыта (`hidden`), атрибуты безвредны.
  */
-export function dialogOverlay(
-  panel: HTMLElement,
-  options: { label: string; describedBy?: string },
-): HTMLElement {
+export function dialogOverlay(panel: HTMLElement, options: { label: string; describedBy?: string }): HTMLElement {
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-label', options.label);

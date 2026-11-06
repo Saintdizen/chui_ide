@@ -4,6 +4,7 @@ import type { GitModel } from '../core/git-model';
 import { clear, h } from './dom';
 import { createModal } from './modal';
 import { createSelect } from './select';
+import { errorText } from '../core/file-errors';
 
 export interface WorktreeModalDeps {
   git: GitModel;
@@ -115,7 +116,7 @@ export function createWorktreeModal(deps: WorktreeModalDeps): WorktreeModalView 
       await deps.openProject(path);
       close();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -136,7 +137,7 @@ export function createWorktreeModal(deps: WorktreeModalDeps): WorktreeModalView 
       render();
     } catch (error) {
       // Каталог с незакоммиченными правками git не удалит: спрашиваем про принудительное.
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorText(error);
       const forced = await deps.confirm({
         title: 'Удалить принудительно?',
         message: 'git отказался удалять каталог.',
@@ -174,7 +175,7 @@ export function createWorktreeModal(deps: WorktreeModalDeps): WorktreeModalView 
       newBranchInput.value = '';
       render();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -214,7 +215,7 @@ export function createWorktreeModal(deps: WorktreeModalDeps): WorktreeModalView 
       worktrees = await deps.git.worktreePrune();
       render();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -232,7 +233,7 @@ export function createWorktreeModal(deps: WorktreeModalDeps): WorktreeModalView 
       ]);
     } catch (error) {
       worktrees = [];
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
     buildAddRow();
     render();

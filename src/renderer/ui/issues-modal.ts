@@ -4,6 +4,7 @@ import type { GitModel } from '../core/git-model';
 import { clear, h, svgIcon } from './dom';
 import { loadingNote } from './loading';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 export interface IssuesModalDeps {
   git: GitModel;
@@ -95,7 +96,7 @@ export function createIssuesModal(deps: IssuesModalDeps): IssuesModalView {
     try {
       await operation();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -178,7 +179,7 @@ export function createIssuesModal(deps: IssuesModalDeps): IssuesModalView {
         renderComments(await deps.git.forgeIssueComments(issue.number));
       } catch (error) {
         clear(listNode);
-        listNode.append(h('p', { class: 'forge-note' }, error instanceof Error ? error.message : String(error)));
+        listNode.append(h('p', { class: 'forge-note' }, errorText(error)));
       }
     };
 
@@ -366,7 +367,7 @@ export function createIssuesModal(deps: IssuesModalDeps): IssuesModalView {
     } catch (error) {
       info = null;
       issues = [];
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
     render();
   }

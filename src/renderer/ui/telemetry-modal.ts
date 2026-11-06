@@ -4,6 +4,7 @@ import { describeRecord, finishedLabel } from '../../shared/telemetry';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 /**
  * Окно «Журнал прогонов»: последние прогоны агента из файла.
@@ -69,7 +70,7 @@ export function createTelemetryModal(deps: TelemetryModalDeps): TelemetryModalVi
       deps.notify('Журнал прогонов очищен');
       await open();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -162,7 +163,7 @@ export function createTelemetryModal(deps: TelemetryModalDeps): TelemetryModalVi
       const snapshot = await deps.rpc.request('ai.telemetry');
       render(snapshot);
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
   }
 

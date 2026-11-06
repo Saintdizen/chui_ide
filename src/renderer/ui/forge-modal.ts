@@ -12,6 +12,7 @@ import { clear, h, svgIcon } from './dom';
 import { loadingNote } from './loading';
 import { createModal } from './modal';
 import { createSelect } from './select';
+import { errorText } from '../core/file-errors';
 
 export interface ForgeModalDeps {
   git: GitModel;
@@ -112,7 +113,7 @@ export function createForgeModal(deps: ForgeModalDeps): ForgeModalView {
     try {
       await operation();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -198,7 +199,7 @@ export function createForgeModal(deps: ForgeModalDeps): ForgeModalView {
         renderComments(await deps.git.forgeComments(request.number));
       } catch (error) {
         clear(listNode);
-        listNode.append(h('p', { class: 'forge-note' }, error instanceof Error ? error.message : String(error)));
+        listNode.append(h('p', { class: 'forge-note' }, errorText(error)));
       }
     };
 
@@ -409,7 +410,7 @@ export function createForgeModal(deps: ForgeModalDeps): ForgeModalView {
       info = await deps.git.forgeInfo();
     } catch (error) {
       info = null;
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
     render();
   }

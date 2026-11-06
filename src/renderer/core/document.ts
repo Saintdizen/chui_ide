@@ -168,7 +168,10 @@ export class TextDocument {
     // ПОСЛЕ вставленного, как в обычной правке руками.
     const last = edits[edits.length - 1]!;
     const added = last.newText.split('\n').length - 1;
-    this.lastEdit = { line: last.startLine + added, column: added > 0 ? last.newText.length - last.newText.lastIndexOf('\n') : last.startColumn + last.newText.length };
+    this.lastEdit = {
+      line: last.startLine + added,
+      column: added > 0 ? last.newText.length - last.newText.lastIndexOf('\n') : last.startColumn + last.newText.length,
+    };
     this.bump(source);
     return edits.length;
   }

@@ -1970,7 +1970,7 @@ textarea {
 /* Кусок цепочки. Разделитель — псевдоэлементом: он не читается вслух
    (шапка `aria-hidden`) и не мешает выделять текст. */
 .explorer .tree-crumb + .tree-crumb::before {
-  content: '/';
+  content: "/";
   margin: 0 4px;
   opacity: 0.5;
 }

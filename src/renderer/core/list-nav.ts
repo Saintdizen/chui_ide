@@ -29,12 +29,7 @@ export const LIST_PAGE = 10;
  * намертво, и человек не понимал, список кончился или сломался.
  * `Home`/`End` — намеренный скачок к краю.
  */
-export function listMove(
-  key: string,
-  current: number,
-  count: number,
-  page: number = LIST_PAGE,
-): ListMove | null {
+export function listMove(key: string, current: number, count: number, page: number = LIST_PAGE): ListMove | null {
   if (count <= 0) return null;
   const last = count - 1;
   const clamp = (index: number): number => Math.min(Math.max(index, 0), last);
@@ -68,11 +63,7 @@ export function listMove(
  * одноимённые, а не замирает на первом. Не нашли после — ищем с начала,
  * иначе переход «застревал» бы на хвосте списка.
  */
-export function typeaheadIndex(
-  labels: readonly string[],
-  typed: string,
-  current: number,
-): number | null {
+export function typeaheadIndex(labels: readonly string[], typed: string, current: number): number | null {
   const needle = typed.trim().toLowerCase();
   if (needle === '' || labels.length === 0) return null;
   const start = current + 1;

@@ -13,6 +13,7 @@ import type { OwnDiffHandle } from '../core/diff-handle';
 import type { GitModel } from '../core/git-model';
 import { languageFromPath } from '../core/languages';
 import { clear, h, svgIcon } from './dom';
+import { errorText } from '../core/file-errors';
 
 export interface ConflictViewDeps {
   /** Фабрика сравнения: движок приходит извне, здесь только тексты. */
@@ -175,7 +176,7 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
         deps.notify?.(`Оба: стороны легли на одну строку (блок ${guessed[0]!.index + 1}) — проверь результат`, 'warn');
       }
     } catch (error) {
-      deps.notify?.(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify?.(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -197,7 +198,7 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
       deps.notify?.(`Конфликт разрешён: ${path.split('/').pop() ?? path}`);
       await render(path);
     } catch (error) {
-      deps.notify?.(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify?.(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -218,7 +219,7 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
       deps.notify?.(`Пере-слито: ${path.split('/').pop() ?? path}`);
       await render(path);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorText(error);
       if (force || !/(затрёт|потеряется|lost)/i.test(message)) {
         deps.notify?.(message, 'error');
       } else if (deps.confirm) {

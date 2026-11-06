@@ -3,6 +3,7 @@ import type { GitModel } from '../core/git-model';
 import { clear, h } from './dom';
 import { createModal } from './modal';
 import { createSelect } from './select';
+import { errorText } from '../core/file-errors';
 
 export interface RefDiffModalDeps {
   git: GitModel;
@@ -90,7 +91,7 @@ export function createRefDiffModal(deps: RefDiffModalDeps): RefDiffModalView {
       summary.textContent = '';
       clear(list);
       list.append(h('p', { class: 'refdiff-empty' }, 'Не удалось сравнить — проверьте ссылки.'));
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -136,7 +137,7 @@ export function createRefDiffModal(deps: RefDiffModalDeps): RefDiffModalView {
       }));
     } catch (error) {
       options = [];
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
     if (options.length === 0) {
       clear(list);

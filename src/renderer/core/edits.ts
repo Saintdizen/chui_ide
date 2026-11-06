@@ -7,6 +7,7 @@ import type { DocumentStore } from './document-store';
 import type { EditSource } from './document';
 import type { EditorApi } from './editor-api';
 import type { RpcClient } from './rpc';
+import { errorText } from './file-errors';
 
 export interface EditServiceDeps {
   documents: DocumentStore;
@@ -187,7 +188,7 @@ export class EditService {
         }));
         prepared.push({ file, document, applied: preview.changes.length, skipped });
       } catch (error) {
-        failed.push({ path: file.path, message: error instanceof Error ? error.message : String(error) });
+        failed.push({ path: file.path, message: errorText(error) });
       }
     }
 
@@ -239,7 +240,7 @@ export class EditService {
         }
         reports.push({ path: file.path, applied: translated.changes.length, version: document.version });
       } catch (error) {
-        failed.push({ path: file.path, message: error instanceof Error ? error.message : String(error) });
+        failed.push({ path: file.path, message: errorText(error) });
       }
     }
     return { reports, failed };

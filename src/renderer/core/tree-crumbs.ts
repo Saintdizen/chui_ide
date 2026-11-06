@@ -98,4 +98,3 @@ export function breadcrumbChanged(prev: readonly Breadcrumb[], next: readonly Br
   }
   return false;
 }
-

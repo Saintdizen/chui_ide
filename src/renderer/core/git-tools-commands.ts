@@ -1,5 +1,6 @@
 import type { DefineCommand } from './command-args';
 import type { ToastKind } from '../ui/toast';
+import { errorText } from './file-errors';
 
 /** Окна git, которые открываются командой и сами собирают свои данные. */
 export interface GitToolPanels {
@@ -140,7 +141,7 @@ export function registerGitToolsCommands(define: DefineCommand, deps: GitToolsDe
         await deps.submoduleUpdate();
         showToast('Подмодули обновлены');
       } catch (error) {
-        showToast(error instanceof Error ? error.message : String(error), 'error');
+        showToast(errorText(error), 'error');
       }
     },
   );

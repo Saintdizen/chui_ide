@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeFileError, errorCode } from '../src/renderer/core/file-errors';
+import { describeFileError, errorCode, errorText } from '../src/renderer/core/file-errors';
 
 /**
  * Причина файлового отказа — словами.
@@ -57,5 +57,37 @@ describe('что сказать человеку', () => {
 
   it('нет кода и нет смысла — null, пусть решает вызывающий', () => {
     expect(describeFileError(new Error('нет'))).toBeNull();
+  });
+});
+
+/**
+ * Одна точка отказа для всего окна.
+ *
+ * ПОВОД: этот запасной путь — «текст ошибки без префикса движка» — был скопирован
+ * в 116 местах рендерера, и в каждом легко было забыть снять `Error: `. Теперь
+ * место одно, и здесь оно проверяется.
+ */
+describe('errorText — что увидит человек', () => {
+  it('снимает префикс движка: «Error: » — не причина', () => {
+    expect(errorText(new Error('нет связи'))).toBe('нет связи');
+  });
+
+  it('снимает и чужое имя ошибки — `RpcError: …` тоже шелуха', () => {
+    expect(errorText({ message: 'RpcError: таймаут' })).not.toContain('RpcError');
+  });
+
+  it('знакомый код отказа — действием, без аббревиатуры', () => {
+    const text = errorText({ code: 'EACCES' }, 'a.ts');
+    expect(text).toContain('Нет прав');
+    expect(text).not.toContain('EACCES');
+  });
+
+  it('строку берёт как есть — она уже написана человеком', () => {
+    expect(errorText('нет места на диске')).toBe('нет места на диске');
+  });
+
+  it('совсем пусто — честный запасной текст, а не пустой тост', () => {
+    expect(errorText(new Error(''))).toBe('Операция не выполнена');
+    expect(errorText(null, 'файл', 'Не вышло')).toBe('Не вышло');
   });
 });

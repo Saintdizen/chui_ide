@@ -2,6 +2,7 @@
 import './styles/fonts.css';
 import './styles/theme.css';
 import './styles/main.css';
+import { errorText } from './core/file-errors';
 // Свой редактор: классы `own-editor*` изолированы от остальной разметки.
 import './styles/editor.css';
 // Свой терминал: классы `own-term*` — по тому же правилу.
@@ -42,6 +43,6 @@ void startApplication(mount, { probe: probeOn })
     console.error('[chui] не удалось запустить приложение', error);
     // Стек: по одной строке «reading 'fold'» причину не найти — нужно место.
     if (error instanceof Error && error.stack) console.error(error.stack);
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
     mount.textContent = `Не удалось запустить приложение: ${message}`;
   });

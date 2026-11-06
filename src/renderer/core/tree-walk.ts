@@ -155,13 +155,7 @@ export function walkTree(rows: readonly WalkRow[], current: string | null, key: 
 const PAGE = 15;
 
 /** Клавиши, которые без выделения не знают, к чему относятся: молчат. */
-const NAMED_ROW_KEYS: ReadonlySet<WalkKey> = new Set<WalkKey>([
-  'Enter',
-  'Space',
-  'F2',
-  'Delete',
-  'ContextMenu',
-]);
+const NAMED_ROW_KEYS: ReadonlySet<WalkKey> = new Set<WalkKey>(['Enter', 'Space', 'F2', 'Delete', 'ContextMenu']);
 
 /** Индекс родителя строки: ближайшая выше с меньшей глубиной (`-1` — корень). */
 function parentOf(rows: readonly WalkRow[], index: number): number {

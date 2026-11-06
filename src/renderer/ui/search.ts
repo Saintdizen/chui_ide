@@ -7,6 +7,7 @@ import type { WorkspaceModel } from '../core/workspace-model';
 import { clear, debounce, h, svgIcon } from './dom';
 import { createSelect } from './select';
 import { showToast } from './toast';
+import { errorText } from '../core/file-errors';
 
 export interface SearchView {
   element: HTMLElement;
@@ -202,7 +203,7 @@ export function createSearchView(deps: SearchDeps): SearchView {
       render(result, query);
     } catch (error) {
       if (current !== sequence) return;
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = errorText(error);
     }
   };
 
@@ -232,7 +233,7 @@ export function createSearchView(deps: SearchDeps): SearchView {
       );
       await search();
     } catch (error) {
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = errorText(error);
     } finally {
       // Возвращаем кнопку, но не включаем её в режиме вкладок: там замена недоступна.
       replaceButton.disabled = mode === 'editors';

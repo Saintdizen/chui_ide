@@ -3,6 +3,7 @@ import { activePipelineCount, failedPipelineCount, platformLabel } from '../../s
 import type { GitModel } from '../core/git-model';
 import { clear, h, svgIcon } from './dom';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 export interface PipelinesModalDeps {
   git: GitModel;
@@ -64,7 +65,7 @@ export function createPipelinesModal(deps: PipelinesModalDeps): PipelinesModalVi
     try {
       await operation();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -175,7 +176,7 @@ export function createPipelinesModal(deps: PipelinesModalDeps): PipelinesModalVi
     } catch (error) {
       info = null;
       pipelines = [];
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
     render();
   }

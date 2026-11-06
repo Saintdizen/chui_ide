@@ -1,3 +1,5 @@
+import { errorText } from '../../core/file-errors';
+
 /**
  * Поиск по файлу: где встречается то, что человек ищет.
  *
@@ -242,7 +244,7 @@ function regexError(query: string, options: FindOptions): string {
     new RegExp(query, `${options.caseSensitive ? '' : 'i'}u`);
     return 'Регулярное выражение не разобрано';
   } catch (error) {
-    return error instanceof Error ? error.message : String(error);
+    return errorText(error);
   }
 }
 

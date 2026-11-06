@@ -2,6 +2,7 @@ import { isEmptyCommitMessage } from '../../shared/commit-message';
 import type { DefineCommand } from './command-args';
 import type { GitModel } from './git-model';
 import type { ToastKind } from '../ui/toast';
+import { errorText } from './file-errors';
 
 /**
  * Сообщение коммита по diff: модель читает правки и предлагает текст.
@@ -67,7 +68,7 @@ export function registerGitAiCommands(define: DefineCommand, deps: GitAiDeps): v
       // Диф обрезан — предупреждаем: модель видела не всю правку, тему стоит проверить.
       showToast(context.truncated ? 'Сообщение готово (diff был обрезан — проверьте)' : 'Сообщение готово');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   });
 }

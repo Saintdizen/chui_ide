@@ -7,6 +7,7 @@ import { REVIEW_LOCAL_AUTHOR, reviewSummary } from '../../shared/review';
 import { compareLabel } from '../core/file-compare';
 import { languageFromPath } from '../core/languages';
 import { h, svgIcon } from './dom';
+import { errorText } from '../core/file-errors';
 
 export interface DiffViewDeps {
   /** Фабрика сравнения: движок приходит извне, здесь только тексты. */
@@ -268,7 +269,7 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
       if (staged) await deps.git.unstageHunk(path, index);
       else await deps.git.stageHunk(path, index);
     } catch (error) {
-      deps.notify?.(error instanceof Error ? error.message : String(error));
+      deps.notify?.(errorText(error));
     } finally {
       busy = false;
     }

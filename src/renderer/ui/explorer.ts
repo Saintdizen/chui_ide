@@ -779,8 +779,6 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     );
     return { shown, excluded: counted.count, patterns: [...counted.patterns] };
   };
-;
-;
 
   /**
    * Есть ли у пути правка по git. Спрашиваем модель точечно, а не перебираем
@@ -1854,12 +1852,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    * здесь: `excluded-only` показывает папку на этот раз, остальные гоняют
    * команду. Так текст остаётся чистым, а знание о кнопках — в одном месте.
    */
-  const emptyRow = (
-    dir: string,
-    depth: number,
-    reason: EmptyReason,
-    patterns: readonly string[],
-  ): HTMLElement => {
+  const emptyRow = (dir: string, depth: number, reason: EmptyReason, patterns: readonly string[]): HTMLElement => {
     const state = emptyState(reason, patterns);
     const action = state.action;
     const button =
@@ -1973,17 +1966,17 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     if (crumbShown !== null && !breadcrumbChanged(crumbShown, next)) return;
     crumbShown = next;
     crumbsEl.replaceChildren(
-      ...next.map((crumb) =>
-        h('span', { class: 'tree-crumb', title: crumb.path }, crumb.label),
-      ),
+      ...next.map((crumb) => h('span', { class: 'tree-crumb', title: crumb.path }, crumb.label)),
     );
     // Шапка без кусков занимает место и ловит клики — убираем её с экрана целиком.
     crumbsEl.hidden = next.length === 0;
   };
 
   /** Строка набора, за которой стоит файл `path`: по ней строится имя для читалки. */
-  const rowIsPath = (path: string) => (row: FlatRow): boolean =>
-    row.kind === 'entry' && row.entry.path === path;
+  const rowIsPath =
+    (path: string) =>
+    (row: FlatRow): boolean =>
+      row.kind === 'entry' && row.entry.path === path;
 
   const renderWindow = (): void => {
     const host = rowsHost;
@@ -2385,7 +2378,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const next = document.activeElement === tree;
       if (next === treeFocused) return;
       treeFocused = next;
-      // Окно забыло прежний набор, а окно то же: 
+      // Окно забыло прежний набор, а окно то же:
       visibleNow = [];
       renderWindow();
     };
@@ -2621,7 +2614,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         // так же, как это уже делает `Space` в обработчике клавиш.
         const paths = peekablePaths();
         const target = paths.includes(action.path) ? paths : [action.path];
-        deps.peekFiles?.(target, peekAnchor(target[0]!, event));        return;
+        deps.peekFiles?.(target, peekAnchor(target[0]!, event));
+        return;
       }
       case 'rename':
         startRename(action.path);

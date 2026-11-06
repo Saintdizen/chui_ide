@@ -11,6 +11,7 @@ import { WindowFrame } from '../core/window-frame';
 import { h, svgIcon } from './dom';
 import { createSelect } from './select';
 import { installTooltips } from './tooltip';
+import { errorText } from '../core/file-errors';
 
 /**
  * Стартовое окно: открыть проект, клонировать, создать новый или взять один из недавних.
@@ -452,5 +453,5 @@ function repositoryName(url: string): string {
 }
 
 function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return errorText(error);
 }

@@ -7,6 +7,7 @@ import { optionId } from '../core/list-nav';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { clear, dialogOverlay, h, svgIcon, type IconName } from './dom';
 import { focusOwner, returnFocus } from './focus-return';
+import { errorText } from '../core/file-errors';
 
 // Счётчик списков: имена строк в `aria-activedescendant` не должны совпадать
 // у двух одновременно открытых окон.
@@ -171,7 +172,7 @@ export function createQuickOpen(deps: {
       // Печатаем и в консоль: тост мельком, а причину пустого списка надо видеть.
       // Причину показываем в самом списке: тост улетает, а пустой список без
       // объяснения читается как «в проекте правда нет файлов».
-      loadError = error instanceof Error ? error.message : String(error);
+      loadError = errorText(error);
       files = [];
     } finally {
       loading = false;
@@ -447,9 +448,7 @@ export function createQuickOpen(deps: {
           if (current !== ticket) return;
           rows = [];
           clear(list);
-          list.appendChild(
-            h('div', { class: 'palette-empty' }, error instanceof Error ? error.message : String(error)),
-          );
+          list.appendChild(h('div', { class: 'palette-empty' }, errorText(error)));
         });
     };
     if (mode === 'text') pending = setTimeout(ask, 120);

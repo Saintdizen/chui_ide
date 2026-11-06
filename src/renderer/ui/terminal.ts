@@ -22,6 +22,7 @@ import { shortcutKey } from '../../shared/physical-key';
 import { h, svgIcon } from './dom';
 import { showPopupMenu, type PopupMenuItem } from './popup-menu';
 import { showToast } from './toast';
+import { errorText } from '../core/file-errors';
 
 /**
  * Пункты меню по правому клику в консоли.
@@ -310,7 +311,7 @@ export function createTerminalPanel(deps: {
     } catch (error) {
       container.remove();
       view.dispose();
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
       return null;
     }
   }

@@ -3,6 +3,7 @@ import { nameOf, separatorOf } from '../../shared/paths';
 import type { RpcClient } from '../core/rpc';
 import { clear, h, svgIcon } from './dom';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 export interface FolderCompareModalDeps {
   rpc: RpcClient;
@@ -98,7 +99,7 @@ export function createFolderCompareModal(deps: FolderCompareModalDeps): FolderCo
         clear(list);
         names.textContent = '';
         list.append(h('p', { class: 'refdiff-empty' }, 'Не удалось сравнить папки.'));
-        deps.notify(error instanceof Error ? error.message : String(error), 'error');
+        deps.notify(errorText(error), 'error');
       } finally {
         busy = false;
       }

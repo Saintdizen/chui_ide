@@ -29,6 +29,7 @@ import type { RunEndHow } from './run-end';
 import { classifyFailure } from './run-failure';
 import { clear, h, svgIcon } from './dom';
 import { showToast } from './toast';
+import { errorText } from '../core/file-errors';
 
 /**
  * Стриминг ответа ассистента в ленту беседы.
@@ -599,7 +600,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         host.runEndNote(session, 'stopped');
       } else {
         clear(segment);
-        const reason = error instanceof Error ? error.message : String(error);
+        const reason = errorText(error);
         segment.appendChild(failureBlock(reason, () => void host.retryRun(session)));
         showToast('Не удалось получить ответ модели', 'error');
         // Сводка идёт после строки ошибки: сначала что случилось, потом — что от работы осталось.

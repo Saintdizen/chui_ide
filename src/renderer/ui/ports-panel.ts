@@ -10,6 +10,7 @@
  */
 import type { PortEntry } from '../../shared/port-forward';
 import { clear, h } from './dom';
+import { errorText } from '../core/file-errors';
 
 /** Между опросами: чаще — лишние процессы, реже — порт появляется с задержкой. */
 const POLL_MS = 2500;
@@ -101,7 +102,7 @@ export function createPortsPanel(deps: PortsPanelDeps): PortsPanel {
       if (mine !== generation) return;
       // Пустой список и сломанный опрос — разные вещи: второй может сбить
       // человека на мысль, что сервер не запустился.
-      failed = error instanceof Error ? error.message : String(error);
+      failed = errorText(error);
     }
     status.textContent = shown.length > 0 ? `${shown.length}` : '';
     render();

@@ -229,7 +229,10 @@ describe('file-write: «Сохранить как»', () => {
     expect(await fileWrite.saveDocumentAs(d)).toBe(false);
     expect(rec.closed).toHaveLength(0);
     expect(rec.opened).toHaveLength(0);
-    expect(rec.toasts.at(-1)).toContain('EACCES');
+    // Свод: сообщение называет причину и что делать — код отказа переводится в
+    // действие (`errorText`), а не вываливается как `EACCES`.
+    expect(rec.toasts.at(-1)).toContain('Нет прав');
+    expect(rec.toasts.at(-1)).not.toContain('EACCES');
   });
 
   it('только для чтения — даже не спрашиваем путь', async () => {

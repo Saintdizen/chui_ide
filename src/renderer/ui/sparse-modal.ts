@@ -3,6 +3,7 @@ import { addSparseDirectory, removeSparseDirectory, sparseDirectories, sparseSum
 import type { GitModel } from '../core/git-model';
 import { clear, h } from './dom';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 export interface SparseModalDeps {
   git: GitModel;
@@ -128,7 +129,7 @@ export function createSparseModal(deps: SparseModalDeps): SparseModalView {
       info = await operation();
       render();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -175,7 +176,7 @@ export function createSparseModal(deps: SparseModalDeps): SparseModalView {
       info = await deps.git.sparseInfo();
     } catch (error) {
       info = null;
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
     render();
   }

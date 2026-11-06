@@ -2,6 +2,7 @@ import type { ViewImage } from '../../shared/api';
 import { canRenderImageMime, imageFormatLabel, isImagePath } from '../../shared/images';
 import type { RpcClient } from '../core/rpc';
 import { basename, formatBytes, h, svgIcon } from './dom';
+import { errorText } from '../core/file-errors';
 
 /**
  * Вьюер изображений: показывает картинку там, где обычно текст.
@@ -207,7 +208,7 @@ export function createImageView(deps: ImageViewDeps): ImageView {
   );
 
   const showError = (path: string, error: unknown): void => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
     deps.notify(`Не удалось открыть изображение: ${basename(path)} — ${message}`);
   };
 

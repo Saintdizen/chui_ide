@@ -6,6 +6,7 @@ import type { RpcClient } from '../core/rpc';
 import { clear, h, svgIcon } from './dom';
 import { skeleton } from './loading';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 export interface HistoryModalDeps {
   rpc: RpcClient;
@@ -161,7 +162,7 @@ export function createHistoryModal(deps: HistoryModalDeps): HistoryModalView {
       if (selected?.item.id !== item.id) return;
       selected = null;
       renderPreview();
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
   }
 
@@ -192,7 +193,7 @@ export function createHistoryModal(deps: HistoryModalDeps): HistoryModalView {
       selected = null;
       await reload();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
       renderPreview();
     } finally {
       busy = false;
@@ -208,7 +209,7 @@ export function createHistoryModal(deps: HistoryModalDeps): HistoryModalView {
       await reload();
       deps.notify('Снимки файла очищены');
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -234,7 +235,7 @@ export function createHistoryModal(deps: HistoryModalDeps): HistoryModalView {
         await reload();
       } catch (error) {
         list.replaceChildren(h('p', { class: 'history-empty' }, 'Не удалось прочитать историю.'));
-        deps.notify(error instanceof Error ? error.message : String(error), 'error');
+        deps.notify(errorText(error), 'error');
       }
     },
   };

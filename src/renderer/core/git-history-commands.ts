@@ -3,6 +3,7 @@ import type { PopupMenuItem } from '../ui/popup-menu';
 import type { ToastKind } from '../ui/toast';
 import type { GitModel } from './git-model';
 import { type GitResult, gitStepNotice, rebaseNotice } from './git-notice';
+import { errorText } from './file-errors';
 
 /**
  * История и теги: там, где человек выбирает коммит или ветку в списке.
@@ -72,7 +73,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
     try {
       reportRebase(await git.rebaseContinue());
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   });
 
@@ -80,7 +81,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
     try {
       reportStep(await git.rebaseSkip(), 'Коммит пропущен, rebase идёт дальше');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   });
 
@@ -89,7 +90,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
       await git.rebaseAbort();
       showToast('Rebase прерван, ветка на прежнем месте');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   });
 
@@ -114,7 +115,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
       await git.reset(mode, hash);
       showToast(`Ветка сброшена на ${hash}`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   };
 
@@ -125,7 +126,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
       onSelect: () => {
         void git.cherryPick(hash).then(
           () => showToast(`Коммит ${hash} перенесён`),
-          (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
+          (error: unknown) => showToast(errorText(error), 'error'),
         );
       },
     },
@@ -134,7 +135,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
       onSelect: () => {
         void git.revert(hash).then(
           () => showToast(`Коммит ${hash} отменён`),
-          (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
+          (error: unknown) => showToast(errorText(error), 'error'),
         );
       },
     },
@@ -185,7 +186,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
       await git.createTag(name);
       showToast(`Тег ${name} создан`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   });
 
@@ -219,7 +220,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
                   confirmLabel: 'Перейти',
                 })
                 .then((confirmed) => (confirmed ? git.checkout(tag.name) : undefined))
-                .catch((error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'));
+                .catch((error: unknown) => showToast(errorText(error), 'error'));
             },
           },
           {
@@ -227,7 +228,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
             onSelect: () => {
               void git.pushTag(tag.name).then(
                 (result) => showToast(result.message),
-                (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
+                (error: unknown) => showToast(errorText(error), 'error'),
               );
             },
           },
@@ -245,7 +246,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
                 })
                 .then((confirmed) => (confirmed ? git.deleteTag(tag.name) : undefined))
                 .then(() => undefined)
-                .catch((error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'));
+                .catch((error: unknown) => showToast(errorText(error), 'error'));
             },
           },
         ],
@@ -271,7 +272,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
       await git.reset('soft', 'HEAD~1');
       showToast('Последний коммит отменён, правки в индексе');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   });
 
@@ -296,7 +297,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
             onSelect: () => {
               void git.cherryPick(entry.hash).then(
                 () => showToast(`Коммит ${entry.hash} перенесён`),
-                (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
+                (error: unknown) => showToast(errorText(error), 'error'),
               );
             },
           },
@@ -335,7 +336,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
       const confirmed = await deps.confirm({
         title: 'Ветка не влита',
         message: `Удалить ветку ${name} принудительно?`,
-        detail: error instanceof Error ? error.message : String(error),
+        detail: errorText(error),
         confirmLabel: 'Удалить принудительно',
       });
       if (!confirmed) return;
@@ -361,7 +362,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
       await git.renameBranch(from, to);
       showToast(`Ветка переименована в ${to}`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   });
 
@@ -380,7 +381,7 @@ export function registerGitHistoryCommands(define: DefineCommand, deps: GitHisto
       await git.ignore(paths);
       showToast(paths.length === 1 ? 'Добавлено в .gitignore' : `В .gitignore добавлено файлов: ${paths.length}`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   });
 

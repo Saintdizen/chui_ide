@@ -102,6 +102,7 @@ import {
   type RunEnd,
   type RunOutcome,
 } from './chat-notify';
+import { errorText } from '../core/file-errors';
 
 /**
  * Чем кончился ход.
@@ -1537,7 +1538,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       return true;
     } catch (error) {
       if (error instanceof RpcError && error.cancelled) showToast('Сжатие отменено');
-      else showToast(error instanceof Error ? error.message : String(error), 'error');
+      else showToast(errorText(error), 'error');
       return false;
     } finally {
       setBusy(false, session);
@@ -1702,7 +1703,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       settings = await deps.rpc.request('settings.update', { ai: { reasoningEffort: effort } });
       showToast(effort === 'off' ? 'Размышления выключены' : `Усилие размышления: ${effort}`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   }
 

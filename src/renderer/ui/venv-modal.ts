@@ -14,6 +14,7 @@ import { clear, h } from './dom';
 import { createModal } from './modal';
 import { createSelect, type SelectOption } from './select';
 import { showToast } from './toast';
+import { errorText } from '../core/file-errors';
 
 /**
  * Окно Python-окружений проекта.
@@ -355,7 +356,7 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
       if (cancelRequested) {
         showToast('Создание окружения отменено', 'info');
       } else {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorText(error);
         appendLog(`Ошибка: ${message}`);
         showToast(message, 'error');
       }

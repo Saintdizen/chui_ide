@@ -65,6 +65,7 @@ import { toWorkspaceEdits, toWorkspaceFileEdits, type WorkspaceEdits } from '../
 import { pathToUri, uriToPath } from '../../core/document';
 import type { RpcClient } from '../../core/rpc';
 import type { CompletionItem } from '../complete/completions';
+import { errorText } from '../../core/file-errors';
 
 /** Потолок досчёта линз без команды: на каждую сервер зовём отдельно. */
 const MAX_LENS_RESOLVES = 100;
@@ -200,7 +201,7 @@ export class LspFeatures {
     // причина отказа («это ключевое слово») — то, ради чего спрашиваем.
     const result = await this.rpc
       .request('lsp.request', { path, method: 'textDocument/prepareRename', params })
-      .catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+      .catch((error: unknown) => errorText(error));
     // Строка — причина отказа от сервера (см. main: отказ отдаёт message).
     if (typeof result === 'string') return { word: null, message: result, range: null };
     return toPreparedRename(result);

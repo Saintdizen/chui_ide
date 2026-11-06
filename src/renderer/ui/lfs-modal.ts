@@ -3,6 +3,7 @@ import { lfsFileLabel, missingCount } from '../../shared/git-lfs';
 import type { GitModel } from '../core/git-model';
 import { clear, h } from './dom';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 export interface LfsModalDeps {
   git: GitModel;
@@ -169,7 +170,7 @@ export function createLfsModal(deps: LfsModalDeps): LfsModalView {
       info = await operation();
       render();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -206,7 +207,7 @@ export function createLfsModal(deps: LfsModalDeps): LfsModalView {
       info = await deps.git.lfsInfo();
     } catch (error) {
       info = null;
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
     render();
   }

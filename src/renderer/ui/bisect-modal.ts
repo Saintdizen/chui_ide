@@ -2,6 +2,7 @@ import type { GitBisectState } from '../../shared/git-bisect';
 import type { GitModel } from '../core/git-model';
 import { h } from './dom';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 export interface BisectModalDeps {
   git: GitModel;
@@ -155,7 +156,7 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
     try {
       apply(await deps.git.bisectState());
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
   };
 
@@ -168,7 +169,7 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
       apply(await deps.git.bisectStart({ bad: bad || undefined, good: good || undefined }));
       if (!state?.active && !state?.firstBad) deps.notify(state?.message || 'Поиск не начался', 'error');
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -180,7 +181,7 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
     try {
       apply(await deps.git.bisectMark(where));
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -195,7 +196,7 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
       render();
       deps.notify('Поиск закончен, ветка на прежнем месте');
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }

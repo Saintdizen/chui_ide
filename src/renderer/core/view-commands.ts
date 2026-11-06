@@ -178,12 +178,9 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
   // `Ctrl+Shift+O` занят быстрым открывателем (`app-view-commands`), `Ctrl+Shift+K`
   // — удалением строки в редакторе, `Ctrl+Shift+M` — панелью проблем. Свободное
   // `Ctrl+Shift+U` и стало дверью к структуре (`U` — как `outline` у штурвала).
-  define(
-    { id: 'view.showOutline', title: 'Структура файла', category: 'Вид', keybinding: 'Ctrl+Shift+U' },
-    () => {
-      dock.showAndFocus('outline');
-    },
-  );
+  define({ id: 'view.showOutline', title: 'Структура файла', category: 'Вид', keybinding: 'Ctrl+Shift+U' }, () => {
+    dock.showAndFocus('outline');
+  });
 
   // Журнал LSP: туда ведёт «Показать» из уведомления о подключении серверов.
   // Команда, а не замыкание, потому что шаг должен переживать закрытие тоста.

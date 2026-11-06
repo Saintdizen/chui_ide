@@ -18,6 +18,7 @@ import type { ChatSession } from './chat-session';
 import { formatBytes } from './chat-text';
 import { basename, clear, h, svgIcon } from './dom';
 import { showToast } from './toast';
+import { errorText } from '../core/file-errors';
 
 /**
  * Контекст, который пользователь прикладывает к вопросу: выделение, файл,
@@ -319,7 +320,7 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
       const picked = await deps.rpc.request('dialog.pickImages');
       for (const image of picked) addImage(image);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
     deps.focus();
   }
@@ -446,7 +447,7 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
       return lines.join('\n');
     } catch (error) {
       // Один файл не прочитался — не повод терять остальные: пишем причину на его месте.
-      return `(не удалось получить diff: ${error instanceof Error ? error.message : String(error)})`;
+      return `(не удалось получить diff: ${errorText(error)})`;
     }
   }
 
@@ -478,7 +479,7 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     try {
       places = await deps.codebase(query);
     } catch (error) {
-      showToast(`Поиск не удался: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      showToast(`Поиск не удался: ${errorText(error)}`, 'error');
       return null;
     }
     if (places.length === 0) {
@@ -532,7 +533,7 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
         text: `\`\`\`${languageFromPath(target)}\n${text}\n\`\`\``,
       };
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
       return null;
     }
   }
@@ -543,7 +544,7 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
       const stat = await deps.rpc.request('workspace.stat', { path: target });
       addAttachment(await attachmentFromPath(target, stat.kind === 'directory' ? 'dir' : 'file'));
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   }
 

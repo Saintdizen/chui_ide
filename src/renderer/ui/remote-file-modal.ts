@@ -2,6 +2,7 @@ import { fsAddressLabel, parseFsAddress } from '../../shared/fs-address';
 import type { RpcClient } from '../core/rpc';
 import { h } from './dom';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 export interface RemoteFileModalDeps {
   rpc: RpcClient;
@@ -75,7 +76,7 @@ export function createRemoteFileModal(deps: RemoteFileModalDeps): RemoteFileModa
       // Обрезку писать нельзя: это была бы тихая потеря части файла.
       saveButton.disabled = result.truncated;
     } catch (error) {
-      note.textContent = error instanceof Error ? error.message : String(error);
+      note.textContent = errorText(error);
       deps.notify('Не удалось прочитать удалённый файл', 'error');
     }
   }
@@ -87,7 +88,7 @@ export function createRemoteFileModal(deps: RemoteFileModalDeps): RemoteFileModa
       await deps.rpc.request('remote.writeFile', { address, text: editor.value });
       deps.notify('Удалённый файл записан');
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }

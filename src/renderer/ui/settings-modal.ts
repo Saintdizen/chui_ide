@@ -23,6 +23,7 @@ import {
   type ProviderConfigValues,
   type ProviderPreset,
 } from '../../shared/providers';
+import { errorText } from '../core/file-errors';
 
 /** Сводка о подключении: состояние видно, не открывая окно. */
 function connectionSummary(provider: AiProviderView | undefined, activeModel: string | undefined): string {
@@ -231,7 +232,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       settings = await deps.rpc.request('settings.get');
       recent = await deps.rpc.request('app.recentProjects');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
     // Статус серверов спрашиваем заново при каждом открытии окна: он меняется.
     lspRunning = null;
@@ -262,7 +263,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       settings = deps.project ? await deps.project.patch(value) : await deps.rpc.request('settings.update', value);
       if (rerender) render();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   }
 
@@ -1051,7 +1052,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           }
         })
         .catch((error: unknown) => {
-          say(error instanceof Error ? error.message : String(error), 'error');
+          say(errorText(error), 'error');
         })
         .finally(() => {
           checkButton.disabled = false;
@@ -1144,7 +1145,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         close();
         showToast(existing ? `«${provider.label}» обновлён` : `Добавлен провайдер «${provider.label}»`);
       } catch (error) {
-        say(error instanceof Error ? error.message : String(error), 'error');
+        say(errorText(error), 'error');
       }
     }
 
@@ -1670,9 +1671,11 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         ),
       ];
       for (const dispute of disputes) {
-        sections.push(disputeNotice(dispute, commands, (next) => {
-          void patch({ keybindings: { overrides: [...next].map(([command, combo]) => ({ command, combo })) } });
-        }));
+        sections.push(
+          disputeNotice(dispute, commands, (next) => {
+            void patch({ keybindings: { overrides: [...next].map(([command, combo]) => ({ command, combo })) } });
+          }),
+        );
       }
       head.push(h('div', { class: 'st-ui-keydisputes' }, ...sections));
     }
@@ -1691,18 +1694,13 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     commands: Map<string, { title: string }>,
     write: (overrides: Map<string, string>) => void,
   ): Child {
-    const titleOf = (row: BindingRow): string =>
-      commands.get(menuCommandOf(row.id))?.title ?? menuCommandOf(row.id);
+    const titleOf = (row: BindingRow): string => commands.get(menuCommandOf(row.id))?.title ?? menuCommandOf(row.id);
     const winnerRow = dispute.rows[0]!;
     return h(
       'div',
       { class: 'field st-ui-keydispute' },
       h('span', { class: 'field-sub' }, `${dispute.combo} — у ${dispute.commands.length} команд`),
-      h(
-        'div',
-        { class: 'field-hint' },
-        `Сработает «${titleOf(winnerRow)}»: ${dispute.winner.reason}.`,
-      ),
+      h('div', { class: 'field-hint' }, `Сработает «${titleOf(winnerRow)}»: ${dispute.winner.reason}.`),
       h(
         'button',
         {
@@ -1975,7 +1973,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         render();
         if (result.name) showToast(`Тема «${result.name}» применена`);
       } catch (error) {
-        showToast(error instanceof Error ? error.message : String(error), 'error');
+        showToast(errorText(error), 'error');
       }
     });
 
@@ -1986,7 +1984,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         const result = await deps.rpc.request('theme.export', { contents, name: 'chui-theme.json' });
         if (result.path) showToast(`Шаблон сохранён: ${result.path}`);
       } catch (error) {
-        showToast(error instanceof Error ? error.message : String(error), 'error');
+        showToast(errorText(error), 'error');
       }
     });
 
@@ -1999,7 +1997,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           settings = await deps.rpc.request('theme.clear');
           render();
         } catch (error) {
-          showToast(error instanceof Error ? error.message : String(error), 'error');
+          showToast(errorText(error), 'error');
         }
       });
       actions.append(clearButton);
@@ -2112,7 +2110,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           render();
         })
         .catch((error) => {
-          mcpStatus = error instanceof Error ? error.message : String(error);
+          mcpStatus = errorText(error);
           render();
         })
         .finally(() => {
@@ -2261,7 +2259,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     detectButton.addEventListener('click', () => {
       detectButton.disabled = true;
       void detect()
-        .catch((error) => showToast(error instanceof Error ? error.message : String(error), 'error'))
+        .catch((error) => showToast(errorText(error), 'error'))
         .finally(() => {
           detectButton.disabled = false;
         });
@@ -2282,7 +2280,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           showToast(result.installed.length > 0 ? `Установлено: ${result.installed.join(', ')}` : 'Нечего ставить');
           await detect();
         })
-        .catch((error) => showToast(error instanceof Error ? error.message : String(error), 'error'))
+        .catch((error) => showToast(errorText(error), 'error'))
         .finally(() => {
           installButton.disabled = false;
         });
@@ -2316,7 +2314,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
               : result.error;
           })
           .catch((error) => {
-            verdict.textContent = error instanceof Error ? error.message : String(error);
+            verdict.textContent = errorText(error);
           })
           .finally(() => {
             check.disabled = false;
@@ -2371,7 +2369,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           showToast('Серверы остановлены — поднимутся заново при открытии файла');
         })
         .catch((error) => {
-          showToast(error instanceof Error ? error.message : String(error), 'error');
+          showToast(errorText(error), 'error');
           stopButton.disabled = false;
         });
     });
@@ -2389,7 +2387,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           );
         })
         .catch((error) => {
-          showToast(error instanceof Error ? error.message : String(error), 'error');
+          showToast(errorText(error), 'error');
           restartButton.disabled = false;
         });
     });
@@ -2537,7 +2535,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       recent = await deps.rpc.request('app.forgetProject', { path });
       render();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
   }
 

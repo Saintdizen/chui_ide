@@ -257,7 +257,16 @@ export class ProjectCheck {
       // молчим. Тост про «проверка не удалась» здесь был бы упрёком за своё же действие.
       if (isCancelled(error)) {
         this.dropMarkers();
-        this.emit({ phase: 'idle', tool: null, files: 0, problems: 0, timedOut: false, cancelled: true, note: null, progress: null });
+        this.emit({
+          phase: 'idle',
+          tool: null,
+          files: 0,
+          problems: 0,
+          timedOut: false,
+          cancelled: true,
+          note: null,
+          progress: null,
+        });
         return;
       }
       const reason = (error as { message?: unknown } | null)?.message;

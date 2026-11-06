@@ -12,6 +12,7 @@
  */
 
 import type { FileOperation } from '../../shared/lsp-workspace-edit';
+import { errorText } from './file-errors';
 
 /** Что делать с упавшей операцией: выполнено (нужное уже есть) или пропущено. */
 export type FileOperationOutcome = { kind: 'skipped' } | { kind: 'failed'; error: string };
@@ -39,7 +40,14 @@ export function failedOperationLabel(operation: FileOperation): string {
   return operation.kind === 'rename' ? `${operation.from} → ${operation.to}` : operation.path;
 }
 
-/** Текст ошибки для человека — единый вид у всех трёх операций. */
+/**
+ * Текст ошибки для человека — единый вид у всех трёх операций.
+ *
+ * Свод: сообщение называет причину и что делать. Знакомый код отказа переводится
+ * в действие (`describeFileError`), незнакомый — в чистый текст без `Error: ` —
+ * всё это и есть `errorText`, одна точка на всё окно (`core/file-errors.ts`).
+ */
 export function fileOperationError(operation: FileOperation, error: unknown): string {
-  return `Не удалось выполнить операцию с файлом ${failedOperationLabel(operation)}: ${String(error)}`;
+  const what = failedOperationLabel(operation);
+  return `Не удалось выполнить операцию с файлом ${what}: ${errorText(error, what)}`;
 }

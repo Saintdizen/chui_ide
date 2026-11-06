@@ -355,7 +355,7 @@ button.status-item:focus-visible {
 }
 
 .status-meter.is-cancellable:hover .status-meter-label::after {
-  content: ' ✕';
+  content: " ✕";
   opacity: 0.7;
 }
 

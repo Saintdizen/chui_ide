@@ -13,6 +13,7 @@ import {
 import { clear, h } from './dom';
 import { createModal } from './modal';
 import { showToast } from './toast';
+import { errorText } from '../core/file-errors';
 
 /** Результат замены по проекту: изменённые пути и число замен. */
 export interface StructuralProjectResult {
@@ -252,7 +253,7 @@ export function createStructuralSearch(deps: StructuralSearchDeps): StructuralSe
       result = await deps.searchProject(projectOptions());
     } catch (error) {
       if (token !== projectToken) return;
-      report(error instanceof Error ? error.message : String(error), true);
+      report(errorText(error), true);
       return;
     }
     // Пока ходили за ответом, образец могли поменять — прежний результат уже не нужен.
@@ -308,7 +309,7 @@ export function createStructuralSearch(deps: StructuralSearchDeps): StructuralSe
       if (result.replaced === 0) showToast('Совпадений нет', 'info');
       else showToast(`Заменено по структуре: ${result.replaced}, файлов: ${result.files.length}`, 'success');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     }
     compute();
   }

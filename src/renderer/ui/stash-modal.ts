@@ -2,6 +2,7 @@ import type { GitStashEntry } from '../../shared/git-stash';
 import type { GitModel } from '../core/git-model';
 import { clear, h } from './dom';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 export interface StashModalDeps {
   git: GitModel;
@@ -77,7 +78,7 @@ export function createStashModal(deps: StashModalDeps): StashModalView {
         patch.textContent = await deps.git.stashShow(entry.index);
         loaded = true;
       } catch (error) {
-        patch.textContent = error instanceof Error ? error.message : String(error);
+        patch.textContent = errorText(error);
       }
     };
 
@@ -90,7 +91,7 @@ export function createStashModal(deps: StashModalDeps): StashModalView {
           await run();
           await refresh();
         } catch (error) {
-          deps.notify?.(error instanceof Error ? error.message : String(error));
+          deps.notify?.(errorText(error));
         } finally {
           busy.value = false;
         }
@@ -145,7 +146,7 @@ export function createStashModal(deps: StashModalDeps): StashModalView {
     try {
       entries = await deps.git.stashList();
     } catch (error) {
-      deps.notify?.(error instanceof Error ? error.message : String(error));
+      deps.notify?.(errorText(error));
     }
     clear(list);
     empty.hidden = entries.length > 0;
@@ -162,7 +163,7 @@ export function createStashModal(deps: StashModalDeps): StashModalView {
       untrackedBox.checked = false;
       await refresh();
     } catch (error) {
-      deps.notify?.(error instanceof Error ? error.message : String(error));
+      deps.notify?.(errorText(error));
     } finally {
       busy.value = false;
       saveButton.disabled = false;

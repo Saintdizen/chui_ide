@@ -58,7 +58,10 @@ export function countExcluded(
 }
 
 /** Подпись строки: «Ещё 3 файла исключено» без склонения в шаблоне. */
-export function excludedLabel(count: number, plural: (n: number, one: string, few: string, many: string) => string): string {
+export function excludedLabel(
+  count: number,
+  plural: (n: number, one: string, few: string, many: string) => string,
+): string {
   if (count <= 0) return '';
   return `Ещё ${count} ${plural(count, 'файл', 'файла', 'файлов')} исключено`;
 }

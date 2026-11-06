@@ -1,6 +1,7 @@
 import type { Settings, SettingsPatch } from '../../shared/api';
 import { addressProblem } from '../../shared/fs-address';
 import type { DefineCommand } from './command-args';
+import { errorText } from './file-errors';
 
 /**
  * Команды над путём: показать/открыть файл средствами системы, поднять терминал
@@ -124,7 +125,7 @@ export function registerPathCommands(define: DefineCommand, deps: PathDeps): voi
     // и лучше сказать это сразу, чем оставить молча нерабочую строку в списке.
     const check = await rpc
       .request('remote.check', { address: value })
-      .catch((error: unknown) => ({ ok: false, detail: error instanceof Error ? error.message : String(error) }));
+      .catch((error: unknown) => ({ ok: false, detail: errorText(error) }));
     if (!check.ok) {
       showToast(check.detail ?? 'Удалённая папка недоступна', 'error');
       return;

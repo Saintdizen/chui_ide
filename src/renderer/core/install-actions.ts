@@ -12,6 +12,7 @@ import type { VenvLookup } from '../../shared/python-env';
 import type { ProjectTools } from './project-tools';
 import type { RpcClient } from './rpc';
 import { nodeInstallTarget, type RunTarget } from './run-config';
+import { errorText } from './file-errors';
 
 export interface InstallActionsOptions {
   rpc: RpcClient;
@@ -58,7 +59,7 @@ export function createInstallActions(options: InstallActionsOptions) {
       toast(installedMessage(result.installed, 'Нечего ставить'));
       refreshImports();
     } catch (error) {
-      toast(error instanceof Error ? error.message : String(error), 'error');
+      toast(errorText(error), 'error');
     }
   };
 

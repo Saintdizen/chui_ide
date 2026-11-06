@@ -4,6 +4,7 @@ import type { GitModel } from '../core/git-model';
 import { clear, h } from './dom';
 import { createModal } from './modal';
 import { createSelect } from './select';
+import { errorText } from '../core/file-errors';
 
 export interface IdentityModalDeps {
   git: GitModel;
@@ -232,7 +233,7 @@ export function createIdentityModal(deps: IdentityModalDeps): IdentityModalView 
       deps.notify('Настройки автора и подписи сохранены в конфиге репозитория');
       render();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -248,7 +249,7 @@ export function createIdentityModal(deps: IdentityModalDeps): IdentityModalView 
     } catch (error) {
       identity = BLANK;
       keys = [];
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
     render();
   }

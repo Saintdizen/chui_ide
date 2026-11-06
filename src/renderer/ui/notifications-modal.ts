@@ -3,6 +3,7 @@ import { platformLabel, unreadNotificationCount } from '../../shared/git-platfor
 import type { GitModel } from '../core/git-model';
 import { clear, h, svgIcon } from './dom';
 import { createModal } from './modal';
+import { errorText } from '../core/file-errors';
 
 export interface NotificationsModalDeps {
   git: GitModel;
@@ -52,7 +53,7 @@ export function createNotificationsModal(deps: NotificationsModalDeps): Notifica
     try {
       await operation();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
     }
@@ -154,7 +155,7 @@ export function createNotificationsModal(deps: NotificationsModalDeps): Notifica
     } catch (error) {
       info = null;
       notifications = [];
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
     render();
   }

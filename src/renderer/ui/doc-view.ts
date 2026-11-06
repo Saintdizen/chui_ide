@@ -14,6 +14,7 @@
 import { officeFormatLabel, officeSummary, type OfficeBlock, type OfficePreview } from '../../shared/office';
 import type { RpcClient } from '../core/rpc';
 import { basename, clear, h, svgIcon } from './dom';
+import { errorText } from '../core/file-errors';
 
 export interface DocView {
   element: HTMLElement;
@@ -152,7 +153,7 @@ export function createDocView(deps: DocViewDeps): DocView {
   };
 
   const fail = (path: string, error: unknown): void => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
     deps.notify(`Не удалось открыть документ: ${basename(path)} — ${message}`);
     currentPath = path;
     open = true;

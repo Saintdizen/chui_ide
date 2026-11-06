@@ -215,6 +215,7 @@ import { editorActionCommands } from './core/editor-actions';
 import { outcomeOfFailure } from './core/file-operations';
 import { editorSurfacePlan } from './core/editor-surface';
 import { testMarkerSignature as testMarkerSignatureOf, testMarkersFor } from './core/test-markers';
+import { errorText } from './core/file-errors';
 
 /**
  * Точка сборки приложения: сервисы, команды, подписки.
@@ -1192,11 +1193,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
    * Отделено от попапа, потому что три ветки никак не связаны с разметкой: смена языка
    * трогает подсветку, отступ — контроллер, кодировка вообще только обьясняет.
    */
-  function applyStatusChoice(
-    kind: StatusChoiceKind,
-    id: string,
-    pane: typeof editors.pane,
-  ): string | null {
+  function applyStatusChoice(kind: StatusChoiceKind, id: string, pane: typeof editors.pane): string | null {
     if (kind === 'language') {
       pane.setLanguageOf(id);
       return `Язык файла: ${statusLanguageLabel(id)}`;
@@ -1212,7 +1209,6 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Кодировка: писатель всегда UTF-8, выбора нет. Говорим это прямо.
     return id === 'utf-8' ? null : 'Файлы пишутся только в UTF-8 — другой кодировки нет';
   }
-
 
   /**
    * Окружение проекта читаем при его открытии, а не только по клику на чип: иначе
@@ -3090,7 +3086,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         return await handler(...args);
       } catch (error) {
         console.error(`[chui] команда ${descriptor.id} упала:`, error);
-        showToast(error instanceof Error ? error.message : String(error), 'error');
+        showToast(errorText(error), 'error');
         return undefined;
       }
     });
@@ -3117,7 +3113,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
           editors.runAction(actionId);
         } catch (error) {
           console.error(`[chui] действие ${actionId} упало:`, error);
-          showToast(error instanceof Error ? error.message : String(error), 'error');
+          showToast(errorText(error), 'error');
         }
       }),
     );

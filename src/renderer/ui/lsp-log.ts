@@ -1,5 +1,6 @@
 import type { LspTraceLine } from '../../shared/lsp-trace';
 import { h } from './dom';
+import { errorText } from '../core/file-errors';
 
 /**
  * Панель «LSP» в доке: хвост журнала обмена с языковыми серверами.
@@ -48,7 +49,7 @@ export function createLspLogPanel(deps: LspLogDeps): LspLogPanel {
       const result = await deps.fetch(deps.lines ?? 300);
       render(result);
     } catch (error) {
-      showHint(error instanceof Error ? error.message : String(error));
+      showHint(errorText(error));
     } finally {
       refreshButton.disabled = false;
     }

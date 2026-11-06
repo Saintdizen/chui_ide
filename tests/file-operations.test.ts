@@ -58,10 +58,20 @@ describe('failedOperationLabel', () => {
 });
 
 describe('fileOperationError', () => {
-  it('в текст попадает причина, а не только факт провала', () => {
-    expect(fileOperationError(create(false), new Error('denied'))).toBe(
-      'Не удалось выполнить операцию с файлом /p/a.ts: Error: denied',
-    );
+  it('причина без машинного префикса: человеку не «Error: denied»', () => {
+    const text = fileOperationError(create(false), new Error('denied'));
+    expect(text).toContain('/p/a.ts');
+    expect(text).toContain('denied');
+    // Префикс движка — не причина, а мусор: свод требует слов человека.
+    expect(text).not.toContain('Error:');
+  });
+
+  it('знакомый код отказа превращается в действие, а не в аббревиатуру', () => {
+    const error = Object.assign(new Error('denied'), { code: 'EACCES' });
+    const text = fileOperationError(create(false), error);
+    // Что делать — часть сообщения, а не догадка читателя.
+    expect(text).toContain('Нет прав');
+    expect(text).not.toContain('EACCES');
   });
 
   it('не-Error значение тоже читаемо', () => {

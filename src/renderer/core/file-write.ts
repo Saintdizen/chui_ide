@@ -5,6 +5,7 @@ import type { ToastKind, ToastOptions } from '../ui/toast';
 import { decideSaveAs } from '../../shared/save-as';
 import { applySaveEdits } from '../../shared/save-edits';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
+import { errorText } from './file-errors';
 
 /**
  * Запись буфера на диск: Ctrl+S, «Сохранить как», сохранение перед git и при закрытии окна.
@@ -248,7 +249,7 @@ export function createFileWrite(ports: FileWritePorts): FileWrite {
       // строк в проекте (см. `shared/line-endings.ts`).
       await ports.rpc.request('workspace.writeFile', { path: target, text: document.diskText });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = errorText(error);
       showToast(`Не удалось сохранить как ${basename(target)}: ${reason}`, 'error');
       return false;
     }
@@ -293,7 +294,7 @@ export function createFileWrite(ports: FileWritePorts): FileWrite {
       await ports.rpc.request('window.close');
     } catch (error) {
       // Сохранение не прошло — окно оставляем, иначе правки пропадут молча.
-      showToast(error instanceof Error ? error.message : String(error), 'error');
+      showToast(errorText(error), 'error');
     } finally {
       closing = false;
     }

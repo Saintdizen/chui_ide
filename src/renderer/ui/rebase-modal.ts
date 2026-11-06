@@ -10,6 +10,7 @@ import type { GitModel } from '../core/git-model';
 import { clear, h, svgIcon } from './dom';
 import { createModal } from './modal';
 import { createSelect } from './select';
+import { errorText } from '../core/file-errors';
 
 export interface RebaseModalDeps {
   git: GitModel;
@@ -247,7 +248,7 @@ export function createRebaseModal(deps: RebaseModalDeps): RebaseModalView {
         .map((commit) => ({ action: 'pick', commit: commit.hash, subject: commit.summary }));
     } catch (error) {
       items = [];
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     }
     render();
   };
@@ -274,7 +275,7 @@ export function createRebaseModal(deps: RebaseModalDeps): RebaseModalView {
       }
       close();
     } catch (error) {
-      deps.notify(error instanceof Error ? error.message : String(error), 'error');
+      deps.notify(errorText(error), 'error');
     } finally {
       busy = false;
       render();
