@@ -11,6 +11,7 @@ import { dropAttachment, keepLatest, takeSent } from '../../shared/chat-attachme
 import type { DocumentStore } from '../core/document-store';
 import type { EditorApi } from '../core/editor-api';
 import type { GitModel } from '../core/git-model';
+import { driftOf, modelViews } from '../core/context-drift';
 import { languageFromPath } from '../core/languages';
 import type { RpcClient } from '../core/rpc';
 import { relativePath, type WorkspaceModel } from '../core/workspace-model';
@@ -94,6 +95,12 @@ export interface AttachmentsDeps {
    * где текст пришёл из файла и мог с тех пор измениться.
    */
   openFile?(path: string): Promise<void>;
+}
+
+/** Подпись расхождения на чипе: коротко — рядом с ним цена, а не абзац. */
+function describeDriftChip(drift: NonNullable<ChatAttachment['drift']>): string {
+  const lines = `${drift.changed} ${drift.changed === 1 ? 'строка' : 'строк'}`;
+  return drift.turn ? `разошлось с «${drift.turn}» · ${lines}` : `разошлось с прочитанным · ${lines}`;
 }
 
 /** Виды контекста, у которых есть пункт `#` (без изображений и буфера). */
@@ -204,6 +211,9 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
         // Цена — на каждой вложенности: по ней видно, какой файл тянет контекст,
         // ещё до всякой отправки.
         h('span', { class: 'chip-cost' }, formatTokens(estimateAttachmentTokens(item))),
+        // Модель видит то же, что и ты: раз файл разошёлся с прочитанным, чип
+        // говорит об этом до отправки, а не после неверного ответа.
+        item.drift ? h('span', { class: 'chip-drift' }, describeDriftChip(item.drift)) : null,
         h(
           'button',
           {
@@ -601,11 +611,29 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
         label: basename(target),
         title: `Файл ${target}`,
         text: `\`\`\`${languageFromPath(target)}\n${text}\n\`\`\``,
+        ...(await driftNote(target, text)),
       };
     } catch (error) {
       showToast(errorText(error), 'error');
       return null;
     }
+  }
+
+  /**
+   * Разошёлся ли приложенный файл с тем, что модель уже видела.
+   *
+   * Сверка нужна ровно тут: человек прикладывает то, что читает сейчас, а модель
+   * может держать версию из прошлого хода. Заполняется только когда расхождение
+   * есть — в остальных случаях поле не появляется вовсе (иначе чип обещал бы
+   * проблему там, где её нет).
+   */
+  async function driftNote(target: string, raw: string): Promise<{ drift?: ChatAttachment['drift'] }> {
+    const session = deps.session();
+    const ranges = session.reads?.files.find((file) => file.path === target)?.ranges;
+    if (!ranges || ranges.length === 0) return {};
+    const texts = new Map([[target, raw]]);
+    const [found] = driftOf(session, texts, modelViews(new Map([[target, ranges]]), [], texts));
+    return found ? { drift: { changed: found.changed, ...(found.view ? { turn: found.view.turn } : {}) } } : {};
   }
 
   /**
