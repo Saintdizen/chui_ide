@@ -58,6 +58,7 @@ import { todoMarks } from '../../../shared/todo-comments';
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
 import type { DocumentColor } from '../../../shared/lsp-document-color';
 import { enclosingFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
+import { foldLabel, hiddenLineCount } from '../../core/fold-selection';
 import { whitespaceMarks, type WhitespaceMode } from './whitespace';
 import { Minimap } from './minimap';
 import { OverviewRuler, type OverviewState } from './overview';
@@ -1139,6 +1140,28 @@ export class EditorView {
     return true;
   }
 
+  /**
+   * Известные блоки языка. Нужны снаружи, чтобы не плодить регион-двойник поверх
+   * того, что уже прислал сервер.
+   */
+  get foldRanges(): readonly FoldRange[] {
+    return this.folds.all;
+  }
+
+  /**
+   * Сложить произвольный регион, которого язык не знает (свёртка по выделению).
+   *
+   * Возвращает `false`, если такой блок уже есть: двойник в списке диапазонов
+   * заставил бы скрытие считать одни и те же строки дважды.
+   */
+  foldRegion(region: FoldRange): boolean {
+    if (this.folds.regionAt(region.startLine)) return false;
+    this.folds.setRanges([...this.folds.all, region]);
+    this.folds.toggle(region.startLine);
+    this.render();
+    return true;
+  }
+
   foldAll(): void {
     this.folds.collapseAll();
     this.render();
@@ -1691,7 +1714,11 @@ export class EditorView {
             const collapsed = this.folds.isCollapsed(line);
             marker.classList.add('is-visible');
             marker.textContent = collapsed ? '▸' : '▾';
-            marker.title = collapsed ? 'Развернуть' : 'Свернуть';
+            // У свёрнутого блока число строк в подсказке: иначе человек не знает,
+            // одну строку он не читает или двести.
+            const hidden = collapsed ? this.folds.regionAt(line) : null;
+            const label = hidden ? foldLabel(hiddenLineCount(hidden)) : '';
+            marker.title = collapsed ? `Развернуть${label ? ` (${label.replace('⋯ ', 'скрыто ')})` : ''}` : 'Свернуть';
             marker.addEventListener('mousedown', (event) => {
               event.preventDefault();
               event.stopPropagation();

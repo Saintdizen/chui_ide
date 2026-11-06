@@ -915,6 +915,7 @@ export class EditorWorkspace {
       // Свёртка — состояние самой панели: она знает и диапазоны, и что сложено.
       fold: () => this.pane.foldAtCursor(),
       unfold: () => this.pane.unfoldAtCursor(),
+      foldSelection: () => this.pane.foldSelection(),
       foldAll: () => this.pane.foldAll(),
       unfoldAll: () => this.pane.unfoldAll(),
       foldToLevel: (level: number) => this.pane.foldToLevel(level),

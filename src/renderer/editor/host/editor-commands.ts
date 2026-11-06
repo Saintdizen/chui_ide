@@ -107,6 +107,8 @@ export interface EditorCommandContext {
   /** Свернуть блок у курсора, развернуть его, свернуть или развернуть всё. */
   fold(): void;
   unfold(): void;
+  /** Сложить ровно выделенный кусок — даже если язык не прислал для него блок. */
+  foldSelection(): boolean;
   foldAll(): void;
   unfoldAll(): void;
   /** Сложить всё до уровня `level` включительно (1 — верхние блоки). */
@@ -520,6 +522,20 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     keybinding: 'Ctrl+Shift+]',
     category: CATEGORY,
     run: (context) => context.unfold(),
+  },
+  {
+    id: 'editor.foldSelection',
+    label: 'Свернуть выделение',
+    alias: 'foldSelection',
+    // Как в VS Code: `Ctrl+K Ctrl+[` — двухшаговая связка, чтобы одиночный
+    // `Ctrl+[` остался «выйти из вставки» на раскладке без Escape.
+    keybinding: 'Ctrl+K Ctrl+[',
+    category: CATEGORY,
+    // Молчание здесь честно: ничего не сложилось — ничего и не изменилось, а
+    // всплывающее окно на каждое нажатие мешало бы больше, чем помогало.
+    run: (context) => {
+      context.foldSelection();
+    },
   },
   {
     id: 'editor.foldAll',

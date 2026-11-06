@@ -27,6 +27,7 @@ import type { HighlightOffReason } from '../../../shared/large-file';
 import { detectIndent, resolveIndent } from '../../../shared/indent';
 import type { TextEdit } from '../../../shared/edits';
 import { shiftCursor } from '../../../shared/cursor-shift';
+import { selectionRegion } from '../../core/fold-selection';
 import type { FoldRange } from '../../../shared/fold-ranges';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import type { CompletionContext } from '../../../shared/lsp-completions';
@@ -2607,6 +2608,29 @@ export class EditorHost {
   /** Раскрыть блок, закрывающий каретку. `false` — раскрывать нечего. */
   unfoldAtCursor(): boolean {
     return this.view.unfoldAt(this.controller.caret);
+  }
+
+  /**
+   * Сложить выделенный кусок (Ctrl+K Ctrl+[).
+   *
+   * Работает и там, где язык не прислал `foldingRange` для этих строк: границы
+   * берём из самого выделения. `false` — выделение не регион (пусто или одна
+   * строка), тогда честнее промолчать, чем спрятать строку целиком.
+   */
+  foldSelection(): boolean {
+    const { anchor, active } = this.controller.selection;
+    const buffer = this.controller.bufferRef;
+    const region = selectionRegion(
+      buffer.lineAt(anchor),
+      buffer.lineAt(active),
+      this.view.foldRanges,
+    );
+    // Границы выравниваем по строкам: свёртка живёт на строках, а выделение — на
+    // позициях, и регион с границей посреди строки скрыл бы её половину.
+    if (!region) return false;
+    const ok = this.view.foldRegion(region);
+    if (ok) this.rememberFolds();
+    return ok;
   }
 
   foldAll(): void {
