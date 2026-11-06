@@ -16,11 +16,6 @@ Neovim).
 
 ### Без мыши и доступность
 
-16. **`role` и `aria` по шаблонам APG: остаток.** `treeview` и `tabs` строго
-    по шаблону.
-    Источник: VS Code `ux-accessibility`, Zed `development/ui-checklist`
-    (Accessibility).
-
 17. **Текст интерфейса по одному своду.** Кнопка — глагол, сообщение называет
     причину и что делать, ошибка не обвиняет человека, без жаргона.
     Источник: Microsoft `ms-writing-style`, JetBrains

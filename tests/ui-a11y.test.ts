@@ -65,6 +65,29 @@ describe('полоса вкладок умеет то, что обещает р�
     expect(TABS).toMatch(/hadFocus = element\.contains\(document\.activeElement\)/);
     expect(TABS).toMatch(/if \(hadFocus\) activeTab\?\.focus\(\)/);
   });
+
+  it('вкладка и её область связаны в обе стороны', () => {
+    // Иначе читалка знает, что вкладка выбрана, но не знает, что после выбора
+    // изменилось: вкладка — это обещание «вот здесь содержимое этой вкладки».
+    // От вкладки к области — `aria-controls`, обратно — `aria-labelledby`.
+    expect(TABS).toMatch(/'aria-controls': FILE_PANEL_ID/);
+    expect(TABS).toMatch(/'aria-controls': PAGE_PANEL_ID\(page\.id\)/);
+    // У каждой вкладки есть имя: на него и указывает панель.
+    expect(TABS).toMatch(/id: tabId\(String\(index\)\)/);
+    expect(TABS).toMatch(/id: tabId\(`page-\$\{page\.id\}`\)/);
+  });
+
+  it('область редактора — панель, которую называет выбранная вкладка', () => {
+    const LAYOUT = source('layout.ts');
+    expect(LAYOUT).toMatch(/role: 'tabpanel'/);
+    // Имя общее с полосой: одна константа, а не две строки, которые разъедутся.
+    expect(LAYOUT).toMatch(/id: FILE_PANEL_ID/);
+    // И подключено, а не только объявлено: имя панели ставит хозяин каркаса.
+    expect(APP).toMatch(/const tabName = activeTabId\(tabSources\)/);
+    expect(APP).toMatch(/island\.setAttribute\('aria-labelledby', tabName\)/);
+    // Нечего называть — атрибут снимается, а не указывает в пустоту.
+    expect(APP).toMatch(/if \(tabName === ''\) island\.removeAttribute\('aria-labelledby'\)/);
+  });
 });
 
 describe('папка дерева говорит, раскрыта ли она', () => {
@@ -91,6 +114,19 @@ describe('папка дерева говорит, раскрыта ли она',
   it('ход по дереву действительно подключён, а не только объявлен', () => {
     // Иначе роль снова врёт: объявленный договор должен вызываться.
     expect(EXPLORER).toMatch(/walkTree\(walkRows\(\)/);
+  });
+
+  it('текущую строку называет само дерево — через `aria-activedescendant`', () => {
+    // Фокус живёт на контейнере (`tabindex=-1`), а строки пересоздаются каждую
+    // отрисовку: без `aria-activedescendant` читалка не знает, какая строка
+    // текущая, — и роль `tree` опять превращается в обещание без содержания.
+    expect(EXPLORER).toMatch(/'aria-activedescendant': ''/);
+    expect(EXPLORER).toMatch(/setAttribute\('aria-activedescendant', selectedIndex < 0 \? '' : treeRowId\(selectedIndex\)\)/);
+    // Имя строки — от её места в наборе: индекс берётся у тех строк, что попали
+    // в набор, а место в наборе считается по всему набору, не по окну.
+    expect(EXPLORER).toMatch(/index === undefined \? \{\} : \{ id: treeRowId\(index\) \}/);
+    // Строка, которой уже нет (свернули, отфильтровали), не называется.
+    expect(EXPLORER).toMatch(/flatRows\.findIndex\(rowIsPath\(selected\)\)/);
   });
 
   it('`Ctrl+Enter` на файле открывает в соседнюю панель', () => {

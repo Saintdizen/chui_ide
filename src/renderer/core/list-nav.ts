@@ -93,3 +93,13 @@ export function typeaheadIndex(
 export function optionId(listId: string, index: number): string {
   return `${listId}-option-${index}`;
 }
+
+/**
+ * Идентификатор строки дерева — для `aria-activedescendant` у самого дерева.
+ *
+ * Как и у списков, имя даётся по позиции в наборе: строки дерева тоже
+ * пересоздаются на каждую отрисовку, и держаться за сам узел нельзя.
+ */
+export function treeRowId(index: number): string {
+  return optionId('tree', index);
+}

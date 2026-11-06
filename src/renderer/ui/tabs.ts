@@ -49,6 +49,37 @@ export interface Tabs {
   refresh(): void;
 }
 
+/**
+ * Область, которую открывают вкладки файлов — остров редактора.
+ *
+ * Вкладка обязана сказать, ЧТО она показывает (`aria-controls`), а область —
+ * чья она (`aria-labelledby`): без этой связи читалка знает о выборе вкладки,
+ * но не знает, что поменялось на экране. Имя панели одно на всех файлах: файлы
+ * делят один остров, поэтому и панель одна.
+ */
+export const FILE_PANEL_ID = 'editor-panel';
+
+/** Имя вкладки: по нему на неё указывает панель. */
+const tabId = (key: string): string => `tab-${key.replace(/[^\w-]/g, '_')}`;
+
+/** Область страницы браузера — своя у каждой страницы. */
+export const PAGE_PANEL_ID = (pageId: string): string => `page-panel-${pageId.replace(/[^\w-]/g, '_')}`;
+
+/**
+ * Какая вкладка сейчас выбрана — имя для `aria-labelledby` панели.
+ *
+ * Пустая строка — выбранной нет (ни одного файла, все закрыты): тогда и панели
+ * называть нечем, и `aria-labelledby` должен отсутствовать, а не указывать в пусто.
+ */
+export function activeTabId(deps: TabsDeps): string {
+  const pageActive = deps.pages?.activePageId ?? null;
+  if (pageActive !== null) return tabId(`page-${pageActive}`);
+  const active = deps.openEditors.active?.path ?? null;
+  if (active !== null) return tabId(active);
+  const first = deps.openEditors.paths[0];
+  return first === undefined ? '' : tabId(first);
+}
+
 /** Вкладки: скруглённые, у активной — синяя полоса сверху. */
 export function createTabs(deps: TabsDeps): Tabs {
   const element = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Открытые файлы' });
@@ -145,7 +176,7 @@ export function createTabs(deps: TabsDeps): Tabs {
     const paths = [...deps.openEditors.paths].sort(
       (a, b) => Number(deps.openEditors.isPinned(b)) - Number(deps.openEditors.isPinned(a)),
     );
-    for (const path of paths) {
+    for (const [index, path] of paths.entries()) {
       const document = deps.documents.get(path);
       const pinned = deps.openEditors.isPinned(path);
       const preview = deps.preview;
@@ -167,6 +198,12 @@ export function createTabs(deps: TabsDeps): Tabs {
           // остаётся настоящей кнопкой, и это её собственное место (см. ниже).
           role: 'tab',
           dataset: { path, kind: 'file' },
+          // Имя вкладки — так на неё указывает панель (`aria-labelledby`).
+          id: tabId(String(index)),
+          // И область, которая этой вкладке принадлежит: у файлов она одна —
+          // остров редактора (см. `app.ts`). Без связи читалка знает о вкладке,
+          // но не о том, что изменилось после её выбора.
+          'aria-controls': FILE_PANEL_ID,
           'aria-selected': path === active ? 'true' : 'false',
           // Ходить по полосе — Tab (встаёт на активной) плюс стрелки внутри (см. `onTabKey`).
           tabindex: path === active ? '0' : '-1',
@@ -287,6 +324,10 @@ export function createTabs(deps: TabsDeps): Tabs {
           }`,
           role: 'tab',
           dataset: { kind: 'page', pageId: page.id },
+          // Панель называет выбранную вкладку — значит, у неё должно быть имя.
+          id: tabId(`page-${page.id}`),
+          // Страница показывает себя в своей же области (остров браузера).
+          'aria-controls': PAGE_PANEL_ID(page.id),
           'aria-selected': page.id === pageActive ? 'true' : 'false',
           tabindex: page.id === pageActive ? '0' : '-1',
         },

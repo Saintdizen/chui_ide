@@ -201,7 +201,7 @@ import {
 import { needsLspRefresh, statusPatch } from './core/status-state';
 import type { SectionId, SettingsModalView } from './ui/settings-modal';
 import { createRecentFiles } from './core/recent-files';
-import { createTabs, type PagesTabSource } from './ui/tabs';
+import { activeTabId, createTabs, type PagesTabSource } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
 import { createPortsPanel } from './ui/ports-panel';
 import { createDebugPanel } from './ui/debug-panel';
@@ -1790,6 +1790,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       markdownPreview: activePath !== null && markdownPreviews.has(activePath),
     });
     const island = layout.editorIsland;
+    // Панель называет себя выбранной вкладкой: `aria-controls` ведёт от вкладки
+    // сюда, `aria-labelledby` — обратно. Имя берЁтся у той же вкладки, что
+    // показана на экране (включая страницу браузера и вкладку по умолчанию).
+    const tabName = activeTabId(tabSources);
+    if (tabName === '') island.removeAttribute('aria-labelledby');
+    else island.setAttribute('aria-labelledby', tabName);
     island.classList.toggle('is-browser', plan.shown === 'page');
     island.classList.toggle('is-image', plan.shown === 'image');
     island.classList.toggle('is-doc', plan.shown === 'doc');
@@ -2015,7 +2021,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   // композер отдаёт готовую строку, статус-бар принимает её в свой слот.
   statusBar.chatSlot.appendChild(chat.statusElement);
 
-  const tabs = createTabs({
+  // Источники вкладок — одна запись на двоих: по ней полоса рисует вкладки, а
+  // остров редактора (`applySurfaces`) спрашивает, чьё имя ему носить.
+  const tabSources: Parameters<typeof createTabs>[0] = {
     openEditors,
     documents,
     commands,
@@ -2027,7 +2035,9 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       active: (path) => markdownPreviews.has(path),
       toggle: (path) => toggleMarkdownPreview(path),
     },
-  });
+  };
+
+  const tabs = createTabs(tabSources);
   layout.tabsHost.appendChild(tabs.element);
 
   // Путь к файлу живёт в строке состояния: крошки рисуют его сегментами и

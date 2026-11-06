@@ -54,6 +54,7 @@ import {
 } from '../core/tree-selection';
 import { walkTree, type WalkAction, type WalkKey, type WalkRow } from '../core/tree-walk';
 import { ariaPositions, type AriaPosition } from '../core/tree-aria';
+import { treeRowId } from '../core/list-nav';
 import { EMPTY_TYPEAHEAD, typeaheadPress, typeaheadTarget } from '../core/tree-typeahead';
 import { ancestorsAt, breadcrumbChanged, type Breadcrumb } from '../core/tree-crumbs';
 import { showContextMenu } from './context-menu';
@@ -1179,6 +1180,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     depth: number,
     dir: string,
     flags: { nested: boolean; deleted: boolean; chain?: string } = { nested: false, deleted: false },
+    index?: number,
   ): HTMLElement | null => {
     const isDirectory = entryIsDirectory(entry);
     const isLink = entryIsSymlink(entry);
@@ -1261,6 +1263,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         // (`core/tree-walk.ts`), поэтому и роль, и уровень, и положение в наборе
         // говорятся честно.
         role: 'treeitem',
+        // Имя строки — адрес для `aria-activedescendant`: фокус живёт на дереве,
+        // и без имени читалка не знает, какая строка текущая. Берём номер
+        // в наборе видимых строк: строки пересоздаются, узел не годится.
+        ...(index === undefined ? {} : { id: treeRowId(index) }),
         'aria-level': String(place.level),
         'aria-posinset': String(place.posInSet),
         'aria-setsize': String(place.setSize),
@@ -1825,11 +1831,20 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     }
     if (row.kind === 'excluded') return excludedRow(row.dir, row.depth, row.count, row.patterns);
     if (row.kind === 'empty') return emptyRow(row.dir, row.depth, row.reason, row.patterns);
-    return renderRow(row.entry, row.depth, row.dir, {
-      nested: row.nested,
-      deleted: row.deleted,
-      ...(row.chain ? { chain: row.chain } : {}),
-    });
+    return renderRow(
+      row.entry,
+      row.depth,
+      row.dir,
+      {
+        nested: row.nested,
+        deleted: row.deleted,
+        ...(row.chain ? { chain: row.chain } : {}),
+      },
+      // Номер строки в наборе: по нему дерево называет текущую строку читалке
+      // (`aria-activedescendant`). `indexOf` — потому что `buildRow` получает уже
+      // готовую строку, а номер нужен только тем строкам, что попадают в набор.
+      flatRows.indexOf(row),
+    );
   };
 
   /**
@@ -1966,6 +1981,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     crumbsEl.hidden = next.length === 0;
   };
 
+  /** Строка набора, за которой стоит файл `path`: по ней строится имя для читалки. */
+  const rowIsPath = (path: string) => (row: FlatRow): boolean =>
+    row.kind === 'entry' && row.entry.path === path;
+
   const renderWindow = (): void => {
     const host = rowsHost;
     const scroller = treeEl;
@@ -1977,6 +1996,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
     const total = flatRows.length;
     const viewport = scroller.clientHeight;
+
+    // Текущая строка меняется вместе с набором: назвать читалке строку, которой
+    // уже нет (её свернули или отфильтровали), — хуже, чем не назвать никакой.
+    const selectedIndex = selected === null ? -1 : flatRows.findIndex(rowIsPath(selected));
+    scroller.setAttribute('aria-activedescendant', selectedIndex < 0 ? '' : treeRowId(selectedIndex));
 
     const paintRange = (first: number, last: number, stride: number): void => {
       const fragment = document.createDocumentFragment();
@@ -2329,7 +2353,15 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // tabindex -1: дерево можно сфокусировать программно (в мышь и клавиатуру
     // табом оно не попадает). Фокус нужен, чтобы F2 и Del относились к дереву,
     // а не к редактору: глобальная привязка Delete удаляла бы файл при наборе.
-    const tree = h('div', { class: 'tree', tabindex: '-1', role: 'tree', 'aria-label': 'Файлы проекта' });
+    const tree = h('div', {
+      class: 'tree',
+      tabindex: '-1',
+      role: 'tree',
+      'aria-label': 'Файлы проекта',
+      // Какая строка текущая — называет САМО дерево: фокус живёт здесь, а строки
+      // пересоздаются на каждую отрисовку. Пусто — ни одна строка не выбрана.
+      'aria-activedescendant': '',
+    });
     // Ссылку на поле фильтра берём после сборки: `h` не умеет `ref`.
     filterInput = element.querySelector<HTMLInputElement>('.tree-filter');
     treeEl = tree;

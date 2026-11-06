@@ -1,4 +1,5 @@
 import { clear, h } from './dom';
+import { FILE_PANEL_ID } from './tabs';
 import { applyPanelIntent, type PanelState, panelOrder } from '../core/panel-layout';
 import type { SidebarPosition } from '../../shared/api/settings';
 
@@ -56,8 +57,16 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
   const sidebarSplitter = h('div', { class: 'splitter splitter-left' });
 
   const tabsHost = h('div', { class: 'tabs-host' });
-  const editorHost = h('div', { class: 'editor-host' });
-  const editorIsland = h('section', { class: 'island editor-island' }, tabsHost, editorHost);
+  // Остров редактора — панель полосы вкладок-файлов: вкладка называет его через
+  // `aria-controls` (`FILE_PANEL_ID` в `ui/tabs.ts`), а он — её через
+  // `aria-labelledby`, которое ставит `app.ts` при смене активной вкладки.
+  const editorHost = h('div', { class: 'editor-host', id: FILE_PANEL_ID });
+  const editorIsland = h(
+    'section',
+    { class: 'island editor-island', role: 'tabpanel' },
+    tabsHost,
+    editorHost,
+  );
 
   const dockSplitter = h('div', { class: 'splitter splitter-dock' });
   const dockHost = h('div', { class: 'dock-host' });
