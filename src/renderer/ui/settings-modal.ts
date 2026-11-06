@@ -1859,6 +1859,14 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         apply({ openOnSingleClick: value }),
       ),
       h('div', { class: 'field-hint' }, 'Выключено: одинарный клик выделяет, двойной открывает.'),
+      switchRow('Показывать активный файл в дереве', explorer.revealActiveFile, (value) =>
+        apply({ revealActiveFile: value }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Сменили вкладку — дерево раскрывает папки файла и прокручивается к его строке.',
+      ),
       switchRow('Пометки git у файлов', explorer.gitDecorations, (value) => apply({ gitDecorations: value })),
       switchRow('Точка у папок с правками', explorer.folderChangeDot, (value) => apply({ folderChangeDot: value })),
       switchRow('Отмечать недавно изменённые', explorer.recentChanges, (value) => apply({ recentChanges: value })),

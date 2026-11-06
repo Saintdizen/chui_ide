@@ -39,6 +39,18 @@ describe('sanitizeSession', () => {
     expect(state.activeTab).toBeUndefined();
   });
 
+  it('прокрутка дерева переживает перезапуск, кроме нуля и мусора', () => {
+    expect(sanitizeSession({ tabs: [], expanded: [], explorerScroll: 412 }).explorerScroll).toBe(412);
+    // Дробное округляем: пиксели дробить незачем.
+    expect(sanitizeSession({ tabs: [], expanded: [], explorerScroll: 12.6 }).explorerScroll).toBe(13);
+    // «Сверху» — это отсутствие поля, а не ноль в файле.
+    expect(sanitizeSession({ tabs: [], expanded: [], explorerScroll: 0 }).explorerScroll).toBeUndefined();
+    // Мусор равносилен отсутствию: иначе дерево прыгнуло бы в негаданное место.
+    expect(sanitizeSession({ tabs: [], expanded: [], explorerScroll: -5 }).explorerScroll).toBeUndefined();
+    expect(sanitizeSession({ tabs: [], expanded: [], explorerScroll: '412' }).explorerScroll).toBeUndefined();
+    expect(sanitizeSession({ tabs: [], expanded: [], explorerScroll: NaN }).explorerScroll).toBeUndefined();
+  });
+
   it('нестроковые элементы отбрасываются', () => {
     const state = sanitizeSession({ tabs: ['/p/a.ts', 42, null, '', '/p/b.ts'], expanded: [null, '/p/x'] });
     expect(state.tabs).toEqual(['/p/a.ts', '/p/b.ts']);

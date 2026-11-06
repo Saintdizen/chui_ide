@@ -21,6 +21,9 @@ import type { RpcClient } from './rpc';
 export interface ExpandedTree {
   expandedPaths(): string[];
   restoreExpanded(paths: readonly string[]): void;
+  /** Прокрутка дерева, px: место, где человек работал в проекте. */
+  scrollTop(): number;
+  restoreScroll(top: number): void;
   /** Закреплённые файлы и папки дерева — их рабочее место тоже помнит. */
   pinnedPaths(): string[];
   restorePinned(paths: readonly string[]): void;
@@ -221,6 +224,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       // вести туда же, куда вёл до него.
       ...(openEditors.recent.length > 0 ? { mru: [...openEditors.recent] } : {}),
       expanded: explorer.expandedPaths(),
+      // Где стояла прокрутка дерева. Ноль не пишем: свежий проект начинается сверху.
+      ...(explorer.scrollTop() > 0 ? { explorerScroll: explorer.scrollTop() } : {}),
       pinned: explorer.pinnedPaths(),
       ...(explorer.labels().length > 0 ? { labels: explorer.labels() } : {}),
       ...(dock.activeId ? { dockActive: dock.activeId } : {}),
@@ -328,6 +333,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       openEditors.restoreRecent(state.mru ?? []);
 
       explorer.restoreExpanded(state.expanded);
+      // Прокрутка — ПОСЛЕ раскрытия: до него дерево короче, и браузер обрезал бы её до нуля.
+      explorer.restoreScroll(state.explorerScroll ?? 0);
       explorer.restorePinned(state.pinned ?? []);
       explorer.restoreLabels(state.labels ?? []);
       // Корни области: открываем заново те, что были, и возвращаем активный. Сбой на

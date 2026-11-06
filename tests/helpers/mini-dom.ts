@@ -242,6 +242,9 @@ function makeNode(tag: string): MiniNode {
     clientHeight: 600,
     offsetWidth: 800,
     offsetHeight: 600,
+    // `offsetTop` берут деревья: начало списка внутри прокрутки. Без него
+    // арифметика окна давала `NaN`, и видимый диапазон съезжал в пустоту.
+    offsetTop: 0,
     isConnected: true,
     // `ownerDocument` — чтобы `focus()` знал, чей `activeElement` обновлять.
     // Заполняется `installMiniDom`, когда документ уже есть: узлы создаются и до него.

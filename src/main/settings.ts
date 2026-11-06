@@ -338,6 +338,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     dimIgnored: true,
     // Привычное поведение: двойной клик открывает, одинарный — выделяет.
     openOnSingleClick: false,
+    // Файл из вкладки находим в дереве сами: иначе его ищут глазами.
+    revealActiveFile: true,
     confirmDelete: true,
     exclude: [],
     // Вложение выключено по умолчанию: это заметно меняет вид дерева, и включать

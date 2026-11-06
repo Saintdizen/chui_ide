@@ -106,6 +106,12 @@ export function sanitizeSession(raw: unknown): SessionState {
   if (Object.keys(cursors).length > 0) state.cursors = cursors;
   const scrollTops = scrollTopsByFile(value.scrollTops, tabs);
   if (Object.keys(scrollTops).length > 0) state.scrollTops = scrollTops;
+  // Прокрутка дерева: ноль — значит «сверху», и писать его незачем. Кривое
+  // значение (строка, минус, `NaN`) равносильно отсутствию.
+  if (typeof value.explorerScroll === 'number' && Number.isFinite(value.explorerScroll)) {
+    const top = Math.max(0, Math.round(value.explorerScroll));
+    if (top > 0) state.explorerScroll = top;
+  }
   // Несохранённые правки («hot exit»): их возвращает редактор при следующем открытии.
   const unsaved = unsavedBuffers(value.unsaved);
   if (unsaved.length > 0) state.unsaved = unsaved;

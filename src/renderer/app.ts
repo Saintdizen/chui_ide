@@ -965,8 +965,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     // Папка раскрыта или свернута — тоже часть рабочего места, но таких событий
     // много: пишем после паузы (вместе с кареткой и прокруткой).
     onExpandedChange: () => session.scheduleDeepSave(),
+    // Прокрутка дерева — тоже место работы: пишем вместе с раскрытием, после паузы.
+    onScrollChange: () => session.scheduleDeepSave(),
     // Метки файлов — тоже рабочее место проекта: сохраняем при изменении.
     onLabelsChange: () => session.scheduleSave(),
+    // Файл из вкладки находится в дереве сам: сменили вкладку — дерево уводит к нему.
+    autoReveal: () => settings.explorer.revealActiveFile !== false,
     // Пакеты монорепо: их список нужен дереву, чтобы показать проекты строками.
     packages,
     // Удалённые папки рабочего места: адреса из настроек, файл смотрит своё окно.

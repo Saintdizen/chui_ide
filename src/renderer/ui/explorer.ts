@@ -106,6 +106,10 @@ export interface ExplorerView {
   expand(path: string): void;
   /** Вернуть раскрытые папки прошлой сессии: чужие пути игнорируются. */
   restoreExpanded(paths: readonly string[]): void;
+  /** Где стояла прокрутка дерева, px — часть места работы. */
+  scrollTop(): number;
+  /** Вернуть прокрутку прошлой сессии: дальше видимой части дерево не прокручивается. */
+  restoreScroll(top: number): void;
   /** Вид и поведение дерева: значки, сортировка, фильтры, клик. */
   applySettings(settings: ExplorerSettings): void;
   /** Закреплённые файлы и папки — блоком сверху; хранятся в сессии проекта. */
@@ -155,6 +159,9 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   recentWindowHours: 24,
   dimIgnored: true,
   openOnSingleClick: false,
+  // Автораскрытие — включено: так ведёт себя Zed, и без него файл из вкладки
+  // приходится искать глазами по всему дереву.
+  revealActiveFile: true,
   confirmDelete: true,
   exclude: [],
   fileNesting: false,
@@ -209,6 +216,11 @@ export interface ExplorerDeps {
    * вчерашний набор раскрытых папок (всё пишется один раз, при закрытии окна).
    */
   onExpandedChange?: () => void;
+  /**
+   * Прокрутка дерева сдвинулась — тоже повод сохранить сессию. Событие идёт потоком,
+   * поэтому сессия и пишет его в глубокую запись, после паузы.
+   */
+  onScrollChange?: () => void;
   /** Пакеты проекта: по ним дерево в монорепо показывает проекты строками. */
   packages?: ProjectPackagesModel;
   /**
@@ -229,6 +241,11 @@ export interface ExplorerDeps {
    * открыть не туда.
    */
   splitEditor?: () => void;
+  /**
+   * Автораскрытие: активный файл подсвечивается и прокручивается в дереве сам.
+   * По умолчанию включено — так же, как в Zed (`auto_reveal_entries`).
+   */
+  autoReveal?: () => boolean;
 }
 
 /**
@@ -2389,6 +2406,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     tree.addEventListener('scroll', () => {
       savedScroll = tree.scrollTop;
       renderWindow();
+      deps.onScrollChange?.();
     });
     // Высоту панели меняют окно, нижний док и переключатели панелей — а окно строк
     // считают по ВЫСОТЕ в момент отрисовки (см. `renderWindow`). Без пересчёта окно,
@@ -2734,6 +2752,24 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   });
 
   deps.openEditors.onDidChange(render);
+  /**
+   * Автораскрытие: сменилась активная вкладка — дерево само уводит к её файлу.
+   *
+   * Реагируем именно на СМЕНУ пути, а не на каждое событие: `onDidChange` зовётся
+   * и при смене «грязности» или порядка вкладок, и `reveal` на каждое такое событие
+   * раскрывал бы папки против воли человека.
+   */
+  let lastActivePath: string | null = deps.openEditors.active?.path ?? null;
+  deps.openEditors.onDidChange(() => {
+    const path = deps.openEditors.active?.path ?? null;
+    if (path === lastActivePath) return;
+    lastActivePath = path;
+    if (!path) return;
+    if (deps.autoReveal && !deps.autoReveal()) return;
+    // Файл вне проекта (`reveal` сам молча выйдет): проверяем заранее, чтобы не дёргать
+    // загрузку папок зря.
+    reveal(path);
+  });
   // Список пакетов перечитали (появился манифест) — строки пакетов могли измениться.
   deps.packages?.onDidChange(render);
   // Пометки git меняются и без правок в дереве — например после коммита.
@@ -2790,6 +2826,18 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       }
       // Отрисовка сама подтянет корень и раскрытые уровни (см. `paint`).
       render();
+    },
+    // `treeEl` — прокручиваемый узел; он пересоздаётся отрисовкой, потому берём его в момент зова.
+    scrollTop: () => treeEl?.scrollTop ?? savedScroll,
+    /**
+     * Прокрутка прошлой сессии. Дерево к этому времени может быть выше прежнего
+     * (файлы добавились) или ниже (папки исчезли) — браузер сам обрежет лишнее,
+     * поэтому дальше проверки на разумность не идём.
+     */
+    restoreScroll(top) {
+      if (!Number.isFinite(top) || top <= 0) return;
+      savedScroll = top;
+      if (treeEl) treeEl.scrollTop = top;
     },
     pinnedPaths: () => [...pinned],
     restorePinned(paths) {
