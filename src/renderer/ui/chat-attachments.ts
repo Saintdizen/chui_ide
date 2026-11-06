@@ -80,6 +80,12 @@ export interface AttachmentsDeps {
   session(): ChatSession;
   /** Сколько токенов стоит вид `#` прямо сейчас, до прикладывания. */
   contextCost?(kind: ContextNoArg): number | null;
+  /**
+   * Сколько вложения влезают в окно прямо сейчас. Считается панелью разговора:
+   * только она знает модель, историю и резерв под ответ. Без неё полоса чипов
+   * показывает вес, но молчит про обрезку.
+   */
+  attachmentBudget?(): { limit: number; overhead: number; reserve: number } | null;
   /** Вернуть фокус в поле ввода после прикладывания контекста. */
   focus(): void;
 }
@@ -137,6 +143,13 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
   /** Узлы чипов по порядку — чтобы уметь схлопнуть снимаемый (см. `removeAttachment`). */
   let chipNodes: HTMLElement[] = [];
 
+  /** Токены в короткой записи: «1 234» и «12,3 тыс.» — в чипе места нет. */
+  function formatTokens(tokens: number): string {
+    if (tokens < 1000) return `${tokens} т.`;
+    if (tokens < 10000) return `${(tokens / 1000).toFixed(1).replace('.', ',')} тыс.`;
+    return `${Math.round(tokens / 1000)} тыс.`;
+  }
+
   function render(): void {
     const session = deps.session();
     const attachments = session.attachments;
@@ -158,8 +171,8 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
           // У справки из беседы в подсказке видна ссылка на источник: по ней понятно,
           // из какого разговора приложен текст и что он ушёл отдельным блоком.
           title: image
-            ? `${item.title} · ${formatBytes(item.bytes ?? 0)}`
-            : `${item.title}${item.uri ? ` · ${item.uri}` : ''}\n\n${item.text.slice(0, 300)}`,
+            ? `${item.title} · ${formatBytes(item.bytes ?? 0)} · ${formatTokens(estimateAttachmentTokens(item))}`
+            : `${item.title}${item.uri ? ` · ${item.uri}` : ''}\n${formatTokens(estimateAttachmentTokens(item))}\n\n${item.text.slice(0, 300)}`,
         },
         // У картинки вместо значка — она сама: по миниатюре видно, что приложено,
         // и не приходится открывать файл, чтобы это проверить.
@@ -168,6 +181,9 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
           : svgIcon(CHIP_ICON[item.kind] ?? 'file', 12),
         h('span', { class: 'chip-name' }, item.label),
         image ? h('span', { class: 'chip-hint' }, formatBytes(item.bytes ?? 0)) : null,
+        // Цена — на каждой вложенности: по ней видно, какой файл тянет контекст,
+        // ещё до всякой отправки.
+        h('span', { class: 'chip-cost' }, formatTokens(estimateAttachmentTokens(item))),
         h(
           'button',
           {
@@ -199,6 +215,36 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
 
     shownLabels = nextLabels;
     shownSession = session;
+    if (!element.hidden) element.appendChild(budgetLine(attachments));
+  }
+
+  /**
+   * Сколько этот набор стоит и что с ним будет.
+   *
+   * Главное здесь — не сумма, а слово «влезет». Считать вес легко, а человеку
+   * перед отправкой нужно знать другое: поместится ли приложенное в окно модели
+   * вместе с историей и ответом, и если нет — что именно урежется. Поэтому
+   * бюджет спрашиваем у панели разговора (`attachmentBudget`): только она знает
+   * модель, историю и резерв под ответ, и только она способна посчитать то же,
+   * что посчитает отправка.
+   */
+  function budgetLine(items: readonly ChatAttachment[]): HTMLElement {
+    const total = items.reduce((sum, item) => sum + estimateAttachmentTokens(item), 0);
+    const budget = deps.attachmentBudget?.() ?? null;
+    if (!budget) return h('span', { class: 'chip-budget' }, `Контекст: ${formatTokens(total)}`);
+    // Сколько места остаётся вложениям: окно минус уже занятое минус ответ.
+    const room = Math.max(0, budget.limit - budget.overhead - budget.reserve);
+    if (total <= room) {
+      return h('span', { class: 'chip-budget' }, `Контекст: ${formatTokens(total)} · свободно ${formatTokens(room - total)}`);
+    }
+    // Не влезает — говорим прямо, сколько уйдёт и как это выглядит снаружи: файлы
+    // режутся с хвоста набора, поэтому под обрез попадает приложенное позже.
+    const cut = total - room;
+    return h(
+      'span',
+      { class: 'chip-budget is-over', title: 'Хвост контекста не уйдёт в модель — снимите лишнее или сожмите беседу' },
+      `Контекст: ${formatTokens(total)} · не влезет ${formatTokens(cut)}`,
+    );
   }
 
   function addAttachment(item: ChatAttachment | null): void {

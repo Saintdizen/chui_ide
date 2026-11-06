@@ -2595,6 +2595,32 @@
   font-size: var(--font_micro_size);
 }
 
+/* Цена вложенности в токенах. Приглушена, как и размер файла: цифра нужна для
+   решения, а не как украшение чипа. `tabular-nums` — чтобы цифры не дёргались,
+   когда цена пересчитывается на каждое прикладывание. */
+.chip-cost {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Итог по всей полосе: сколько стоят вложения и всё ли влезет в окно. Стоит
+   последним элементом полосы — читается как подпись ко всем чипам сразу. */
+.chip-budget {
+  margin-left: auto;
+  color: var(--text_color_secondary);
+  font-size: var(--font_micro_size);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Не влезает: цвет предупреждения, но не красный — это ещё не ошибка, а повод
+   снять пару файлов до отправки. */
+.chip-budget.is-over {
+  color: var(--yellow_prime_background);
+}
+
 /* Перетаскивание изображения на панель чата: подсвечиваем место приёма, иначе
    ничего не говорит о том, что панель готова принять файл. */
 .chat.is-dropping {

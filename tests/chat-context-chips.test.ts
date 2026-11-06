@@ -12,7 +12,7 @@ beforeAll(() => {
  * Контекст `#` глазами человека: он выбирает пункт, а до отправки должен
  * видеть, что именно уедет модели, и уметь это снять.
  */
-function harness(text: string, selection = '') {
+function harness(text: string, selection = '', budget?: () => { limit: number; overhead: number; reserve: number } | null) {
   const session = { attachments: [], kept: [] } as unknown as ChatSession;
   const view = createAttachments({
     rpc: {} as never,
@@ -26,11 +26,55 @@ function harness(text: string, selection = '') {
     composerText: () => '',
     session: () => session,
     focus: () => undefined,
+    ...(budget ? { attachmentBudget: budget } : {}),
   });
   const host = h('div');
   host.appendChild(view.element);
   return { session, view, chipNodes: () => host.querySelectorAll('.chip') };
 }
+
+describe('цена контекста видна до отправки', () => {
+  it('у каждого чипа есть цена, и полоса подводит итог', () => {
+    const { view, chipNodes } = harness('const x = 1;\n'.repeat(200), '', () => ({
+      limit: 100_000,
+      overhead: 1_000,
+      reserve: 1_000,
+    }));
+
+    view.attachFrom('file');
+
+    // Цена не только в подсказке (её надо навести), но и в самом чипе.
+    expect(chipNodes()[0]!.textContent).toContain('т.');
+    expect(view.element.textContent).toContain('Контекст:');
+    expect(view.element.textContent).toContain('свободно');
+  });
+
+  it('не влезает — полоса говорит, сколько именно не уйдёт', () => {
+    // Окно крошечное: приложенный файл не помещается целиком.
+    const { view } = harness('const x = 1;\n'.repeat(400), '', () => ({
+      limit: 400,
+      overhead: 100,
+      reserve: 100,
+    }));
+
+    view.attachFrom('file');
+
+    const line = view.element.querySelector('.chip-budget')!;
+    expect(line.classList.contains('is-over')).toBe(true);
+    expect(line.textContent).toContain('не влезет');
+  });
+
+  it('бюджета нет — вес всё равно есть, обрезку не выдумываем', () => {
+    const { view } = harness('const x = 1;\n'.repeat(50));
+
+    view.attachFrom('file');
+
+    const line = view.element.querySelector('.chip-budget')!;
+    expect(line.textContent).toContain('Контекст:');
+    expect(line.textContent).not.toContain('свободно');
+    expect(line.textContent).not.toContain('влезет');
+  });
+});
 
 describe('контекст `#` виден до отправки', () => {
   it('`#файл` ставит чип с именем файла', () => {

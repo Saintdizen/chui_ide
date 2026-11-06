@@ -227,6 +227,8 @@ function makeNode(tag: string): MiniNode {
     children: [] as any[],
     childNodes: [] as any[],
     handlers: {} as Record<string, ((event: unknown) => void)[]>,
+    // Владелец проставляется ниже: `classList.contains` должен видеть и классы,
+    // заданные строкой `class`.
     classList: newClassList(),
     style: newStyle(),
     value: '',
@@ -252,6 +254,7 @@ function makeNode(tag: string): MiniNode {
     parentNode: null,
     _text: '',
   };
+  node.classList.owner = node;
   defineTree(node);
   defineTreeOps(node);
   defineEvents(node);
@@ -259,9 +262,10 @@ function makeNode(tag: string): MiniNode {
   return node as MiniNode;
 }
 
-function newClassList(): any {
+function newClassList(owner?: any): any {
   return {
     classes: new Set<string>(),
+    owner,
     add(name: string) {
       this.classes.add(name);
     },
@@ -274,8 +278,15 @@ function newClassList(): any {
       else this.classes.delete(name);
       return on;
     },
+    // Класс, заданный строкой `class: 'a b'`, живёт в `className`, а не в этом
+    // наборе: настоящий `contains` видит оба. Иначе проверка класса на узле,
+    // построенном через `h()`, отвечает «нет» на класс, который в разметке есть.
     contains(name: string) {
-      return this.classes.has(name);
+      if (this.classes.has(name)) return true;
+      return String(this.owner?.className ?? '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .includes(name);
     },
   };
 }

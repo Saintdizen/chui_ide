@@ -618,6 +618,19 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     ...(deps.browserUrl ? { browserUrl: deps.browserUrl } : {}),
     composerText: () => input.value,
     session: () => active(),
+    // Бюджет вложений — тот же расчёт, что у кольца и у проверки перед отправкой
+    // (`ensureContextFits`), но с сессией без вложений: тогда `used` — это ровно
+    // всё, что уйдёт помимо них (история, инструкции, инструменты, новый вопрос).
+    attachmentBudget: () => {
+      const session = active();
+      const base = contextUsage(sessionInfoData({ ...session, attachments: [] }, input.value));
+      const full = contextUsage(sessionInfoData(session, input.value));
+      return {
+        limit: full.limit,
+        overhead: base.used,
+        reserve: answerReserve(maxOutputTokens(currentModel(), settings.ai.maxTokens), full.limit),
+      };
+    },
     focus: () => input.focus(),
   });
 
