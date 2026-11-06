@@ -3,9 +3,14 @@ import { rankCommandMatches } from '../core/palette-rank';
 import { QUICK_MODES, parseQuickPrefix, type QuickMode } from '../core/quick-prefix';
 import { rankFiles } from '../core/quick-open-rank';
 import type { RpcClient } from '../core/rpc';
+import { optionId } from '../core/list-nav';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { clear, dialogOverlay, h, svgIcon, type IconName } from './dom';
 import { focusOwner, returnFocus } from './focus-return';
+
+// Счётчик списков: имена строк в `aria-activedescendant` не должны совпадать
+// у двух одновременно открытых окон.
+let quickOpenSeq = 0;
 
 /** Место в файле — символ или совпадение по тексту. */
 export interface QuickPlace {
@@ -91,8 +96,17 @@ export function createQuickOpen(deps: {
     type: 'text',
     placeholder: 'Начните вводить имя файла…',
     spellcheck: false,
+    // Та же разметка, что в палитре команд: поле — `combobox`, список —
+    // `listbox`. Без неё читалка читала подсказку поля и молчала о том,
+    // что ниже варианты и какой из них подсвечен.
+    role: 'combobox',
+    'aria-expanded': 'true',
+    'aria-autocomplete': 'list',
+    'aria-label': 'Быстрое открытие',
   });
-  const list = h('div', { class: 'palette-list' });
+  const listId = `quick-open-list-${++quickOpenSeq}`;
+  const list = h('div', { class: 'palette-list', role: 'listbox', id: listId });
+  input.setAttribute('aria-controls', listId);
   const footer = h('div', { class: 'palette-footer' });
   const overlay = dialogOverlay(h('div', { class: 'palette' }, input, list, footer), {
     label: 'Быстрое открытие файла',
@@ -218,6 +232,9 @@ export function createQuickOpen(deps: {
    */
   function render(): void {
     clear(list);
+    // Список пересобран: строки под старыми именами больше не существуют. Текущую
+    // строку объявляем заново после отрисовки — там, где `rows` уже готовы.
+    input.removeAttribute('aria-activedescendant');
     const parsed = parseQuickPrefix(input.value);
     mode = parsed.mode;
     renderFooter();
@@ -243,6 +260,7 @@ export function createQuickOpen(deps: {
         return;
       }
       rows.forEach(draw);
+      announceCursor();
       return;
     }
 
@@ -261,6 +279,18 @@ export function createQuickOpen(deps: {
     );
   }
 
+  /**
+   * Объявить, какая строка текущая.
+   *
+   * Зовётся ПОСЛЕ отрисовки: до неё строк с такими именами ещё нет, и ссылка
+   * вела бы в пустоту. Строк нет — признак снимается: поле не должно
+   * утверждать, что указывает на несуществующий вариант.
+   */
+  function announceCursor(): void {
+    if (rows.length === 0) input.removeAttribute('aria-activedescendant');
+    else input.setAttribute('aria-activedescendant', optionId(listId, cursor));
+  }
+
   function draw(row: Row, index: number): void {
     if (row.kind === 'file') {
       const slash = row.path.lastIndexOf('/');
@@ -269,7 +299,13 @@ export function createQuickOpen(deps: {
       bind(
         h(
           'button',
-          { class: `palette-item${index === cursor ? ' is-active' : ''}`, type: 'button' },
+          {
+            class: `palette-item${index === cursor ? ' is-active' : ''}`,
+            type: 'button',
+            id: optionId(listId, index),
+            role: 'option',
+            'aria-selected': index === cursor ? 'true' : 'false',
+          },
           svgIcon('file', 13),
           h('span', { class: 'palette-item-title' }, name),
           dir ? h('span', { class: 'palette-item-category' }, dir) : null,
@@ -286,7 +322,14 @@ export function createQuickOpen(deps: {
           {
             class: `palette-item${index === cursor ? ' is-active' : ''}${row.enabled ? '' : ' is-disabled'}`,
             type: 'button',
-            disabled: !row.enabled,
+            id: optionId(listId, index),
+            role: 'option',
+            'aria-selected': index === cursor ? 'true' : 'false',
+            // Недоступная команда не `disabled`: такую строку читалка
+            // пропускает молча, и человек не узнаёт, что команда здесь есть,
+            // но недоступна. `aria-disabled` оставляет её в списке и называет
+            // состояние.
+            'aria-disabled': row.enabled ? undefined : 'true',
           },
           h('span', { class: 'palette-item-title' }, ...highlight(row.title, row.positions)),
           h('span', { class: 'palette-item-category' }, row.category),
@@ -299,7 +342,13 @@ export function createQuickOpen(deps: {
     bind(
       h(
         'button',
-        { class: `palette-item${index === cursor ? ' is-active' : ''}`, type: 'button' },
+        {
+          class: `palette-item${index === cursor ? ' is-active' : ''}`,
+          type: 'button',
+          id: optionId(listId, index),
+          role: 'option',
+          'aria-selected': index === cursor ? 'true' : 'false',
+        },
         svgIcon(row.icon, 13),
         h('span', { class: 'palette-item-title' }, row.place.label),
         row.place.detail ? h('span', { class: 'palette-item-category' }, row.place.detail) : null,
@@ -330,6 +379,7 @@ export function createQuickOpen(deps: {
       return;
     }
     rows.forEach(draw);
+    announceCursor();
   }
 
   /** Название с подсветкой совпавших букв: `свн` → «Свернуть всё». */
@@ -391,6 +441,7 @@ export function createQuickOpen(deps: {
             return;
           }
           rows.forEach(draw);
+          announceCursor();
         })
         .catch((error: unknown) => {
           if (current !== ticket) return;

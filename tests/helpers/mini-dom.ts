@@ -114,6 +114,11 @@ function defineEvents(node: any): void {
 function defineLookup(node: any): void {
   node.setAttribute = (key: string, value: string) => {
     node.attrs[key] = String(value);
+    // В настоящем DOM атрибут `id` отражается в свойстве: `el.id` и
+    // `el.getAttribute('id')` — одно и то же. Без этого `h(..., { id })`
+    // клал имя в `attrs`, а `.id` оставался пустым — и ссылки вида
+    // `aria-controls`/`activedescendant` не находили адресата.
+    if (key === 'id') node.id = String(value);
   };
   node.removeAttribute = (key: string) => {
     delete node.attrs[key];

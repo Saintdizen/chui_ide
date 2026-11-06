@@ -1,7 +1,11 @@
 import type { CommandDescriptor, CommandRegistry } from '../core/commands';
 import { groupCommands, rankCommandMatches, type RankedCommand } from '../core/palette-rank';
+import { listMove, optionId } from '../core/list-nav';
 import { clear, dialogOverlay, h } from './dom';
 import { focusOwner, returnFocus } from './focus-return';
+
+/** Счётчик палитр на модуль: два окна в одном документе не должны делиться именами строк. */
+let paletteSeq = 0;
 
 /**
  * Что делает клик по сочетанию (п.1).
@@ -83,8 +87,20 @@ export function createPalette(deps: {
     type: 'text',
     placeholder: 'Введите команду…',
     spellcheck: false,
+    // Поле запроса — часть списка, а не отдельный поиск: `combobox` с
+    // `aria-controls` на список. Без этого читалка называла «Введите команду…»
+    // и молчала о том, что звучащее дальше — варианты.
+    role: 'combobox',
+    'aria-expanded': 'true',
+    'aria-autocomplete': 'list',
+    'aria-label': 'Команда',
   });
-  const list = h('div', { class: 'palette-list' });
+  // Идентификатор списка нужен ссылкам `aria-controls`/`activedescendant`.
+  // Счётчик на модуль, а не на экземпляр: палитра одна, но порядок в тестах
+  // не должен зависеть от соседей в том же документе.
+  const listId = `palette-list-${++paletteSeq}`;
+  const list = h('div', { class: 'palette-list', role: 'listbox', id: listId });
+  input.setAttribute('aria-controls', listId);
   const overlay = dialogOverlay(h('div', { class: 'palette' }, input, list), {
     label: 'Палитра команд',
   });
@@ -168,6 +184,15 @@ export function createPalette(deps: {
         {
           class: `palette-item${index === cursor ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`,
           type: 'button',
+          // `option` + `aria-selected`: текущий вариант назван, ЕСЛИ у списка
+          // есть `activedescendant`. Он ставится ниже, после отрисовки.
+          id: optionId(listId, index),
+          role: 'option',
+          'aria-selected': index === cursor ? 'true' : 'false',
+          // Недоступная команда не `disabled`: `disabled` на `option` читалка
+          // пропускает МОЛЧА, и человек не узнает ни что команда есть, ни
+          // почему не выбирается. `aria-disabled` её сохраняет в списке.
+          'aria-disabled': disabled ? 'true' : undefined,
           disabled,
         },
         // Подсветка — ответ на «почему эта команда тут»: без неё нечёткое
@@ -215,6 +240,13 @@ export function createPalette(deps: {
       // читается как «такой команды нет», хотя их нет ВООБЩЕ.
       list.appendChild(h('div', { class: 'palette-empty' }, paletteEmptyReason(visible.length, query)));
     }
+
+    // Текущая строка называется идентификатором, а не «фокусом»: фокус остаётся
+    // в поле запроса, иначе печатать было бы некуда. Это и есть APG-разметка
+    // `combobox` + `listbox`: `activedescendant` — единственный способ сообщить
+    // читалке, какой из вариантов сейчас подсвечен.
+    if (matches.length > 0) input.setAttribute('aria-activedescendant', optionId(listId, cursor));
+    else input.removeAttribute('aria-activedescendant');
   };
 
   input.addEventListener('input', () => {
@@ -223,21 +255,22 @@ export function createPalette(deps: {
   });
 
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      cursor = Math.min(cursor + 1, matches.length - 1);
-      render();
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      cursor = Math.max(cursor - 1, 0);
-      render();
-    } else if (event.key === 'Enter') {
+    if (event.key === 'Enter') {
       event.preventDefault();
       const picked = matches[cursor];
       if (picked) run(picked.descriptor);
     } else if (event.key === 'Escape') {
       event.preventDefault();
       close();
+    } else {
+      // Стрелки, Home/End и страницы — по тому же правилу, что у остальных
+      // списков (`core/list-nav`). Подсветка по краям обёрнута: «уперся в
+      // край» читается как поломка, а не как конец списка.
+      const move = listMove(event.key, cursor, matches.length);
+      if (move === null || move.kind !== 'to') return;
+      event.preventDefault();
+      cursor = move.index;
+      render();
     }
   });
 

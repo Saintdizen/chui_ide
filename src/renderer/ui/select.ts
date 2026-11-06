@@ -1,4 +1,5 @@
 import { clear, h, svgIcon, type IconName } from './dom';
+import { listMove, optionId, typeaheadIndex } from '../core/list-nav';
 
 export interface SelectOption {
   value: string;
@@ -23,6 +24,10 @@ export interface SelectView {
 
 /** Открытый список один: открытие нового закрывает предыдущий. */
 let closeOpen: (() => void) | null = null;
+
+// Счётчик списков: строки ссылаются на свой список в `aria-activedescendant`,
+// и идентификаторы не должны сталкиваться между разными выпадающими списками.
+let selectSeq = 0;
 
 /**
  * Выпадающий список вместо системного `<select>`.
@@ -49,6 +54,7 @@ export function createSelect(
   } = {},
 ): SelectView {
   /** Значок текущего значения: свой у каждой опции, поэтому живёт отдельным слотом. */
+  const labels = (): string[] => items.map((item) => item.label);
   const valueIcon = h('span', { class: 'select-icon', hidden: true });
   const valueLabel = h('span', { class: 'select-value is-empty' }, options.placeholder ?? '');
   const element = h(
@@ -133,7 +139,11 @@ export function createSelect(
     const nodes = [...popup.querySelectorAll<HTMLElement>('.select-item')];
     nodes.forEach((node, index) => {
       node.classList.toggle('is-cursor', index === cursor);
+      node.setAttribute('aria-selected', index === cursor ? 'true' : 'false');
     });
+    // Фокус остаётся на списке, а текущая строка называется по имени. Без этого
+    // читалка не знает, какая строка подсвечена: `is-cursor` — это цвет.
+    popup.setAttribute('aria-activedescendant', optionId(popup.id, cursor));
     nodes[cursor]?.scrollIntoView({ block: 'nearest' });
   };
 
@@ -165,8 +175,8 @@ export function createSelect(
     typedTimer = window.setTimeout(() => {
       typed = '';
     }, 600);
-    const index = items.findIndex((item) => item.label.toLowerCase().startsWith(typed));
-    if (index >= 0) setCursor(index);
+    const index = typeaheadIndex(labels(), typed, cursor);
+    if (index !== null) setCursor(index);
   };
 
   const open = (): void => {
@@ -176,6 +186,9 @@ export function createSelect(
 
     popup = h('div', {
       class: 'select-popup',
+      // Имя нужно, чтобы строки могли ссылаться на него в `aria-activedescendant`:
+      // их идентификаторы строятся от идентификатора списка.
+      id: `select-${++selectSeq}`,
       role: 'listbox',
       tabindex: '-1',
       style: { minWidth: `${Math.max(element.offsetWidth, 160)}px` },
@@ -189,6 +202,7 @@ export function createSelect(
           {
             class: `select-item${item.value === current ? ' is-selected' : ''}`,
             type: 'button',
+            id: optionId(popup!.id, index),
             role: 'option',
             'aria-selected': item.value === current ? 'true' : 'false',
             title: item.label,
@@ -210,16 +224,19 @@ export function createSelect(
 
     popup.addEventListener('keydown', (event) => {
       const key = event.key;
-      if (key === 'ArrowDown') setCursor(cursor + 1);
-      else if (key === 'ArrowUp') setCursor(cursor - 1);
-      else if (key === 'Home') setCursor(0);
-      else if (key === 'End') setCursor(items.length - 1);
-      else if (key === 'Enter' || key === ' ') pick(items[cursor]);
+      if (key === 'Enter' || key === ' ') pick(items[cursor]);
       else if (key === 'Escape' || key === 'Tab') {
         close();
         element.focus();
-      } else if (key.length === 1) search(key);
-      else return;
+      } else {
+        // Стрелки, Home/End, страницы и буквы — по общему правилу списков.
+        // Раньше здесь были только стрелки и Home/End, и у соседних списков
+        // (палитра, быстрое открытие) — вообще ничего.
+        const move = listMove(key, cursor, items.length);
+        if (move === null) return;
+        if (move.kind === 'to') setCursor(move.index);
+        else search(move.letter);
+      }
       event.preventDefault();
     });
 
