@@ -8,6 +8,7 @@ import {
   normalizeCommand,
 } from '../../shared/agent-grants';
 import { commandConsequence, editsConsequence, type DangerLevel } from '../../shared/step-consequence';
+import { firstChangedLine } from '../core/text-diff';
 import { fileWord } from './chat-text';
 import type { ChatSession } from './chat-session';
 import { h, svgIcon, type IconName } from './dom';
@@ -32,9 +33,19 @@ const MAX_REVIEW_LINES = 20;
 export interface EditPreviewFile {
   path: string;
   error?: string;
-  hunks: Array<{ label: string; removed: string[]; added: string[] }>;
+  hunks: Array<{
+    label: string;
+    removed: string[];
+    added: string[];
+    /** Первая строка НОВОЙ версии в этом куске и её колонка — куда встать курсором. */
+    line: number;
+    column: number;
+  }>;
   /** Сколько правок не поместилось в предпросмотр. */
   extra?: number;
+  /** Куда открыть файл: самое первое изменение. Нет правок — нет и места. */
+  line?: number;
+  column?: number;
 }
 
 export interface ApprovalHost {
@@ -66,6 +77,12 @@ export interface ApprovalHost {
    * самого файла — карточке незачем знать про пути больше, чем она показывает.
    */
   rememberEdit?(scope: EditGrantScope, path: string): void;
+  /**
+   * Открыть файл ровно на месте правки. Обычное открытие файла — дело того, кто
+   * уже умеет (`openFile` + `revealAt` в панели): карточке незачем знать про
+   * вкладки. `line` / `column` — уже в координатах НОВОЙ версии файла.
+   */
+  revealEdit?(path: string, position: { line: number; column: number }): Promise<void>;
 }
 
 /**
@@ -81,14 +98,25 @@ export function previewFile(file: FileEdit, text: string | null): EditPreviewFil
     // Пустой диапазон (начало и конец совпадают) — это вставка: правка ничего не
     // удаляет, и показывать строку как удалённую было бы враньём.
     const insertion = edit.startLine === edit.endLine && edit.startColumn === edit.endColumn;
+    const added = edit.newText.length === 0 ? [] : edit.newText.replace(/\n$/, '').split('\n');
+    const removed = insertion ? [] : lines.slice(edit.startLine - 1, edit.endLine);
     return {
       label: edit.startLine === edit.endLine ? `строка ${edit.startLine}` : `строки ${edit.startLine}–${edit.endLine}`,
-      removed: insertion ? [] : lines.slice(edit.startLine - 1, edit.endLine).slice(0, MAX_REVIEW_LINES),
-      added: edit.newText.length === 0 ? [] : edit.newText.replace(/\n$/, '').split('\n').slice(0, MAX_REVIEW_LINES),
+      removed: removed.slice(0, MAX_REVIEW_LINES),
+      added: added.slice(0, MAX_REVIEW_LINES),
+      // Куда встать курсором: первой изменённой строке новой версии.
+      line: firstChangedLine(removed, added) || edit.startLine,
+      column: edit.startColumn,
     };
   });
 
-  return { path: file.path, hunks, extra: file.edits.length - hunks.length };
+  const first = hunks[0];
+  return {
+    path: file.path,
+    hunks,
+    extra: file.edits.length - hunks.length,
+    ...(first ? { line: first.line, column: first.column } : {}),
+  };
 }
 
 export interface EditReview {
@@ -129,14 +157,29 @@ export function createEditReview(host: ApprovalHost): EditReview {
       box.checked = true;
       checks.push(box);
 
-      const section = h(
-        'div',
-        { class: 'review-file' },
-        h('label', { class: 'review-file-head' }, box, h('span', { class: 'review-path' }, file.path)),
-      );
+      // Путь — кнопка, а не текст: читая дифф, хочется увидеть то же место в живом
+      // файле, а не искать его глазами по всему документу.
+      const pathLabel = host.revealEdit
+        ? h('button', { class: 'btn-link review-path review-path-open', type: 'button' }, file.path)
+        : h('span', { class: 'review-path' }, file.path);
+      if (host.revealEdit && file.line !== undefined) {
+        const reveal = host.revealEdit;
+        const line = file.line;
+        const column = file.column ?? 1;
+        pathLabel.addEventListener('click', () => void reveal(file.path, { line, column }));
+        pathLabel.title = `Открыть на строке ${line}`;
+      }
+      const section = h('div', { class: 'review-file' }, h('label', { class: 'review-file-head' }, box, pathLabel));
       if (file.error) section.appendChild(h('div', { class: 'review-error' }, file.error));
       for (const hunk of file.hunks) {
-        const group = h('div', { class: 'review-hunk' }, h('div', { class: 'review-range' }, hunk.label));
+        const range = h('button', { class: 'btn-link review-range review-range-open', type: 'button' }, hunk.label);
+        if (host.revealEdit) {
+          const reveal = host.revealEdit;
+          const line = hunk.line;
+          const column = hunk.column;
+          range.addEventListener('click', () => void reveal(file.path, { line, column }));
+        }
+        const group = h('div', { class: 'review-hunk' }, range);
         for (const line of hunk.removed) group.appendChild(h('div', { class: 'review-del' }, `- ${line}`));
         for (const line of hunk.added) group.appendChild(h('div', { class: 'review-add' }, `+ ${line}`));
         section.appendChild(group);

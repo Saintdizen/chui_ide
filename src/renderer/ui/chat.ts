@@ -614,6 +614,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     editors: deps.editors,
     workspace: deps.workspace,
     ...(deps.git ? { git: deps.git } : {}),
+    ...(deps.openFile ? { openFile: deps.openFile } : {}),
     // Места проекта — тот же поиск по смыслу, что у палитры: `#codebase` спрашивает его
     // по тому, что уже набрано в поле ввода.
     ...(deps.codebase ? { codebase: deps.codebase } : {}),
@@ -3147,7 +3148,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       pendingApprovals.add(cancel);
       return () => pendingApprovals.delete(cancel);
     },
+    // Клик по файлу в карточке ставит на место правки: первое изменение и есть то,
+    // что человек только что утвердил или собирается утвердить.
+    ...(deps.revealAt ? { revealAt: deps.revealAt } : {}),
   };
+
   const editReview = createEditReview(approvals);
   const commandApproval = createCommandApproval(approvals);
   const askPrompt = createAskPrompt(approvals);

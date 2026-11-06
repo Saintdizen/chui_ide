@@ -88,6 +88,12 @@ export interface AttachmentsDeps {
   attachmentBudget?(): { limit: number; overhead: number; reserve: number } | null;
   /** Вернуть фокус в поле ввода после прикладывания контекста. */
   focus(): void;
+  /**
+   * Открыть файл вложения — чтобы «посмотреть, что именно приложил» не значило
+   * «найти его в дереве заново». Имя файла в чипе кликабельно только у тех видов,
+   * где текст пришёл из файла и мог с тех пор измениться.
+   */
+  openFile?(path: string): Promise<void>;
 }
 
 /** Виды контекста, у которых есть пункт `#` (без изображений и буфера). */
@@ -163,6 +169,9 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     attachments.forEach((item, index) => {
       const image = item.kind === 'image' && item.dataUrl ? item : null;
       const isNew = sameSession && !shownLabels.has(item.label);
+      // У файла и выделения в заголовке настоящий путь: по нему чип становится
+      // ссылкой в редактор. Подпись для этого не годится — она урезана.
+      const filePath = item.kind === 'file' || item.kind === 'selection' ? item.title : null;
       nextLabels.add(item.label);
       const chip = h(
         'span',
@@ -179,7 +188,18 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
         image
           ? h('img', { class: 'chip-thumb', src: image.dataUrl!, alt: item.label })
           : svgIcon(CHIP_ICON[item.kind] ?? 'file', 12),
-        h('span', { class: 'chip-name' }, item.label),
+        h(
+          filePath && deps.openFile ? 'button' : 'span',
+          filePath && deps.openFile
+            ? {
+                class: 'chip-name is-link',
+                type: 'button',
+                title: 'Открыть файл и подтянуть его свежим',
+                onclick: () => void openAttached(filePath, item),
+              }
+            : { class: 'chip-name' },
+          item.label,
+        ),
         image ? h('span', { class: 'chip-hint' }, formatBytes(item.bytes ?? 0)) : null,
         // Цена — на каждой вложенности: по ней видно, какой файл тянет контекст,
         // ещё до всякой отправки.
@@ -235,7 +255,11 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     // Сколько места остаётся вложениям: окно минус уже занятое минус ответ.
     const room = Math.max(0, budget.limit - budget.overhead - budget.reserve);
     if (total <= room) {
-      return h('span', { class: 'chip-budget' }, `Контекст: ${formatTokens(total)} · свободно ${formatTokens(room - total)}`);
+      return h(
+        'span',
+        { class: 'chip-budget' },
+        `Контекст: ${formatTokens(total)} · свободно ${formatTokens(room - total)}`,
+      );
     }
     // Не влезает — говорим прямо, сколько уйдёт и как это выглядит снаружи: файлы
     // режутся с хвоста набора, поэтому под обрез попадает приложенное позже.
@@ -582,6 +606,28 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
       showToast(errorText(error), 'error');
       return null;
     }
+  }
+
+  /**
+   * Открыть файл, из которого приложен текст, — и подтянуть его обратно.
+   *
+   * Второе важнее первого: вложение — снимок `text` на момент прикладывания,
+   * и человек, проверив файл глазами, ждёт, что модель получит то, что он видит.
+   * Перечитываем только файл целиком (`kind === 'file'`): у выделения и у
+   * сравнения границы задал человек, и «обновить» их нечем.
+   */
+  async function openAttached(target: string, item: ChatAttachment): Promise<void> {
+    if (!deps.openFile) return;
+    await deps.openFile(target);
+    // Могли снять чип, пока файл открывался: без этого вложение воскресло бы
+    // в наборе, которого человек уже не видит.
+    const current = deps.session().attachments;
+    if (!current.some((kept) => kept.label === item.label)) return;
+    if (item.kind !== 'file') return;
+    const fresh = await attachmentFromPath(target, 'file').catch(() => null);
+    if (!fresh || fresh.text === item.text) return;
+    deps.session().attachments = current.map((kept) => (kept.label === item.label ? fresh : kept));
+    render();
   }
 
   /** Вложение из пути: тип определяем через stat, чтобы папка и файл шли разными путями. */
