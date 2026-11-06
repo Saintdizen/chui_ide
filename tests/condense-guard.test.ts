@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { ApplyEditsHostResult } from '../src/shared/api';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
-import { condenseAppliedCalls, condenseCallArguments, isCondenseMarker } from '../src/shared/context-fit';
+import { condenseAppliedCalls, condenseCallArguments, findCondenseMarker, isCondenseMarker } from '../src/shared/context-fit';
 
 const MARKER = '[применено: 57 стр. — текст в файле]';
 // Собираем в рантайме: в исходнике такая строка выглядит как порча, и статический
@@ -18,7 +18,47 @@ describe('пометка сжатия в аргументе: отказ вмес
     expect(isCondenseMarker(`  ${MARKER}\n`)).toBe(true);
     // Обычный текст, даже упоминающий сжатие, — не пометка.
     expect(isCondenseMarker('export const a = 1;')).toBe(false);
-    expect(isCondenseMarker(`${MARKER}\nещё строка`)).toBe(false);
+    // Пометка с хвостом — тот же обрубок: сторож её узнаёт, чтобы отказать, а не
+    // пропустить. Отличать её от чистого текста обязательно — иначе в файл ляжет
+    // склейка «пометка + правка», файл изменится, и правку засчитают применённой.
+    expect(isCondenseMarker(`${MARKER}\nещё строка`)).toBe(true);
+    expect(isCondenseMarker('строка, где [применено: 3 стр. — текст в файле] упомянута в середине')).toBe(false);
+  });
+
+  it('находит, в каком поле правки сидит пометка', () => {
+    // Чистая пометка: в файл не попадёт ничего, кроме неё.
+    expect(findCondenseMarker({ contents: MARKER })).toEqual({ path: 'contents', only: true });
+    // Вложенная правка `edit`: путь называет место, хвост после пометки — правка.
+    expect(
+      findCondenseMarker({ edits: [{ path: 'src/a.ts', edits: [{ oldText: 'a', newText: `${MARKER}\nb` }] }] }),
+    ).toEqual({ path: 'edits[0].edits[0].newText', only: false });
+    expect(findCondenseMarker({ edits: [{ path: 'src/a.ts', edits: [{ oldText: 'a', newText: 'b' }] }] })).toBeNull();
+  });
+
+  it('edit: пометка с хвостом не доходит до файла', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'chui-marker-tail-'));
+    const ws = new WorkspaceService(() => undefined);
+    await ws.open(dir);
+    try {
+      const ctx = { workspace: ws, signal: new AbortController().signal } as ToolContext;
+      const target = join(dir, 'probe.ts');
+      writeFileSync(target, 'export const a = 1;\n');
+      const r = await runTool(
+        ctx,
+        'edit',
+        JSON.stringify({
+          path: target,
+          edits: [{ oldText: 'export const a = 1;', newText: `${MARKER}\nexport const a = 2;` }],
+        }),
+      );
+      expect(r.ok).toBe(false);
+      expect(r.summary).toContain('пометкой сжатия');
+      // Главное: файл не тронут — ни пометки, ни склейки.
+      expect(readFileSync(target, 'utf8')).toBe('export const a = 1;\n');
+    } finally {
+      ws.dispose();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('create_file: файл не создаётся, ответ объясняет причину', async () => {

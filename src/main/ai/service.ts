@@ -113,6 +113,7 @@ import { repairToolPairs } from '../../shared/chat-sanitize';
 import { ProjectMemory } from './project-memory';
 import { RunControls, type RunEntry } from './run-controls';
 import { WorkspaceContext } from './workspace-context';
+import { createSkillLibrary, type SkillLibrary } from './skills';
 import type { TelemetryStore } from './telemetry';
 import { createJobRegistry, type JobRegistry } from './jobs';
 import type { SandboxService } from '../sandbox/sandbox';
@@ -375,13 +376,19 @@ export class AiService {
    */
   private readonly contextBlocks: WorkspaceContext;
 
+  /** Навыки проекта: каталог — в промпт, тело — инструментом `skill`. */
+  private readonly skills: SkillLibrary;
+
   constructor(
     private readonly settings: SettingsStore,
     private readonly workspace: WorkspaceService,
     memory?: ProjectMemory,
   ) {
     this.memory = memory ?? new ProjectMemory();
-    this.contextBlocks = new WorkspaceContext(this.workspace, this.memory);
+    // Навыки читаются с диска при каждом обращении: файл могли поправить только что,
+    // а каталог в промпте должен совпадать с тем, что лежит в `.chui/skills`.
+    this.skills = createSkillLibrary(() => this.workspace.rootPath());
+    this.contextBlocks = new WorkspaceContext(this.workspace, this.memory, this.skills);
     // Поправки оценки токенов переживают перезапуск: без них первые шаги снова
     // промахиваются мимо окна, пока калибровка не наберёт замеры заново.
     this.calibration.load(readCalibration(this.settings.file()));
@@ -877,6 +884,9 @@ export class AiService {
       forget: (query, scope) => this.memory.forget(this.workspace.rootPath(), query, scope),
       notes: (scope) => this.memory.list(this.workspace.rootPath(), scope),
     };
+    // Навыки: каталог уже в промпте, а инструмент отдаёт тело по имени. Без этого
+    // модель видела бы список сценариев и не могла ни один из них открыть.
+    toolContext.skills = this.skills;
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
     // Хуки проекта читаются на каждый прогон: человек мог включить их или дописать
     // скрипт посреди работы, и следующее действие должно это увидеть.

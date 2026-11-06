@@ -1,7 +1,7 @@
 import type { ChatMessage } from '../../shared/api';
 import { IMAGE_TOKENS, estimateTextTokens } from '../../shared/context-fit';
-import { AGED_KIND, spillText } from './spill';
 import { STALE_RESULT_PREFIX } from '../../shared/read-coverage';
+import { AGED_KIND, spillText } from './spill';
 
 /**
  * Свёртка старых результатов инструментов — вместо выбрасывания целых ходов.
@@ -164,6 +164,13 @@ function candidates(messages: ChatMessage[], lastIndex: number, minChars: number
       if (message.role !== 'tool') continue;
       const content = message.content;
       if (typeof content !== 'string' || content.length < minChars) continue;
+    }
+    // Свёрнутое уже не свёртывают. Пометка с подсказкой про `read_image` бывает
+    // длиннее `minChars` — тогда её выбирали снова и снова: каждый шаг один
+    // лишний файл, и в нём ровно то же «свёрнуто». Сравнение по началу, потому что
+    // у пометки бывает хвост с подсказкой.
+    if (typeof message.content === 'string' && message.content.trimStart().startsWith(STALE_RESULT_PREFIX)) {
+      continue;
     }
     picked.push(index);
   }

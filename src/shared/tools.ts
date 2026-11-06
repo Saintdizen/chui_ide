@@ -68,6 +68,7 @@ export type AgentToolName =
   | 'web'
   | 'file'
   | 'mind'
+  | 'skill'
   | 'browser'
   | 'show';
 
@@ -502,6 +503,22 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       // `search` + `edit`. Разбор и реализация у обоих живы: старые беседы зовут их
       // по имени, а проверка `enum` для этих двух действий пропускает (runTool).
       required: ['action'],
+    },
+  },
+  {
+    name: 'skill',
+    side: 'main',
+    description:
+      'Project skill: a ready-made order of work from .chui/skills. The prompt lists names and one line each; ' +
+      'the body comes only when called. Without name — the full catalogue.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Skill name from the catalogue in the prompt. Omit to list every skill.',
+        },
+      },
     },
   },
   {

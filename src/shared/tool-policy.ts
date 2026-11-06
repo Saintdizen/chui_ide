@@ -107,6 +107,10 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   // План и вопрос в плане законны, а `remember`/`forget` ПИШУТ память — их
   // держит `writeActions`, а не имя.
   mind: { plan: true, alwaysAvailable: true, writeActions: ['remember', 'forget'] },
+  // Навык — файл проекта на чтение: в плане его смотреть можно, а писать нечем.
+  // alwaysAvailable: каталог виден в промпте при любом наборе, и читать его надо
+  // тем же набором, иначе список в промпте ссылается на недоступный инструмент.
+  skill: { readOnly: true, plan: true, alwaysAvailable: true },
 
   /* ── агенты в фоне: план они не меняют, они читают проект ───────────── */
   // Одно имя на все пять действий: `spawn` и три разговора с живым агентом

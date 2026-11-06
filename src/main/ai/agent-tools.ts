@@ -10,7 +10,13 @@
 import { confirmFile, coveredRequest, uncoverFiles } from '../../shared/read-coverage';
 import { isMcpToolName } from '../../shared/mcp';
 import { parseToolArguments } from '../../shared/tools';
-import { CHARS_PER_TOKEN, CHARS_PER_TOKEN_WIDE, estimateTextTokens, isCondenseMarker } from '../../shared/context-fit';
+import {
+  CHARS_PER_TOKEN,
+  CHARS_PER_TOKEN_WIDE,
+  estimateTextTokens,
+  findCondenseMarker,
+  isCondenseMarker,
+} from '../../shared/context-fit';
 import { fitOutput } from '../../shared/output-budget';
 import {
   argumentsShape,
@@ -23,7 +29,7 @@ import {
 import { canonicalCall } from '../../shared/tool-aliases';
 import type { AgentHookNote } from './agent-hooks';
 import { MAX_OUTPUT_CHARS, MAX_OUTPUT_TOKENS, MIN_OUTPUT_CHARS, toolOutputChars } from './output-budget';
-import { spill } from './output-trim';
+import { clipTail, spill } from './output-trim';
 import { spillHint } from './spill';
 import { terminalAction } from './agent-terminal';
 import { editAction, fileAction } from './agent-edit';
@@ -193,6 +199,22 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     };
   }
 
+  // Пометка не одна, а с хвостом: `[свёрнуто: …]\nнастоящий текст`. Такую правку
+  // сторож выше пропускает — она не «целиком пометка», — и в файл ложится склейка.
+  // Файл при этом меняется, сравнение «до/после» радуется, и агент слышит «применено».
+  const mangled = findCondenseMarker(parsed.value);
+  if (mangled && !mangled.only) {
+    return {
+      ok: false,
+      summary:
+        `Аргумент «${mangled.path}» начинается пометкой сжатия, а за ней текст — так в файл нельзя. ` +
+        'Строка пометки остаток истории, а не твоя правка: повтори вызов с одним настоящим содержимым.',
+      detail:
+        'Пометка вроде `[применено: N стр. — текст в файле]` — это место, где раньше было тело правки. ' +
+        'Она не текст файла: склеенная с правкой строка оставит в файле мусор. Перечитай файл и пришли правку заново.',
+    };
+  }
+
   const before = ctx.stepBudget
     ? {
         left: ctx.stepBudget.left,
@@ -299,6 +321,41 @@ function staleCondensedBody(args: Record<string, unknown>): string | null {
     return null;
   };
   return walk(args, '', 0);
+}
+
+/**
+ * `skill` — тело навыка по имени. Каталог модель уже видела в промпте: здесь она
+ * платит только за тот сценарий, который решила взять. Без `name` — каталог
+ * целиком, чтобы не гадать по памяти, что вообще есть.
+ */
+async function skillRead(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.skills) return { ok: false, summary: 'Навыки не настроены' };
+  const name = typeof args.name === 'string' ? args.name.trim() : '';
+  if (!name) {
+    const all = await ctx.skills.list();
+    if (all.length === 0) return { ok: true, summary: 'Навыков нет' };
+    return {
+      ok: true,
+      summary: `Навыков: ${all.length} — назови name, чтобы прочитать тело`,
+      detail: all.map((entry) => `${entry.name} — ${entry.description}`).join('\n'),
+    };
+  }
+  const found = await ctx.skills.read(name);
+  if (!found) {
+    const all = await ctx.skills.list();
+    return {
+      ok: false,
+      summary: `Навыка «${name}» нет${all.length > 0 ? `. Есть: ${all.map((e) => e.name).join(', ')}` : ''}`,
+    };
+  }
+  // Тело — по потолку, как любой другой вывод: сценарий бывает длинным, и без
+  // обрезки он один съедал бы бюджет шага.
+  const body = clipTail(ctx, 'skill', found.body);
+  return {
+    ok: true,
+    summary: `Навык «${found.entry.name}»: ${found.entry.description}`,
+    detail: body,
+  };
 }
 
 /**
@@ -447,6 +504,8 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
       case 'terminalStop':
       case 'terminalList':
         return await terminalAction(ctx, name, args);
+      case 'skill':
+        return await skillRead(ctx, args);
       default:
         return unknownTool(name);
     }

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ageToolResults } from '../src/main/ai/age-results';
+import { ageStaleResults, ageToolResults } from '../src/main/ai/age-results';
 import type { ChatMessage } from '../src/shared/api';
 
 /**
@@ -194,5 +194,31 @@ describe('порог давности', () => {
     const outcome = ageStaleResults(messages, { keepRecent: 1, spillDir: spillDir() });
     expect(outcome.aged).toBe(2);
     expect(messages[0]?.content).toContain('свёрнуто');
+  });
+});
+
+describe('свёрнутое с подсказкой не свёртывается второй раз', () => {
+  // Пометка картинки бывает длиннее minChars — раньше её выбирали снова, и каждый
+  // шаг уносил в файл ровно то же «свёрнуто».
+  const marker = ['[свёрнуто:', 'картинка — снимок экрана; вернёт read_image]'].join(' ');
+  const made: string[] = [];
+  afterEach(() => {
+    for (const dir of made.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('сообщение с пометкой пропускается', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chui-age-marker-'));
+    made.push(dir);
+    const messages = [
+      { role: 'tool' as const, content: marker.padEnd(400, ' ') },
+      { role: 'tool' as const, content: 'x'.repeat(400) },
+      { role: 'assistant' as const, content: 'дальше' },
+    ];
+    const before = messages.map((m) => m.content);
+    const out = ageStaleResults(messages, { spillDir: dir, keepRecent: 0, minChars: 100, batchSize: 1 });
+    // Свёрнуто ровно одно — не помеченное.
+    expect(out.aged).toBe(1);
+    expect(messages[0]?.content).toBe(before[0]);
+    expect(messages[1]?.content).toContain('свёрнуто');
   });
 });

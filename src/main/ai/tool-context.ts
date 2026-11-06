@@ -26,6 +26,7 @@ import type { SymbolLocation } from '../../shared/lsp-locations';
 import type { FileSymbol } from '../../shared/lsp-symbols';
 import type { McpResourceInfo, McpToolInfo } from '../../shared/mcp';
 import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memory';
+import type { SkillLibrary } from './skills';
 import type { PatchFile } from '../../shared/patch';
 import type { ReadRange } from '../../shared/read-coverage';
 import type { SessionSearchReport } from '../../shared/session-search';
@@ -373,6 +374,8 @@ export interface ToolContext {
   sessions?: SessionSearchRunner;
   /** Память проекта: нужна инструменту mind. */
   memory?: MemoryTools;
+  /** Навыки проекта: каталог — в промпте, тело — инструментом skill. */
+  skills?: SkillLibrary;
   /** Картинки для модели (`read_image`): чтение и уменьшение живут в main (`ai/read-image.ts`). */
   readImage?: ReadImageRunner;
   /** Веб-поиск: подключён только при включённой настройке. */

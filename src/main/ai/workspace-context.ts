@@ -9,6 +9,8 @@ import {
   type AppliedInstruction,
 } from '../../shared/instructions';
 import { formatMemory } from '../../shared/memory';
+import { formatSkillCatalog } from '../../shared/skills';
+import type { SkillLibrary } from './skills';
 import { formatShortMap } from '../../shared/project-map';
 import { scanProject } from '../project/scan';
 import { listProjectFiles } from '../project/scan';
@@ -46,6 +48,8 @@ export class WorkspaceContext {
   constructor(
     private readonly workspace: WorkspaceService,
     private readonly memory: ProjectMemory,
+    /** Навыки проекта: в промпт идёт только каталог, тело — инструментом `skill`. */
+    private readonly skills?: SkillLibrary,
   ) {}
 
   /**
@@ -164,6 +168,14 @@ export class WorkspaceContext {
       } catch {
         // файла нет — это нормально
       }
+    }
+    // Навыки — после правил: правила действуют всегда, а навык подгружается по
+    // надобности. Здесь только каталог (имя и строка): тело агент просит
+    // инструментом `skill`, поэтому без инструментов каталог не добавляем —
+    // прочитать навык будет нечем, и список станет обещанием без продолжения.
+    if (withMap && this.skills) {
+      const catalog = formatSkillCatalog(await this.skills.list());
+      if (catalog) parts.push(catalog);
     }
     return parts.join('\n\n');
   }

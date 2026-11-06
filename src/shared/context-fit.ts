@@ -678,9 +678,57 @@ export function condenseCallArguments(args: string, minChars: number): string {
  */
 const CONDENSE_MARKER = /^\[(?:применено|свёрнуто): \d+ стр\. — текст в файле(, не копировать)?\]$/;
 
+/**
+ * Пометка, стоящая не одна, а в начале содержимого: `contents` бывает многострочным,
+ * и склейка «пометка + хвост» — тот же обрубок, только узнавать его по `^…$` уже
+ * нельзя. Хвост после пометки — по-прежнему чужая строка, и в файл ей нельзя.
+ */
+const CONDENSE_MARKER_OPEN = /^\[(?:применено|свёрнуто): \d+ стр\. — текст в файле(?:, не копировать)?\]/;
+
 /** Аргумент — ровно пометка сжатия, а не текст, который модель написала сама. */
 export function isCondenseMarker(value: unknown): boolean {
-  return typeof value === 'string' && CONDENSE_MARKER.test(value.trim());
+  if (typeof value !== 'string') return false;
+  const text = value.trim();
+  return CONDENSE_MARKER.test(text) || CONDENSE_MARKER_OPEN.test(text);
+}
+
+/**
+ * В каком поле тела правки сидит пометка сжатия. `path` — путь до поля
+ * (`edits[0].edits[1].newText`), `only` — пометка занимает всё содержимое, а не
+ * только его начало: тогда в файл не попадёт ничего, кроме неё.
+ *
+ * Нужен там, где решают, «легла ли правка»: сравнение «до/после» по файлу этого
+ * не видит — файл не изменился, и правку засчитывают записанной, хотя вместо
+ * текста в него положили пометку.
+ */
+export function findCondenseMarker(value: unknown): { path: string; only: boolean } | null {
+  // Тела правок лежат вложенно: `edit` присылает `edits[].edits[].newText`,
+  // `file` (action create) — плоский `contents`. Глубина ограничена: схемы
+  // инструментов не глубже четырёх уровней.
+  const walk = (node: unknown, path: string, depth: number): { path: string; only: boolean } | null => {
+    if (depth > 4 || typeof node === 'string') return null;
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i += 1) {
+        const found = walk(node[i], `${path}[${i}]`, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (typeof node !== 'object' || node === null) return null;
+    for (const [key, inner] of Object.entries(node as Record<string, unknown>)) {
+      const where = path ? `${path}.${key}` : key;
+      // Полям не передают имена в кавычках, а `content` бывает вложенным в `edits`.
+      if (typeof inner === 'string' && CONDENSE_FIELDS.has(key)) {
+        if (isCondenseMarker(inner)) {
+          return { path: where, only: CONDENSE_MARKER.test(inner.trim()) };
+        }
+      }
+      const found = walk(inner, where, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(value, '', 0);
 }
 
 /**
