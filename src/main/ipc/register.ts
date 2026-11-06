@@ -33,6 +33,8 @@ export async function openProjectFolder(
 ): Promise<{ root: string; name: string }> {
   const info = await deps.workspace.open(folder);
   deps.settings.rememberProject(info.root);
+  // Открытие папки заменяет область этой одной папкой — набор корней тоже.
+  deps.settings.rememberRoots([info.root], info.root);
   openIdeWindow();
   await deps.git.refresh();
   return { root: info.root, name: info.name };

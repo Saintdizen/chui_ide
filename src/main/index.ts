@@ -14,6 +14,7 @@ import { GitService, gitTemplateDir } from './git/git';
 import { HostClient } from './ipc/host';
 import { pushToRenderers } from './ipc/push';
 import { openProjectFolder, registerIpc } from './ipc/register';
+import { restoreRoots } from '../shared/workspace-restore';
 import { LspService } from './lsp/lsp';
 import { createProjectDiagnostics, isProjectSource } from './lsp/project-diagnostics';
 import { detectLspSources } from './lsp/detect';
@@ -505,12 +506,48 @@ if (!app.requestSingleInstanceLock()) {
       }
     };
 
+    /**
+     * Поднять прошлую рабочую область целиком: все корни и активный.
+     *
+     * Раньше при старте без аргументов открывался только список проектов, и
+     * добавленные корни человек собирал заново. Возвращаем true, если хоть
+     * один корень поднялся.
+     */
+    const reopenLastWorkspace = async (store: SettingsStore): Promise<boolean> => {
+      const saved = store.get().workspace;
+      const plan = restoreRoots(saved.roots, saved.activeRoot, (root): boolean => statSync(root, { throwIfNoEntry: false })?.isDirectory() === true);
+      if (plan.roots.length === 0) return false;
+      try {
+        await openProjectFolder(deps, plan.roots[0]!);
+      } catch (error) {
+        // Корень был жив секунду назад — мог пропасть именно сейчас. Молчать
+        // нельзя, но и оставлять приложение без окна тоже: идём в список.
+        process.stderr.write(
+          `[chui] не удалось вернуть рабочую область: ${error instanceof Error ? error.message : error}\n`,
+        );
+        return false;
+      }
+      // Остальные корни добавляем по порядку; активно поднимаем последним,
+      // чтобы `open()` первого корня не перебил запомненный активный.
+      for (const root of plan.roots.slice(1)) {
+        await workspace.addRoot(root).catch(() => undefined);
+      }
+      const last = plan.activeRoot ?? plan.roots[0]!;
+      await workspace.setActiveRoot(last).catch(() => undefined);
+      await git.refresh().catch(() => undefined);
+      return true;
+    };
+
     const fromArgs = folderFromArgs(process.argv.slice(1));
     reportUnusable(fromArgs.unusable);
     const requested = pendingFolder ?? fromArgs.folder;
     pendingFolder = null;
-    if (requested) await requestOpenFolder(requested);
-    else openWelcomeWindow();
+    if (requested) {
+      await requestOpenFolder(requested);
+    } else if (!(await reopenLastWorkspace(settings))) {
+      // Возвращаться некуда (первый запуск или все папки пропали) — список проектов.
+      openWelcomeWindow();
+    }
 
     app.on('will-quit', () => {
       terminals.dispose();

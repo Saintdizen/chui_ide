@@ -74,8 +74,10 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
   // обновляем его сразу и рассылаем — UI не должен ходить за этим сам.
   router.register('workspace.open', async (params) => {
     const info = await deps.workspace.open(params.path);
-    // Открытая папка попадает в историю стартового окна.
+    // Открытая папка попадает в историю стартового окна...
     deps.settings.rememberProject(info.root);
+    // ...и в набор корней: открытие папки заменяет область одной папкой.
+    rememberRoots();
     await deps.git.refresh();
     // Другой проект — другая карта символов и чужие пометки в строке состояния.
     // Обход заново: он же снимает счёт прошлого проекта (`begin()` в project-diagnostics).
@@ -88,22 +90,39 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
   router.register('workspace.addRoot', async (params) => {
     const info = await deps.workspace.addRoot(params.path);
     deps.settings.rememberProject(info.root);
+    rememberRoots();
     await deps.git.refresh();
     deps.index?.refresh();
     return info;
   });
   router.register('workspace.removeRoot', async (params) => {
     const info = await deps.workspace.removeRoot(params.path);
+    rememberRoots();
     await deps.git.refresh();
     deps.index?.refresh();
     return info;
   });
   router.register('workspace.setActiveRoot', async (params) => {
     const info = await deps.workspace.setActiveRoot(params.path);
+    rememberRoots();
     await deps.git.refresh();
     deps.index?.refresh();
     return info;
   });
+
+  /**
+   * Запомнить рабочую область целиком после любого изменения набора.
+   *
+   * Одно место на все четыре перехода (открыть, добавить, убрать, переключить):
+   * раньше каждый звал `rememberProject` со СВОИМ корнем, и в настройки
+   * попадала только последняя папка — набор корней при перезапуске пропадал.
+   */
+  const rememberRoots = (): void => {
+    deps.settings.rememberRoots(
+      deps.workspace.rootList().map((item) => item.root),
+      deps.workspace.rootPath(),
+    );
+  };
 
   router.register('workspace.current', () => ({
     root: deps.workspace.rootPath(),

@@ -379,6 +379,10 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // История открытых папок живёт в настройках, а не в renderer: её показывает
     // стартовое окно, а оно — отдельный процесс со своим хранилищем.
     recent: [],
+    // Набора корней нет, пока человек не открыл папку.
+    roots: [],
+    // Активного нет по той же причине.
+    activeRoot: null,
     // «Избранное» по умолчанию пусто: список наполняет человек.
     favorites: [],
     // Удалённых папок нет: схему подключает человек, зная, что ssh/wsl стоит.
@@ -553,6 +557,8 @@ export class SettingsStore {
       },
       workspace: {
         recent: [...this.data.workspace.recent],
+        roots: [...this.data.workspace.roots],
+        activeRoot: this.data.workspace.activeRoot,
         favorites: [...this.data.workspace.favorites],
         remoteRoots: [...this.data.workspace.remoteRoots],
       },
@@ -585,6 +591,22 @@ export class SettingsStore {
   rememberProject(root: string): void {
     const recent = [root, ...this.data.workspace.recent.filter((item) => item !== root)].slice(0, 12);
     this.data.workspace.recent = recent;
+    this.persist();
+  }
+
+  /**
+   * Запомнить рабочую область целиком: все корни и активный.
+   *
+   * Зовётся после КАЖДОГО изменения набора — открытия, добавления, удаления и
+   * переключения активного. Раньше помнилась только последняя папка, поэтому
+   * второй корень исчезал при закрытии окна.
+   */
+  rememberRoots(roots: readonly string[], activeRoot: string | null): void {
+    const clean = roots.filter((item) => typeof item === 'string' && item.length > 0);
+    // Активный обязан быть из набора — то же правило, что при чтении с диска.
+    const active = activeRoot !== null && clean.includes(activeRoot) ? activeRoot : clean[0] ?? null;
+    this.data.workspace.roots = [...clean];
+    this.data.workspace.activeRoot = active;
     this.persist();
   }
 
@@ -1192,6 +1214,18 @@ function loadSettings(filePath: string): StoredSettings {
       recent: Array.isArray(parsed.workspace?.recent)
         ? parsed.workspace!.recent.filter((item): item is string => typeof item === 'string')
         : [],
+      // Набор корней мог быть записан старым форматом — держим только строки.
+      roots: Array.isArray(parsed.workspace?.roots)
+        ? parsed.workspace!.roots.filter((item): item is string => typeof item === 'string')
+        : [],
+      // Активный корень обязан быть из набора: иначе активным станет путь,
+      // которого в области нет, и git с поиском пойдут в никуда.
+      activeRoot:
+        typeof parsed.workspace?.activeRoot === 'string' &&
+        Array.isArray(parsed.workspace?.roots) &&
+        parsed.workspace!.roots.includes(parsed.workspace.activeRoot)
+          ? parsed.workspace.activeRoot
+          : null,
       // Избранное правили в интерфейсе или руками — тот же разбор, что у модели.
       favorites: normalizeFavorites(parsed.workspace?.favorites),
       // Удалённые папки: берём только адреса, которые сами же и разбираем.
