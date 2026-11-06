@@ -332,6 +332,27 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // «*» приходит как `event.key === '*'` и на русской раскладке тоже (там это
     // та же клавиша): сверяем по `key`, а не по коду, — так же, как остальные.
     const walkKey = event.key === '*' ? 'Star' : event.key;
+    // `Shift+↑/↓` — не ход, а выделение диапазона. Правило «от якоря до курсора» уже
+    // есть в `core/tree-selection.ts` для мыши (`clickSelection(..., 'range')`); с
+    // клавиатуры в него не было входа вовсе — `tree-walk` про модификатор не знает
+    // и знать не должен: он решает «куда ведёт клавиша», а не «как ложится
+    // выделение». Поэтому сначала двигаем курсор обычным ходом, потом тянем
+    // диапазон до него — от прежнего якоря, как при клике с `Shift`.
+    if (event.shiftKey && (walkKey === 'ArrowUp' || walkKey === 'ArrowDown')) {
+      const action = walkTree(walkRows(), selected, walkKey as WalkKey);
+      if (action && action.kind === 'move') {
+        event.preventDefault();
+        selection = clickSelection(
+          selection.anchor ? selection : { paths: [action.path], anchor: action.path },
+          walkRows().map((row) => row.path),
+          action.path,
+          'range',
+        );
+        selected = action.path;
+        paint();
+        return;
+      }
+    }
     if (WALK_KEYS.has(walkKey)) {
       const action = walkTree(walkRows(), selected, walkKey as WalkKey);
       if (action) {
