@@ -44,7 +44,7 @@ import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
 import { sortTree } from '../core/tree-sort';
 import { computeWindow } from '../core/tree-window';
 import { filterTreePaths, matchName, withNestedHosts, type NestedRowInfo } from '../core/tree-filter';
-import { movePlan } from '../core/tree-move';
+import { internalSkip, movePlan, type InternalSkip } from '../core/tree-move';
 import {
   clickSelection,
   EMPTY_SELECTION,
@@ -1336,6 +1336,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         void acceptExternal(event, entry.path, isDirectory);
         return;
       }
+      // Бросок, который ничего не сделает, обязан сказать ПОЧЕМУ. Иначе папка,
+      // брошенная в свою же подпапку, просто «не перетаскивается» — и это
+      // выглядит как поломка, а не как запрет.
+      const skip = internalSkip(moving, dropDir);
+      if (skip) {
+        deps.notify?.(skipNotice(skip.why, nameOf(skip.first)), 'error');
+        return;
+      }
       void deps.commands.execute(copyDrag(event) ? 'file.copyInto' : 'file.moveInto', moving, dropDir);
     });
     return row;
@@ -1358,6 +1366,20 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     return paths;
   };
 
+  /**
+   * Почему бросок отменён — словами, которые называют виновника.
+   *
+   * Три причины, и все три человек может встретить нарочно: папку в свою
+   * подпапку, папку вместе с тем, что внутри неё, и файл туда, где он лежит.
+   * Последняя безобидна, но и её нельзя объяснять молчанием: Ctrl+бросок в
+   * свою папку — это осознанное «сделай копию рядом», и ответ «ничего» врёт.
+   */
+  const skipNotice = (why: InternalSkip, name: string): string => {
+    if (why === 'inside-itself') return `«${name}» нельзя положить в свою же папку`;
+    if (why === 'under-selected') return `«${name}» уже едет вместе с папкой, которая его содержит`;
+    return `«${name}» уже лежит в этой папке`;
+  };
+
   /** Внешний перенос в папку: проверяем, копируем или переносим, говорим, что мешает. */
   const acceptExternal = async (event: DragEvent, path: string, isDirectory: boolean): Promise<void> => {
     const sources = externalPaths(event);
@@ -1374,7 +1396,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const skip = skippedSource(source, dir);
       if (skip === 'inside-itself') {
         // Молчать нельзя: человек увидел бы, что перетаскивание «не сработало».
-        deps.notify?.(`«${nameOf(source)}» нельзя положить в свою папку`, 'error');
+        // Текст берём из общего места — иначе внешний бросок и внутренний
+        // объясняют одну и ту же беду разными словами.
+        deps.notify?.(skipNotice('inside-itself', nameOf(source)), 'error');
         continue;
       }
       if (skip === 'same-dir') continue;

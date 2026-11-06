@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { copyPlan, movePlan } from '../src/renderer/core/tree-move';
+import { copyPlan, internalSkip, movePlan } from '../src/renderer/core/tree-move';
 
 /**
  * План переноса в целевую папку. Разбор путей — на разделителе системы, поэтому
@@ -58,5 +58,20 @@ describe('copyPlan', () => {
   it('не копирует файл в его же папку и папку внутрь себя', () => {
     expect(copyPlan(['/p/lib/a.ts'], '/p/lib')).toEqual([]);
     expect(copyPlan(['/p/src'], '/p/src')).toEqual([]);
+  });
+
+  it('называет причину, по которой бросок ничего не сделает', () => {
+    // Без этого дерево молча глотало бросок, и это выглядело как поломка.
+    expect(internalSkip(['/p/src'], '/p/src/lib')).toEqual({ first: '/p/src', why: 'inside-itself' });
+    expect(internalSkip(['/p/src/a.ts'], '/p/src')).toEqual({ first: '/p/src/a.ts', why: 'same-dir' });
+    // Вложенный файл едет вместе с предком — и это единственная причина, при
+    // которой он тоже «уже лежит тут». Назвать безобидное «уже лежит» было бы
+    // ложью: он уезжает, просто не своей строкой.
+    expect(internalSkip(['/p/lib', '/p/lib/a.ts'], '/p/lib')).toEqual({ first: '/p/lib/a.ts', why: 'under-selected' });
+  });
+
+  it('молчит, когда бросок осмысленный, — иначе отказ был бы там, где всё в порядке', () => {
+    expect(internalSkip(['/p/a.ts'], '/p/lib')).toBeNull();
+    expect(internalSkip([], '/p/lib')).toBeNull();
   });
 });
