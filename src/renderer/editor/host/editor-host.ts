@@ -1813,6 +1813,9 @@ export class EditorHost {
     decorations.setLinks(this.buildLinks(path));
 
     if (this.path === path) this.view.setDecorations(decorations);
+    // Закладки — тоже на карту: точка на ней видна на весь файл, а значок в поле
+    // слева — только у видимых строк.
+    if (this.path === path) this.view.setMinimapBookmarks(this.bookmarks.get(path) ?? []);
     if (this.path === path) this.refreshOverview();
   }
 

@@ -86,6 +86,11 @@ export interface MinimapOptions {
   readonly viewportHeight: () => number;
   /** Цвет черт: берём цвет текста редактора, чтобы карта шла за темой. */
   readonly color: () => string;
+  /**
+   * Цвет закладок. Отдельным источником, а не литералом: тему меняет CSS, а
+   * холст сам не перекрашивается — цвет надо спросить заново.
+   */
+  readonly bookmarkColor?: () => string;
   /** Перейти к ряду (поставить его в верх окна). */
   readonly scrollToRow: (row: number) => void;
   /** Ширина карты, px. */
@@ -98,6 +103,7 @@ export class Minimap {
   private readonly canvas: HTMLCanvasElement;
   private readonly slider: HTMLElement;
   private readonly width: number;
+  private bookmarks: readonly number[] = [];
 
   constructor(private readonly options: MinimapOptions) {
     this.width = options.width ?? 80;
@@ -110,6 +116,22 @@ export class Minimap {
     this.slider.className = 'own-editor-minimap-slider';
     this.element.append(this.canvas, this.slider);
     this.bind();
+  }
+
+  /**
+   * Закладки строками (1 с единицы) — рисуются поверх текста карты.
+   *
+   * Хранятся здесь, а не в украшениях редактора: украшения пересчитываются при
+   * прокрутке и живут по видимым строкам, а карта — один холст на весь файл,
+   * где отметка обязана быть видна и там, где окно сейчас не стоит.
+   */
+  setBookmarks(lines: readonly number[]): void {
+    const next = [...lines].sort((a, b) => a - b);
+    const same =
+      next.length === this.bookmarks.length && next.every((line, index) => line === this.bookmarks[index]);
+    if (same) return;
+    this.bookmarks = next;
+    this.render();
   }
 
   /** Перерисовать черты и переставить ползунок: зовётся из перерисовки редактора. */
@@ -141,6 +163,34 @@ export class Minimap {
       if (bar) ctx.fillRect(bar.x, row * rowHeight, bar.width, barHeight);
     }
     ctx.globalAlpha = 1;
+    this.drawBookmarks(ctx, height, rowCount, rowHeight, step);
+  }
+
+  /**
+   * Закладки поверх карты: короткая полоса у правого края.
+   *
+   * Почему у края, а не по всей ширине: карта — уменьшенный текст, и закрасить
+   * строку целиком значит спрятать ровно тот текст, ради которого в неё смотрят.
+   * Полоса у края видна, но ничего не закрывает.
+   */
+  private drawBookmarks(
+    ctx: CanvasRenderingContext2D,
+    height: number,
+    rowCount: number,
+    rowHeight: number,
+    step: number,
+  ): void {
+    if (this.bookmarks.length === 0 || rowCount <= 0) return;
+    // Шаг карты — «одна полоса на N строк»: закладку двигаем на весь шаг, иначе
+    // две соседние закладки сольются в одну полосу и будут выглядеть как одна.
+    const markHeight = Math.max(2, rowHeight * step);
+    const width = Math.max(2, Math.min(4, this.width / 6));
+    ctx.fillStyle = this.options.bookmarkColor?.() ?? '#e8a33d';
+    for (const line of this.bookmarks) {
+      if (line < 1 || line > rowCount) continue;
+      const y = Math.min(height - markHeight, (line - 1) * rowHeight);
+      ctx.fillRect(this.width - width, y, width, markHeight);
+    }
   }
 
   private positionSlider(height: number, rowCount: number): void {

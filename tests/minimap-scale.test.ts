@@ -184,6 +184,33 @@ describe('виджет миникарты', () => {
     return { minimap: element, scrolled, rects: canvas.rects, node };
   }
 
+  it('закладки рисуются полосой у правого края, чужие строки игнорируются', () => {
+    const { minimap, rects } = makeMinimap({ rowCount: 40 });
+
+    minimap.setBookmarks([5, 1, 999, 0]);
+
+    // 40 строк на 400px: черта — 10px на строку, шаг 1. Четыре закладки заданы,
+    // но 0 и 999 вне файла — их не рисуем, остаются 1 и 5.
+    const marks = rects.slice(-2);
+    expect(marks).toHaveLength(2);
+    // Строка 1 — верх, строка 5 — на 40px ниже (полоса стоит по строке).
+    expect(marks[0]!.y).toBe(0);
+    expect(marks[1]!.y).toBe(40);
+    // У правого края: x сдвинут вправо, ширина мала — текст карты не закрыт.
+    expect(marks[0]!.x).toBeGreaterThan(0);
+    expect(marks[0]!.w).toBeLessThanOrEqual(4);
+  });
+
+  it('тот же набор закладок не перерисовывает карту заново', () => {
+    const { minimap, rects } = makeMinimap({ rowCount: 40 });
+
+    minimap.setBookmarks([3, 7]);
+    const afterFirst = rects.length;
+    minimap.setBookmarks([7, 3]); // тот же набор, другой порядок
+
+    expect(rects.length).toBe(afterFirst);
+  });
+
   it('рисует по черте на каждую строку и ставит ползунок по прокрутке', () => {
     const { minimap, rects } = makeMinimap({ rowCount: 40, scrollTop: 200 });
 

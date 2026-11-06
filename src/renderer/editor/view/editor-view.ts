@@ -428,6 +428,10 @@ export class EditorView {
       scrollTop: () => this.viewport.scrollTop,
       viewportHeight: () => this.viewport.clientHeight,
       color: () => window.getComputedStyle(this.root).color,
+      // Закладки — не цвет текста: они обязаны отличаться и от черт самой карты,
+      // и друг от друга на тёмной и светлой теме одинаково. Берём акцент интерфейса.
+      bookmarkColor: () =>
+        window.getComputedStyle(this.root).getPropertyValue('--accent_fill').trim() || '#e8a33d',
       scrollToRow: (row) => {
         this.stopScrollAnimation();
         this.viewport.scrollTop = row * this.metrics.lineHeight;
@@ -1908,6 +1912,15 @@ export class EditorView {
 
   private renderOverview(): void {
     if (this.overviewVisible) this.overview.render();
+  }
+
+  /**
+   * Закладки на карте. Список берётся снаружи (`editor-host` знает, где они), а
+   * карта его только рисует и не перерисовывается зря: `setBookmarks` сам
+   * сравнивает с прежним списком.
+   */
+  setMinimapBookmarks(lines: readonly number[]): void {
+    this.minimap.setBookmarks(lines);
   }
 
   /** Показать или спрятать миникарту. */
