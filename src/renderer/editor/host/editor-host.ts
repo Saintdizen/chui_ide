@@ -26,6 +26,7 @@ import { languageFromPath, languageIndent } from '../../core/languages';
 import type { HighlightOffReason } from '../../../shared/large-file';
 import { detectIndent, resolveIndent } from '../../../shared/indent';
 import type { TextEdit } from '../../../shared/edits';
+import { shiftCursor } from '../../../shared/cursor-shift';
 import type { FoldRange } from '../../../shared/fold-ranges';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import type { CompletionContext } from '../../../shared/lsp-completions';
@@ -1181,6 +1182,12 @@ export class EditorHost {
       // За кадром: текст правит документ — истина о содержимом, а буфер подтянет реестр.
       // Так же приходят правки с диска и форматирование при сохранении.
       document.applyEdits(edits, source);
+      // Место, где человек остановился, живёт в `cursors` и переживает перезапуск.
+      // Без сдвига оно осталось бы указывать на СТАРУЮ строку: правка выше
+      // раздвигает текст, и вернувшийся к файлу человек оказывался бы не там, где
+      // был. Номера строк правок и курсора — в одной системе (1-базовые).
+      const known = this.cursors.get(document.path);
+      if (known) this.cursors.set(document.path, shiftCursor(known, edits));
     }
     return translated;
   }

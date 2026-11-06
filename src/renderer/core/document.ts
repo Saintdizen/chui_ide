@@ -1,3 +1,4 @@
+import type { CursorPosition } from '../../shared/api';
 import { applyTextEdits, type TextEdit } from '../../shared/edits';
 import { detectLineEnding, withLineEndings, type LineEnding } from '../../shared/line-endings';
 import { Emitter, type Disposable } from './events';
@@ -151,12 +152,23 @@ export class TextDocument {
     return true;
   }
 
+  /**
+   * Где документ правили в последний раз. Нужен, чтобы восстановленный буфер
+   * открывался у своей правки, а не в начале файла.
+   */
+  lastEdit: CursorPosition | null = null;
+
   /** Применяет правки и возвращает их количество. */
   applyEdits(edits: readonly TextEdit[], source: EditSource): number {
     if (edits.length === 0) return 0;
     const next = applyTextEdits(this.text, edits);
     if (next === this.text) return 0;
     this.text = next;
+    // Место правки — там, где она кончается: так после вставки курсор стоит
+    // ПОСЛЕ вставленного, как в обычной правке руками.
+    const last = edits[edits.length - 1]!;
+    const added = last.newText.split('\n').length - 1;
+    this.lastEdit = { line: last.startLine + added, column: added > 0 ? last.newText.length - last.newText.lastIndexOf('\n') : last.startColumn + last.newText.length };
     this.bump(source);
     return edits.length;
   }

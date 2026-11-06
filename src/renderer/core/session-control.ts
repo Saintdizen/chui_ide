@@ -180,8 +180,14 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       const document = documents.get(item.path);
       // Большой файл править нельзя — и вернуть в него правку тоже нечего.
       if (!document || document.readOnly) continue;
+      // Место последней правки — до `setText`: правка может быть в конце файла,
+      // а без курсора буфер откроется на первой строке, и человек будет искать
+      // свою работу глазами. Восстановленный буфер — это «дочитал до этого места».
+      // Место последней правки берём у документа: он помнит его с момента правки.
+      const lastEdit = document.lastEdit;
       if (document.setText(item.text, 'programmatic')) restored.push(item.path);
       else if (document.dirty) restored.push(item.path);
+      if (lastEdit) editors.restoreCursorPositions({ [item.path]: lastEdit });
     }
     return restored;
   };
