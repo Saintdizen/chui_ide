@@ -42,6 +42,26 @@ export interface NoticeInput {
   /** Группа для «не беспокоить»: по умолчанию часть ключа до двоеточия. */
   group?: string;
   action?: NoticeAction;
+  /**
+   * Куда смотреть человеку, когда тост уже ушёл. Отказ без этого — это «Опять не
+   * работает»: текст есть, а куда идти — не сказано.
+   */
+  source?: NoticeSource;
+}
+
+/**
+ * «Где это чинится» — подсказка у отказа.
+ *
+ * Не ссылка на код: у отказа провайдера причина в настройке, у отказа LSP — в
+ * журнале сервера. Одно поле на всё, потому что человеку в момент ошибки нужен
+ * ответ «куда идти», а не классификация.
+ */
+export interface NoticeSource {
+  /** Место в человеческих словах: «Настройки → AI → Ключ». */
+  where: string;
+  /** Окно или панель, которую откроет шаг «Куда смотреть», если оно есть. */
+  command?: string;
+  args?: unknown[];
 }
 
 export interface Notice {
@@ -56,6 +76,8 @@ export interface Notice {
   firstAt: number;
   /** Последний раз. */
   lastAt: number;
+  /** Где это чинится — подсказка у отказа. */
+  source: NoticeSource | null;
   /** Человек видел это уведомление (закрыл тост или открыл модалку). */
   seen: boolean;
 }
@@ -99,6 +121,9 @@ export class NoticeRegistry {
       existing.lastAt = at;
       existing.text = input.text;
       existing.kind = input.kind ?? existing.kind;
+      // Источник обновляем только когда он известен: повтор без подсказки не должен
+      // стирать ту, что уже была.
+      if (input.source) existing.source = input.source;
       // Повтор возвращает уведомление в начало журнала: он снова актуален.
       this.items.splice(this.items.indexOf(existing), 1);
       this.items.unshift(existing);
@@ -113,6 +138,7 @@ export class NoticeRegistry {
       kind: input.kind ?? 'info',
       group,
       action: input.action ?? null,
+      source: input.source ?? null,
       count: 1,
       firstAt: at,
       lastAt: at,

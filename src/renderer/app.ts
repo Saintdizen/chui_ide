@@ -252,6 +252,7 @@ import { createPortsPanel } from "./ui/ports-panel";
 import { createDebugPanel } from "./ui/debug-panel";
 import { createTestPanel } from "./ui/test-panel";
 import { createTodoPanel } from "./ui/todo-panel";
+import { createNoticeLog } from "./ui/notice-log";
 import { showToast } from "./ui/toast";
 import { installTooltips } from "./ui/tooltip";
 import { createVenvModal } from "./ui/venv-modal";
@@ -2406,8 +2407,13 @@ export async function startApplication(
         ? showToast(message, kind, {
             action,
             execute: (id, args) => void commands.execute(id, ...(args ?? [])),
+            // Куда смотреть, если тост уже ушёл: журнал сервера и окно настроек —
+            // без этого отказ живёт минуту и исчезает без следа.
+            source: { where: "Журнал языка — вкладка «LSP» внизу" },
           })
-        : showToast(message, kind),
+        : showToast(message, kind, {
+            source: { where: "Настройки → Языки", command: "settings.open" },
+          }),
     openLspSettings: () => {
       // Окно настроек на разделе «Языки»: оттуда ставят сервер, которого нет.
       settingsModal.open("lsp");
@@ -3395,6 +3401,17 @@ export async function startApplication(
       void openPath(path).then(() => editors.reveal(path, line, 1)),
   });
   document.body.appendChild(bookmarksModal.element);
+
+  // Журнал уведомлений: тосты уходят, а отказ остаётся с адресом «куда смотреть».
+  const noticeLog = createNoticeLog({
+    execute: (command, args) => void commands.execute(command, ...(args ?? [])),
+    openSettings: () => settingsModal.open(),
+  });
+  document.body.appendChild(noticeLog.element);
+  commands.register(
+    { id: "notice.log", title: "Уведомления: журнал", category: "Вид" },
+    () => noticeLog.open(),
+  );
 
   /*
    * Сохранить документ на диск. Если файл изменился снаружи после нашего чтения,

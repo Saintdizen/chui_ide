@@ -1455,6 +1455,90 @@
   white-space: nowrap;
 }
 
+/* ── журнал уведомлений ──────────────────────────────────────────────── */
+
+/* Отказ живёт минуту в тосте и навсегда в журнале: окно — место, куда
+   возвращаются за тем, что уже исчезло с экрана. */
+.notice-log-modal {
+  width: min(620px, 94vw);
+}
+
+.notice-log-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.notice-log {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notice-log-empty {
+  padding: 16px 8px;
+  color: var(--text_color_tertiary);
+}
+
+.notice-log-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: var(--radius_sm);
+}
+
+.notice-log-row:hover {
+  background: var(--element_background_hover);
+}
+
+.notice-log-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--font_small_size);
+  color: var(--text_color_tertiary);
+}
+
+.notice-log-kind[data-kind='error'] {
+  color: var(--text_color_error);
+}
+
+.notice-log-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notice-log-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* «Куда смотреть» — кнопка, а не подпись: у отказа должен быть адрес. */
+.notice-log-source,
+.notice-log-actions button {
+  padding: 2px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: transparent;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.notice-log-source:hover,
+.notice-log-actions button:hover {
+  color: var(--text_color);
+  border-color: var(--text_color_tertiary);
+}
+
 /* ── окно закладок ─────────────────────────────────────────────────────── */
 
 .bookmarks-modal {

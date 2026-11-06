@@ -1,6 +1,6 @@
 import { h, svgIcon, type IconName } from './dom';
 import { OCCLUDERS } from './occluders';
-import { type NoticeAction, NoticeRegistry } from '../core/notice-registry';
+import { type NoticeAction, type NoticeSource, NoticeRegistry } from '../core/notice-registry';
 
 export type ToastKind = 'info' | 'error' | 'success';
 
@@ -39,6 +39,11 @@ export interface ToastOptions {
    * `toast.ts` не знает про реестр команд и знать не должен.
    */
   execute?: (command: string, args?: unknown[]) => void;
+  /**
+   * Куда смотреть, если тост уже ушёл: где это чинится (см. `NoticeSource`).
+   * Живёт в журнале — в тосте места нет, а в истории причина нужна больше всего.
+   */
+  source?: NoticeSource;
 }
 
 let container: HTMLElement | null = null;
@@ -80,6 +85,9 @@ export function showToast(message: string, kind: ToastKind = 'info', options: To
       // Журнал помнит, куда вёл тост: иначе «Показать» из истории было бы
       // надписью без адреса — самая частая причина «кнопка не работает».
       action: toNoticeAction(options.action),
+      // И куда смотреть, когда тост уже ушёл: без этого та же ошибка — «Опять
+      // не работает»: человек не может вернуться к причине.
+      ...(options.source ? { source: options.source } : {}),
     });
     // Группа приглушена — не показываем, но в историю уже записали.
     if (!outcome.toast) return;
