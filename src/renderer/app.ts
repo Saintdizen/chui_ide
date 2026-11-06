@@ -981,6 +981,11 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     peekKey: (event) => editors.handlePeekKey(event),
     // Перетаскивание извне: почему не взяли — сказать вслух.
     notify: (message, kind) => showToast(message, kind),
+    // `Ctrl+Enter` на файле — открыть в соседнюю панель: делим, потом открываем
+    // (тот же порядок, что у выбора символа ниже).
+    splitEditor: () => {
+      if (!editors.isSplit) editors.splitEditor();
+    },
   });
   // Список открытых файлов над деревом: по нему видно, что открыто и что не сохранено,
   // не глядя на полосу вкладок наверху. Как в VS Code — первым в боковой панели.

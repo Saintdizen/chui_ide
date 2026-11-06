@@ -222,6 +222,12 @@ export interface ExplorerDeps {
   peekKey?: (event: KeyboardEvent) => boolean;
   /** Сказать человеку, почему перетаскивание не сработало. Не задано — молчим. */
   notify?: (message: string, kind?: 'info' | 'error') => void;
+  /**
+   * Разделить редактор СЕЙЧАС — под `Ctrl+Enter` на файле. Не задано —
+   * `Ctrl+Enter` открывает как обычный `Enter`: тихо терять клавишу хуже, чем
+   * открыть не туда.
+   */
+  splitEditor?: () => void;
 }
 
 /**
@@ -1994,7 +2000,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     render();
   };
 
-  const onClick = async (entry: DirEntry, preview = false): Promise<void> => {
+  const onClick = async (entry: DirEntry, preview = false, side = false): Promise<void> => {
     // Ссылка ведёт себя как то, на что указывает: на папку — раскрывается, на файл —
     // открывается. Битую ссылку не читаем: цель не найдена, открывать нечего.
     if (entryIsDirectory(entry)) {
@@ -2010,6 +2016,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       return;
     }
     if (entryIsSymlink(entry) && (entry.symlink === undefined || entry.symlink.broken)) return;
+    // `Ctrl+Enter` — в соседнюю панель: сначала делим, потом открываем, чтобы файл
+    // ушёл уже в правую половину (так же делает выбор символа, `ui/symbol-picker.ts`).
+    if (side) deps.splitEditor?.();
     await deps.commands.execute('file.open', entry.path, preview ? { preview: true } : {});
   };
 
@@ -2541,7 +2550,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         return;
       case 'open': {
         const entry = [...children.values()].flat().find((item) => item.path === action.path);
-        if (entry) void onClick(entry);
+        // Модификатор читается здесь, а не в `tree-walk`: раскладка клавиш — забота
+        // вида, а правило «куда ведёт открытие» — забота дерева.
+        const side = Boolean(event && (event.ctrlKey || event.metaKey));
+        if (entry) void onClick(entry, false, side);
         return;
       }
       case 'peek': {

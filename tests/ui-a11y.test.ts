@@ -12,10 +12,11 @@ import { describe, expect, it } from 'vitest';
  *   • уведомление объявляется читалке (`role` и живая область в контейнере);
  *   • у полосы вкладок есть роль, выбор и ход стрелками;
  *   • папка дерева говорит, раскрыта ли она;
- *   • «идёт чтение» — это `status`, а не просто серые полоски.
+ *   • «идёт чтение» — это `status`, а не просто серые полоски;
+ *   • долгая работа — `progressbar` со значением, а не только полоска.
  *
- * Что НЕ объявлено — тоже осознанно и записано в README: роль `tree` у проводника
- * не выставлена, потому что она обещает ход стрелками внутри дерева, а его у нас нет.
+ * Что НЕ объявлено — тоже осознанно и записано в README: роль `tree` была
+ * снята без хода стрелками, а не навсегда — теперь она есть и держится проверкой выше.
  */
 
 const UI = resolve(process.cwd(), 'src/renderer/ui');
@@ -23,6 +24,9 @@ const UI = resolve(process.cwd(), 'src/renderer/ui');
 function source(name: string): string {
   return readFileSync(resolve(UI, name), 'utf8');
 }
+
+/** Хост приложения: здесь живёт подключение хуков к проводнику. */
+const APP = readFileSync(resolve(process.cwd(), 'src/renderer/app.ts'), 'utf8');
 
 describe('уведомления объявляются читалке', () => {
   const TOAST = source('toast.ts');
@@ -87,6 +91,41 @@ describe('папка дерева говорит, раскрыта ли она',
   it('ход по дереву действительно подключён, а не только объявлен', () => {
     // Иначе роль снова врёт: объявленный договор должен вызываться.
     expect(EXPLORER).toMatch(/walkTree\(walkRows\(\)/);
+  });
+
+  it('`Ctrl+Enter` на файле открывает в соседнюю панель', () => {
+    // Shift+↑/↓ (диапазон) и буквенный переход уже есть в `core/tree-walk.ts` и
+    // `core/tree-typeahead.ts`; оставалась одна дверь без клавиши — открыть вбок.
+    // Порядок тот же, что у выбора символа: сначала делим, потом открываем.
+    expect(EXPLORER).toMatch(/applyWalk\(action, event\)/);
+    expect(EXPLORER).toMatch(/event\.ctrlKey \|\| event\.metaKey/);
+    expect(EXPLORER).toMatch(/if \(side\) deps\.splitEditor\?\.\(\);/);
+    expect(APP).toMatch(/splitEditor: \(\) => \{/);
+    expect(APP).toMatch(/if \(!editors\.isSplit\) editors\.splitEditor\(\);/);
+  });
+});
+
+describe('долгая работа говорит читалке, сколько прошло', () => {
+  const STATUS = source('statusbar.ts');
+
+  it('полоса объявлена как `progressbar`, а не как текст', () => {
+    expect(STATUS).toMatch(/class: 'status-item status-meter is-metered', role: 'progressbar'/);
+  });
+
+  it('значения обновляются вместе с шириной', () => {
+    expect(STATUS).toMatch(/setAttribute\('aria-valuemin', '0'\)/);
+    expect(STATUS).toMatch(/setAttribute\('aria-valuemax', '100'\)/);
+    expect(STATUS).toMatch(/setAttribute\('aria-valuenow', String\(percent\)\)/);
+    expect(STATUS).toMatch(/setAttribute\('aria-valuetext', meter\.label\)/);
+  });
+
+  it('бегущая без процента работа не обещает числа', () => {
+    // `aria-valuenow` у неё убран: иначе читалка скажет «0 процентов» о работе,
+    // которая идёт. Скрытая полоса молчит совсем — значений и подписи у неё нет.
+    expect(STATUS).toMatch(/const known = !\(meter\.busy && meter\.fill === 0\);/);
+    expect(STATUS).toMatch(/if \(!meter\.hidden && known\) meterItem\.setAttribute\('aria-valuenow'/);
+    expect(STATUS).toMatch(/else meterItem\.removeAttribute\('aria-valuenow'\);/);
+    expect(STATUS).toMatch(/else meterItem\.removeAttribute\('aria-valuetext'\);/);
   });
 });
 

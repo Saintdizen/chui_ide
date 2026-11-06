@@ -258,9 +258,12 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   // Одна полоса на все долгие работы окна: языковый сервер, чтение проекта, проверка
   // проекта. Раньше их было три, и две обычно стояли на нуле, дожидаясь первой —
   // рядом это читалось как зависание. Очередь решает чистый модуль: `ui/status-meter.ts`.
+  // Долгая работа: роль «прогресс» нужна, чтобы читалка говорила «сколько прошло»,
+  // а не читала подпись как обычный текст. `aria-valuenow` обновляет `update`:
+  // у бегущей без процента работы значения нет — тогда она `busy` без числа.
   const meterItem = h(
     'span',
-    { class: 'status-item status-meter is-metered' },
+    { class: 'status-item status-meter is-metered', role: 'progressbar', 'aria-live': 'polite' },
     h(
       'span',
       { class: 'status-meter-track' },
@@ -366,6 +369,18 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     meterItem.classList.toggle('is-busy', meter.busy);
     meterLabel.textContent = meter.label;
     meterFill.style.width = `${Math.round(meter.fill * 100)}%`;
+    // Число для читалки — только когда его правда есть: у бегущей без процента
+    // работы значения нет, и атрибут уходит — иначе полоса обещает проценты,
+    // которых мы не знаем. Пустая подпись тоже не годится: `aria-valuetext`
+    // заменяет чтение числа, и пустой строкой читалка замолчала бы совсем.
+    const percent = Math.round(meter.fill * 100);
+    const known = !(meter.busy && meter.fill === 0);
+    meterItem.setAttribute('aria-valuemin', '0');
+    meterItem.setAttribute('aria-valuemax', '100');
+    if (!meter.hidden && known) meterItem.setAttribute('aria-valuenow', String(percent));
+    else meterItem.removeAttribute('aria-valuenow');
+    if (!meter.hidden && meter.label) meterItem.setAttribute('aria-valuetext', meter.label);
+    else meterItem.removeAttribute('aria-valuetext');
     meterItem.classList.toggle('is-cancellable', meter.cancellable === true);
     meterItem.title = meter.cancellable ? `${meter.title} — нажмите, чтобы прервать` : meter.title;
     const macro = state.macro;
