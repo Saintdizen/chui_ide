@@ -2166,6 +2166,22 @@ textarea {
   color: var(--text_color);
 }
 
+/* Фокус ушёл из дерева: клавиши здесь больше не работают. Подсветку не убираем
+   совсем — выделение остаётся нужным (к нему вернутся или на него глянут) —
+   но гасим до фона: живая строка всегда ярче потухшей. */
+.tree-row.is-unfocused.is-active,
+.tree-row.is-unfocused.is-selected {
+  background: transparent;
+  color: var(--text_color_secondary);
+}
+
+/* Пока дерево не в фокусе, мышь всë равно подсвечивает строку под собой:
+   иначе курсор ходит по мёртвому списку и непонятно, куда кликнешь. */
+.tree-row.is-unfocused:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
 .tree-row.is-editing {
   background: transparent;
 }

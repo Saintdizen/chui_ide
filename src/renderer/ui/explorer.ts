@@ -246,6 +246,18 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   /** Просьба вернуть фокус дереву на ближайшей отрисовке (см. обработчик клика). */
   let refocusTreeOnce = false;
   /**
+   * Дерево НЕ в фокусе: выделение в нём есть, но клавиши уйдут не сюда — поэтому
+   * обе его подсветки бледнеют. Так видно, куда уйдёт `Enter`: «выбранных» строк
+   * в окне бывает две (дерево и палитра, два дерева рядом), и без этого признака
+   * они выглядят равноправными.
+   *
+   * Держим событийно, а не по `document.activeElement` на каждой строке: строк в
+   * дереве тысячи, а фокус меняется раз в клик.
+   */
+  let treeFocused = false;
+
+  const treeHasFocus = (): boolean => treeFocused;
+  /**
    * Папка, раскрытая кликом: её прямые дети «выезжают» из-под родителя вниз, а не
    * возникают на месте: движение идёт туда, откуда элемент пришёл. Живёт
    * до конца одной отрисовки — на следующих перерисовках
@@ -1121,6 +1133,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const classes = ['tree-row'];
     if (isActive) classes.push('is-active');
     if (isSelected) classes.push('is-selected');
+    // Фокус ушёл из дерева — клавиши здесь больше не сработают; подсветка
+    // гаснет, чтобы не спорить с той, что сейчас живая.
+    if (!treeHasFocus()) classes.push('is-unfocused');
     if (flags.nested) classes.push('is-nested');
     // Удалённый файл: строки на диске нет, но правка есть — помечаем зачёркнутым.
     if (isDeleted) classes.push('is-deleted');
@@ -2246,6 +2261,19 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     tree.appendChild(host);
     tree.addEventListener('contextmenu', (event) => openMenu(null, event));
     tree.addEventListener('keydown', (event) => onTreeKey(event));
+    // Фокус входа/выхода — событие по самому дереву: строки пересоздаются, а оно
+    // живёт постоянно. Перерисовка нужна только для того, чтобы побледнеть или
+    // снова загореться.
+    const onFocusChange = (): void => {
+      const next = document.activeElement === tree;
+      if (next === treeFocused) return;
+      treeFocused = next;
+      // Окно забыло прежний набор, а окно то же: 
+      visibleNow = [];
+      renderWindow();
+    };
+    tree.addEventListener('focusin', onFocusChange);
+    tree.addEventListener('focusout', onFocusChange);
     // Прокрутили — рисуем другое окно строк. Полную перерисовку не делаем: иначе
     // на каждой прокрутке пересобирались бы заголовок панели и закреплённые строки.
     tree.addEventListener('scroll', () => {
@@ -2299,6 +2327,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
     // Плоский список видимых строк: по нему считаем окно и обходим выделение.
     flatRows = buildFlat(info);
+    // `paint` пересоздаёт строки, а `renderWindow` рисует только при смене
+    // диапазона в `visibleNow`. При перерисовке без пересборки дерева (фокус,
+    // пометки git) строки уже новые, а `visibleNow` помнит старые — и окно не
+    // перерисуется, если у них совпал диапазон. Сбрасываем: соберём заново.
     visibleNow = [];
     // Удалённые строки в порядок выделения не берём: файла на диске нет, и массовая
     // операция над ним (Shift-диапазон) споткнулась бы о несуществующий путь.
