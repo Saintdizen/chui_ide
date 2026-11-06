@@ -67,6 +67,39 @@
   }
 }
 
+/* Ждущая нить: точка есть, но не пульсирует — работа встала и ждёт человека.
+   Цвет предупреждения: это не беда, но и не «всё в порядке». */
+.chat-tab.is-waiting .tab-label::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: var(--radius_circle);
+  background: var(--yellow_prime_background);
+}
+
+/* Упавшая нить: без решения человека она так и будет стоять. */
+.chat-tab.is-failed .tab-label::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: var(--radius_circle);
+  background: var(--red_prime_background);
+}
+
+/* Цена нити на вкладке. Приглушена: она нужна для решения «куда идти»,
+   а не как украшение; `tabular-nums` — чтобы цифры не плясали между нитями. */
+.chat-tab-cost {
+  margin-left: 6px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ── окно информации о сессии ──────────────────────────────────────────── */
 
 .session-info {

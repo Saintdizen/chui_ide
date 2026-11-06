@@ -44,6 +44,7 @@ import type { HostService } from '../core/host';
 import type { WorkspaceModel } from '../core/workspace-model';
 import type { GitModel } from '../core/git-model';
 import { createChatBranchSpace } from './chat-branch-space';
+import { describeThread } from '../../shared/chat-threads';
 import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
@@ -902,11 +903,27 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   function renderTabs(): void {
     tabs.render(
-      sessions.map((session) => ({
-        id: session.id,
-        title: session.title,
-        streaming: runningIds.has(session.id),
-      })),
+      sessions.map((session) => {
+        const running = runningIds.has(session.id);
+        return {
+          id: session.id,
+          title: session.title,
+          streaming: running,
+          // Нить: чем занята и сколько стоила. Цена — из накопленного следа
+          // беседы, поэтому переживает перезапуск и не сбрасывается ходом.
+          thread: describeThread({
+            id: session.id,
+            running,
+            hasHistory: session.history.length > 0,
+            // Оборванный прогон — не «упала», а «остановлена»: `aborted` значит, что
+            // его прервали, и решать человеку тут нечего. Падения в ленте видны
+            // сообщением, но отдельного признака в беседе для них нет — не выдумываем.
+            failed: false,
+            model: currentModel(),
+            ...(session.trace ? { trace: session.trace } : {}),
+          }),
+        };
+      }),
       activeId,
     );
   }

@@ -1,4 +1,5 @@
 import { clear, h, svgIcon } from './dom';
+import type { ThreadInfo } from '../../shared/chat-threads';
 
 /**
  * Полоса вкладок бесед и поиск по ним.
@@ -19,6 +20,11 @@ export interface ChatTabItem {
   title: string;
   /** В этой беседе идёт генерация — вкладка помечается пульсирующей точкой. */
   streaming: boolean;
+  /**
+   * Нить работы: состояние и цена (см. `shared/chat-threads`). Не задана —
+   * вкладка рисуется как раньше: имя да пульсирующая точка.
+   */
+  thread?: ThreadInfo;
 }
 
 /** Найденное место в беседе — по одной строке на беседу. */
@@ -145,6 +151,14 @@ export function createChatTabs(deps: ChatTabsDeps): ChatTabsView {
       const classes = ['tab', 'chat-tab'];
       if (isActive) classes.push('is-active');
       if (item.streaming) classes.push('is-busy');
+      // Состояние нити — классом на вкладке: точка у всех одна, а цвет у идущей,
+      // упавшей и ждущей разный, и это единственное, что видно боковым зрением.
+      if (item.thread) classes.push(`is-${item.thread.state}`);
+
+      const thread = item.thread;
+      const status = thread && thread.state !== 'idle' && thread.state !== 'empty' ? thread.label : null;
+      const cost = thread?.costText ?? null;
+      const tip = [item.title, status, cost && `≈ ${cost}`].filter(Boolean).join(' · ');
 
       const tab = h(
         'div',
@@ -157,11 +171,14 @@ export function createChatTabs(deps: ChatTabsDeps): ChatTabsView {
           // подписью для наведения и `aria-label` для озвучки — важное нельзя
           // передавать только анимацией. Под «уменьшить движение» точка статична, а
           // смысл остаётся.
-          title: item.streaming ? `${item.title} — идёт генерация` : item.title,
-          'aria-label': item.streaming ? `${item.title}, идёт генерация` : undefined,
+          title: tip,
+          'aria-label': status ? `${item.title}, ${status}` : item.title,
         },
         svgIcon('chat', 13),
         h('span', { class: 'tab-label' }, item.title),
+        // Цена — только когда она известна: прочерк на вкладке читается как
+        // «бесплатно», а это неправда, когда модель просто нет в тарифах.
+        cost ? h('span', { class: 'chat-tab-cost' }, cost) : null,
       );
 
       tab.addEventListener('click', () => deps.onActivate(item.id));
