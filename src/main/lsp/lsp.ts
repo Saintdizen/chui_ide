@@ -886,6 +886,11 @@ export class LspService {
   /** Прежние пометки по запросу: `unchanged` отвечает «то же, что и в прошлый раз». */
   private readonly pullState = new Map<string, { resultId: string; items: LspDiagnostic[] }>();
   /**
+   * Итоги пакетного обхода: `resultId` прошлого ответа, чтобы сервер не
+   * присылал заново то, что не менялось (`unchanged`).
+   */
+  private workspacePullState: { uri: string; value: string }[] = [];
+  /**
    * Языки, сервер которых поднять не удалось: язык → причина. Без кэша каждый файл
    * такого языка заново искал бы сервер (диск, PATH, окружения) — на пустом ответе
    * это дорого и ничего не меняет. Снимается перезапуском (`restart`).
@@ -1915,6 +1920,10 @@ export class LspService {
               // Файлы поменялись мимо редактора: без этого объявления сервер не ждёт
               // `didChangeWatchedFiles`, и наш отказ (`workspaceWatchedFiles` выше) всегда ложен.
               didChangeWatchedFiles: { dynamicRegistration: false },
+              // Пометки всего проекта одним запросом вместо файла за файлом.
+              // `identifier` — наш отпечаток настройки обхода: он же уходит в
+              // `previousResultIds`, и сервер по нему узнаёт уже сосчитанное.
+              diagnostics: { refreshSupport: true, identifier: 'chui-ide' },
               symbol: {},
               // Правки сервера (переименование) приходят с `documentChanges` — разбираем.
               // Заодно умеем операции с файлами: создать, переименовать, удалить (их применяет
@@ -2851,6 +2860,18 @@ export class LspService {
       if (oldest === undefined) break;
       this.sweptClosed.delete(oldest);
     }
+    // Пакетный обход: один запрос на сервер вместо файла за файлом. Файлов в
+    // большом проекте тысячи, и поштучный обход шёл минутами даже на тёплом кэше.
+    // Сервер, не объявивший `workspaceDiagnostics`, пойдёт прежним путём ниже.
+    if (
+      (runtime.capabilities.diagnosticProvider as { workspaceDiagnostics?: unknown } | undefined)?.workspaceDiagnostics
+    ) {
+      const reported = await this.workspaceDiagnostics(runtime).catch(() => 0);
+      if (this.runtimes.get(language) !== runtime) return;
+      // Отчитался хотя бы о чём-то — поштучный обход не нужен: он лишь повторит
+      // то же самое файл за файлом. Ноль — сервер промолчал, тогда старый путь.
+      if (reported > 0) return;
+    }
     const queue = [...files];
     const worker = async (): Promise<void> => {
       for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
@@ -2860,6 +2881,66 @@ export class LspService {
       }
     };
     await Promise.all(Array.from({ length: SWEEP_CONCURRENCY }, worker));
+  }
+
+  /**
+   * Пометки всего проекта одним запросом (`workspace/diagnostic`).
+   *
+   * Пакетный обход — одна просьба вместо пофайловых: сервер сам решает, что
+   * пересчитать, и помнит прошлые ответы (`previousResultId`). Файлов в проекте
+   * тысячи, и пофайловый обход занимал минуты даже на тёплом кэше.
+   *
+   * Ответ бывает кусками (`items` — множество ответов, часть `unchanged`): их
+   * разбираем поштучно и отдаём обычной публикацией — в редакторе это те же пометки.
+   */
+  async workspaceDiagnostics(runtime: ServerRuntime): Promise<number> {
+    const provider = runtime.capabilities.diagnosticProvider as
+      | { workspaceDiagnostics?: unknown; identifier?: unknown }
+      | undefined;
+    if (!provider?.workspaceDiagnostics) return 0;
+    const identifier = typeof provider.identifier === 'string' ? provider.identifier : '';
+    let reports = 0;
+    let more = true;
+    let next: unknown;
+    // Предел на страницы: сервер вправе отдавать кусками, но бесконечная лента
+    // превратила бы обход в вечный — шести страниц хватает на любой разумный проект.
+    for (let page = 0; more && page < 6; page += 1) {
+      const request = (runtime.connection.request as unknown as (method: string, params: unknown) => Promise<unknown>)(
+        'workspace/diagnostic',
+        {
+          previousResultIds: this.workspacePullState,
+          ...(identifier ? { identifier } : {}),
+        },
+      );
+      const result = (await request.catch(() => null)) as {
+        items?: unknown;
+        nextResultId?: unknown;
+        more?: unknown;
+      } | null;
+      if (!result || !Array.isArray(result.items)) break;
+      for (const item of result.items) {
+        if (!item || typeof item !== 'object') continue;
+        const entry = item as { uri?: unknown; resultId?: unknown };
+        if (typeof entry.uri !== 'string') continue;
+        let path: string;
+        try {
+          path = fileURLToPath(entry.uri);
+        } catch {
+          continue;
+        }
+        const items = this.applyDiagnosticReport(path, entry);
+        // Пакетный обход ничего не открывает и не закрывает — его ответ про все файлы.
+        this.publish(PushTopic.LspDiagnostics, { path, diagnostics: items });
+        if (this.diagnosticsSink && !this.languageOfPath.has(path)) {
+          this.diagnosticsSink(path, items);
+        }
+        reports += 1;
+      }
+      next = result.nextResultId;
+      this.workspacePullState = Array.isArray(next) ? (next as { uri: string; value: string }[]) : [];
+      more = result.more === true;
+    }
+    return reports;
   }
 
   private async sweepFile(runtime: ServerRuntime, file: string, languageId: string): Promise<void> {
