@@ -25,6 +25,30 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return element;
 }
 
+/**
+ * Подложка диалога: затемнение плюс сама панель.
+ *
+ * Все четыре оверлея окна (палитра команд, быстрое открытие, символы проекта,
+ * поиск по смыслу) — близнецы, и собираются они здесь, а не на месте. Причина
+ * не в экономии строк, а в том, что рисовать их вручную значило бы забывать
+ * одно и то же дважды: подложка без `role="dialog"` и `aria-modal` для
+ * читалки — просто затемнённый прямоугольник, а поле внутри не объявлено
+ * диалогом, в который она вошла. Подпись (`aria-label`) обязывает.
+ *
+ * `aria-modal` — не украшение: она говорит читалке не читать остальное окно
+ * за подложкой. Пока панель скрыта (`hidden`), атрибуты безвредны.
+ */
+export function dialogOverlay(
+  panel: HTMLElement,
+  options: { label: string; describedBy?: string },
+): HTMLElement {
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-label', options.label);
+  if (options.describedBy) panel.setAttribute('aria-describedby', options.describedBy);
+  return h('div', { class: 'overlay', hidden: true }, panel);
+}
+
 export function append(parent: Node, children: readonly Child[]): void {
   for (const child of children) {
     if (child === null || child === undefined || child === false) continue;

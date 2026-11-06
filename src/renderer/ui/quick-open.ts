@@ -4,7 +4,7 @@ import { QUICK_MODES, parseQuickPrefix, type QuickMode } from '../core/quick-pre
 import { rankFiles } from '../core/quick-open-rank';
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
-import { clear, h, svgIcon, type IconName } from './dom';
+import { clear, dialogOverlay, h, svgIcon, type IconName } from './dom';
 import { focusOwner, returnFocus } from './focus-return';
 
 /** Место в файле — символ или совпадение по тексту. */
@@ -94,7 +94,9 @@ export function createQuickOpen(deps: {
   });
   const list = h('div', { class: 'palette-list' });
   const footer = h('div', { class: 'palette-footer' });
-  const overlay = h('div', { class: 'overlay', hidden: true }, h('div', { class: 'palette' }, input, list, footer));
+  const overlay = dialogOverlay(h('div', { class: 'palette' }, input, list, footer), {
+    label: 'Быстрое открытие файла',
+  });
 
   /** Относительные пути: ключ, по которому список перечитывается при смене проекта. */
   let root: string | null = null;

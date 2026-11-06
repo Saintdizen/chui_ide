@@ -1,6 +1,6 @@
 import type { CommandDescriptor, CommandRegistry } from '../core/commands';
 import { groupCommands, rankCommandMatches, type RankedCommand } from '../core/palette-rank';
-import { clear, h } from './dom';
+import { clear, dialogOverlay, h } from './dom';
 import { focusOwner, returnFocus } from './focus-return';
 
 /**
@@ -85,7 +85,9 @@ export function createPalette(deps: {
     spellcheck: false,
   });
   const list = h('div', { class: 'palette-list' });
-  const overlay = h('div', { class: 'overlay', hidden: true }, h('div', { class: 'palette' }, input, list));
+  const overlay = dialogOverlay(h('div', { class: 'palette' }, input, list), {
+    label: 'Палитра команд',
+  });
 
   // Совпадения вместе с тем, что подсветить: две формы одного списка
   // разошлись бы на первой же правке.

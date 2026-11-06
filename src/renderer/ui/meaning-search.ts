@@ -2,7 +2,8 @@ import type { SearchHit } from '../../shared/api';
 import type { ProjectSymbol } from '../../shared/lsp-symbols';
 import { combineMeaning, meaningRegex, type MeaningHit } from '../../shared/meaning-search';
 import type { RpcClient } from '../core/rpc';
-import { clear, h, svgIcon } from './dom';
+import { clear, dialogOverlay, h, svgIcon } from './dom';
+import { focusOwner, returnFocus } from './focus-return';
 
 /**
  * Поиск по смыслу: запрос можно писать словами, а не угадывать точную строку.
@@ -47,7 +48,9 @@ export function createMeaningSearch(deps: MeaningSearchDeps): MeaningSearchView 
     spellcheck: false,
   });
   const list = h('div', { class: 'palette-list' });
-  const overlay = h('div', { class: 'overlay', hidden: true }, h('div', { class: 'palette' }, input, list));
+  const overlay = dialogOverlay(h('div', { class: 'palette' }, input, list), {
+    label: 'Поиск по смыслу',
+  });
 
   let hits: MeaningHit[] = [];
   let cursor = 0;
@@ -169,16 +172,27 @@ export function createMeaningSearch(deps: MeaningSearchDeps): MeaningSearchView 
     if (event.target === overlay) close();
   });
 
+  /** Чей фокус был до открытия: уйдёт в поле запроса, вернём ему же. */
+  let owner: HTMLElement | null = null;
+
   function close(): void {
     if (timer !== null) window.clearTimeout(timer);
     timer = null;
     requestId += 1;
     overlay.hidden = true;
+    // Фокус забирали себе — значит обязаны вернуть. Без этого после Escape
+    // клавиатурный человек оказывается «в никуда»: `Tab` начинает обход с верха
+    // страницы, а не с того места, откуда он открыл поиск. Мышь этого не заметит.
+    returnFocus(owner);
+    owner = null;
   }
 
   return {
     element: overlay,
     open() {
+      // Чей фокус забираем — берём ДО `input.focus()`, иначе владельцем
+      // окажется само поле поиска.
+      owner = focusOwner();
       overlay.hidden = false;
       input.value = '';
       hits = [];

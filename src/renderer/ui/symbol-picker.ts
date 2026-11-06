@@ -1,7 +1,8 @@
 import { filterSymbols, type ProjectSymbol } from '../../shared/lsp-symbols';
 import { basename } from '../../shared/languages';
 import type { RpcClient } from '../core/rpc';
-import { clear, h, svgIcon } from './dom';
+import { clear, dialogOverlay, h, svgIcon } from './dom';
+import { focusOwner, returnFocus } from './focus-return';
 
 /**
  * Поиск символа по всему проекту (`Ctrl+T`).
@@ -77,7 +78,9 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
     spellcheck: false,
   });
   const list = h('div', { class: 'palette-list' });
-  const overlay = h('div', { class: 'overlay', hidden: true }, h('div', { class: 'palette' }, input, list));
+  const overlay = dialogOverlay(h('div', { class: 'palette' }, input, list), {
+    label: 'Символы проекта',
+  });
 
   let matches: ProjectSymbol[] = [];
   /** Сколько символов вернул источник и сколько из них прошло фильтр по виду. */
@@ -218,16 +221,26 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
     if (event.target === overlay) close();
   });
 
+  /** Чей фокус был до открытия: уйдёт в поле запроса, вернём ему же. */
+  let owner: HTMLElement | null = null;
+
   function close(): void {
     if (timer !== null) window.clearTimeout(timer);
     timer = null;
     requestId += 1;
     overlay.hidden = true;
+    // Фокус забирали себе — возвращаем. Иначе после Escape клавиатура начинает
+    // обход с верха страницы вместо того места, откуда палитру открыли.
+    returnFocus(owner);
+    owner = null;
   }
 
   return {
     element: overlay,
     open() {
+      // Владельца берём ДО `input.focus()`: после него `document.activeElement`
+      // уже само поле, и вернуть фокус было бы некуда.
+      owner = focusOwner();
       overlay.hidden = false;
       input.value = '';
       matches = [];

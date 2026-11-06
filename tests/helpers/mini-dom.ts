@@ -158,8 +158,16 @@ function defineLookup(node: any): void {
     }
     return false;
   };
-  node.focus = () => {};
-  node.blur = () => {};
+  // `focus()` пишет в `document.activeElement` — без этого нельзя проверить ни
+  // «фокус ушёл в поле диалога», ни «вернулся тому, у кого его взяли». Раньше
+  // это была пустышка, и проверки возврата фокуса были бы фикцией.
+  node.isConnected = true;
+  node.focus = () => {
+    if (node.isConnected && node.ownerDocument) node.ownerDocument.activeElement = node;
+  };
+  node.blur = () => {
+    if (node.ownerDocument?.activeElement === node) node.ownerDocument.activeElement = null;
+  };
   node.scrollTo = () => {};
   node.scrollIntoView = () => {};
   node.setSelectionRange = () => {};
@@ -230,6 +238,9 @@ function makeNode(tag: string): MiniNode {
     offsetWidth: 800,
     offsetHeight: 600,
     isConnected: true,
+    // `ownerDocument` — чтобы `focus()` знал, чей `activeElement` обновлять.
+    // Заполняется `installMiniDom`, когда документ уже есть: узлы создаются и до него.
+    ownerDocument: null as any,
     parentNode: null,
     _text: '',
   };
@@ -346,6 +357,24 @@ export function installMiniDom(): { root: MiniNode; document: any; window: any }
     unobserve(): void {}
     disconnect(): void {}
   }
+  // `ownerDocument` у всех узлов: `focus()` пишет в `document.activeElement`, и без
+  // этой связи проверка возврата фокуса осталась бы фикцией.
+  const bindDocument = (node: any): void => {
+    node.ownerDocument = document;
+    for (const child of node.children ?? []) bindDocument(child);
+  };
+  for (const known of [body, document.documentElement, document.head]) bindDocument(known);
+  const createElement = document.createElement;
+  document.createElement = (tag: string) => {
+    const node = createElement(tag);
+    node.ownerDocument = document;
+    return node;
+  };
+  document.createTextNode = (text: string) => {
+    const node = textNode(text);
+    node.ownerDocument = document;
+    return node;
+  };
   // Глобальные имена, которые код берёт без `window.` (браузер отдаёт их так же).
   Object.assign(globalThis, {
     document,
