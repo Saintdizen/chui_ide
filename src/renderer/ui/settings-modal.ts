@@ -1823,6 +1823,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'По строке на шаблон: `*.min.js`, `coverage`, `dist`. Поддерживаются `*`, `?` и `**`.',
       ),
       switchRow('Свёртывать связанные файлы', explorer.fileNesting, (value) => apply({ fileNesting: value })),
+      switchRow('Склеивать пустые цепочки папок', explorer.compactFolders, (value) => apply({ compactFolders: value })),
       h(
         'div',
         { class: 'field-hint' },

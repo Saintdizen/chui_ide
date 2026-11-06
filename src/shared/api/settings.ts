@@ -355,6 +355,14 @@ export interface ExplorerSettings {
   /** Сворачивать связанные файлы под родителя (`Button.tsx` ← `Button.test.tsx`). */
   fileNesting: boolean;
   /**
+   * Склеивать одиночные цепочки папок одной строкой (`src/main/ai`).
+   *
+   * Включено: в проекте с одним путём вглубь (`src/main/workspace/fs-read.ts`)
+   * восемь строк «›» — это восемь строк ни о чём, и они вытесняют из окна то,
+   * ради чего дерево открыли.
+   */
+  compactFolders: boolean;
+  /**
    * При переименовании файла или папки править импорты, ведущие на прежний путь.
    * Без этого переименование ломает сборку: на файл ссылаются по имени.
    */
@@ -406,6 +414,7 @@ export interface ExplorerRootOverride {
   confirmDelete?: boolean;
   exclude?: string[];
   fileNesting?: boolean;
+  compactFolders?: boolean;
   nestingRules?: string[];
   groupByType?: boolean;
   groupByPackage?: boolean;

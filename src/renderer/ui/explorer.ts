@@ -142,6 +142,7 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   confirmDelete: true,
   exclude: [],
   fileNesting: false,
+  compactFolders: true,
   nestingRules: [],
   updateImportsOnRename: true,
   groupByType: false,
@@ -1592,7 +1593,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const pushEntry = (entry: DirEntry): void => {
         // Цепочку склеиваем только у настоящих каталогов: строка-имя со спутниками
         // (вложенный файл) — это не путь, и удлинять её не за что.
-        const chain = entryIsDirectory(entry) ? folderChain(entry, children, '/', chains) : null;
+        // Склейка подчиняется настройке: при выключенной каждая папка — своя строка.
+        const chain =
+          options.compactFolders && entryIsDirectory(entry) ? folderChain(entry, children, '/', chains) : null;
         const deeper = chain ? chainDepth(chain) : 1;
         rows.push(
           chain && deeper > 1

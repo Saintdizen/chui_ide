@@ -56,10 +56,6 @@ Neovim).
 
 ### Показ и сортировка
 
-24. **`explorer.compactFolders`.** Склейка одиночных цепочек папок одной
-    строкой (`src/main/ai`); переключатель и поведение при фильтре и
-    вложенности. Источник: VS Code `settings` (explorer.compactFolders).
-
 25. **Порядок и группировка — матрица.** `foldersFirst`, `sort`, `groupByType`,
     `groupByPackage`, вложенность, скрытые: все комбинации и независимость от
     скорости чтения ФС. Источник: JetBrains `lists-and-trees` (сортировка и

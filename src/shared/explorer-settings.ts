@@ -34,6 +34,7 @@ export const ROOT_OVERRIDE_FLAGS = [
   'openOnSingleClick',
   'confirmDelete',
   'fileNesting',
+  'compactFolders',
   'groupByType',
   'groupByPackage',
 ] as const satisfies readonly (keyof ExplorerRootOverride)[];
@@ -166,6 +167,7 @@ export const OVERRIDE_LABELS: Record<RootOverrideFlag, string> = {
   openOnSingleClick: 'Открывать одним кликом',
   confirmDelete: 'Спрашивать перед удалением',
   fileNesting: 'Сворачивать связанные файлы',
+  compactFolders: 'Склеивать пустые цепочки папок',
   groupByType: 'Группировать по назначению',
   groupByPackage: 'Пакеты монорепо строками',
 };

@@ -343,6 +343,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Вложение выключено по умолчанию: это заметно меняет вид дерева, и включать
     // его стоит осознанно. Своих правил нет — возьмутся из `core/file-nesting.ts`.
     fileNesting: false,
+    // Склейку цепочек ВКЛЮЧАЕМ: она убирает строки, которые ничего не сообщают,
+    // и обратного «спрятала нужное» тут не бывает — весь путь остаётся на строке.
+    compactFolders: true,
     nestingRules: [],
     // Импорты правим при переименовании по умолчанию: без этого код перестаёт
     // собираться, а правку видно и её можно отменить.
@@ -1159,6 +1162,8 @@ function loadSettings(filePath: string): StoredSettings {
         : [],
       // Выключить можно явным `false`; любое другое значение — включено.
       updateImportsOnRename: parsed.explorer?.updateImportsOnRename !== false,
+      // Склейка цепочек: включена, если не выключили явно — как и в умолчаниях.
+      compactFolders: parsed.explorer?.compactFolders !== false,
       // Группировка по назначению: включаем, только если попросили явно.
       groupByType: parsed.explorer?.groupByType === true,
       // Пакеты монорепо: тоже только по явной просьбе.

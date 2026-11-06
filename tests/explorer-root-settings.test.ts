@@ -33,6 +33,7 @@ const BASE: ExplorerSettings = {
   confirmDelete: true,
   exclude: [],
   fileNesting: false,
+  compactFolders: true,
   nestingRules: [],
   updateImportsOnRename: true,
   groupByType: false,
@@ -119,5 +120,13 @@ describe('разбор карты из настроек', () => {
   it('подпись отличий перечисляет их словами', () => {
     expect(describeOverride({ showHidden: false, exclude: ['a'] })).toBe('Показывать скрытые: выкл, исключений: 1');
     expect(describeOverride({})).toBe('');
+  });
+  it('склейку цепочек можно выключить одному корню, не трогая остальные', () => {
+    // Новый ключ обязан вести себя как прочие булевы: наследовать общее значение
+    // и переопределяться на корень — иначе он окажется «только глобальным».
+    expect(BASE.compactFolders).toBe(true);
+    const overrides = setRootOverride(undefined, '/p/one', { compactFolders: false });
+    expect(resolveExplorerSettings({ ...BASE, byRoot: overrides }, '/p/one').compactFolders).toBe(false);
+    expect(resolveExplorerSettings({ ...BASE, byRoot: overrides }, '/p/two').compactFolders).toBe(true);
   });
 });
