@@ -120,6 +120,11 @@ export interface StatusBarDeps {
   openProblems(anchor: HTMLElement): void;
   /** Человек нажал «включить всё равно»: подсветить крупный файл несмотря на порог. */
   forceHighlight: () => void;
+  /**
+   * Нажатие на полосу долгой работы: прервать её. Доступно, только когда полоса
+   * говорит `cancellable` — молчаливый клик по «просто показателю» обманывает.
+   */
+  cancelWork: () => void;
   /** Клик по чипу языкового сервера — попап со списком серверов и действиями. */
   openLsp(anchor: HTMLElement): void;
   /**
@@ -266,6 +271,14 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   );
   const meterFill = meterItem.querySelector<HTMLElement>('.status-meter-fill')!;
   const meterLabel = meterItem.querySelector<HTMLElement>('.status-meter-label')!;
+  meterItem.onclick = (event) => {
+    // Прерываем только когда это правда можно: иначе клик по показателю выглядел бы
+    // кнопкой, которая ничего не делает. Признак приходит из состояния (`cancellable`).
+    if (!meterItem.classList.contains('is-cancellable')) return;
+    // Нажатие на саму полосу не должно утекать в разметку вокруг.
+    event.stopPropagation();
+    deps.cancelWork();
+  };
   // Идёт запись макроса: точка и число действий. Молчит, когда записи нет.
   const macroItem = h(
     'span',
@@ -353,7 +366,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     meterItem.classList.toggle('is-busy', meter.busy);
     meterLabel.textContent = meter.label;
     meterFill.style.width = `${Math.round(meter.fill * 100)}%`;
-    meterItem.title = meter.title;
+    meterItem.classList.toggle('is-cancellable', meter.cancellable === true);
+    meterItem.title = meter.cancellable ? `${meter.title} — нажмите, чтобы прервать` : meter.title;
     const macro = state.macro;
     macroItem.hidden = macro === null;
     macroCount.textContent = macro ? `МАКРО ${macro.steps}` : '';

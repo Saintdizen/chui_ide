@@ -266,6 +266,15 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
       editors.forceHighlight();
       refreshStatus();
     },
+    // Полоса долгой работы прерывается нажатием (п.30). Обе проверки проекта —
+    // свои проходы, но отменяем тот, чья полоса сейчас на экране.
+    cancelWork: () => {
+      const cancelled = projectCheck.cancel() || typeCheck.cancel();
+      if (!cancelled) return;
+      // Полоса не должна ждать, пока проход отчитается о прерывании: у неделимой
+      // команды (tsc) ответ придёт через секунды, а нажатие уже случилось.
+      refreshStatus();
+    },
     // Клик по слоту — та же дорога, что и из меню редактора: команды редактора
     // живут в его собственных командах, а не в общем реестре приложения.
     runCommand: (id) => {
@@ -1502,8 +1511,10 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   const projectCheck = new ProjectCheck({
     root: () => workspace.root,
     // Потоком, а не обычным запросом: по событиям хода рисуется полоса в строке состояния.
+    // Ручку отдаём наружу (`openStream`, а не `stream`): по ней полоса прерывает проход,
+    // который иначе досчитывал бы до конца, пока человек уже смотрит в другое место.
     analyze: (onStage) =>
-      rpc.stream('project.analyze', undefined, (event, payload) => {
+      rpc.openStream('project.analyze', undefined, (event, payload) => {
         if (event === PROJECT_STAGE_EVENT) onStage(payload as ProjectStageEvent);
       }),
     setMarkers: (path, owner, list) => editors.setExternalMarkers(path, owner, list),
@@ -1524,7 +1535,11 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     unchecked: projectCheck.unchecked(),
     partial: projectCheck.partial(),
     // Два прохода сразу не запускаются: показываем тот, что идёт.
-    check: projectCheck.progress() ?? typeCheck.progress(),
+    check: {
+      ...(projectCheck.progress() ?? typeCheck.progress() ?? {}),
+      // «Прервать» — только у идущего прохода и только если у него есть ручка.
+      cancellable: (projectCheck.progress() ? projectCheck : typeCheck).cancellable(),
+    } as ReturnType<typeof projectCheck.progress> & { cancellable?: boolean },
   });
   const problemPanel = createProblemPanel({
     markers: () => editors.markers(),

@@ -39,6 +39,8 @@ export interface ProjectCheckState {
   problems: number;
   /** Проход не уложился во время: список может быть неполным. */
   timedOut: boolean;
+  /** Проход прерван человеком: пометки сняты, судить о коде не по чему. */
+  cancelled?: boolean;
   /** Причина отказа или что не удалось проверить. */
   note: string | null;
   /**
@@ -65,13 +67,33 @@ export interface ProjectCheckPorts {
   /**
    * Проход целиком. `onStage` зовут события хода — они есть у линтера
    * (`project.analyze`) и нет у tsc: там одна неделимая команда.
+   *
+   * Возвращает `cancel`: пока проход идёт, человек может его прервать — иначе
+   * долгая проверка на большом корне выглядит зависанием окна. Необязателен:
+   * неделимый проход может не уметь отменяться, тогда `cancel()` не появится.
    */
-  analyze: (onStage: (event: ProjectStageEvent) => void) => Promise<ProjectAnalysis>;
+  analyze: (
+    onStage: (event: ProjectStageEvent) => void,
+  ) => Promise<ProjectAnalysis> | { result: Promise<ProjectAnalysis>; cancel(): boolean };
   /** Положить пометки файла под владельцем (чужие владельцы не трогаются). */
   setMarkers: (path: string, owner: string, diagnostics: readonly LspDiagnostic[]) => void;
   /** Владелец пометок; по умолчанию `project`. */
   owner?: string;
   onState?: (state: ProjectCheckState) => void;
+}
+
+/**
+ * Прерывание — ответ на действие человека, а не беда прохода. Узнаём по признаку
+ * `cancelled` у ошибки RPC (`core/rpc.ts`), а если порт свой — по имени ошибки:
+ * текст сообщения тут не годится, он переводится и меняется.
+ */
+function isCancelled(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const marked = error as { cancelled?: unknown; name?: unknown };
+  // `RpcError` уже отвечает на этот вопрос сам — по коду, а не по тексту.
+  if (marked.cancelled === true) return true;
+  // Свой порт может прерваться по `AbortController` — тот бросает `AbortError`.
+  return marked.name === 'AbortError';
 }
 
 /** Пометка проекта в форме, которую понимает редактор. */
@@ -116,6 +138,8 @@ export class ProjectCheck {
   /** Номер прохода: ответ из прошлого проекта не должен попасть в новый. */
   private token = 0;
   private busy = false;
+  /** Ручка прерывания текущего прохода; `null` — либо не идёт, либо прерывать нечем. */
+  private abort: (() => boolean) | null = null;
 
   constructor(
     private readonly ports: ProjectCheckPorts,
@@ -203,7 +227,14 @@ export class ProjectCheck {
     };
 
     try {
-      const analysis = await this.ports.analyze(onStage);
+      const answer = this.ports.analyze(onStage);
+      // Порт отдаёт либо готовое обещание, либо обещание вместе с ручкой отмены.
+      const handle =
+        answer && typeof answer === 'object' && 'result' in answer
+          ? (answer as { result: Promise<ProjectAnalysis>; cancel(): boolean })
+          : null;
+      if (handle) this.abort = () => handle.cancel();
+      const analysis = await (handle ? handle.result : (answer as Promise<ProjectAnalysis>));
       // Ответ мог прийти уже после смены проекта — тогда он про чужой корень.
       if (token !== this.token) return;
       const grouped = groupByPath(analysis.problems);
@@ -222,6 +253,13 @@ export class ProjectCheck {
       });
     } catch (error) {
       if (token !== this.token) return;
+      // «Отменено» — это ответ на нажатие человека, а не беда: снимаем пометки и
+      // молчим. Тост про «проверка не удалась» здесь был бы упрёком за своё же действие.
+      if (isCancelled(error)) {
+        this.dropMarkers();
+        this.emit({ phase: 'idle', tool: null, files: 0, problems: 0, timedOut: false, cancelled: true, note: null, progress: null });
+        return;
+      }
       const reason = (error as { message?: unknown } | null)?.message;
       this.emit({
         phase: 'failed',
@@ -237,7 +275,29 @@ export class ProjectCheck {
       });
     } finally {
       this.busy = false;
+      this.abort = null;
     }
+  }
+
+  /**
+   * Прервать идущий проход. `true` — прерывать было что: нажатие на полосу в
+   * строке состояния не должно глотать клик молча, когда работы уже нет.
+   */
+  cancel(): boolean {
+    const abort = this.abort;
+    if (!abort) return false;
+    // Ручку снимаем сразу: второе нажатие не должно бить по тому же вызову.
+    this.abort = null;
+    try {
+      return abort();
+    } catch {
+      return false;
+    }
+  }
+
+  /** Есть ли что прерывать — полоса по этому решает, рисовать ли отмену. */
+  cancellable(): boolean {
+    return this.abort !== null;
   }
 
   private dropMarkers(): void {

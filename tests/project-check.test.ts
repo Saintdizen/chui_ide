@@ -254,4 +254,77 @@ describe('ProjectCheck: ход прохода для полосы прогрес
     expect(check.progress()).toBeNull();
     await run;
   });
+
+  // Прерывание (п.30): долгая проверка на большом корне не должна доводить проход
+  // до конца, когда человек уже нажал «прервать».
+  it('нажатие прерывает идущий проход и снимает пометки', async () => {
+    let reject: ((error: unknown) => void) | null = null;
+    let cancelCalls = 0;
+    const start = new Promise<ProjectAnalysis>((_, fail) => {
+      reject = fail;
+    });
+    const written: Written[] = [];
+    const check = new ProjectCheck({
+      root: () => '/proj',
+      analyze: () => ({
+        result: start,
+        cancel: () => {
+          cancelCalls += 1;
+          // Так ведёт себя настоящий транспорт: вызов падает с «отменено».
+          const error = Object.assign(new Error('cancelled'), { cancelled: true });
+          reject?.(error);
+          return true;
+        },
+      }),
+      setMarkers: (path, owner, diagnostics) => written.push({ path, owner, diagnostics: [...diagnostics] }),
+    });
+
+    const running = check.run();
+    expect(check.cancellable()).toBe(true);
+    expect(check.cancel()).toBe(true);
+    expect(cancelCalls).toBe(1);
+    await running;
+
+    // Прервано — не провал: пометок нет, ошибки человеку не показываем.
+    expect(check.state()).toMatchObject({ phase: 'idle', files: 0, problems: 0, note: null, cancelled: true });
+    expect(written).toEqual([]);
+    expect(check.cancellable()).toBe(false);
+  });
+
+  it('второе нажатие не бьёт по тому же вызову', async () => {
+    let cancelCalls = 0;
+    const check = new ProjectCheck({
+      root: () => '/proj',
+      analyze: () => ({
+        result: new Promise<ProjectAnalysis>(() => undefined),
+        cancel: () => {
+          cancelCalls += 1;
+          return true;
+        },
+      }),
+      setMarkers: () => undefined,
+    });
+
+    void check.run();
+    expect(check.cancel()).toBe(true);
+    expect(check.cancel()).toBe(false);
+    expect(cancelCalls).toBe(1);
+  });
+
+  it('нечего прерывать — нажатие не притворяется сделанным', async () => {
+    const { check } = setup();
+    expect(check.cancellable()).toBe(false);
+    expect(check.cancel()).toBe(false);
+    await check.run();
+    // Проход закончился — прерывать больше нечего.
+    expect(check.cancel()).toBe(false);
+  });
+
+  it('проход без ручки отмены работает как раньше', async () => {
+    // Неделимая команда (tsc) может не уметь отменяться: порт отдаёт обещание.
+    const { check, states } = setup({ answer: analysis([problem('/proj/a.ts', 1)]) });
+    await check.run();
+    expect(states).toEqual(['running', 'done']);
+    expect(check.state()).toMatchObject({ phase: 'done', problems: 1 });
+  });
 });

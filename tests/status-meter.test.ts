@@ -43,4 +43,25 @@ describe('одна полоса работы', () => {
     expect(meter.fill).toBeCloseTo(0.4);
     expect(meter.busy).toBe(false);
   });
+
+  // Отмена (п.30): признак «это можно прервать» приходит из состояния и обязан
+  // доехать до вида. Без него полоса выглядела бы кнопкой, которая не работает.
+  it('проверка умеет прерываться — полоса это знает', () => {
+    const meter = statusMeter({ ...NONE, check: { ...check, cancellable: true } });
+    expect(meter.cancellable).toBe(true);
+  });
+
+  it('проверка без отмены — полоса остаётся показателем', () => {
+    expect(statusMeter({ ...NONE, check }).cancellable).toBe(false);
+  });
+
+  it('прерываемый сервер отдаёт признак дальше', () => {
+    const meter = statusMeter({ ...NONE, progress: { ...server(40), cancellable: true } });
+    expect(meter.cancellable).toBe(true);
+    expect(meter.label).toBe('Initializing JS/TS 40%');
+  });
+
+  it('чтение проекта признака отмены не выдумывает', () => {
+    expect(statusMeter({ ...NONE, symbols }).cancellable).toBeUndefined();
+  });
 });

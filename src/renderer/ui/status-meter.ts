@@ -22,14 +22,21 @@ export interface MeterView {
   busy: boolean;
   label: string;
   title: string;
+  /**
+   * Работу можно прервать нажатием на полосу. Ставится только там, где отмена
+   * правда есть: сервер гасится своим способом, чтение проекта — своим, проверка
+   * проекта — ручкой потока. Показатель без отмены остаётся показателем.
+   */
+  cancellable?: boolean;
 }
 
 const HIDDEN: MeterView = { hidden: true, fill: 0, busy: false, label: '', title: '' };
 
 export function statusMeter(state: {
-  progress: { label: string; percentage: number | null } | null;
+  progress: { label: string; percentage: number | null; cancellable?: boolean } | null;
   symbols: { text: string; title: string; progress: { done: number; total: number } | null } | null;
-  check: CheckProgressInput | null;
+  /** Плюс `cancellable` — проверка умеет прерываться, пока идёт проход. */
+  check: (CheckProgressInput & { cancellable?: boolean }) | null;
 }): MeterView {
   // 1. Сервер. Процент он называет сам ($/progress); без процента — бегущий штрих.
   const server = state.progress;
@@ -41,6 +48,7 @@ export function statusMeter(state: {
       busy: percent === null,
       label: percent === null ? server.label : `${server.label} ${Math.round(percent)}%`,
       title: `Языковой сервер: ${server.label}`,
+      cancellable: server.cancellable === true,
     };
   }
 
@@ -60,5 +68,12 @@ export function statusMeter(state: {
   // 3. Проверка проекта: правила шагов и цифр живут в `check-progress.ts`.
   const check = checkProgress(state.check);
   if (check.hidden) return HIDDEN;
-  return { hidden: false, fill: check.fill, busy: check.busy, label: check.label, title: check.title };
+  return {
+    hidden: false,
+    fill: check.fill,
+    busy: check.busy,
+    label: check.label,
+    title: check.title,
+    cancellable: state.check?.cancellable === true,
+  };
 }
