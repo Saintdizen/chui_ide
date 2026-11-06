@@ -2879,6 +2879,42 @@
   min-width: 0;
 }
 
+/* Полоса «что ещё идёт»: инструменты, живущие в main помимо ответа. */
+.chat-running {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text_color_secondary);
+  font-size: var(--font_micro_size);
+}
+
+/* Пустая полоса не должна оставлять щель в статусе — `hidden` её не убирает. */
+.chat-running[hidden] {
+  display: none;
+}
+
+.chat-running-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-running-stop {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--blue_prime_background);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.chat-running-stop:hover {
+  color: var(--blue_prime_background_hover, var(--blue_prime_background));
+}
+
 /* Выключенный ассистент гаснет и здесь — тем же тоном, что и панель чата. */
 .chat-status.is-ai-disabled {
   opacity: 0.5;

@@ -281,6 +281,19 @@ export interface ChatRunTrace {
   instructions?: AppliedInstruction[];
 }
 
+/**
+ * Что main делает прямо сейчас: прогоны бесед и идущие инструменты.
+ *
+ * Не про конкретную беседу, а про процесс целиком: «стопу» нужно найти прогон,
+ * которого окно не помнит, и показать человеку, что ещё живёт.
+ */
+export interface RunningSnapshot {
+  /** Сколько прогонов идёт. */
+  runs: number;
+  /** Беседы, в которых выполняются инструменты. */
+  tools: Array<{ callId: string; conversation: string | null; names: string[]; runningMs: number }>;
+}
+
 export interface ChatStreamDone {
   text: string;
   finishReason?: string;

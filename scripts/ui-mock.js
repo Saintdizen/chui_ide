@@ -398,6 +398,8 @@ module.exports = [
   let listenerId = 0;
   let hostSeq = 0;
   /** Как main: отмена вызова прерывает выполняющийся стрим. */
+  /** Прогон идёт — от этого зависит `ai.running`: полоса «что ещё идёт». */
+  let running = false;
   let cancelRequested = false;
 
   /** Как main: спросить renderer и дождаться ответа хостовым вызовом. */
@@ -854,6 +856,9 @@ module.exports = [
     },
 
     'workspace.current': () => ({ root: currentRoot }),
+
+    // Псевдонимы импортов из монорепного `tsconfig` — файлы читает main.
+    'workspace.importAliases': () => ({}),
 
     // Сниппеты чужого проекта: в моке их нет — пусто, а не отказ.
     'workspace.snippetFiles': () => ({ files: [], userFiles: [] }),
@@ -1464,6 +1469,27 @@ module.exports = [
       ],
     }),
     'ai.telemetryClear': () => ({ ok: true }),
+    // Опись прогонов: прогон есть, завершится — полоса «что ещё идёт» позовёт
+    // `ai.running` сразу после старта. Пока он идёт, идёт и `terminal` — тогда
+    // полосу видно, а кнопка «остановить» есть куда нажать.
+    'ai.running': () => ({
+      runs: running ? 1 : 0,
+      tools: running ? [{ callId: 'mock', conversation: null, names: ['terminal'], runningMs: 4000 }] : [],
+    }),
+    'ai.abortConversation': () => 1,
+    // Словарь орфографии: в настоящем main он читается из системы, в моке —
+    // небольшой набор, чтобы отметки на словах не выглядели случайными.
+    'spell.dictionary': () => ({ words: ['chui', 'renderer', 'main'], source: 'мок' }),
+    // Журнал LSP: в настоящем main это файл, в моке журнал пуст — окно откроется
+    // пустым, а не с ошибкой.
+    'lsp.trace': () => [],
+    // Покрытие тестами: путь к отчёту раннера и сам отчёт — в main. В моке
+    // отчёта нет: окно покрытия скажет «нет данных», а не упадёт.
+    'project.coverageJsonPath': () => null,
+    'project.readCoverage': () => null,
+
+    // Счёт провайдера — сетевой запрос; в моке кошелька нет.
+    'ai.balance': () => null,
     // Inline-автодополнение: мок молча отдаёт короткую подсказку.
     'ai.complete': async () => ({ text: '// подсказка от мока' }),
     // Сообщение коммита: мок отвечает так, как это делает модель после очистки.
@@ -1476,6 +1502,9 @@ module.exports = [
     }),
     'ai.chat': async (params, id) => {
       cancelRequested = false;
+      running = true;
+      // Беседа кончилась по любому исходу — опись пуста, и полоса прячется.
+      try {
 
       // Сжатие беседы — отдельный короткий запрос: модель отвечает резюме,
       // а не обычным ответом с размышлениями и блоками кода.
@@ -1615,6 +1644,9 @@ module.exports = [
         usage: { promptTokens: 12, completionTokens: 24 },
         run: mockRun(Boolean(params.useTools)),
       };
+      } finally {
+        running = false;
+      }
     },
   };
 

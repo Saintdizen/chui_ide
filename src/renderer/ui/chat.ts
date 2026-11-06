@@ -44,6 +44,7 @@ import type { HostService } from '../core/host';
 import type { WorkspaceModel } from '../core/workspace-model';
 import type { GitModel } from '../core/git-model';
 import { createChatBranchSpace } from './chat-branch-space';
+import { createChatRunning } from './chat-running';
 import { describeThread } from '../../shared/chat-threads';
 import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom';
@@ -1413,10 +1414,28 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       })
     : null;
 
+  /**
+   * Полоса «что ещё идёт». Опрашивает main только во время прогона: между ходами
+   * там нечего смотреть, а опрос дважды в секунду — это работа впустую.
+   */
+  const runningBar = createChatRunning({
+    snapshot: () =>
+      deps.rpc
+        .request('ai.running', undefined)
+        .then((snapshot) => snapshot ?? null)
+        // Спрос не удался (старый main, AI выключен) — пустоты достаточно.
+        .catch(() => null),
+    abort: () => {
+      const session = active();
+      void deps.rpc.request('ai.abortConversation', { conversationUid: session.uid }).catch(() => undefined);
+    },
+  });
+
   const statusElement = h(
     'div',
     { class: 'chat-status' },
     branchSpace?.element ?? null,
+    runningBar.element,
     contextRing.element,
     sessionInfo.element,
   );
@@ -2878,6 +2897,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
     busy = value;
     renderTabs();
+    // Инструменты видно только на ходу: между ходами полосу не опрашиваем.
+    runningBar.follow(value);
     // Искра в кнопке «Информация о сессии»: цвет говорит, что ассистент работает.
     aiSparkle.classList.toggle('is-busy', busy);
     aiSparkle.title = busy ? 'AI: генерация…' : 'AI: готов';
@@ -3002,6 +3023,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // закрылся) — бьём по последнему открытому, как раньше.
     const handle = liveStreams.get(running.id);
     if (!handle || !handle.cancel()) deps.rpc.cancelActive();
+    // И то, что живёт в main помимо потока: команда, чтение, запись. Без этого
+    // «стоп» гасил ответ, а запущенный терминал продолжал работать — процесс
+    // оставался сиротой, и человек об этом не знал.
+    void deps.rpc.request('ai.abortConversation', { conversationUid: running.uid }).catch(() => undefined);
   }
 
   /**

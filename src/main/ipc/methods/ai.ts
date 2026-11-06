@@ -177,6 +177,21 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
       .finally(() => deps.ai.closeInterject(request.conversationUid));
   });
 
+  // Что идёт прямо сейчас. Спрашивается по кнопке и перед «стопом»: окно
+  // не помнит прогон после перезапуска, а процесс помнит.
+  router.register('ai.running', () => deps.ai.running.snapshot());
+
+  // Снять инструменты беседы, не гася прогон: зависшая команда переживает
+  // «стоп» только потому, что её нечем было погасить — теперь есть чем.
+  router.register('ai.abortConversation', (params) => {
+    let affected = 0;
+    for (const run of deps.ai.running.forConversation(params.conversationUid)) {
+      run.abort.abort();
+      affected += 1;
+    }
+    return affected;
+  });
+
   // Inline-автодополнение: короткий запрос без истории и инструментов.
   router.register('ai.complete', (params, ctx) => {
     requireAiEnabled();

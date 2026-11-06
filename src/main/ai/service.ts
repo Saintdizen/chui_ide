@@ -122,6 +122,7 @@ import { TaskWorkspace } from './task-workspace';
 import type { WorkspaceService } from '../workspace/workspace';
 import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
 import { normalizeAgentHooks } from '../../shared/agent-hooks';
+import { RunRegistry, abortOfRun } from './run-registry';
 import { runTool } from './agent-tools';
 import { createAgentHooks } from './agent-hooks';
 import { stepOutputChars } from './output-budget';
@@ -359,6 +360,12 @@ export class AiService {
    * и для инструментов. Хранилище можно подменить (проверки пишут в temp-каталог,
    * а не в userData разработчика), поэтому приходит параметром.
    */
+  /**
+   * Что идёт прямо сейчас — по беседам и инструментам. Нужно «стопу» и снимку
+   * «что ещё живо»: отмена по `callId` находит прогон, даже когда окно его забыло.
+   */
+  readonly running = new RunRegistry();
+
   private readonly memory: ProjectMemory;
 
   /**
@@ -505,6 +512,11 @@ export class AiService {
    */
   closeInterject(conversation?: string | null): void {
     this.closeRun(conversation);
+    // Прогон кончился — описи больше не место: иначе «стоп» находил бы след
+    // прошлого прогона, а снимок показывал бы работу, которой нет.
+    if (conversation) {
+      for (const run of this.running.forConversation(conversation)) this.running.finish(run.callId);
+    }
   }
 
   /**
@@ -719,6 +731,12 @@ export class AiService {
     // Теперь есть кому говорить: слова на ходу доедут до модели на границе
     // ближайшего шага. До этой строки такие слова отвергаются с ответом `false`.
     const run = this.runs.open(request.conversationUid);
+    // Опись того, что идёт: по ней «стоп» и «что ещё живо» находят прогон даже
+    // тогда, когда id вызова в окне потерян. Снимается в `finally`.
+    // `callId` — id вызова RPC: без него прогон не найти из окна. Если беседа не
+    // названа, годится её uid; пустой id просто не кладём в опись.
+    const callId = request.conversationUid ?? '';
+    if (callId) this.running.start(callId, request.conversationUid ?? null, abortOfRun(signal));
 
     const messages: ChatMessage[] = [];
     const systemPrompt = request.systemPrompt ?? settings.ai.systemPrompt;
@@ -1655,6 +1673,9 @@ export class AiService {
         // Замер шага: карточка показывает имена и аргументы, а стоило ли это
         // секунду или пять минут — раньше видно не было.
         const startedAt = Date.now();
+        // Опись на время вызова: без неё «стоп» не знает, что инструмент ещё жив,
+        // и человек не видит, что именно идёт.
+        if (callId) this.running.toolStart(callId, call.name, startedAt);
         if (repeated) {
           outcome = {
             ok: false,
@@ -1705,6 +1726,7 @@ export class AiService {
           didNewWork = true;
           didWork = true;
         }
+        if (callId) this.running.toolFinish(callId, call.name);
         const callMs = Date.now() - startedAt;
         emit(ChatStreamEvent.ToolResult, {
           id: call.id,

@@ -81,13 +81,11 @@ const NOT_MOCKED: Record<string, string[]> = {
     'debug.stop',
     'debug.variables',
   ],
-  'правка импортов и словарь орфографии — файлы и языковой сервер живут в main': [
-    'spell.dictionary',
-    'workspace.updateImports',
-  ],
+  // Словарь орфографии из списка ушёл: `app.ts` теперь пишет `spell.dictionary`
+  // двойными кавычками, страж его видит — и моку есть что ответить.
+  'правка импортов — файлы и языковой сервер живут в main': ['workspace.updateImports'],
   'внешние инструменты (MCP) — процессы запускает main': ['ai.mcpTools'],
   'проверка команды и остановка сервера — процессы живут в main': ['lsp.check', 'lsp.stop'],
-  'журнал сервера — файл пишет main, в моке его нет': ['lsp.trace'],
   'нужен настоящий репозиторий и клиент git — в моке их нет': [
     'git.bisectMark',
     'git.bisectReset',
@@ -133,14 +131,13 @@ const NOT_MOCKED: Record<string, string[]> = {
     'review.save',
   ],
   'профайлер и окружение Python — нужен интерпретатор': ['python.activateCommand', 'python.profileLines'],
-  'покрытие тестами — main читает отчёт раннера': ['project.coverageJsonPath', 'project.readCoverage'],
+  // Алиасы импортов ушли отсюда: `app.ts` зовёт `workspace.importAliases` двойными
+  // кавычками, страж снова его видит — и мок отвечает пустым набором.
   'пакеты монорепо и многообласть — читаются из файловой системы': [
     'project.packages',
     'workspace.addRoot',
     'workspace.removeRoot',
     'workspace.setActiveRoot',
-    // Алиасы берутся из `tsconfig.json` проекта: без диска разбирать нечего.
-    'workspace.importAliases',
   ],
   'точные данные от языкового сервера — в браузере сервера нет': [
     'lsp.formatRange',
@@ -158,7 +155,6 @@ const NOT_MOCKED: Record<string, string[]> = {
     // только на время прогона. В моке прогона нет — принимать некому.
     'ai.interject',
   ],
-  'счёт провайдера — сетевой запрос к его API, в моке некому отвечать': ['ai.balance'],
   'встроенный браузер держит main: вложение — слой окна, а не элемент страницы': [
     'browser.viewCapture',
     'browser.viewClose',

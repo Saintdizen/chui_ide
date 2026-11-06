@@ -115,6 +115,7 @@ import type {
   ChatHistory,
   ChatRequest,
   ChatStreamDone,
+  RunningSnapshot,
   InlineCompletionRequest,
   InlineCompletionResult,
   PickedImage,
@@ -1033,6 +1034,18 @@ export interface ChuiMethods {
    * не ответил: это не ошибка, и попап просто не рисует строку про деньги.
    */
   'ai.balance': { params: void; result: AccountBalance | null };
+  /**
+   * Что main делает прямо сейчас: прогоны и идущие инструменты. Нужно «стопу»:
+   * без описи он гасит только тот вызов, чей id ещё помнит окно, а команда,
+   * чтение и запись остаются сиротами.
+   */
+  'ai.running': { params: void; result: RunningSnapshot };
+  /**
+   * Погасить все инструменты беседы, не гася сам прогон. Для кнопки «стоп» этого
+   * мало — она гасит и прогон; а это для тех, кто хочет снять зависшую команду
+   * и продолжить. Возвращает, сколько прогонов было задето.
+   */
+  'ai.abortConversation': { params: { conversationUid: string }; result: number };
 
   'ai.chat': { params: ChatRequest; result: ChatStreamDone };
   /**
