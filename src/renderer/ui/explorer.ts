@@ -106,6 +106,14 @@ export interface ExplorerView {
   expand(path: string): void;
   /** Вернуть раскрытые папки прошлой сессии: чужие пути игнорируются. */
   restoreExpanded(paths: readonly string[]): void;
+  /**
+   * Что тащат сейчас: первый путь перетаскиваемого набора или `null`.
+   *
+   * Нужно снаружи (полоса вкладок открывает по нему сравнение). Отдаём один
+   * путь, а не список: сравнить два файла из десяти выделенных всё равно не
+   * получится, и молча взять первый из них — честнее, чем ждать непонятного.
+   */
+  draggedPath(): string | null;
   /** Где стояла прокрутка дерева, px — часть места работы. */
   scrollTop(): number;
   /** Вернуть прокрутку прошлой сессии: дальше видимой части дерево не прокручивается. */
@@ -2813,6 +2821,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     startCreate,
     startRename,
     expandedPaths: () => [...expanded],
+    draggedPath: () => dragging[0] ?? null,
     restoreExpanded(paths) {
       expanded.clear();
       const root = deps.workspace.root;

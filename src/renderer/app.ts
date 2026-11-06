@@ -2330,6 +2330,9 @@ export async function startApplication(
       active: (path) => markdownPreviews.has(path),
       toggle: (path) => toggleMarkdownPreview(path),
     },
+    // Перетащили файл из дерева на вкладку — значит «сравни с ней». Источник
+    // перетаскивания живёт в дереве, полоса только спрашивает.
+    draggedFile: () => explorer.draggedPath(),
   };
 
   const tabs = createTabs(tabSources);

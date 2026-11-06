@@ -23,6 +23,14 @@ export interface TabsDeps {
     /** Переключить режим. */
     toggle(path: string): void;
   };
+  /**
+   * Путь файла, который сейчас тащат (из дерева или из полосы), или `null`.
+   *
+   * Полоса сама перетаскивание не заводит: вкладки не переставляются, а файл
+   * приезжает снаружи. Поэтому источник — снаружи, здесь только проверка «есть
+   * что сравнивать» и запрет сравнивать файл с самим собой.
+   */
+  draggedFile?: () => string | null;
 }
 
 /**
@@ -246,6 +254,31 @@ export function createTabs(deps: TabsDeps): Tabs {
       tab.addEventListener('click', () => void deps.commands.execute('file.activate', path));
       tab.addEventListener('auxclick', (event) => {
         if (event.button === 1) void deps.commands.execute('file.close', path);
+      });
+
+      // Перетащили файл на вкладку — сравнить с этой вкладкой.
+      //
+      // Почему перетаскивание, а не ещё одна команда: сравнение уже умеет
+      // открыть два файла (`diff.compareFiles`), но выбрать второй из меню —
+      // это путь через список файлов с поиском. Тащат ровно то, что видно.
+      //
+      // Условие «пути разные» обязательное: сравнение файла с самим собой
+      // открывается пустым, и человек решит, что оно сломано.
+      tab.addEventListener('dragover', (event) => {
+        const dragged = deps.draggedFile?.();
+        if (!dragged || dragged === path) return;
+        event.preventDefault();
+        event.dataTransfer!.dropEffect = 'link';
+        tab.classList.add('is-drop-target');
+      });
+      tab.addEventListener('dragleave', () => tab.classList.remove('is-drop-target'));
+      tab.addEventListener('drop', (event) => {
+        tab.classList.remove('is-drop-target');
+        const dragged = deps.draggedFile?.();
+        if (!dragged || dragged === path) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void deps.commands.execute('diff.compareFiles', dragged, path);
       });
       // Стрелки ходят по полосе, как в списке вкладок: фокус и выбор едут вместе.
       tab.addEventListener('keydown', (event) => onTabKey(event, tab));
