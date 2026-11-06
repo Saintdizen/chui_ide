@@ -23,6 +23,7 @@ import { selectionEnd, selectionStart } from '../view/selection';
 import { FindState } from '../find/find-state';
 import { compileQuery, rangeOfSelection, type FindMatch } from '../find/search';
 import { replaceAll, replaceOne, type ReplaceEdit, type ReplaceSource } from '../find/replace';
+import { createSearchHistory, stepHistory, type SearchHistory } from '../../core/search-history';
 
 /** Пауза перед пересчётом поиска после нажатия клавиши. */
 const SEARCH_DEBOUNCE_MS = 120;
@@ -42,6 +43,15 @@ export class FindWidget {
   private readonly message: HTMLElement;
 
   private visible = false;
+  /** История запросов и истории замен — своя у каждой панели: свой текст, свои запросы. */
+  private readonly queryHistory: SearchHistory = createSearchHistory();
+  private readonly replaceHistory: SearchHistory = createSearchHistory();
+  /** Где стоим при листании стрелками: `-1` — в истории не были, в поле своё. */
+  private queryCursor = -1;
+  private replaceCursor = -1;
+  /** Ввод, после которого листание начинается заново. */
+  private lastTyped = '';
+  private lastTypedReplace = '';
   private debounce: number | null = null;
   /** Куда вернуть фокус после закрытия — задаёт тот, кто виджет создал. */
   onClose: (() => void) | null = null;
@@ -86,6 +96,14 @@ export class FindWidget {
     this.input.addEventListener('input', this.onQueryInput);
     this.input.addEventListener('keydown', this.onInputKeyDown);
     this.replaceInput.addEventListener('keydown', this.onReplaceKeyDown);
+    // Ручной ввод в поле сбрасывает листание: иначе стрелка «вниз» подставила бы
+    // запрос из истории поверх только что набранного.
+    this.input.addEventListener('input', () => {
+      this.queryCursor = -1;
+    });
+    this.replaceInput.addEventListener('input', () => {
+      this.replaceCursor = -1;
+    });
   }
 
   /** Разметка: две строки (поиск и замена) и сообщение под ними. */
@@ -193,9 +211,16 @@ export class FindWidget {
     this.root.classList.toggle('is-replace', mode === 'replace');
     this.view.element.classList.add('own-editor-has-find');
     // Запрос по умолчанию — выделенный текст: искать то, что выделил, — обычное дело.
+    // Если выделения нет — прошлый запрос из истории: закрыть и открыть поиск —
+    // не повод набирать то же самое заново.
     const selected = this.controller.selectedText();
-    const initial = query ?? (selected.includes('\n') ? '' : selected);
+    const remembered = this.queryHistory.entries()[0] ?? '';
+    const initial = query ?? (selected.includes('\n') ? '' : selected || remembered);
     if (initial.length > 0) this.input.value = initial;
+    // Поле непустое — листание начинается с нуля: иначе стрелка «вверх» подставила бы
+    // поверх этого запроса его же самого.
+    this.queryCursor = -1;
+    this.lastTyped = initial;
     // Снимаем границы ДО первого пересчёта: иначе он пойдёт по всему файлу
     // и счётчик на миг покажет не то число.
     this.state.setRange(
@@ -375,9 +400,19 @@ export class FindWidget {
       this.hide();
       return;
     }
+    // ↑/↓ без Shift — история запросов, как в VS Code. В длинном запросе стрелки
+    // уводят каретку, поэтому в историю — только с пустым полем или после листания.
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      if (!this.shouldBrowseHistory(this.input)) return;
+      event.preventDefault();
+      this.stepQueryHistory(event.key === 'ArrowUp' ? -1 : 1);
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
       // Enter — вперёд, Shift+Enter — назад: как в остальных редакторах.
+      // Заодно запоминаем запрос: его человек подтвердил действием.
+      this.rememberQuery();
       this.step(event.shiftKey ? -1 : 1);
       return;
     }
@@ -404,12 +439,80 @@ export class FindWidget {
       this.hide();
       return;
     }
+    // В поле замены стрелки тоже листают — свою историю подставок.
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      if (!this.shouldBrowseHistory(this.replaceInput)) return;
+      event.preventDefault();
+      this.stepReplaceHistory(event.key === 'ArrowUp' ? -1 : 1);
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
+      // Подтверждённую замену помним: её потом ищут назад чаще всего.
+      this.rememberReplacement();
       if (event.ctrlKey || event.metaKey) this.replaceEverything();
       else this.replaceCurrent();
     }
   };
+
+  /**
+   * Можно ли отдать стрелку истории.
+   *
+   * Забирать стрелки всегда — значит сломать каретку в длинном запросе. Поэтому
+   * история начинается там, где стрелке больше нечего делать в тексте: поле пустое
+   * или мы уже листаем.
+   */
+  private shouldBrowseHistory(input: HTMLInputElement): boolean {
+    const browsing = input === this.input ? this.queryCursor >= 0 : this.replaceCursor >= 0;
+    return browsing || input.value.length === 0;
+  }
+
+  /**
+   * Шаг по истории запросов.
+   *
+   * Набранное запоминается отдельно (`lastTyped`): листание подменяет поле, и без
+   * этого возврат «вниз» вернул бы не своё, а чужое.
+   */
+  private stepQueryHistory(delta: number): void {
+    // Своё набранное фиксируем ДО первого шага — иначе его не к чему вернуться.
+    if (this.queryCursor < 0) this.lastTyped = this.input.value;
+    const next = stepHistory(this.queryHistory.entries(), this.queryCursor, delta, this.lastTyped);
+    this.queryCursor = next.index;
+    this.input.value = next.query ?? this.lastTyped;
+    // Пересчитываем сразу: листание — это уже готовый запрос, ждать ввода незачем.
+    this.refresh();
+    this.input.select();
+  }
+
+  private stepReplaceHistory(delta: number): void {
+    if (this.replaceCursor < 0) this.lastTypedReplace = this.replaceInput.value;
+    const next = stepHistory(
+      this.replaceHistory.entries(),
+      this.replaceCursor,
+      delta,
+      this.lastTypedReplace,
+    );
+    this.replaceCursor = next.index;
+    this.replaceInput.value = next.query ?? this.lastTypedReplace;
+    this.replaceInput.select();
+  }
+
+  private rememberQuery(): void {
+    const value = this.input.value.trim();
+    if (value.length === 0) return;
+    this.queryHistory.remember(value);
+    // Своё место в поле меняется: дальше листание начинается с этого текста.
+    this.lastTyped = value;
+    this.queryCursor = -1;
+  }
+
+  private rememberReplacement(): void {
+    const value = this.replaceInput.value;
+    // Пустая подстановка — это «удалить»: искать её назад так же нужно, как любую.
+    this.replaceHistory.remember(value);
+    this.lastTypedReplace = value;
+    this.replaceCursor = -1;
+  }
 
   dispose(): void {
     if (this.debounce !== null) clearTimeout(this.debounce);
