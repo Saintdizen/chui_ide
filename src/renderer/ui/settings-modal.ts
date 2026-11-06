@@ -952,7 +952,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       settings = await deps.rpc.request('ai.clearApiKey', { providerId: existing.id });
       keyField.placeholder = 'ключ удалён — вставьте новый, чтобы задать';
       if (clearKeyButton) clearKeyButton.disabled = true;
-      status.textContent = 'Ключ удалён.';
+      say('Ключ удалён.');
     }
 
     const startModels = existing && existing.models.length > 0 ? existing.models : preset.models;
@@ -985,7 +985,28 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     const strictInput = h('input', { class: 'switch-input', type: 'checkbox' });
     strictInput.checked = existing?.strictTools === true;
 
+    // Подсказка-строка пресета. Состояние (ожидание / готово / ошибка) помечаем
+    // в `data-state`: сама по себе смена текста читалке не видна, а цвет — не
+    // виден вовсе. Живой регион ниже говорит о смене словами.
     const status = h('div', { class: 'field-hint' }, preset.hint);
+
+    // Живой регион — ОТДЕЛЬНЫЙ узел, и создаётся он здесь, а не в момент
+    // проверки. Читалка замечает подмену только у узла, который уже был в
+    // документе: у созданного «в момент события» она молчит.
+    // `role="status"` — вежливо: не перебивает то, что человек слушает сейчас.
+    // `aria-atomic` — читать строку целиком, а не только изменённое слово.
+    const live = h('div', {
+      class: 'sr-only',
+      role: 'status',
+      'aria-live': 'polite',
+      'aria-atomic': 'true',
+    });
+    // Одна точка: на экране меняется подсказка, вслух читается то же самое.
+    const say = (text: string, state: 'idle' | 'ok' | 'error' = 'idle'): void => {
+      status.textContent = text;
+      status.setAttribute('data-state', state);
+      live.textContent = text;
+    };
 
     const read = (): ProviderConfigValues => ({
       label: labelField.value.trim(),
@@ -1002,11 +1023,11 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       const current = read();
       const complaint = providerConfigError(preset, current);
       if (complaint !== null) {
-        status.textContent = complaint;
+        say(complaint, 'error');
         return;
       }
       checkButton.disabled = true;
-      status.textContent = 'Проверяем подключение…';
+      say('Проверяем подключение…');
       void deps.rpc
         .request('ai.test', {
           baseUrl: current.baseUrl,
@@ -1017,9 +1038,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           // Баланс показываем там же, где результат проверки: это ответ на вопрос
           // «всё ли в порядке с подключением», а не отдельная страница.
           const balance = result.balance ? ` · ${formatBalance(result.balance)}` : '';
-          status.textContent = result.ok
-            ? `${result.message} · моделей: ${result.models.length}${balance}`
-            : result.message;
+          say(
+            result.ok ? `${result.message} · моделей: ${result.models.length}${balance}` : result.message,
+            result.ok ? 'ok' : 'error',
+          );
           // Сервер сам перечислил модели — берём их, а не список из пресета:
           // человек должен выбирать из настоящих, а не набирать по памяти.
           if (result.ok && result.models.length > 0) {
@@ -1029,7 +1051,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           }
         })
         .catch((error: unknown) => {
-          status.textContent = error instanceof Error ? error.message : String(error);
+          say(error instanceof Error ? error.message : String(error), 'error');
         })
         .finally(() => {
           checkButton.disabled = false;
@@ -1076,7 +1098,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       const current = read();
       const complaint = providerConfigError(preset, current);
       if (complaint !== null) {
-        status.textContent = complaint;
+        say(complaint, 'error');
         return;
       }
 
@@ -1122,7 +1144,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         close();
         showToast(existing ? `«${provider.label}» обновлён` : `Добавлен провайдер «${provider.label}»`);
       } catch (error) {
-        status.textContent = error instanceof Error ? error.message : String(error);
+        say(error instanceof Error ? error.message : String(error), 'error');
       }
     }
 
@@ -1160,6 +1182,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'Максимум токенов 0 — «сколько даст модель» (у DeepSeek 384K, у локальной 8K — 8K).',
       ),
       status,
+      live,
     ];
     view.body.append(...rows.filter((row): row is HTMLElement => row !== null));
     document.body.append(view.element);

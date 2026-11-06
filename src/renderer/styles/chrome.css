@@ -1621,6 +1621,21 @@ textarea {
   border-color: var(--focus_ring_color);
 }
 
+/* Спрятать визуально, но не от читалки. `display: none` тут нельзя: невидимый
+   узел читалка не читает вовсе — и живой регион перестаёт быть живым. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .field-hint {
   color: var(--text_color_tertiary);
   font-size: var(--font_labels_size);
