@@ -1,55 +1,75 @@
 import { describe, expect, it, vi } from 'vitest';
+import { installMiniDom } from './helpers/mini-dom';
+import { createStatusBar } from '../src/renderer/ui/statusbar';
 
 /**
- * Найдено разбором: половина слотов статус-бара — `<span>`. Позиция, концы
- * строк, кодировка, отступ, язык ничего не делали. По эталону элемент полосы —
- * ссылка на действие: полоса из одних подписей — справка, а не орган управления.
+ * П.21: статусная строка — орган управления, а не справка.
  *
- * jsdom в проекте нет (`tests/lazy-popover.test.ts`), поэтому документ — минимальный:
- * проверяем, что слот СТАЛ кнопкой и КАКУЮ команду зовёт, а не как рисуется.
+ * Слоты с действием были кнопками и раньше, но читалка видела набор чисел и букв:
+ * «12:3» и «LF» — это не имена. Теперь у каждого такого слота есть слова, у самой
+ * полосы — роль `toolbar`, а безымянных кнопок в ней не остаётся.
+ *
+ * Стенд — `tests/helpers/mini-dom.ts`: настоящий DOM не нужен, проверяем имена
+ * и роль, а не то, как полоса нарисована.
  */
-type Props = Record<string, unknown>;
 
-function fakeElement(tag: string, props: Props = {}): HTMLElement {
-  const attributes: Record<string, unknown> = { ...props };
-  let text = '';
-  const el = {
-    tagName: tag.toUpperCase(),
-    hidden: false,
-    children: [] as unknown[],
-    classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() },
-    appendChild: vi.fn(),
-    append: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    setAttribute: vi.fn(),
-    removeAttribute: vi.fn(),
-    getAttribute: (name: string) => attributes[name],
-    get textContent() {
-      return text;
-    },
-    set textContent(value: string) {
-      text = value;
-    },
-    set title(value: string) {
-      attributes.title = value;
-    },
-  };
-  // Клик зовём тем же путём, каким его зовёт браузер: через сохранённый handler.
-  (el as unknown as { click: () => void }).click = () => {
-    const handler = attributes.onClick as ((event: Event) => void) | undefined;
-    handler?.({ currentTarget: el } as unknown as Event);
-  };
-  return el as unknown as HTMLElement;
+installMiniDom();
+
+function bar() {
+  const noop = vi.fn();
+  const view = createStatusBar({
+    openGitManager: noop,
+    openPythonEnv: noop,
+    openNodeEnv: noop,
+    openProblems: noop,
+    forceHighlight: noop,
+    cancelWork: noop,
+    openLsp: noop,
+    runCommand: noop,
+    openChoice: noop,
+  });
+  view.update({
+    eol: 'LF',
+    encoding: 'UTF-8',
+    language: 'TypeScript',
+    line: 12,
+    column: 3,
+    tabSize: 2,
+    useTabs: false,
+  });
+  return view.element;
 }
 
-describe('статус-бар: слот с действием — кнопка, а не подпись', () => {
-  it('элементы с командами созданы кнопками', () => {
-    vi.stubGlobal('document', {
-      createElement: (tag: string) => fakeElement(tag),
-      createTextNode: (value: string) => ({ value }),
-    });
-    expect(fakeElement('button').tagName).toBe('BUTTON');
-    expect(fakeElement('span').tagName).toBe('SPAN');
+/** Имя, которое прочитает читалка: `aria-label`, иначе — текст узла. */
+function nameOf(element: Element): string {
+  return (element.getAttribute('aria-label') ?? element.textContent ?? '').trim();
+}
+
+describe('статусная строка: клавиатура и читалка', () => {
+  it('полоса — панель инструментов с именем, а не голый div', () => {
+    const root = bar();
+    expect(root.getAttribute('role')).toBe('toolbar');
+    expect(root.getAttribute('aria-label')).not.toBe('');
+  });
+
+  it('у каждой видимой кнопки есть имя словами, а не только значение', () => {
+    // Скрытый слот пропускаем: он не показывается ни глазом, ни читалкой.
+    const buttons = [...bar().querySelectorAll('button')].filter(
+      (button) => (button as HTMLElement).hidden !== true,
+    );
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      // «12:3» и «LF» именем не считаются: имя — это фраза, в ней есть пробел.
+      expect(nameOf(button)).toMatch(/\s/);
+    }
+  });
+
+  it('«строка:столбец» называются по-человечески и идут за кареткой', () => {
+    const root = bar();
+    const position = [...root.querySelectorAll('button')].find(
+      (button) => button.textContent === '12:3',
+    );
+    expect(position).toBeTruthy();
+    expect(position?.getAttribute('aria-label')).toBe('Строка 12, столбец 3');
   });
 });

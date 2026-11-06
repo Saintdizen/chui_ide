@@ -320,11 +320,14 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const chatSlot = h('div', { class: 'status-chat' });
   const element = h(
     'div',
-    { class: 'statusbar' },
-    h('div', { class: 'status-group' }, gitItem, fileSlot),
+    // Полоса — это набор действий одной строкой. Без роли читалка видела набор кнопок
+    // в общем потоке страницы и не говорила, что это *всё* управление окном после
+    // редактора. `aria-label` даёт им общее имя, а `aria-keyshortcuts` внизу — клавиши.
+    { class: 'statusbar', role: 'toolbar', 'aria-label': 'Состояние и действия окна' },
+    h('div', { class: 'status-group', role: 'presentation' }, gitItem, fileSlot),
     h(
       'div',
-      { class: 'status-group' },
+      { class: 'status-group', role: 'presentation' },
       vimItem,
       highlightItem,
       meterItem,
@@ -347,14 +350,30 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
 
   const render = (): void => {
     positionItem.textContent = `${state.line}:${state.column}`;
+    // Курсор читается как «12:3» — читалке нужны слова, и с толком: вместе с именем
+    // файла строка/столбец — это «где я стою».
+    positionItem.setAttribute('aria-label', `Строка ${state.line}, столбец ${state.column}`);
+    encodingItem.setAttribute('aria-label', `Кодировка: ${state.encoding}`);
     // У картинки и документа Office концов строк нет — виджет не показываем,
     // иначе человек читает «LF» у PNG.
     eolItem.hidden = state.eol === null;
     eolItem.textContent = state.eol ?? '';
     eolItem.title = state.eol === null ? '' : `Концы строк: ${state.eol}`;
+    // Имя — словами, а не «LF»: кнопка без имени читается как текст на ней.
+    eolItem.setAttribute(
+      'aria-label',
+      state.eol === null ? 'Концы строк' : `Концы строк: ${state.eol}. Выбрать`,
+    );
     encodingItem.textContent = state.encoding;
     indentItem.textContent = state.useTabs ? `таб ${state.tabSize}` : `${state.tabSize} пробела`;
+    indentItem.setAttribute(
+      'aria-label',
+      state.useTabs
+        ? `Отступы: табуляция, ${state.tabSize}. Выбрать`
+        : `Отступы: ${state.tabSize} пробела. Выбрать`,
+    );
     languageItem.textContent = state.language ?? '—';
+    languageItem.setAttribute('aria-label', `Язык: ${state.language ?? 'не определён'}. Сменить`);
     const lsp = state.lsp;
     lspItem.hidden = lsp === null;
     lspItem.classList.toggle('is-failed', Boolean(lsp?.failed));
@@ -406,6 +425,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     readOnlyItem.textContent = state.readOnly ? 'Только чтение' : '';
     readOnlyItem.hidden = !state.readOnly;
     readOnlyItem.title = state.readOnly ? 'Файл слишком большой для правки — открыт только для чтения' : '';
+    // Пустой чип — это кнопка без подписи и без имени: убираем её совсем, а не
+    // оставляем невидимую кнопку в порядке обхода.
     envItem.textContent = state.env ?? '';
     envItem.hidden = !state.env;
     envItem.title = state.env
@@ -413,7 +434,22 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
         ? `Node-окружение: ${state.env}`
         : `Python-окружение: ${state.env}`
       : '';
+    // Имя окна окружения — словами: чип «.venv» или «node» без них читается как аббревиатура,
+    // а кнопка без имени хуже ссылки.
+    envItem.setAttribute(
+      'aria-label',
+      state.env
+        ? state.projectKindId === 'node'
+          ? `Node-окружение: ${state.env}. Выбрать`
+          : `Python-окружение: ${state.env}. Выбрать`
+        : 'Окружение проекта не найдено. Выбрать',
+    );
     versionItem.textContent = state.version ? `v${state.version}` : '';
+    // Версия — тоже кнопка: без имени из «v20.11» читалка не поймёт, что это язык проекта.
+    versionItem.setAttribute(
+      'aria-label',
+      state.version ? `Версия: ${state.version}. Выбрать` : 'Версия не известна',
+    );
     // Вид виджета решает чистый модуль: ноль — не всегда «чисто» (правила там).
     const problems = problemsWidget(state.problems);
     problemsItem.hidden = problems.hidden;
@@ -423,6 +459,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     problemsItem.classList.toggle('has-warnings', problems.tone === 'warnings');
     problemsCounts.textContent = problems.text;
     problemsItem.title = problems.title;
+    // Сводка проблем цифрами без слов не читается — имя берём у того же виджета.
+    problemsItem.setAttribute('aria-label', `Проблемы: ${problems.title}`);
     gitItem.hidden = state.branch === null;
     gitLabel.textContent = state.branch ? `${state.branch}${state.changes > 0 ? `  ±${state.changes}` : ''}` : '';
     gitItem.title = state.branch
