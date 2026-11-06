@@ -2566,6 +2566,12 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       case 'expand':
         if (!expanded.has(action.path)) toggleDir(action.path);
         return;
+      case 'toggle':
+        // `Enter` на папке — поведение раскрытия/сворачивания, как в списках
+        // JetBrains и Zed. Повторный `Enter` закрывает: человек не ищет
+        // отдельную клавишу, чтобы спрятать ветку обратно.
+        toggleDir(action.path);
+        return;
       case 'collapse':
         if (expanded.has(action.path)) toggleDir(action.path);
         return;

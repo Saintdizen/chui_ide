@@ -43,6 +43,9 @@ export type WalkAction =
   | { readonly kind: 'expand'; readonly path: string }
   | { readonly kind: 'collapse'; readonly path: string }
   | { readonly kind: 'open'; readonly path: string }
+  // Папка по `Enter` — раскрыть. Отдельное действие, а не `open`: у файла
+  // открытие значит «показать в редакторе», у папки — другое.
+  | { readonly kind: 'toggle'; readonly path: string }
   | { readonly kind: 'peek'; readonly path: string }
   | { readonly kind: 'rename'; readonly path: string }
   | { readonly kind: 'delete'; readonly paths: readonly string[] }
@@ -93,7 +96,11 @@ export function walkTree(rows: readonly WalkRow[], current: string | null, key: 
     case 'End':
       return at === rows.length - 1 ? null : move(rows, rows.length - 1);
     case 'Enter':
-      return { kind: 'open', path: row.path };
+      // Папка по `Enter` раскрывается, а не «открывается»: открытие вкладки у
+      // неё значит не то же, что у файла. Так же ведут себя проводники, к которым
+      // человек привык (JetBrains, Zed): `Enter` на ветке — это её раскрыть, а
+      // открыть файл внутри можно стрелкой и тем же `Enter`.
+      return row.directory ? { kind: 'toggle', path: row.path } : { kind: 'open', path: row.path };
     case 'Space':
       return { kind: 'peek', path: row.path };
     case 'F2':

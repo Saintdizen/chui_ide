@@ -21,19 +21,25 @@ Neovim).
     Источник: VS Code `ux-accessibility`, Zed `development/ui-checklist`
     (Accessibility).
 
+18. **`listbox` по APG — палитра команд и списки выбора.** Сейчас у
+    `ui/command-palette.ts` и подобных: `role=listbox` и `option` есть, а
+    `aria-activedescendant`, `Home`/`End`, переход по набранным буквам и
+    `PageUp/Down` — нет: подсветку двигает только `↑/↓`. Для читалки это
+    значит, что текущий вариант не назван вовсе.
+    Источник: VS Code `ux-accessibility`, JetBrains `lists-and-trees`.
+
 17. **Текст интерфейса по одному своду.** Кнопка — глагол, сообщение называет
     причину и что делать, ошибка не обвиняет человека, без жаргона.
     Источник: Microsoft `ms-writing-style`, JetBrains
     `how-to-write-guidelines`.
 
----
-
 ## Область 2. Проводник
 
-### Клавиши и навигация
+Закрытых пунктов не осталось: набор клавиш дерева, показ и сортировка,
+файловые операции, отмена и история, большие файлы, точка последнего
+изменения — всё сделано и снято. История — `git log --follow -p TASKS.md`.
 
-19. **Дерево: `Enter` на папке.** Раскрыть, а не открыть.
-    Источник: JetBrains `lists-and-trees` (Keyboard), Zed `project-panel`.
+---
 
 ## Правила работы со списком
 
