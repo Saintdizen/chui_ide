@@ -925,8 +925,9 @@ export class WorkspaceService {
    * 15.4 мс против 6.6 мс; локальный диск, на сетевом разрыв больше).
    * Путь отдаём вызывающему, а не считаем здесь: маска у него своя.
    */
-  private async collectFiles(enough?: (full: string) => boolean): Promise<string[]> {
-    const root = this.requireRoot();
+  private async collectFiles(enough?: (full: string) => boolean, area?: string): Promise<string[]> {
+    // `area` — каталог задачи (п.31): у параллельной беседы свой worktree.
+    const root = area ? await this.safePath(area) : this.requireRoot();
     const files: string[] = [];
     /**
      * `return` в `collect` выходит только из текущей папки — вложенные вызовы
@@ -1085,8 +1086,10 @@ export class WorkspaceService {
    * первые пути шли бы по порядку обхода, а не по сортировке. Поэтому тут —
    * полный обход и отбор ниже.
    */
-  async findFiles(glob?: string, limit = 200): Promise<string[]> {
-    const root = this.requireRoot();
+  async findFiles(glob?: string, limit = 200, area?: string): Promise<string[]> {
+    // `area` — каталог задачи (п.31): у параллельной беседы свой worktree, и список
+    // имён должен быть про её дерево, а не про активный корень окна.
+    const root = area ? await this.safePath(area) : this.requireRoot();
     const matcher = glob?.trim() ? globToRegExp(glob.trim()) : null;
     const cap = Math.min(Math.max(limit, 1), 2000);
     const relativeOf = (full: string): string => path.relative(root, full).split(path.sep).join('/');
@@ -1121,9 +1124,10 @@ export class WorkspaceService {
    *
    * Большие файлы пропускаем: держать их целиком в памяти ради замены не стоит.
    */
-  async replace(options: ReplaceFilesOptions): Promise<{ files: string[]; replaced: number }> {
-    const root = this.requireRoot();
-    const targets = await this.collectFiles();
+  async replace(options: ReplaceFilesOptions, area?: string): Promise<{ files: string[]; replaced: number }> {
+    // `area` — каталог задачи (п.31): замена обходит именно его, а не активный корень.
+    const root = area ? await this.safePath(area) : this.requireRoot();
+    const targets = await this.collectFiles(undefined, area);
     const matcher = options.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
     const changed: string[] = [];
     let replaced = 0;
@@ -1212,16 +1216,16 @@ export class WorkspaceService {
    * раздела — тот же путь и строку агент передаёт в `read_file`, чтобы дочитать
    * раздел целиком.
    */
-  async searchDocs(options: DocsQuery): Promise<DocsResult> {
+  async searchDocs(options: DocsQuery, area?: string): Promise<DocsResult> {
     const query = options.query.trim();
     if (query === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задан запрос');
     const limit = Math.min(Math.max(options.limit ?? 6, 1), 20);
 
-    const root = this.requireRoot();
+    const root = area ? await this.safePath(area) : this.requireRoot();
     const chunks: DocChunk[] = [];
     let files = 0;
 
-    for (const file of await this.collectFiles()) {
+    for (const file of await this.collectFiles(undefined, area)) {
       const relative = path.relative(root, file).split(path.sep).join('/');
       if (!isDocPath(relative)) continue;
       const stat = await fs.stat(file).catch(() => null);

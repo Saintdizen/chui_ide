@@ -1372,6 +1372,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         confirm: deps.confirm,
         notify: (message, kind) => showToast(message, kind),
         sessionTitle: () => active().title || '',
+        // Свой каталог задачи записывается в БЕСЕДУ (п.31): ход кончится, прогон
+        // умрёт, а каталог задачи останется — вместе с ней, а не с окном.
+        setSessionRoot: (root) => {
+          const session = active();
+          if (root) session.workspace = root;
+          else delete session.workspace;
+        },
       })
     : null;
 
@@ -2638,6 +2645,24 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return 'started';
   }
 
+  /**
+   * Идёт ли хоть один соседний прогон в ТОМ ЖЕ каталоге, что и этот.
+   *
+   * Увести вторую задачу могло не выйти (не git, нет прав): тогда предупреждение
+   * остаётся верным. Но если соседняя беседа уже в своём worktree — каталоги
+   * разные, и говорить не о чем. Пусто у обеих — обе правят активный корень окна.
+   */
+  function sharedRootWithRunning(current: ChatSession): boolean {
+    const mine = current.workspace ?? deps.workspace.root ?? '';
+    for (const id of runningIds) {
+      if (id === current.id) continue;
+      const other = sessions.find((item) => item.id === id);
+      if (!other) continue;
+      if ((other.workspace ?? deps.workspace.root ?? '') === mine) return true;
+    }
+    return false;
+  }
+
   async function send(raw: string): Promise<PromptRun> {
     const written = raw.trim();
     if (!written) return 'busy';
@@ -2673,10 +2698,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       return 'unavailable';
     }
 
-    // Вторая задача в том же каталоге — не запрет, но и не тишина: правки обеих
-    // лягут в одни файлы, и человек должен узнать об этом сейчас, а не на diff.
-    const notice = parallelRunNotice(runningIds.size + 1);
-    if (notice) showToast(notice, 'info');
+    // Вторая задача в том же каталоге — не запрет и уже не просто предупреждение:
+    // уводим её в свой worktree (п.31). Уводим эту, а не первую: первая уже
+    // правит файлы и может быть на полпути. Тост от увода говорит, ГДЕ она теперь.
+    if (runningIds.size > 0) await branchSpace?.isolateQuietly();
+    // Увести не удалось (не git, нет прав, уже отдельный каталог) — тогда честно
+    // говорим о риске: молчание здесь хуже всего.
+    const stillShared = runningIds.size > 0 && parallelRunNotice(runningIds.size + 1);
+    if (stillShared && sharedRootWithRunning(session)) showToast(stillShared, 'info');
 
     // Не влезает в окно — сначала освобождаем контекст, потом спрашиваем.
     // Вес самого вопроса тоже учитываем: в историю он попадёт лишь ниже.

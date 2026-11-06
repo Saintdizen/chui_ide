@@ -382,6 +382,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             ...(session.reads ? { reads: session.reads } : {}),
             // Беседа — для журнала прогонов: по ней строки одного разговора собираются вместе.
             conversationUid: session.uid,
+            // Свой каталог (п.31): у параллельной задачи он — её worktree, и инструменты
+            // шага обязаны видеть её дерево, а не то, на которое переключено окно.
+            ...(session.workspace ? { workspace: session.workspace } : {}),
           },
           (event, payload) => {
             // Повтор после переподключения или второй подписки — одно событие

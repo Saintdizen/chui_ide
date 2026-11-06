@@ -18,12 +18,20 @@ export interface ChatBranchSpaceDeps {
   sessionTitle: () => string;
   confirm: (options: { title: string; message: string; detail: string; confirmLabel: string }) => Promise<boolean>;
   notify: (text: string, kind?: 'info' | 'error') => void;
+  /** Запомнить каталог задачи в беседе — он переживёт и ход, и окно. */
+  setSessionRoot?: (root: string | null) => void;
 }
 
 export interface ChatBranchSpaceView {
   element: HTMLElement;
   /** Перечитать состояние (открыли беседу, сменили корень, закончился прогон). */
   refresh(): void;
+  /**
+   * Увести задачу в свой каталог без вопроса — для второй задачи (п.31).
+   * `true` — увелась. `false` — уводить было нечего (не git, нет корня, уже
+   * отдельный каталог) или не вышло: причина уходит тостом.
+   */
+  isolateQuietly(): Promise<boolean>;
 }
 
 export function createChatBranchSpace(deps: ChatBranchSpaceDeps): ChatBranchSpaceView {
@@ -92,23 +100,41 @@ export function createChatBranchSpace(deps: ChatBranchSpaceDeps): ChatBranchSpac
     }
   }
 
-  /** Увести задачу в отдельную ветку: worktree рядом с проектом и корень туда же. */
-  async function isolate(root: string): Promise<void> {
+  /**
+   * Увести задачу в отдельную ветку: worktree рядом с проектом и корень туда же.
+   *
+   * `ask` — спрашивать человека. Кнопка спрашивает: это его решение. Вторая
+   * задача (п.31) — не спрашивает, а уводит: иначе правки двух задач лягут
+   * в одни файлы. И всё равно не молчит — тост говорит, где она теперь.
+   *
+   * Возвращает каталог задачи, `null` — уводить не стали.
+   */
+  async function isolate(root: string, ask = true): Promise<string | null> {
     const existing = (await deps.git.branches()).map((item) => item.name);
     const branch = uniqueBranchName(taskBranchName(deps.sessionTitle()), existing);
     const path = worktreePathFor(root, branch);
     const worktrees = await deps.git.worktrees();
     const mainRoot = worktrees[0]?.path ?? root;
-    const ok = await deps.confirm({
-      title: 'Работать в отдельной ветке?',
-      message: `Задача уйдёт в ветку ${branch}, окно переключится в её каталог.`,
-      detail: `Каталог: ${path}\nГлавное дерево: ${mainRoot}\nИзменения в главном дереве останутся нетронутыми.`,
-      confirmLabel: 'Создать ветку',
-    });
-    if (!ok) return;
+    if (ask) {
+      const ok = await deps.confirm({
+        title: 'Работать в отдельной ветке?',
+        message: `Задача уйдёт в ветку ${branch}, окно переключится в её каталог.`,
+        detail: `Каталог: ${path}\nГлавное дерево: ${mainRoot}\nИзменения в главном дереве останутся нетронутыми.`,
+        confirmLabel: 'Создать ветку',
+      });
+      if (!ok) return null;
+    }
     await deps.git.worktreeAdd(path, { newBranch: branch });
+    // Каталог задачи — в беседу, не только в окно: иначе следующий ход пойдёт
+    // по активному корню, а он у второй задачи — чужой.
+    deps.setSessionRoot?.(path);
     await deps.workspace.setActiveRoot(path);
-    deps.notify(`Задача идёт в ветке ${branch}`);
+    deps.notify(
+      ask
+        ? `Задача идёт в ветке ${branch}`
+        : `Вторая задача уведена в свою ветку ${branch}: правки двух задач больше не в одних файлах`,
+    );
+    return path;
   }
 
   /** Вернуться в главное дерево, ничего не вливая: ветка остаётся как есть. */
@@ -119,6 +145,8 @@ export function createChatBranchSpace(deps: ChatBranchSpaceDeps): ChatBranchSpac
     draw();
     try {
       await deps.workspace.setActiveRoot(mainRoot);
+      // Вернулись в главное дерево — задача снова правит его, и своего каталога у неё нет.
+      deps.setSessionRoot?.(null);
       deps.notify('Окно вернулось в главное дерево');
     } catch (error) {
       deps.notify(`Не получилось: ${error instanceof Error ? error.message : String(error)}`, 'error');
@@ -155,10 +183,45 @@ export function createChatBranchSpace(deps: ChatBranchSpaceDeps): ChatBranchSpac
     deps.notify(result.message || 'Слияние не удалось', 'error');
   }
 
+  /**
+   * Увести задачу без вопроса — для второй задачи (п.31).
+   *
+   * Отличий от кнопки два: нет вопроса и НЕТ переключения окна. Кнопку нажимает
+   * человек, смотрящий в эту беседу, — ему и переключение. Вторая задача
+   * уводится вбок, пока он смотрит в первую: увести за ним окно значило бы
+   * выдернуть из-под рук файлы, которые он правит.
+   */
+  async function isolateQuietly(): Promise<boolean> {
+    if (busy) return false;
+    const root = deps.workspace.root;
+    if (!root || !deps.git.isRepository) return false;
+    const mainRoot = deps.git.rootSummaries[0]?.root ?? null;
+    // Уже в отдельном каталоге — уводить нечего.
+    if (mainRoot !== null && root !== mainRoot) return false;
+    busy = true;
+    draw();
+    try {
+      await isolate(root, false);
+      // `isolate` переключил окно на каталог задачи — возвращаем туда, где
+      // человек был. Молча: переключения ему не показывали, откат тоже.
+      if (deps.workspace.root !== root) await deps.workspace.setActiveRoot(root);
+      return true;
+    } catch (error) {
+      deps.notify(
+        `Вторая задача осталась в общем каталоге: ${error instanceof Error ? error.message : String(error)}`,
+        'error',
+      );
+      return false;
+    } finally {
+      busy = false;
+      draw();
+    }
+  }
+
   // Обновляемся, когда меняется git или рабочая папка: ветку можно переключить
   // в терминале, и чип не должен врать о старом месте.
   deps.git.onDidChange(() => draw());
   deps.workspace.onDidChange(() => draw());
   draw();
-  return { element, refresh: draw };
+  return { element, refresh: draw, isolateQuietly };
 }

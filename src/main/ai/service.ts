@@ -118,6 +118,7 @@ import { createJobRegistry, type JobRegistry } from './jobs';
 import type { SandboxService } from '../sandbox/sandbox';
 import { RpcFailure } from '../ipc/router';
 import type { SettingsStore } from '../settings';
+import { TaskWorkspace } from './task-workspace';
 import type { WorkspaceService } from '../workspace/workspace';
 import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
 import { normalizeAgentHooks } from '../../shared/agent-hooks';
@@ -831,8 +832,14 @@ export class AiService {
     let planApproved = false;
     // Полный доступ: и правки, и команды без подтверждений.
     // Страховка — из настроек: по умолчанию выключена, включает пользователь.
+    // Каталог этой беседы (п.31): у параллельной задачи свой worktree, и её
+    // инструменты обязаны видеть своё дерево, а не активный корень окна.
+    const tools_workspace =
+      request.workspace && request.workspace !== this.workspace.rootPath()
+        ? (new TaskWorkspace(this.workspace, request.workspace) as unknown as WorkspaceService)
+        : this.workspace;
     const toolContext: ToolContext = {
-      workspace: this.workspace,
+      workspace: tools_workspace,
       signal,
       autoApprove: flags.autoApprove,
       allowAll: flags.allowAll,
