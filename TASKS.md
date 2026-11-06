@@ -1,7 +1,8 @@
 # Задачи chui_ide
 
-Пять областей: **Оболочка IDE**, **Проводник**, **Редактор**, **Чат**, **LSP и
-подсказки**. Здесь — только открытые задачи: сделанное живёт в
+Три открытые области: **Оболочка IDE** (18–21), **Редактор** (27–31),
+**Чат** (32–36) — Проводник и LSP закрыты целиком, их пунктов здесь
+больше нет. Здесь — только открытые задачи: сделанное живёт в
 `git log --follow -p TASKS.md`, а то, что оно умеет, — в README.
 
 Номера сквозные — на них ссылаемся в коммитах; пропуски в нумерации —
@@ -11,20 +12,11 @@
   символ), чтобы не делать второй раз и не искать заново;
 - **Источник** — страница, откуда взято поведение.
 
-Сверка 2026-11-06, третья. Две первые были плохи: первый заход брал фичи по
-описаниям конкурентов без сверки — 5 из 23 оказались сделанными; второй всё
-равно протащил ещё 6 таких же (мягкий перенос, направляющие отступов,
-сниппеты, `foldingRange`, `selectionRange`, `documentColor`, `documentLink`,
-возврат фокуса из палитры, breadcrumbs — всё это есть).
-
 Отсюда **правило**: пункт пишется только после `grep` и только если после
 него пусто или половина.
 
-Счёт на 2026-11-06: было 26 (18–43). Область 5 закрыта целиком — 37, 38
-(пересчёт по просьбе сервера, формат на лету) и 39–43 (источник пометки,
-умения в списке серверов, подсказка по аргументам, действия по виду,
-проект целиком одним запросом). Осталось 20 пунктов (18–36). Всё, что нашлось готовым, собрано в конце файла —
-чтобы следующий заход начинал со списка «не трогать».
+Осталось 15 пунктов (18–21, 27–36). Всё, что нашлось готовым, собрано в конце
+файла — чтобы следующий заход начинал со списка «не трогать».
 
 ---
 
@@ -78,32 +70,7 @@ https://code.visualstudio.com/docs/configure/accessibility
 
 ---
 
-## Область 2. Проводник
-
-**Все пункты (22–26) закрыты.** Что вышло по каждому — ниже: что оказалось уже
-сделанным и что дописано на самом деле.
-
-- **22. Файл из вкладки находится в дереве сам** — СДЕЛАНО. Подписка на
-  `openEditors` дёргала только отрисовку выделения; теперь при смене активного
-  файла зовётся `reveal`. Следит за настоящей сменой пути — повторное событие с
-  тем же файлом дерево не двигает. Настройка `explorer.revealActiveFile`
-  (по умолчанию включена), переключатель в окне настроек.
-- **23. Выделение не одно** — УЖЕ БЫЛО (`core/tree-selection.ts`): несколько
-  строк, якорь и курсор, `Ctrl+Shift+E`.
-- **24. Цепочка папок схлопывается** — УЖЕ БЫЛО (`core/folder-chain.ts`:
-  `folderChain`/`chainDepth`, подключено в `ui/explorer.ts`).
-- **25. Совпало с фильтром — остальные уходят** — УЖЕ БЫЛО
-  (`core/tree-filter.ts`: `filterTreePaths` отбирает, `matchName` подсвечивает;
-  оба режима в дереве).
-- **26. Проводник переживает перезапуск** — СДЕЛАНО ЧАСТИЧНО. Вид (сортировка,
-  скрытие по `.gitignore`) уже жил в настройках и переживал перезапуск сам;
-  не хватало **прокрутки дерева**. Теперь `explorerScroll` в сессии проекта,
-  `explorer.scrollTop()`/`restoreScroll()`, восстановление — после раскрытия
-  папок (до него дерево короче, и браузер срезал бы прокрутку в ноль).
-
----
-
-## Область 3. Редактор
+## Область 2. Редактор
 
 ### 27. Правка одного — видна во всех
 
@@ -159,7 +126,7 @@ https://code.visualstudio.com/docs/sourcecontrol/overview
 
 ---
 
-## Область 4. Чат
+## Область 3. Чат
 
 ### 32. Контекст виден до отправки — с ценой
 
@@ -218,36 +185,6 @@ https://code.visualstudio.com/docs/sourcecontrol/overview
 
 ---
 
-## Область 5. LSP и подсказки
-
-**Все пункты закрыты 2026-11-06.** Сверка по коду показала:
-
-- **39** — `source` сохраняется (`main/lsp/lsp.ts`) и панель по нему фильтрует
-  (`ui/problem-panel.ts`);
-- **40** — `LspStatus.servers` отдаёт `capabilities` (ручка `lsp.capabilities`,
-  `main/ipc/methods/lsp.ts:63`);
-- **41** — подсказки по аргументам с контекстом и триггерами
-  (`LspFeatures.signatureHelp`, `app.ts:562`), `completionItem/resolve` есть;
-- **42** — действия по видам на сохранении и по команде
-  (`LspFeatures.sourceActions`, `core/file-write.ts:117`), у каждой правки —
-  отмена через общую историю;
-- **43** — сделан в этом заходе: `LspService.workspaceDiagnostics` и переключение
-  обхода проекта на пакетный запрос (см. ниже).
-
-### 43 (закрыт). Проект целиком одним запросом
-
-**Было.** Обход проекта шёл файлом за файлом через `textDocument/diagnostic`:
-на большом проекте — минуты даже на тёплом кэше, и закрытые файлы оставались
-тайной.
-
-**Стало.** `workspace/diagnostic`: одна просьба на сервер, ответ разбирается
-поштучно (`full`/`unchanged` через `previousResultIds`), результат уходит тем же
-путём, что и обычные пометки. Сервер без `workspaceDiagnostics` идёт прежним
-пофайловым путём. Заявлено `workspace.diagnostics.identifier`.
-Тест: `tests/lsp-workspace-diagnostics.test.ts`.
-
----
-
 ## Проверено и найдено готовым — НЕ пункт
 
 Если собрались писать пункт про это — сначала посмотрите сюда.
@@ -258,7 +195,11 @@ https://code.visualstudio.com/docs/sourcecontrol/overview
 (`core/tree-filter.ts`), `aria-activedescendant` (`ui/explorer.ts:1996`),
 сортировка и `expandAll`, панель проблем с отбором (`ui/problem-panel.ts`),
 палитра символов (`ui/symbol-picker.ts`), breadcrumbs (`core/tree-crumbs.ts`,
-`editor/widgets/breadcrumbs-widget.ts`), статус-метр (`ui/status-meter.ts`).
+`editor/widgets/breadcrumbs-widget.ts`), статус-метр (`ui/status-meter.ts`),
+многовыделение в дереве (`core/tree-selection.ts`), цепочка папок
+(`core/folder-chain.ts`), свёртка папок в цепочку (`chainDepth`),
+автораскрытие активного файла (`explorer.revealActiveFile`), прокрутка дерева
+в сессии проекта (`explorerScroll`).
 
 **Редактор:** мультикурсор и column-select (`keymap.ts`, `selection.ts`),
 сплиты (`view-commands.ts`), sticky scroll (`editor-view.ts:164`), мягкий
@@ -277,20 +218,10 @@ https://code.visualstudio.com/docs/sourcecontrol/overview
 `typeHierarchy`, `linkedEditingRange`, `documentHighlight`, `inlineValue`,
 `willSaveWaitUntil`, `didChangeWatchedFiles`, `workspaceSymbol/resolve`,
 `prepareRename`, file operations, `workspace/configuration`,
-`didChangeWorkspaceFolders` — всё в `main/lsp/lsp.ts` и
+`didChangeWorkspaceFolders`, `workspace/diagnostic`, форматирование на лету
+(`formatOnType`), пересчёт по просьбе сервера (`REFRESH_METHODS`,
+`PushTopic.LspRefresh`) — всё в `main/lsp/lsp.ts` и
 `renderer/editor/host/lsp-features.ts`.
-
-**Закрыто 2026-11-06 (было пунктами 37 и 38), не писать заново:**
-
-- подписки на пересчёт — `REFRESH_METHODS` в `main/lsp/lsp.ts`, колбэк
-  `onRefresh` в конструкторе, топик `PushTopic.LspRefresh`;
-  заявлены `resolveSupport` у `codeLens`/`inlayHint` и `refreshSupport` у
-  `semanticTokens`. В окне — `EditorHost.refreshFromServer(method)` и
-  `EditorWorkspace.refreshFromServer` через `case PushTopic.LspRefresh` в
-  `app.ts`. Тест: `tests/lsp-refresh-and-on-type.test.ts`.
-- форматирование на лету — `LspService.formatOnType()` (сверяет знак со
-  списком триггеров сервера), канал `lsp.formatOnType`, ввод идёт через
-  `EditorController.typeWithFormatting()`.
 
 **Прочее:** автосохранение (`shared/auto-save.ts`), история и blame
 (`core/blame.ts`, `ui/history-modal.ts`), source-control с коммитом,

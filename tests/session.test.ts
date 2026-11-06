@@ -106,6 +106,15 @@ describe('sanitizeSession', () => {
     expect(sanitizeSession({ dockActive: 'search' }).dockActive).toBe('search');
   });
 
+  it('группа вкладок помнит терминал, а прочее — редактор', () => {
+    // У терминала нет ни файла, ни страницы: без этого поля перезапуск
+    // всегда открывал бы редактор, хотя человек работал в консоли.
+    expect(sanitizeSession({ activeTabGroup: 'terminal' }).activeTabGroup).toBe('terminal');
+    expect(sanitizeSession({ activeTabGroup: 'editor' }).activeTabGroup).toBeUndefined();
+    expect(sanitizeSession({ activeTabGroup: 'chat' }).activeTabGroup).toBeUndefined();
+    expect(sanitizeSession({}).activeTabGroup).toBeUndefined();
+  });
+
   it('параметры запуска отладки читаются целиком', () => {
     const state = sanitizeSession({
       debugLaunch: { args: ['--port', '8080'], env: { LOG_LEVEL: 'debug' }, cwd: '/p/run' },

@@ -1,6 +1,6 @@
-import type { TextDocument } from './document';
-import type { DocumentStore } from './document-store';
-import { Emitter } from './events';
+import type { TextDocument } from "./document";
+import type { DocumentStore } from "./document-store";
+import { Emitter } from "./events";
 
 /**
  * Открытые вкладки: порядок, активная, dirty-состояние, предпросмотр и закрепление.
@@ -80,7 +80,10 @@ export class OpenEditors {
     this.recentlyUsed.unshift(path);
     // Перебор продолжается, только пока шагаем по его же снимку: любой другой показ
     // (клик по вкладке, открытие файла) начинает порядок заново.
-    if (this.recentCycle && this.recentCycle.order[this.recentCycle.index] !== path) {
+    if (
+      this.recentCycle &&
+      this.recentCycle.order[this.recentCycle.index] !== path
+    ) {
       this.recentCycle = null;
     }
   }
@@ -97,7 +100,9 @@ export class OpenEditors {
    */
   cycleRecent(step: 1 | -1): string | null {
     if (!this.recentCycle) {
-      const order = this.recentlyUsed.filter((path) => this.order.includes(path));
+      const order = this.recentlyUsed.filter((path) =>
+        this.order.includes(path),
+      );
       // Активная свежее всех по определению; иначе первый шаг вёл бы в неё же.
       const at = this.activeId ? order.indexOf(this.activeId) : -1;
       if (this.activeId && at > 0) {
@@ -106,12 +111,15 @@ export class OpenEditors {
       }
       // Вкладки, которых нет в порядке использования (сессия открыта в обход `open`),
       // дописываем в конец — иначе они выпали бы из перебора.
-      for (const path of this.order) if (!order.includes(path)) order.push(path);
+      for (const path of this.order)
+        if (!order.includes(path)) order.push(path);
       this.recentCycle = { order, index: 0 };
     }
 
     // Закрытые за время перебора вкладки из снимка выпадают.
-    const order = this.recentCycle.order.filter((path) => this.order.includes(path));
+    const order = this.recentCycle.order.filter((path) =>
+      this.order.includes(path),
+    );
     if (order.length < 2) {
       this.recentCycle = null;
       return null;
@@ -128,13 +136,32 @@ export class OpenEditors {
     this.recentCycle = null;
   }
 
+  /**
+   * Показать вкладки в записанном порядке.
+   *
+   * Нужно, чтобы порядок полосы переживал перезапуск: восстановление открывает
+   * файлы в том же порядке, что и в сессии, но путь через `open()` мог бы его
+   * сдвинуть (предпросмотр, закреплённые). Чужие пути отбрасываются.
+   */
+  restoreOrder(paths: readonly string[]): void {
+    const order: string[] = [];
+    for (const path of paths) {
+      if (this.order.includes(path) && !order.includes(path)) order.push(path);
+    }
+    // Вкладки, о которых сессия не знала (открылись сами), остаются справа.
+    for (const path of this.order) if (!order.includes(path)) order.push(path);
+    this.order.splice(0, this.order.length, ...order);
+  }
+
   /** Вернуть порядок использования из сессии: чужие и закрытые пути отбрасываются. */
   restoreRecent(paths: readonly string[]): void {
     const recent: string[] = [];
     for (const path of paths) {
-      if (this.order.includes(path) && !recent.includes(path)) recent.push(path);
+      if (this.order.includes(path) && !recent.includes(path))
+        recent.push(path);
     }
-    for (const path of this.order) if (!recent.includes(path)) recent.push(path);
+    for (const path of this.order)
+      if (!recent.includes(path)) recent.push(path);
     this.recentlyUsed = recent;
     this.recentCycle = null;
   }
@@ -155,7 +182,12 @@ export class OpenEditors {
 
     if (preview) {
       const current = this.previewPath;
-      if (current && current !== path && this.order.includes(current) && !this.pinned.has(current)) {
+      if (
+        current &&
+        current !== path &&
+        this.order.includes(current) &&
+        !this.pinned.has(current)
+      ) {
         // Вытесняем прежний предпросмотр, вставая на его место: полоса вкладок не дёргается.
         const index = this.order.indexOf(current);
         this.order.splice(index, 1);
@@ -212,7 +244,8 @@ export class OpenEditors {
     this.documents.close(path);
 
     if (this.activeId === path) {
-      this.activeId = this.order[Math.min(index, this.order.length - 1)] ?? null;
+      this.activeId =
+        this.order[Math.min(index, this.order.length - 1)] ?? null;
     }
     this.changeEmitter.fire();
     return this.activeId;
