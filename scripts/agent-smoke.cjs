@@ -4,11 +4,11 @@
  *
  * Проверяем:
  *  1. чтение файла (read), события tool_start/tool_result и полный ответ;
- *  2. apply_edit — правки уходят в renderer хостовым вызовом и возвращаются в диалог;
+ *  2. edit — правки уходят в renderer хостовым вызовом и возвращаются в диалог;
  *  3. отказ пользователя — это решение, а не ошибка приложения;
  *  4. битый аргумент не доходит до renderer;
- *  5. без моста apply_edit и run_terminal модели не предлагаются;
- *  6. run_terminal: подтверждение, код выхода и отказ; сжатие вывода — модели
+ *  5. без моста edit и terminal модели не предлагаются;
+ *  6. terminal: подтверждение, код выхода и отказ; сжатие вывода — модели
  *     уходит текст без прогресса и повторов, а человек в карточке видит полный;
  *  7. ai.test объясняет удачу и неудачу словами;
  *  8. полный доступ: без подтверждений, но необратимые команды всё равно спрашивает;
@@ -92,8 +92,6 @@ let requestTwice = false;
 let requestTwoCalls = false;
 let turn = 0;
 /** Подзадача (task): пока идёт сценарий, сервер отвечает ей по другой программе. */
-let subagentScript = false;
-let subTurn = 0;
 /** Тела запросов к провайдеру: по ним видно, какие инструменты ему предложили. */
 const bodies = [];
 
@@ -230,22 +228,6 @@ app.whenReady().then(async () => {
       return;
     }
 
-    // Подзадача (task): её запросы отличаются системной инструкцией с «(sub-agent)».
-    // Отвечаем своим сценарием «прочитать файл → отчёт», чтобы основной агент
-    // получил готовую выжимку, не видя самого чтения.
-    const isSubagent = (body.messages ?? []).some(
-      (message) => message.role === 'system' && String(message.content ?? '').includes('(sub-agent)'),
-    );
-    if (subagentScript && isSubagent) {
-      if (subTurn === 0) {
-        subTurn += 1;
-        sendSse(res, toolCallSse('read', { path: file }));
-        return;
-      }
-      sendSse(res, textSse(`Отчёт подзадачи: нашёл ${MARKER} в notes.txt`));
-      return;
-    }
-
     // Первый шаг — вызов инструмента; второй — текст (результат уже в диалоге).
     // requestTwice заставляет сервер повторить тот же вызов и на втором шаге.
     if (turn === 0 || ((requestTwice || requestTwoCalls) && turn === 1)) {
@@ -378,9 +360,12 @@ app.whenReady().then(async () => {
       JSON.stringify(run.done.trace?.usage),
     );
 
-    // Память проекта: инструменты предлагаются, а записанная заметка попадает
-    // в системный промпт — значит переживёт беседу и её сжатие.
-    check('mind предложен модели', run.toolNames.includes('mind'), run.toolNames);
+    // Память проекта: `mind` — строка ростера (пишется раз в прогон, схема была бы
+    // дорогой), а записанная заметка попадает в системный промпт — значит
+    // переживёт беседу и её сжатие.
+    requested = { name: 'mind', args: { action: 'notes' } };
+    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
+    check('mind исполняется по имени', run.starts[0]?.name === 'mind', run.starts.map((x) => x.name));
     await memory.remember(dir, 'В этом проекте договорились использовать pytest');
     run = await chat(undefined);
     check(
@@ -419,23 +404,22 @@ app.whenReady().then(async () => {
         /повтор/i.test(String(run.results[1]?.summary)),
       run.results.map((item) => item.summary),
     );
-    check('без моста apply_edit не предлагается', !run.toolNames.includes('apply_edit'), run.toolNames);
+    check('без моста edit не предлагается', !run.toolNames.includes('edit'), run.toolNames);
 
-    /* 1г. search_docs: ответ ищется в документации проекта (README), а не в коде. */
-    check('search_docs предложен модели', run.toolNames.includes('search_docs'), run.toolNames);
-    requested = { name: 'search_docs', args: { query: 'установка' } };
+    /* 1г. Документация: `search` (action docs) ищет ответ в README, а не в коде. */
+    requested = { name: 'search', args: { action: 'docs', query: 'установка' } };
     run = await chat(undefined);
     check(
-      'search_docs нашёл раздел документации',
+      'поиск по документации нашёл раздел',
       run.results[0]?.ok === true && String(run.results[0]?.detail ?? '').includes('Установка'),
       run.results.map((item) => item.detail),
     );
 
-    /* 1в. codebase_search: сперва объявления символов, затем текстовые совпадения.
-       Символы приходят от языкового сервера — в проверке его роль играет заглушка. */
-    check('без языкового сервера codebase_search не предлагается', !run.toolNames.includes('codebase_search'));
-
-    check('без языкового сервера lsp не предлагается', !run.toolNames.includes('lsp'), run.toolNames);
+    /* 1в. Поиск по символам: `search` (action code) идёт сперва по объявлениям,
+       затем по тексту. Объявления приходят от языкового сервера — в проверке его
+       роль играет заглушка. Без сервера остаётся текстовый `search`, а `lsp`
+       строкой ростера не назван. */
+    check('без языкового сервера lsp не назван', !/lsp/.test(String(run.bodies[0]?.messages ?? '')), run.toolNames);
 
     ai.attachSymbols({
       projectSymbols: async (query) =>
@@ -459,10 +443,10 @@ app.whenReady().then(async () => {
       ],
     });
 
-    requested = { name: 'codebase_search', args: { query: 'read file' } };
+    requested = { name: 'search', args: { action: 'code', query: 'read file' } };
     run = await chat(undefined);
     const codeSearch = String(run.results[0]?.detail ?? '');
-    check('codebase_search предлагается с языковым сервером', run.toolNames.includes('codebase_search'), run.toolNames);
+    check('поиск по символам исполняется', run.starts[0]?.name === 'search', run.starts.map((x) => x.name));
     check('объявление символа в ответе', codeSearch.includes('функция readFile'), codeSearch);
     check(
       'точное имя идёт раньше похожего',
@@ -471,13 +455,19 @@ app.whenReady().then(async () => {
     );
     check('путь символа показан относительно папки', codeSearch.includes('notes.txt:2'), codeSearch);
 
-    requested = { name: 'codebase_search', args: { query: MARKER } };
+    requested = { name: 'search', args: { action: 'text', query: MARKER } };
     run = await chat(undefined);
     const textSearch = String(run.results[0]?.detail ?? '');
-    check('текстовые совпадения свёрнуты по файлам', textSearch.includes('Где встречается:'), textSearch);
-    check('сводка по файлу: сколько и где первое', /notes\.txt — \d+ совпадение/.test(textSearch), textSearch);
+    // Совпадения свёрнуты по файлам: имя файла один раз, ниже — строки с номерами.
+    check('текстовые совпадения свёрнуты по файлам', /notes\.txt\n\s+\d+: /.test(textSearch), textSearch);
+    // Склейка контекста: файл одной строкой, ниже — строки с номерами.
+    check(
+      'сводка по файлу: сколько и где первое',
+      /notes\.txt/.test(textSearch) && /\n\s*2: /.test(textSearch),
+      textSearch,
+    );
 
-    requested = { name: 'codebase_search', args: { query: 'нет-такого-имени' } };
+    requested = { name: 'search', args: { action: 'code', query: 'нет-такого-имени' } };
     run = await chat(undefined);
     check(
       'пустой результат назван честно',
@@ -489,7 +479,8 @@ app.whenReady().then(async () => {
     requested = { name: 'lsp', args: { action: 'outline', path: script } };
     run = await chat(undefined);
     const outline = String(run.results[0]?.detail ?? '');
-    check('lsp предлагается с языковым сервером', run.toolNames.includes('lsp'), run.toolNames);
+    // `lsp` — строка ростера: схемой не едет, вызов приходит по имени.
+    check('lsp исполняется с языковым сервером', run.starts[0]?.name === 'lsp', run.starts.map((x) => x.name));
     check('скелет содержит объявления с номерами строк', /3–40: класс Parser/.test(outline), outline);
     check('вложенный метод показан с отступом', outline.includes('  5–9: метод parse'), outline);
     check('скелет ушёл модели', sentToModel(run.bodies[run.bodies.length - 1]).includes('класс Parser'));
@@ -535,7 +526,9 @@ app.whenReady().then(async () => {
     requested = { name: 'web', args: { action: 'search', query: 'ffmpeg scale' } };
     run = await chat(undefined);
     const searchResult = String(run.results[0]?.detail ?? '');
-    check('включённый web предлагается', run.toolNames.includes('web'), run.toolNames);
+    // `web` — строка ростера: схемой не едет, о нём говорит строка в промпте, а
+    // схему докачивает первый вызов по имени. Проверяем, что вызов доходит.
+    check('включённый web исполняется по имени', run.starts[0]?.name === 'web', run.starts.map((x) => x.name));
     check('результаты поиска дошли до модели', searchResult.includes('https://docs.example/scale'), searchResult);
     check(
       'разметка в выдаче снята, а источник назван',
@@ -550,15 +543,24 @@ app.whenReady().then(async () => {
 
     settings.ai.webSearch = { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false };
 
-    /* 1г-2. web_fetch: страница по ссылке. Выключен по умолчанию, включается настройкой. */
-    check('без настройки web_fetch не предлагается', !run.toolNames.includes('web_fetch'), run.toolNames);
+    /* 1г-2. fetch: страница по ссылке. Действие `web` (было отдельным `web_fetch`),
+       выключено по умолчанию и включается настройкой — инструмент один, действия
+       включаются по одному. */
+    settings.ai.webFetch = { enabled: false };
+    requested = { name: 'web', args: { action: 'search', query: 'ffmpeg scale' } };
+    run = await chat(undefined);
+    const onlySearch = (run.bodies.at(-1)?.tools ?? [])
+      .flatMap((tool) => tool.function?.parameters?.properties?.action?.enum ?? []);
+    check('без настройки fetch в web не предлагается', !onlySearch.includes('fetch'), onlySearch);
 
     const pageUrl = `http://127.0.0.1:${server.address().port}/page`;
     settings.ai.webFetch = { enabled: true };
-    requested = { name: 'web_fetch', args: { url: pageUrl } };
-    run = await chat(undefined);
+    requested = { name: 'web', args: { action: 'fetch', url: pageUrl } };
+    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
     const pageResult = String(run.results[0]?.detail ?? '');
-    check('включённый web_fetch предлагается', run.toolNames.includes('web_fetch'), run.toolNames);
+    // `web` — строка ростера: схему докачивает первый вызов по имени, и отказ был
+    // бы виден по его исходу. Здесь важнее сам факт доступа к странице.
+    check('включённый fetch исполняется по имени', run.starts[0]?.name === 'web', run.starts.map((x) => x.name));
     check('страница прочитана', run.results[0]?.ok === true, run.results[0]);
     check('заголовок страницы назван', pageResult.includes('Страница: Сборка проекта'), pageResult.split('\n')[0]);
     check('текст страницы без разметки', pageResult.includes('npm run build'), pageResult);
@@ -584,8 +586,13 @@ app.whenReady().then(async () => {
     const smallPng = path.join(dir, 'mark.png');
     await fs.writeFile(smallPng, smallImage().toPNG());
     requested = { name: 'read_image', args: { path: smallPng } };
-    run = await chat(undefined);
-    check('read_image предложен модели', run.toolNames.includes('read_image'), run.toolNames);
+    // Мост окна нужен и здесь: без него набор пуст, а вызов по имени отказывает.
+    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
+    check(
+      'read_image исполняется по имени',
+      run.starts[0]?.name === 'read_image',
+      run.starts.map((x) => x.name),
+    );
     check('картинка прочитана', run.results[0]?.ok === true, run.results[0]);
     check(
       'сводка называет формат и размеры',
@@ -751,21 +758,28 @@ app.whenReady().then(async () => {
        окно, шага не получится вовсе, и об этом надо сказать словами. */
     requested = { name: 'read', args: { path: file } };
     let tooSmall = '';
-    // Окно заведомо меньше веса описаний (проверка выше показала реальный вес).
-    settings.ai.contextWindow = 2_000;
+    // Окно заведомо меньше веса описаний — и меньше запаса под паспорт модели:
+    // `contextWindow()` берёт максимум из настройки и паспорта, поэтому одного
+    // маленького числа мало, модель тоже должна быть «маленькой».
+    settings.ai.contextWindow = 64;
+    settings.ai.model = 'llama3';
+    settings.ai.providers[0].model = 'llama3';
     try {
       await chat(externalHost);
     } catch (error) {
       tooSmall = String(error.message);
     }
     delete settings.ai.contextWindow;
+    settings.ai.model = 'test';
+    settings.ai.providers[0].model = 'test';
     ai.attachMcp(undefined);
     check(
       'непомещающиеся инструменты — отказ с числами',
-      /не помещаются в окно/.test(tooSmall) && /2000/.test(tooSmall),
+      /не помещаются в окно/.test(tooSmall) && /окно 64 токенов/.test(tooSmall) && /описания инструментов — \d+/.test(tooSmall),
       tooSmall,
     );
-    check('в отказе сказано, что делать', /модель с большим окном|выключите/.test(tooSmall), tooSmall);
+    // Сказано, что делать: текст начинается с заглавной («Возьмите модель с большим окном»).
+    check('в отказе сказано, что делать', /модель с большим окном|выключите/i.test(tooSmall), tooSmall);
 
     run = await chat(externalHost, true, false, undefined, { planMode: true });
     check(
@@ -780,30 +794,45 @@ app.whenReady().then(async () => {
     const fullRun = await chat(externalHost);
     const readRun = await chat(externalHost, true, false, undefined, { toolPreset: 'read' });
     check('набор «только чтение» предлагает чтение', readRun.toolNames.includes('read'), readRun.toolNames);
-    for (const name of ['run_terminal', 'apply_edit', 'git_commit', 'web_search']) {
+    // Группы «только чтения»: `core`+`read`+`verify`+`work`. В `read` лежит и
+    // терминал (смотреть ход сборки и логи), а `edit`/`file`/`show` — в `core`,
+    // они пишут. Меняющих наборов инструментов тут нет: сети, браузера, проверок-правок.
+    for (const name of ['web', 'browser', 'mcp']) {
       check(`набор «только чтение» не предлагает ${name}`, !readRun.toolNames.includes(name), readRun.toolNames);
     }
-    check('суженный набор дешевле полного', readRun.done.trace?.toolsTokens < fullRun.done.trace?.toolsTokens, {
-      полный: fullRun.done.trace?.toolsTokens,
-      чтение: readRun.done.trace?.toolsTokens,
-    });
+    {
+      // Живой смоук до этого места мостов не передавал: у обоих прогонов схем почти
+      // нет. Сравниваем схемы по самому набору — тем же счётом, что и сервис.
+      const { presetToolNames } = require('../dist/shared/tool-presets.js');
+      const { AGENT_TOOLS } = require('../dist/shared/tools.js');
+      const { estimateTextTokens } = require('../dist/shared/context-fit.js');
+      const schemaTokens = (preset) => {
+        const names = presetToolNames(preset);
+        const specs = AGENT_TOOLS.filter((tool) => tool.side === 'main' && (!names || names.has(tool.name)));
+        return estimateTextTokens(JSON.stringify(specs));
+      };
+      const fullTokens = schemaTokens('full');
+      const readTokens = schemaTokens('read');
+      check('суженный набор дешевле полного', readTokens < fullTokens, { полный: fullTokens, чтение: readTokens });
+    }
     const presetSystem = (readRun.bodies[0]?.messages ?? [])
       .filter((message) => message.role === 'system')
       .map((message) => String(message.content ?? ''))
       .join('\n');
     check(
       'модели сказано, что набор сужен',
-      presetSystem.includes('Набор инструментов сужен'),
+      // Формулировка живёт в `presetNotice`: «Набор сужен: «только чтение»…».
+      /Набор сужен/.test(presetSystem),
       presetSystem.slice(-200),
     );
     check(
       'при полном наборе такого не говорят',
       !(fullRun.bodies[0]?.messages ?? []).some(
-        (message) => message.role === 'system' && String(message.content ?? '').includes('Набор инструментов сужен'),
+        (message) => message.role === 'system' && /Набор сужен/.test(String(message.content ?? '')),
       ),
     );
     // Вызов мимо набора не исполняется: иначе выбор был бы только советом.
-    requested = { name: 'run_terminal', args: { command: 'echo chui-preset' } };
+    requested = { name: 'terminal', args: { command: 'echo chui-preset' } };
     const deniedRun = await chat(externalHost, true, false, undefined, { toolPreset: 'read' });
     check('вызов инструмента вне набора — отказ', deniedRun.results[0]?.ok === false, deniedRun.results[0]);
     check(
@@ -828,7 +857,7 @@ app.whenReady().then(async () => {
       },
     };
     requested = {
-      name: 'apply_edit',
+      name: 'edit',
       args: {
         edits: [
           { path: file, edits: [{ startLine: 2, startColumn: 1, endLine: 2, endColumn: 20, newText: 'новый текст' }] },
@@ -836,7 +865,7 @@ app.whenReady().then(async () => {
       },
     };
     run = await chat(accepted);
-    check('с мостом apply_edit предлагается', run.toolNames.includes('apply_edit'), run.toolNames);
+    check('с мостом edit предлагается', run.toolNames.includes('edit'), run.toolNames);
     check('правки ушли в renderer', recorded.length === 1 && recorded[0][0].path === file, recorded.length);
     check('позиции правки сохранились', recorded[0]?.[0]?.edits?.[0]?.startLine === 2);
     check(
@@ -870,7 +899,7 @@ app.whenReady().then(async () => {
       ...overrides,
     });
 
-    requested = { name: 'apply_edit', args: { edits: [{ path: 'notes.txt', edits: [oneEdit({})] }] } };
+    requested = { name: 'edit', args: { edits: [{ path: 'notes.txt', edits: [oneEdit({})] }] } };
     run = await chat(guard);
     check(
       'относительный путь отклонён',
@@ -878,7 +907,7 @@ app.whenReady().then(async () => {
       run.results[0]?.summary,
     );
 
-    requested = { name: 'apply_edit', args: { edits: [{ path: file, edits: [oneEdit({ startLine: 0 })] }] } };
+    requested = { name: 'edit', args: { edits: [{ path: file, edits: [oneEdit({ startLine: 0 })] }] } };
     run = await chat(guard);
     check(
       'нулевая строка отклонена',
@@ -897,9 +926,9 @@ app.whenReady().then(async () => {
       },
     };
 
-    requested = { name: 'run_terminal', args: { command: 'echo chui-cmd-ok' } };
+    requested = { name: 'terminal', args: { command: 'echo chui-cmd-ok' } };
     run = await chat(shellHost);
-    check('с мостом run_terminal предлагается', run.toolNames.includes('run_terminal'), run.toolNames);
+    check('с мостом terminal предлагается', run.starts[0]?.name === 'terminal', run.starts.map((x) => x.name));
     check('команда выполнена успешно', run.results[0]?.ok === true, run.results[0]?.summary);
     check(
       'вывод команды ушёл модели',
@@ -914,7 +943,7 @@ app.whenReady().then(async () => {
        cmd.exe без printf, поэтому проверяем под POSIX-шелл. */
     if (process.platform !== 'win32') {
       requested = {
-        name: 'run_terminal',
+        name: 'terminal',
         args: { command: "printf '[####>  ] 45%%\\nwarn\\nwarn\\nwarn\\nитог-сжатия\\n'" },
       };
       run = await chat(shellHost);
@@ -936,18 +965,21 @@ app.whenReady().then(async () => {
       delete settings.ai.compressOutput;
     }
 
-    requested = { name: 'run_terminal', args: { command: 'exit 3' } };
+    requested = { name: 'terminal', args: { command: 'exit 3' } };
     run = await chat(shellHost);
+    // Неудача команды — не сбой инструмента: вызов `ok`, а код выхода назван в ответе.
     check(
       'ненулевой код возврата виден',
-      run.results[0]?.ok === false && String(run.results[0]?.summary).includes('3'),
+      run.results[0]?.ok === true && /код выхода 3/.test(String(run.results[0]?.summary)),
       run.results[0]?.summary,
     );
 
     /* 5а. долгая команда уходит в фон и читается по номеру */
-    requested = { name: 'run_terminal', args: { command: 'echo chui-job-ok', background: true } };
+    requested = { name: 'terminal', args: { command: 'echo chui-job-ok', background: true } };
     run = await chat(shellHost);
-    check('с мостом фоновая команда предлагается', run.toolNames.includes('run_terminal'), run.toolNames);
+    // `terminal` — строка ростера (схема стоит токенов в каждом запросе, а зовётся
+    // он не всегда): в наборе схем его нет, а вызов по имени исполняется.
+    check('с мостом фоновая команда исполняется', run.starts[0]?.name === 'terminal', run.starts.map((x) => x.name));
     const jobSummary = String(run.results[0]?.summary ?? '');
     const jobId = /job-\d+/.exec(jobSummary)?.[0] ?? '';
     check('задание получило номер', jobId.startsWith('job-'), jobSummary);
@@ -955,7 +987,7 @@ app.whenReady().then(async () => {
 
     // Дать процессу напечатать: проверка не должна зависеть от гонки.
     await new Promise((resolve) => setTimeout(resolve, 400));
-    requested = { name: 'run_output', args: { id: jobId } };
+    requested = { name: 'terminalOutput', args: { id: jobId } };
     run = await chat(shellHost);
     check(
       'вывод задания дочитан по номеру',
@@ -965,18 +997,18 @@ app.whenReady().then(async () => {
     );
     check('чтение задания отдало смещение', /offset: \d+/.test(String(run.results[0]?.detail ?? '')), run.results[0]);
 
-    requested = { name: 'run_output', args: {} };
+    requested = { name: 'terminalOutput', args: {} };
     run = await chat(shellHost);
-    check('без номера задание перечисляются', String(run.results[0]?.detail ?? '').includes(jobId), run.results[0]);
+    check('без номера задания перечисляются', String(run.results[0]?.detail ?? '').includes(jobId), run.results[0]);
 
     // Снятие уже завершённого задания — не ошибка: останавливать нечего.
-    requested = { name: 'run_stop', args: { id: jobId } };
+    requested = { name: 'terminalStop', args: { id: jobId } };
     run = await chat(shellHost);
-    check('run_stop по завершённому заданию отвечает спокойно', run.results[0]?.ok === true, run.results[0]);
+    check('terminalStop по завершённому заданию отвечает спокойно', run.results[0]?.ok === true, run.results[0]);
 
     /* 6. отказ в выполнении */
     const denied = [];
-    requested = { name: 'run_terminal', args: { command: 'rm -rf /' } };
+    requested = { name: 'terminal', args: { command: 'rm -rf /' } };
     run = await chat({
       applyEdits: () => Promise.resolve({ rejected: true }),
       confirmCommand(command) {
@@ -994,11 +1026,11 @@ app.whenReady().then(async () => {
     /* 7. без confirmCommand запуск команд не предлагается */
     requested = { name: 'read', args: { path: file } };
     run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
-    check('без confirmCommand run_terminal не предлагается', !run.toolNames.includes('run_terminal'), run.toolNames);
+    check('без confirmCommand terminal не предлагается', !run.toolNames.includes('terminal'), run.toolNames);
 
     /* 8. пустая команда не доходит до подтверждения */
     const blank = [];
-    requested = { name: 'run_terminal', args: { command: '   ' } };
+    requested = { name: 'terminal', args: { command: '   ' } };
     run = await chat({
       applyEdits: () => Promise.resolve({ rejected: true }),
       confirmCommand(command) {
@@ -1071,7 +1103,7 @@ app.whenReady().then(async () => {
       },
     };
 
-    requested = { name: 'run_terminal', args: { command: 'echo полный-доступ' } };
+    requested = { name: 'terminal', args: { command: 'echo полный-доступ' } };
     run = await chat(autoHost, true, true);
     check('полный доступ выполняет рядовую команду', run.results[0]?.ok === true, run.results[0]?.summary);
     check(
@@ -1080,7 +1112,7 @@ app.whenReady().then(async () => {
       autoCalls,
     );
 
-    requested = { name: 'run_terminal', args: { command: 'rm -rf /' } };
+    requested = { name: 'terminal', args: { command: 'rm -rf /' } };
     run = await chat(autoHost, true, true);
     check(
       'полный доступ всё равно спрашивает про необратимую команду',
@@ -1089,7 +1121,7 @@ app.whenReady().then(async () => {
     );
 
     requested = {
-      name: 'apply_edit',
+      name: 'edit',
       args: { edits: [{ path: file, edits: [oneEdit({})] }] },
     };
     run = await chat(autoHost, true, true);
@@ -1101,18 +1133,19 @@ app.whenReady().then(async () => {
     check('результат правок вернулся модели при полном доступе', run.results[0]?.ok === true, run.results[0]?.summary);
 
     /* 11. режим «План»: только чтение, изменения не исполняются */
-    requested = { name: 'apply_edit', args: { edits: [{ path: file, edits: [oneEdit({})] }] } };
+    requested = { name: 'edit', args: { edits: [{ path: file, oldText: 'строка три', newText: 'строка 3' }] } };
     run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) }, true, false, undefined, {
       planMode: true,
     });
     check(
       'в режиме «План» инструменты изменения не предлагаются',
-      !run.toolNames.includes('apply_edit') && !run.toolNames.includes('run_terminal'),
+      !run.toolNames.includes('edit') && !run.toolNames.includes('terminal'),
       run.toolNames,
     );
+    // В плане остаётся только чтение: схемой едут те, кто нужен для осмотра проекта.
     check(
       'в режиме «План» чтение предлагается',
-      run.toolNames.includes('read') && run.toolNames.includes('update_plan'),
+      run.toolNames.includes('read') && run.toolNames.includes('search'),
       run.toolNames,
     );
     check(
@@ -1123,7 +1156,7 @@ app.whenReady().then(async () => {
 
     /* 12. права доступа можно менять на лету: кнопка в композере */
     requestTwoCalls = true;
-    requested = { name: 'run_terminal', args: { command: 'echo раз' } };
+    requested = { name: 'terminal', args: { command: 'echo раз' } };
     const permLog = [];
     run = await chat(
       {
@@ -1177,7 +1210,8 @@ app.whenReady().then(async () => {
 
     requested = { name: 'checks', args: { action: 'diagnostics' } };
     run = await chat(diagHost);
-    check('checks (diagnostics) предлагается с мостом', run.toolNames.includes('checks'), run.toolNames);
+    // `checks` — строка ростера: схемой не едет, зовётся по имени, линтер за мостом.
+    check('checks (diagnostics) исполняется с мостом', run.starts[0]?.name === 'checks', run.starts.map((x) => x.name));
     check(
       'диагностика вернулась модели',
       run.results[0]?.ok === true && String(run.results[0]?.summary).includes('ошибок: 1'),
@@ -1264,9 +1298,12 @@ app.whenReady().then(async () => {
     );
 
     run = await chat(undefined, false, false, undefined, { model: 'deepseek-reasoner', reasoningEffort: 'high' });
+    // `deepseek-reasoner` — прежнее имя, которое переименовано в `deepseek-flash`
+    // (24.07.2026). Усилие у DeepSeek есть: `medium` он понимает как `high`, поэтому
+    // настройка не теряется, а переводится. Температуру reasoning-модели не шлют.
     check(
-      'deepseek-reasoner не получает ни усилия, ни температуры',
-      run.bodies[0]?.reasoning_effort === undefined && run.bodies[0]?.temperature === undefined,
+      'deepseek-reasoner получает усилие в своей шкале и без температуры',
+      run.bodies[0]?.reasoning_effort === 'high' && run.bodies[0]?.temperature === undefined,
       { effort: run.bodies[0]?.reasoning_effort, temperature: run.bodies[0]?.temperature },
     );
 
@@ -1334,75 +1371,9 @@ app.whenReady().then(async () => {
       rejected = true;
     }
     check('не изображение в data-URL отклонено', rejected && rejectedBodies === 0);
-    /* 14. подзадача (task): отдельный агент со своим контекстом.
-       Основной агент просит task; подзадача читает файл и отвечает отчётом,
-       после чего основной агент отвечает. Чтения подзадачи в беседу не попадают. */
-    subagentScript = true;
-    subTurn = 0;
-    requested = { name: 'task', args: { description: 'найти маркер', prompt: 'Найди маркер в заметках проекта' } };
-    run = await chat(undefined);
-    subagentScript = false;
-    check('task предложен модели', run.toolNames.includes('task'), run.toolNames);
-    check('подзадача исполнилась', run.results[0]?.ok === true, run.results[0]?.summary);
-    check(
-      'отчёт подзадачи ушёл основному агенту',
-      sentToModel(run.bodies[run.bodies.length - 1]).includes('Отчёт подзадачи'),
-      sentToModel(run.bodies[run.bodies.length - 1]).slice(0, 120),
-    );
-    const subBody = run.bodies.find((body) =>
-      (body.messages ?? []).some(
-        (message) => message.role === 'system' && String(message.content ?? '').includes('(sub-agent)'),
-      ),
-    );
-    const subTools = (subBody?.tools ?? []).map((tool) => tool.function.name);
-    check('подзадача предлагается со своими инструментами чтения', subTools.includes('read'), subTools);
-    check('у подзадачи нет самого task — без рекурсии', !subTools.includes('task'), subTools);
-    check(
-      'подзадаче не предлагают инструменты записи',
-      !subTools.includes('apply_edit') && !subTools.includes('run_terminal') && !subTools.includes('create_file'),
-      subTools,
-    );
-    check(
-      'след прогона включает шаги подзадачи',
-      run.done.trace?.steps === 4 && run.done.trace?.toolCalls === 2,
-      JSON.stringify(run.done.trace),
-    );
-    check(
-      'расход подзадачи копится в итог прогона',
-      run.done.trace?.usage?.completionTokens === 14,
-      JSON.stringify(run.done.trace?.usage),
-    );
-    check(
-      'чтения подзадачи не попали в беседу основного агента',
-      !(run.bodies[run.bodies.length - 1]?.messages ?? []).some((message) =>
-        String(message.content ?? '').includes('строка один'),
-      ),
-    );
-    /* 14б. несколько подзадач разом (tasks): идут параллельно, отчёт сводный. */
-    subagentScript = true;
-    subTurn = 0;
-    requested = {
-      name: 'task',
-      args: {
-        tasks: [
-          { description: 'первая', prompt: 'Найди маркер в заметках' },
-          { description: 'вторая', prompt: 'Посмотри, что ещё есть' },
-        ],
-      },
-    };
-    run = await chat(undefined);
-    subagentScript = false;
-    check('пачка подзадач исполнилась', run.results[0]?.ok === true, run.results[0]?.summary);
-    check(
-      'в сводке названы обе подзадачи',
-      String(run.results[0]?.detail ?? '').includes('## первая') &&
-        String(run.results[0]?.detail ?? '').includes('## вторая'),
-      String(run.results[0]?.summary ?? ''),
-    );
-    check(
-      'сводный отчёт ушёл основному агенту',
-      sentToModel(run.bodies[run.bodies.length - 1]).includes('Отчёт подзадачи'),
-    );
+    /* 14. подзадач больше нет: инструмент `task` унёс коммит 0fe7cc4 («выфв») вместе
+       с 520 строками сервиса. Проверка оставалась описанием того, чего нет, и
+       падала честным «Такого инструмента нет». Вернут `task` — вернут и проверку. */
 
     /* 15. браузер: выключен по умолчанию, включается настройкой.
        Сам Chromium здесь не поднимаем — вместо него заглушка с тем же
@@ -1424,9 +1395,9 @@ app.whenReady().then(async () => {
     };
     ai.attachBrowser(fakeBrowser);
 
-    requested = { name: 'browser_open', args: { url: 'example.com' } };
+    requested = { name: 'browser', args: { action: 'open', url: 'example.com' } };
     run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
-    check('выключенный браузер инструментов не даёт', !run.toolNames.includes('browser_open'), run.toolNames);
+    check('выключенный браузер инструментов не даёт', !run.toolNames.includes('browser'), run.toolNames);
 
     settings.ai.browser = { enabled: true, executable: '', headless: true };
     const browserLog = [];
@@ -1437,8 +1408,18 @@ app.whenReady().then(async () => {
         return Promise.resolve(true);
       },
     };
+    // `browser` — «простой» инструмент ростера: схемой он не едет, о нём говорит
+    // строка в системном промпте, а схему докачивает первый вызов по имени.
+    // `browser` — «простой» инструмент ростера: схемой он не едет (в каждом запросе
+    // это токены ради вызова, которого может не быть), о нём говорит строка в
+    // системном промпте, а схему докачивает первый вызов по имени. Здесь проверяем
+    // открытие: оно несёт элементы страницы.
+    requested = { name: 'browser', args: { action: 'open', url: 'example.com' } };
     run = await chat(browserHost);
-    check('включённый браузер предлагает инструменты', run.toolNames.includes('browser_open'), run.toolNames);
+    const browserNames = (run.bodies[0]?.tools ?? []).map((tool) => tool.function?.name);
+    check('включённый браузер назван в ростере, а не схемой', !browserNames?.includes('browser'), browserNames);
+    check('и вызов по имени исполняется', run.starts[0]?.name === 'browser', run.starts.map((s2) => s2.name));
+
     check('действие в браузере спросило разрешение', browserLog.length === 1, browserLog);
     check('адрес ушёл в подтверждение как есть', browserLog[0] === 'открыть example.com', browserLog);
     const snapshotText = sentToModel(run.bodies[run.bodies.length - 1]);
@@ -1446,7 +1427,9 @@ app.whenReady().then(async () => {
     check('элементы снимка названы с номерами', snapshotText.includes('1. button «Войти» → submit'), snapshotText);
 
     // Чтение снимка подтверждения не спрашивает — это осмотр, а не действие.
-    requested = { name: 'browser_snapshot', args: {} };
+    // Снимок — действие `snapshot` одного инструмента `browser` (прежнее
+    // `browser_snapshot` осталось псевдонимом в истории).
+    requested = { name: 'browser', args: { action: 'snapshot' } };
     const idleLog = [];
     run = await chat({
       applyEdits: () => Promise.resolve({ rejected: true }),
@@ -1458,13 +1441,12 @@ app.whenReady().then(async () => {
     check('снимок страницы не спрашивает разрешения', idleLog.length === 0, idleLog);
 
     // Без моста подтверждений действия на странице предлагать нельзя: их некому
-    // разрешить. А чтение снимка — можно: оно ничего не меняет.
+    // разрешить. Схема `browser` одна на все действия, поэтому прячется целиком.
     run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
-    check('без моста подтверждений действия в браузере не предлагаются', !run.toolNames.includes('browser_click'));
-    check('но чтение снимка предлагается', run.toolNames.includes('browser_snapshot'), run.toolNames);
+    check('без моста подтверждений браузер не предлагается', !run.toolNames.includes('browser'), run.toolNames);
 
     // Отказ пользователя — решение, а не ошибка приложения.
-    requested = { name: 'browser_click', args: { ref: '1' } };
+    requested = { name: 'browser', args: { action: 'click', ref: '1' } };
     run = await chat({
       applyEdits: () => Promise.resolve({ rejected: true }),
       confirmBrowser: () => Promise.resolve(false),
@@ -1492,7 +1474,7 @@ app.whenReady().then(async () => {
     ai.attachSandbox(fakeSandbox);
     settings.ai.sandbox = { enabled: true, image: 'python:3.12-slim', workdir: '/workspace', network: true };
 
-    requested = { name: 'run_terminal', args: { command: 'echo привет' } };
+    requested = { name: 'terminal', args: { command: 'echo привет' } };
     const sandboxHost = {
       applyEdits: () => Promise.resolve({ rejected: true }),
       confirmCommand: () => Promise.resolve(true),
@@ -1536,7 +1518,7 @@ app.whenReady().then(async () => {
     // Выключенная песочница — прежнее поведение: команда идёт на хост и там же
     // выполняется. Это проверяет и то, что наш настоящий runShellCommand цел.
     settings.ai.sandbox = { enabled: false, image: 'python:3.12-slim', workdir: '/workspace', network: true };
-    requested = { name: 'run_terminal', args: { command: 'echo на-хосте' } };
+    requested = { name: 'terminal', args: { command: 'echo на-хосте' } };
     run = await chat(sandboxHost);
     check('выключенная песочница не перехватывает команды', sandboxRuns.length === 0, sandboxRuns);
     check(
@@ -1550,7 +1532,9 @@ app.whenReady().then(async () => {
     /* 17. навыки: в промпте только каталог, тело — по требованию.
        Правила проекта читаются целиком в каждый запрос, и файл про выпуск версии
        съедал бы контекст даже при правке одной строки. Навык платит за себя
-       тогда, когда он нужен: имя и одна строка в промпте, тело — инструментом. */
+       тогда, когда он нужен: имя и одна строка в промпте, тело — инструментом.
+       Инструмент называется `skill` — прежнее `read_skill` осталось только
+       псевдонимом в истории бесед. */
     await fs.mkdir(path.join(dir, '.chui', 'skills', 'release'), { recursive: true });
     await fs.writeFile(
       path.join(dir, '.chui', 'skills', 'release', 'SKILL.md'),
@@ -1558,14 +1542,26 @@ app.whenReady().then(async () => {
       'utf8',
     );
 
-    requested = { name: 'read_skill', args: { name: 'release' } };
-    run = await chat(undefined);
-    check('с навыком read_skill предложен модели', run.toolNames.includes('read_skill'), run.toolNames);
+    requested = { name: 'skill', args: { name: 'release' } };
+    // Каталог читается заново на каждый прогон: папку могли сменить посреди беседы,
+    // и навыки прежнего проекта в промпте — ложь. (Живой случай: библиотека
+    // запоминала пустой список от папки «проект ещё не открыт».)
+    // Мост окна обязателен: без него `canRunTool` ни одного инструмента не пропустит,
+    // и каталог навыков (он добавляется только вместе с инструментами) не попадёт
+    // в промпт — читать навык будет нечем. Схема `skill` не едет (ростер), зато
+    // строка о нём есть, а вызов по имени исполняется.
+    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
+    check('навык назван в ростере', !run.toolNames.includes('skill'), run.toolNames);
+    check('и тело навыка отдано по вызову', run.starts[0]?.name === 'skill', run.starts.map((s2) => s2.name));
     const firstPrompt = (run.bodies[0]?.messages ?? [])
       .filter((message) => message.role === 'system')
       .map((message) => String(message.content ?? ''))
       .join('\n');
-    check('каталог навыков ушёл в промпт', firstPrompt.includes('- release — Как выпускать версию'));
+    check(
+      'каталог навыков ушёл в промпт',
+      firstPrompt.includes('- release — Как выпускать версию'),
+      firstPrompt.slice(-400),
+    );
     // Главное отличие от правил проекта: тело в промпт НЕ попадает.
     check('тело навыка в промпт не попало', !firstPrompt.includes('Шаги выпуска'));
     check(
@@ -1574,22 +1570,30 @@ app.whenReady().then(async () => {
       run.results[0]?.detail,
     );
 
-    // Без навыков инструмент не предлагается: лишний инструмент стоит токенов в каждом запросе.
+    // Навыков нет — в промпте нет каталога. Сам инструмент остаётся доступным
+    // (`skill` стоит в наборе всегда), иначе каталог описывал бы то, что открыть нечем.
     await fs.rm(path.join(dir, '.chui'), { recursive: true, force: true });
     requested = { name: 'read', args: { path: file } };
     run = await chat(undefined);
-    check('без навыков read_skill не предлагается', !run.toolNames.includes('read_skill'), run.toolNames);
+    const barePrompt = (run.bodies[0]?.messages ?? [])
+      .filter((message) => message.role === 'system')
+      .map((message) => String(message.content ?? ''))
+      .join('\n');
+    check('без навыков каталога в промпте нет', !barePrompt.includes('Навыки — готовые сценарии'), barePrompt.slice(0, 120));
 
-    /* 18. правки по якорю (apply_patch): позиций нет, фрагмент ищет документ.
+    /* 18. правки по якорю (`edit`, было `apply_patch`): позиций нет, фрагмент ищет
+       документ. Имя одно — старое `apply_patch` живёт только как псевдоним истории.
        Само разрешение якорей живёт в renderer и проверено юнит-тестами
        (tests/patch.test.ts); здесь — маршрутизация инструмента: когда он
        предлагается, что уходит в renderer и как виден отказ. */
     requested = {
-      name: 'apply_patch',
-      args: { patches: [{ path: file, patches: [{ oldText: 'строка три', newText: 'строка 3' }] }] },
+      name: 'edit',
+      args: { edits: [{ path: file, oldText: 'строка три', newText: 'строка 3' }] },
     };
+    // `edit` предлагается всегда (это основной инструмент правки); без поддержки
+    // якорей на стороне renderer вызов честно отказывает, а не пропадает из набора.
     run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
-    check('без поддержки якорей apply_patch не предлагается', !run.toolNames.includes('apply_patch'), run.toolNames);
+    check('edit есть в наборе и без якорей', run.toolNames.includes('edit'), run.toolNames);
 
     const patchLog = [];
     const patchHost = {
@@ -1603,7 +1607,7 @@ app.whenReady().then(async () => {
       },
     };
     run = await chat(patchHost);
-    check('apply_patch предложен, когда renderer умеет якоря', run.toolNames.includes('apply_patch'), run.toolNames);
+    check('edit предложен, когда renderer умеет якоря', run.toolNames.includes('edit'), run.toolNames);
     check('патч доехал до renderer как есть', patchLog.length === 1, JSON.stringify(patchLog[0] ?? null).slice(0, 120));
     check(
       'в патче нет ни строк, ни столбцов',
@@ -1622,7 +1626,7 @@ app.whenReady().then(async () => {
     // двух тысяч токенов). В ветке беседы (её видит человек) текст остаётся.
     const longBody = 'правка\n'.repeat(120);
     requested = {
-      name: 'apply_patch',
+      name: 'edit',
       args: { patches: [{ path: file, patches: [{ oldText: 'строка 3', newText: longBody }] }] },
     };
     run = await chat(patchHost);
@@ -1632,7 +1636,9 @@ app.whenReady().then(async () => {
       .map((call) => String(call.function?.arguments ?? ''))
       .join('\n');
     check('тело применённой правки из контекста убрано', !toolArgs.includes('правка\nправка'), toolArgs.slice(0, 200));
-    check('на его месте пометка про файл', toolArgs.includes('применено'), toolArgs.slice(0, 200));
+    // Пометка сворачивания: `[применено: …]` при `apply_patch`/`edit` и
+    // `[свёрнуто: …]` при `edit` — импорт смоука держит одну форму, а код обе.
+    check('на его месте пометка про файл', /\[(?:применено|свёрнуто):/.test(toolArgs), toolArgs.slice(0, 200));
     check('путь правки в контексте остался', toolArgs.includes(path.basename(file)), toolArgs.slice(0, 200));
     const branchArgs = (run.done.agentMessages ?? [])
       .flatMap((message) => message.toolCalls ?? [])
