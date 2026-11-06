@@ -309,29 +309,17 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       // Край списка или файл без детей — нажатие не наше, дальше его не трогаем.
     }
 
-    if (!selected) return;
-
-    if (event.key === 'F2') {
-      event.preventDefault();
-      // При группе переименовывается строка под курсором. Сказать об этом нечем —
-      // у проводника нет канала тостов, — поэтому группа в этот момент просто не
-      // ждёт «переименовать всё»: поле открывается на ОДНОЙ строке, и это видно.
-      // В меню подпись честная: `Переименовать… (только <имя>)`.
-      startRename(selected);
-      return;
-    }
-    if (event.key === ' ' && deps.peekFiles) {
-      // Пробел — быстрый просмотр: показываем выделенные файлы, вкладок не открывая.
-      const paths = peekablePaths();
-      if (paths.length > 0) {
+    // Ниже — клавиши, которым нужна выделенная строка. Все они живут в
+    // `tree-walk.ts` рядом со стрелками: правило одно, мышью и клавишей
+    // приходят в одни и те же `applyWalk`-ветки.
+    const selectedWalkKey = walkKey === ' ' ? 'Space' : walkKey;
+    if (SELECTION_KEYS.has(selectedWalkKey)) {
+      const action = walkTree(walkRows(), selected, selectedWalkKey as WalkKey);
+      if (action) {
         event.preventDefault();
-        deps.peekFiles(paths, rowAnchor(paths[0]!, event));
+        applyWalk(action, event);
       }
       return;
-    }
-    if (event.key === 'Delete') {
-      event.preventDefault();
-      deleteTargets(selection.paths.length > 0 ? selection.paths : [selected]);
     }
   };
   let selected: string | null = null;
@@ -417,6 +405,15 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const found = findEntry(path);
       return found !== undefined && entryIsFile(found);
     });
+  };
+
+  const peekAnchor = (path: string, event?: Event): PeekAnchorPoint => {
+    if (event) return rowAnchor(path, event);
+    // С клавиатуры события строки нет: берём прямоугольник строки прямо из неё.
+    const row = element.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`);
+    const box = row?.getBoundingClientRect();
+    if (!box) return { left: 0, top: 0, bottom: 1 };
+    return { left: box.left, top: box.top, bottom: box.bottom };
   };
 
   /** Прямоугольник строки пути (в дереве) — у него показывать просмотр. */
@@ -2383,6 +2380,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     'Star',
   ]);
 
+  /** Клавиши строки: без выделения им нечего делать, поэтому в ход не идут. */
+  const SELECTION_KEYS: ReadonlySet<string> = new Set(['Space', 'F2', 'Delete', 'ContextMenu']);
+
   /**
    * Видимые строки с тем, что нужно для хода: глубина (по ней ищется родитель)
    * и раскрыт ли каталог. `loading`/`deleted` в ход не входят — это не строки
@@ -2417,7 +2417,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let ariaPlaces = new Map<string, AriaPosition>();
   const ariaPlace = (path: string): AriaPosition => ariaPlaces.get(path) ?? { level: 1, posInSet: 1, setSize: 1 };
 
-  const applyWalk = (action: WalkAction): void => {
+  const applyWalk = (action: WalkAction, event?: KeyboardEvent): void => {
     switch (action.kind) {
       case 'move': {
         selected = action.path;
@@ -2440,6 +2440,36 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       case 'open': {
         const entry = [...children.values()].flat().find((item) => item.path === action.path);
         if (entry) void onClick(entry);
+        return;
+      }
+      case 'peek': {
+        // Пробел — посмотреть, не открывая вкладку. Ветку не раскрывает:
+        // «глазом» смотрят, не трогая дерево. На выделении смотрим всё выделенное:
+        // так же, как это уже делает `Space` в обработчике клавиш.
+        const paths = peekablePaths();
+        const target = paths.includes(action.path) ? paths : [action.path];
+        deps.peekFiles?.(target, peekAnchor(target[0]!, event));        return;
+      }
+      case 'rename':
+        startRename(action.path);
+        return;
+      case 'delete':
+        // Выделено несколько — удаляем выделенное, а не одну строку под
+        // клавишей: `Delete` после выделения мышью адресуется выделению.
+        deleteTargets(selection.paths.length > 1 ? selection.paths : action.paths);
+        return;
+      case 'menu': {
+        // Меню — то же, что правый щелчок по строке: через тот же `openMenu`,
+        // чтобы пункты не разъехались с мышиными.
+        const row = element.querySelector<HTMLElement>(`[data-path="${CSS.escape(action.path)}"]`);
+        if (!row) return;
+        const box = row.getBoundingClientRect();
+        openMenu(findEntry(action.path) ?? null, {
+          preventDefault: () => {},
+          stopPropagation: () => {},
+          clientX: box.left + 12,
+          clientY: box.top + box.height,
+        } as unknown as MouseEvent);
         return;
       }
       case 'expandAll':

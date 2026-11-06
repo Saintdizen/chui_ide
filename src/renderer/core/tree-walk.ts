@@ -32,13 +32,21 @@ export type WalkKey =
   | 'PageUp'
   | 'PageDown'
   | 'Enter'
-  | 'Star';
+  | 'Star'
+  | 'Space'
+  | 'F2'
+  | 'Delete'
+  | 'ContextMenu';
 
 export type WalkAction =
   | { readonly kind: 'move'; readonly path: string }
   | { readonly kind: 'expand'; readonly path: string }
   | { readonly kind: 'collapse'; readonly path: string }
   | { readonly kind: 'open'; readonly path: string }
+  | { readonly kind: 'peek'; readonly path: string }
+  | { readonly kind: 'rename'; readonly path: string }
+  | { readonly kind: 'delete'; readonly paths: readonly string[] }
+  | { readonly kind: 'menu'; readonly path: string }
   | { readonly kind: 'expandAll'; readonly paths: readonly string[] };
 
 /**
@@ -48,7 +56,12 @@ export type WalkAction =
  * `Up`/`Down` — соседняя строка; `Right` у свёрнутой папки раскрывает, у
  * раскрытой — уходит к первому ребёнку, у файла не делает ничего;
  * `Left` у раскрытой папки сворачивает, у свёрнутой — поднимается к родителю;
- * `Home`/`End` — край списка; `Enter` — открыть.
+ * `Home`/`End` — край списка; `Enter` — открыть; `Space` — показать файл, не
+ * открывая вкладку; `F2` — переименовать; `Delete` — удалить; клавиша меню
+ * (`ContextMenu`, она же `Shift+F10`) — контекстное меню строки.
+ *
+ * `Delete` без выбранной строки не значит ничего: у «удалить» нет разумной цели
+ * по умолчанию, и нажатие в пустом дереве не должно сносить первый файл.
  *
  * `null` — нажатие ничего не значит (дерево пусто, край достигнут, строка не
  * выбрана): вызывающему нечего делать, и он не должен ничего предотвращать.
@@ -60,6 +73,11 @@ export function walkTree(rows: readonly WalkRow[], current: string | null, key: 
   // стрелке, даже если до этого в него только ткнули.
   const at = current === null ? -1 : rows.findIndex((row) => row.path === current);
   if (at < 0) {
+    // Клавиши, которые бьют по конкретной строке (удалить, переименовать,
+    // открыть), без выделения молчат: у них нет разумной цели по умолчанию,
+    // а «первая строка» по умолчанию — это удаление первого файла с одного
+    // ударения. Движение и края работают как раньше.
+    if (NAMED_ROW_KEYS.has(key)) return null;
     const first = key !== 'ArrowUp' && key !== 'ArrowLeft';
     return move(rows, first ? 0 : rows.length - 1);
   }
@@ -76,6 +94,14 @@ export function walkTree(rows: readonly WalkRow[], current: string | null, key: 
       return at === rows.length - 1 ? null : move(rows, rows.length - 1);
     case 'Enter':
       return { kind: 'open', path: row.path };
+    case 'Space':
+      return { kind: 'peek', path: row.path };
+    case 'F2':
+      return { kind: 'rename', path: row.path };
+    case 'Delete':
+      return { kind: 'delete', paths: [row.path] };
+    case 'ContextMenu':
+      return { kind: 'menu', path: row.path };
     case 'Star': {
       // Раскрыть всех папок-соседей одного уровня (договор APG для «*»).
       // Файлы и уже раскрытые в набор не попадают: вызывающему незачем их трогать.
@@ -120,6 +146,15 @@ export function walkTree(rows: readonly WalkRow[], current: string | null, key: 
  * размера окна чистый модуль не знает — и знать не должен.
  */
 const PAGE = 15;
+
+/** Клавиши, которые без выделения не знают, к чему относятся: молчат. */
+const NAMED_ROW_KEYS: ReadonlySet<WalkKey> = new Set<WalkKey>([
+  'Enter',
+  'Space',
+  'F2',
+  'Delete',
+  'ContextMenu',
+]);
 
 /** Индекс родителя строки: ближайшая выше с меньшей глубиной (`-1` — корень). */
 function parentOf(rows: readonly WalkRow[], index: number): number {

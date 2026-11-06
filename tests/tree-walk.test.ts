@@ -19,6 +19,34 @@ const row = (path: string, depth: number, directory = false, expanded = false): 
 // src/ (раскрыта) → a.ts, lib/ (свёрнута), b.ts
 const TREE: WalkRow[] = [row('src', 0, true, true), row('src/a.ts', 1), row('src/lib', 1, true, false), row('b.ts', 0)];
 
+describe('ключи действия — из того же договора, что и стрелки', () => {
+  // Раньше эти клавиши разбирал сам `onTreeKey`: дерево знало Enter/F2/Delete
+  // отдельным списком, а стрелки — таблицей хода. Два места — одно поведение,
+  // которое нельзя проверить целиком: здесь оно в одном месте.
+  it('Enter открывает строку', () => {
+    expect(walkTree(TREE, 'src/a.ts', 'Enter')).toEqual({ kind: 'open', path: 'src/a.ts' });
+  });
+
+  it('пробел — показать, не открывая вкладку', () => {
+    expect(walkTree(TREE, 'src/a.ts', 'Space')).toEqual({ kind: 'peek', path: 'src/a.ts' });
+  });
+
+  it('F2 — переименовать, Delete — удалить эту строку', () => {
+    expect(walkTree(TREE, 'src/lib', 'F2')).toEqual({ kind: 'rename', path: 'src/lib' });
+    expect(walkTree(TREE, 'src/lib', 'Delete')).toEqual({ kind: 'delete', paths: ['src/lib'] });
+  });
+
+  it('меню клавишей — та же строка, что под выделением', () => {
+    expect(walkTree(TREE, 'b.ts', 'ContextMenu')).toEqual({ kind: 'menu', path: 'b.ts' });
+  });
+
+  it('без выделения Delete не угадывает цель', () => {
+    // У «удалить» нет разумной цели по умолчанию: нажатие без выделения
+    // молчит, а не сносит первую строку дерева.
+    expect(walkTree(TREE, null, 'Delete')).toBeNull();
+  });
+});
+
 describe('соседние строки', () => {
   it('вниз и вверх идут по видимому порядку', () => {
     expect(walkTree(TREE, 'src', 'ArrowDown')).toEqual({ kind: 'move', path: 'src/a.ts' });
