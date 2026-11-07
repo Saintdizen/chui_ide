@@ -1097,6 +1097,47 @@ export class AiService {
     const widensOnDemand = toolPresetSpec(toolPreset).widen === true;
 
     /**
+     * Бесплодные вызовы подряд по инструментам: повтор той же ошибки — это не
+     * упорство, а потраченный шаг. Трижды подряд — схема уезжает из набора,
+     * а имя остаётся в ростере: вызов по имени вернёт инструмент (как и "Авто").
+     */
+    const wasted = new Map<string, number>();
+    const WASTED_LIMIT = 3;
+    /**
+     * Инструменты, у которых провал — не признак бесплодности. `edit` и `file`
+     * проваливаются по делу: нет такого текста, файл изменился, путь занят.
+     * В замере падала каждая четвёртая правка — выключать её за это нельзя.
+     */
+    const KEEP_ON_FAIL = new Set(['edit', 'file', 'terminal', 'task']);
+    /** Инструменты, выпавшие за бесплодность: схема снята, имя помним для возврата. */
+    const wastedAway = new Set<string>();
+    const hideWasted = (name: string, outcome: { ok: boolean }): void => {
+      if (outcome.ok) {
+        wasted.delete(name);
+        // Успех возвращает в набор: выпавший инструмент был не тем, а не сломанным.
+        wastedAway.delete(name);
+        return;
+      }
+      if (KEEP_ON_FAIL.has(name)) return;
+      const count = (wasted.get(name) ?? 0) + 1;
+      wasted.set(name, count);
+      if (count < WASTED_LIMIT) return;
+      onDemandTools.delete(name);
+      wastedAway.add(name);
+      // Счёт сбрасывается: важно «три подряд», а не «три за прогон» — после
+      // возврата по имени у инструмента снова есть право на попытку.
+      wasted.set(name, 0);
+      // Сказать вслух: иначе модель смотрит на ошибку и не понимает, куда делась схема.
+      emit(ChatStreamEvent.ToolResult, {
+        id: `wasted-${name}-${count}`,
+        name,
+        ok: false,
+        summary: `${name}: три бесплодных вызова подряд — схема снята до конца прогона`,
+        detail: 'Вызывать по имени можно: так инструмент вернётся в набор.',
+      });
+    };
+
+    /**
      * План утвердили посреди прогона: ограничений плана больше нет — набор схем
      * пересобирается, чтобы модель могла выполнить одобренное. Внешние (MCP) в
      * пересчёт не входят: в плане их не было.
@@ -1113,6 +1154,9 @@ export class AiService {
           // докачивается, как только инструмент позвали. Провал кэша префикса
           // тут один, а строка подсказки стоила бы на каждом шаге.
           (!WIDENED_TOOLS.includes(tool.name) || onDemandTools.has(tool.name)) &&
+          // Выпавший за бесплодность не возвращается сам: иначе схема ездила бы
+          // туда-обратно на каждом шаге и ломала кэш префикса.
+          !wastedAway.has(tool.name) &&
           (toolPresetAllows(toolPreset, tool.name) || onDemandTools.has(tool.name)),
       ).map((tool) => narrowToolSpec(tool, toolEnv));
       const next = [...widened, ...external, ...resourceTools];
@@ -1685,8 +1729,12 @@ export class AiService {
             // (`terminal` не входит в группы «Авто», поэтому условие «скрыт
             // набором» верно для него всегда). Модель читает это
             // как «набор всё время меняется», а человек — как рост на каждом шаге.
-            const first = !onDemandTools.has(call.name);
+            const first = !onDemandTools.has(call.name) || wastedAway.has(call.name);
             onDemandTools.add(call.name);
+            // Вызов по имени снимает клеймо «бесплодный»: модель попросила его сознательно,
+            // и следующая тройка провалов начнёт счёт заново.
+            wasted.set(call.name, 0);
+            wastedAway.delete(call.name);
             if (!rosterOnly && first) {
               widenedNow = true;
               widenTools();
@@ -1874,6 +1922,9 @@ export class AiService {
           didWork = true;
         }
         if (callId) this.running.toolFinish(callId, call.name);
+        // Бесплодные подряд: три провала — схема уезжает из набора до конца
+        // прогона. Счёт идёт по факту, а не по обещаниям инструмента.
+        hideWasted(call.name, outcome);
         const callMs = Date.now() - startedAt;
         emit(ChatStreamEvent.ToolResult, {
           id: call.id,
