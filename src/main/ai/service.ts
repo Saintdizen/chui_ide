@@ -80,7 +80,7 @@ import {
   type ReadRange,
 } from '../../shared/read-coverage';
 import { callFlags } from '../../shared/step-counts';
-import { planStepCalls } from '../../shared/parallel-calls';
+import { planStepCalls, readPathOf, wholeFileRead } from '../../shared/parallel-calls';
 import { renderSessionReferences } from '../../shared/session-context';
 import {
   permissionFlags,
@@ -1849,20 +1849,62 @@ export class AiService {
         if (group && group.length > 1) {
           const fresh = group.filter((item) => !prefetched.has(item.id));
           if (fresh.length > 0) {
-            const running = await Promise.all(
-              fresh.map(async (item) => {
+            // Соседние `read` без диапазона — одним вызовом с `paths`: это и есть
+            // п.54. Диапазоны не трогаем: у каждого своё место, и склеивать их
+            // в общий `paths` значило бы потерять, что именно просили.
+            const plain = fresh.filter((item) => wholeFileRead(item.name, item.arguments) !== undefined);
+            const packed = plain.length >= 2 ? plain : [];
+            const paths = packed
+              .map((item) => wholeFileRead(item.name, item.arguments))
+              .filter((path): path is string => typeof path === 'string');
+            const together = paths.length >= 2 ? JSON.stringify({ paths }) : null;
+            // Один вызов держит всю пачку, остальные ждут его результата и берут
+            // свою часть. Вызывать с полным `paths` каждого значило бы прочитать
+            // всё четырежды — ровно то, что эта задача и должна убрать.
+            const holder = together !== null && packed.length > 0 ? packed[0] : undefined;
+            const holderArgs = together ?? '';
+            const rest = fresh.filter((item) => item.id !== holder?.id);
+            const results = new Map<string, { at: number; outcome: ToolOutcome }>();
+            if (holder) {
+              const at = Date.now();
+              if (callId) this.running.toolStart(callId, holder.name, at);
+              try {
+                results.set(holder.id, { at, outcome: await runTool(toolContext, holder.name, holderArgs) });
+              } finally {
+                if (callId) this.running.toolFinish(callId, holder.name);
+              }
+              // Каждый в пачке получает свою часть прочитанного: иначе следующие
+              // витки считали бы файл непрочитанным и читали его заново.
+              const done0 = results.get(holder.id)?.outcome;
+              for (const read of done0?.reads ?? []) {
+                const owner = packed.find((item) => readPathOf(item.arguments) === read.path);
+                if (!owner) continue;
+                if (owner.id === holder.id) continue;
+                results.set(owner.id, {
+                  at: results.get(holder.id)?.at ?? Date.now(),
+                  outcome: {
+                    ok: true,
+                    summary: `${read.path}: строки ${read.from}–${read.to}`,
+                    detail: `Прочитано тем же вызовом с paths (файл ${read.path}). Текст — в ответе первого чтения пачки.`,
+                    reads: [read],
+                  },
+                });
+              }
+            }
+            await Promise.all(
+              rest.filter((item) => !results.has(item.id)).map(async (item) => {
                 const at = Date.now();
                 if (callId) this.running.toolStart(callId, item.name, at);
                 try {
-                  return { item, at, outcome: await runTool(toolContext, item.name, item.arguments) };
+                  results.set(item.id, { at, outcome: await runTool(toolContext, item.name, item.arguments) });
                 } finally {
                   if (callId) this.running.toolFinish(callId, item.name);
                 }
               }),
             );
-            for (const item of running) {
-              prefetched.set(item.item.id, item.outcome);
-              started.set(item.item.id, item.at);
+            for (const [id, done] of results) {
+              prefetched.set(id, done.outcome);
+              started.set(id, done.at);
             }
           }
         }

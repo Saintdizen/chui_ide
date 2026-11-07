@@ -11,6 +11,39 @@ import { isReadOnlyCall } from './tool-policy';
  */
 export type CallOrder = 'alone' | 'group';
 
+/**
+ * Файл целиком читает `read` без диапазона и без `paths`: именно такие вызовы
+ * имеет смысл собирать в одну пачку. С диапазоном — нельзя: у каждого своё окно,
+ * и склеивать их в один список значило бы отдавать лишнее.
+ */
+export function wholeFileRead(name: string, argumentsText: string): string | undefined {
+  if (name !== 'read' && name !== 'read_file') return undefined;
+  try {
+    const parsed = JSON.parse(argumentsText) as Record<string, unknown>;
+    if (parsed.paths !== undefined) return undefined;
+    if (parsed.startLine !== undefined || parsed.endLine !== undefined) return undefined;
+    const path = parsed.path ?? parsed.file ?? parsed.filePath;
+    return typeof path === 'string' && path.length > 0 ? path : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Путь вызова чтения без условий на диапазон: нужен, чтобы отдать из пачки. */
+export function readPathOf(argumentsText: string): string | undefined {
+  try {
+    const parsed = JSON.parse(argumentsText) as Record<string, unknown>;
+    const path = parsed.path ?? parsed.file ?? parsed.filePath;
+    if (typeof path === 'string' && path.length > 0) return path;
+    // Пачка путей: берём первый — он и держит весь вызов.
+    const paths = parsed.paths;
+    const first = Array.isArray(paths) ? paths[0] : undefined;
+    return typeof first === 'string' && first.length > 0 ? first : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Цель вызова — файл, к которому он обращается. Пусто — не видно, трогать нельзя. */
 export function callTarget(argumentsText: string): string | undefined {
   try {

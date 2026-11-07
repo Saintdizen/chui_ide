@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { callOrder, planStepCalls } from '../src/shared/parallel-calls';
+import { callOrder, planStepCalls, readPathOf, wholeFileRead } from '../src/shared/parallel-calls';
 
 const call = (id: string, name: string, args: Record<string, unknown> = {}) => ({
   id,
@@ -75,5 +75,37 @@ describe('план шага', () => {
 
   it('пустой список — пустой план', () => {
     expect(planStepCalls([])).toEqual([]);
+  });
+});
+
+describe('целый файл без диапазона', () => {
+  it('read без строк — целый файл', () => {
+    expect(wholeFileRead('read', JSON.stringify({ path: '/a.ts' }))).toBe('/a.ts');
+  });
+
+  it('с диапазоном — не целый', () => {
+    expect(wholeFileRead('read', JSON.stringify({ path: '/a.ts', startLine: 5 }))).toBeUndefined();
+    expect(wholeFileRead('read', JSON.stringify({ path: '/a.ts', endLine: 9 }))).toBeUndefined();
+  });
+
+  it('с пачкой путей — не целый: там своя логика', () => {
+    expect(wholeFileRead('read', JSON.stringify({ paths: ['/a.ts', '/b.ts'] }))).toBeUndefined();
+  });
+
+  it('не read — не считается', () => {
+    expect(wholeFileRead('search', JSON.stringify({ query: 'x' }))).toBeUndefined();
+    expect(wholeFileRead('edit', JSON.stringify({ path: '/a.ts' }))).toBeUndefined();
+  });
+});
+
+describe('путь вызова read', () => {
+  it('из `path` и из `paths[0]`', () => {
+    expect(readPathOf(JSON.stringify({ path: '/a.ts' }))).toBe('/a.ts');
+    expect(readPathOf(JSON.stringify({ paths: ['/b.ts', '/c.ts'] }))).toBe('/b.ts');
+  });
+
+  it('нечего взять — undefined', () => {
+    expect(readPathOf('{}')).toBeUndefined();
+    expect(readPathOf('битый json')).toBeUndefined();
   });
 });
