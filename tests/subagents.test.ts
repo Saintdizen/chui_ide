@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { addUsage } from '../src/shared/usage';
 import {
   MAX_PARALLEL,
   MAX_TASKS,
@@ -128,5 +129,33 @@ describe('formatSubagentReport', () => {
     );
     expect(text).toContain('## Не удалось');
     expect(text).toContain('- Вторая: модель отказала');
+  });
+});
+
+/**
+ * П.46: расход подзадач входит в счёт прогона.
+ *
+ * Подзадача — это отдельный прогон со своими токенами, и раньше они нигде не
+ * складывались: бюджет беседы считался только по шагам основного агента, а четыре
+ * подзадачи стоит дороже самого дорогого шага.
+ */
+describe('расход подзадач в общем счёте', () => {
+  it('складывается с расходом шагов', () => {
+    const steps = { promptTokens: 100, completionTokens: 50 };
+    const subagents = { promptTokens: 400, completionTokens: 200 };
+    const total = addUsage(steps, subagents);
+    expect(total.promptTokens).toBe(500);
+    expect(total.completionTokens).toBe(250);
+  });
+
+  it('без подзадач счёт не меняется', () => {
+    const steps = { promptTokens: 100, completionTokens: 50 };
+    expect(addUsage(steps, {})).toEqual(steps);
+  });
+
+  it('подзадачи без шагов не теряются', () => {
+    const total = addUsage({}, { promptTokens: 30, completionTokens: 7 });
+    expect(total.promptTokens).toBe(30);
+    expect(total.completionTokens).toBe(7);
   });
 });

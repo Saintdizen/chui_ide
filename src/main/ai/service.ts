@@ -964,10 +964,16 @@ export class AiService {
     // Картинки для модели: чтение и уменьшение файлов живут в main, инструмент
     // только просит. Права не спрашиваем — это чтение внутри проекта.
     toolContext.readImage = createReadImageRunner(this.workspace);
+    // Расход подзадач копится здесь: каждая — свой прогон, и её токены — тоже
+    // деньги беседы.
+    const subagentUsage: ChatUsage = {};
     // Подзадача: свой прогон, та же обстановка. Провайдера и окно берём текущие —
     // подзадача должна стоить столько же, сколько шаг основного агента.
-    toolContext.subagent = (task) =>
-      this.runSubagent(
+    //
+    // Её расход — расход беседы: без этого четыре подзадачи по десять шагов
+    // выглядели бесплатными, а `spend` и потолок бюджета их не видели.
+    toolContext.subagent = async (task) => {
+      const result = await this.runSubagent(
         task,
         {
           providerId: request.providerId,
@@ -977,6 +983,10 @@ export class AiService {
         },
         toolContext,
       );
+      subagentUsage.promptTokens = (subagentUsage.promptTokens ?? 0) + (result.inputTokens ?? 0);
+      subagentUsage.completionTokens = (subagentUsage.completionTokens ?? 0) + (result.outputTokens ?? 0);
+      return result;
+    };
     // Чтение страницы по ссылке: своя настройка-разрешение, потому что это тоже
     // ход наружу. Адрес проверяется до запроса, а тело читается с потолком.
     if (settings.ai.webFetch?.enabled) {
@@ -1211,7 +1221,9 @@ export class AiService {
     const trace = (): ChatRunTrace => ({
       steps: runSteps,
       toolCalls: runToolCalls,
-      usage: runUsage,
+      // Подзадачи — это тоже расход беседы: без этой строки четыре `task` по десять
+      // шагов выглядели бесплатными и потолок бюджета их не видел.
+      usage: addUsage(runUsage, subagentUsage),
       toolsTokens,
       // Какие правила проекта ушли в контекст: без этого «агент откуда-то знает
       // правило» или «а правила-то прочитались?» — вопросы без ответа в ленте.
