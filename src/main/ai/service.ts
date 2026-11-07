@@ -1272,6 +1272,10 @@ export class AiService {
      */
     let singleReads = 0;
     let pathsHinted = false;
+    // Шаги последнего плана и тронутые правками файлы: нужны отчёту об упоре в лимит.
+    // Живут вне цикла: на последнем шаге тело уже не выполнится, а отчёт нужен.
+    let planSteps: { text: string; status: string }[] = [];
+    const touched = new Set<string>();
 
     for (let step = 0; step < steps; step += 1) {
       if (signal.aborted) break;
@@ -1538,6 +1542,8 @@ export class AiService {
           if (steps.length > 0) {
             emit(ChatStreamEvent.Plan, { steps });
             planCallId = call.id;
+            // Последний план помним до конца прогона: он нужен отчёту об остановке.
+            planSteps = steps;
           }
           const toolMessage: ChatMessage = {
             role: 'tool',
@@ -1954,6 +1960,9 @@ export class AiService {
         // в файле, а в истории он висел бы до конца беседы и пересылался на каждом
         // шаге (правка на 200 строк — это около двух тысяч токенов).
         if (outcome.applied) appliedCalls.add(call.id);
+        // Что тронуто — для отчёта при упоре в лимит: иначе человек читает
+        // «достигнут лимит» и сам ищет, где же остановились.
+        for (const change of outcome.changes ?? []) touched.add(change.path);
       }
 
       // Меняем только сообщение, которое уходит провайдеру: в `produced` (его
@@ -2016,7 +2025,7 @@ export class AiService {
       };
     }
 
-    const note = '\n\n[агент остановлен: достигнут лимит шагов]';
+    const note = limitNote(planSteps, [...touched], steps);
     text += note;
     emit(ChatStreamEvent.Delta, { text: note });
     produced.push({ role: 'assistant', content: note.trim() });
@@ -2396,6 +2405,24 @@ function parsePlanSteps(raw: string): PlanStep[] {
       };
     })
     .filter((step): step is PlanStep => step !== null);
+}
+
+function limitNote(steps: readonly { text: string; status: string }[], touched: readonly string[], limit: number): string {
+  const parts = [`\n\n[агент остановлен: исчерпано ${limit} шагов]`];
+  const left = steps.filter((step) => step.status !== 'done');
+  if (left.length > 0) {
+    parts.push('· не сделано:');
+    for (const step of left.slice(0, 8)) parts.push(`  — ${step.text}`);
+    if (left.length > 8) parts.push(`  …и ещё ${left.length - 8}`);
+  }
+  if (touched.length > 0) {
+    const shown = touched.slice(0, 6).join(', ');
+    const more = touched.length > 6 ? ` и ещё ${touched.length - 6}` : '';
+    parts.push(`· изменено файлов: ${touched.length} — ${shown}${more}`);
+  }
+  if (left.length === 0 && touched.length === 0) parts.push('· работа не начата');
+  parts.push('Скажи «продолжай», чтобы дать ещё шагов.');
+  return parts.join('\n');
 }
 
 function isLocalEndpoint(baseUrl: string): boolean {
