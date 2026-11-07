@@ -107,6 +107,10 @@ export function canRunTool(tool: AgentToolSpec, env: ToolAvailability): boolean 
   if (tool.name === 'mcp') return false;
   // Заметки, вопрос, план и его утверждение живут в окне; отказ без него
   // скажет обработчик.
+  // Подзадача идёт тем же прогоном с теми же инструментами: своего окружения ей
+  // не нужно, а без прогона в main запускать нечего. Условие — основной агент
+  // работает инструментами, а не «вопросом».
+  if (tool.name === 'task') return true;
   if (tool.name === 'mind') return host !== undefined;
   if (tool.name === 'show') return host?.openFile !== undefined || host !== undefined;
   // Символы живут на языковом сервере: без него их не предлагаем. Переименование

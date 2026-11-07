@@ -41,7 +41,7 @@ import type { DocumentStore } from '../core/document-store';
 import type { EditService } from '../core/edits';
 import type { EditorApi } from '../core/editor-api';
 import type { HostService } from '../core/host';
-import type { WorkspaceModel } from '../core/workspace-model';
+import { relativePath, type WorkspaceModel } from '../core/workspace-model';
 import type { GitModel } from '../core/git-model';
 import { createChatBranchSpace } from './chat-branch-space';
 import { createChatRunning } from './chat-running';
@@ -3507,7 +3507,21 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       void regenerate(session);
     },
     modes: () => composer.modes(),
+    // Правила и навыки из подпапок: берём папку открытого файла, а не корень —
+    // `src/AGENTS.md` должен дойти до агента, когда работа идёт в `src`.
+    workingFolder: workingFolder,
   });
+
+  /** Папка открытого файла от корня проекта (`src/app`); `undefined` — не видно или файла нет. */
+  function workingFolder(): string | undefined {
+    const root = deps.workspace.root;
+    const path = deps.editors.currentPath;
+    if (!root || !path) return undefined;
+    const rel = relativePath(root, path);
+    if (!rel || rel === path) return undefined;
+    const cut = rel.lastIndexOf('/');
+    return cut < 0 ? '' : rel.slice(0, cut);
+  }
 
   /** Вопросы этой беседы — то, что человек сам писал. Служебный дострой и пустышки — не вопрос. */
   function askedQuestions(): string[] {

@@ -125,6 +125,13 @@ import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
 import { normalizeAgentHooks } from '../../shared/agent-hooks';
 import { RunRegistry, abortOfRun } from './run-registry';
 import { runTool } from './agent-tools';
+import {
+  SUBAGENT_MAX_STEPS,
+  SUBAGENT_PROMPT,
+  SUBAGENT_TOOLS,
+  type SubagentResult,
+  type SubagentTask,
+} from '../../shared/subagents';
 import { createAgentHooks } from './agent-hooks';
 import { stepOutputChars } from './output-budget';
 import { failureText } from './tool-rules';
@@ -400,6 +407,65 @@ export class AiService {
    */
   attachSpillDir(dir: string): void {
     this.spillDir = dir;
+  }
+
+
+  /**
+   * Одна подзадача: свой короткий диалог с тем же набором инструментов.
+   *
+   * Главное здесь — что она НЕ видит историю беседы: в этом весь смысл, иначе
+   * десять прочитанных файлов снова уехали бы в контекст и задача вышла бы
+   * дороже, чем без неё. Наружу — только отчёт словами.
+   *
+   * Задачи внутри одной пачки идут одновременно, но каждую копим отдельно:
+   * упавшая отдаётся причиной, остальные всё равно доносят найденное.
+   */
+  private async runSubagent(
+    task: SubagentTask,
+    base: { providerId: string; model?: string; signal: AbortSignal; windowTokens: number },
+    toolContext: ToolContext,
+  ): Promise<SubagentResult> {
+    const provider = this.createProvider(base.providerId);
+    const ai = this.settings.get().ai;
+    const model = base.model ?? ai.activeModel ?? '';
+    const messages: ChatMessage[] = [
+      { role: 'system', content: SUBAGENT_PROMPT },
+      { role: 'user', content: task.prompt },
+    ];
+    const tools = toOpenAiTools(AGENT_TOOLS.filter((tool) => SUBAGENT_TOOLS.has(tool.name)));
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let steps = 0;
+    let text = '';
+    for (let step = 0; step < SUBAGENT_MAX_STEPS; step += 1) {
+      steps += 1;
+      const done = await provider.streamChat(
+        { model, messages, tools },
+        { onDelta: () => undefined },
+        base.signal,
+      );
+      inputTokens += done.usage?.promptTokens ?? 0;
+      outputTokens += done.usage?.completionTokens ?? 0;
+      text = done.text ?? '';
+      const calls = done.toolCalls ?? [];
+      // Без вызовов работа кончена: последний ответ и есть отчёт.
+      if (calls.length === 0) break;
+      messages.push({ role: 'assistant', content: text, toolCalls: calls });
+      for (const call of calls) {
+        // Сырые аргументы: разбор и старые имена — забота `runTool`.
+        const outcome = await runTool(toolContext, call.name, call.arguments);
+        // Каждый результат — с потолком: подзадача не должна стоить как беседа.
+        const body = (outcome.ok ? outcome.detail : outcome.summary) || outcome.summary;
+        messages.push({
+          role: 'tool',
+          toolCallId: call.id,
+          content: body.length <= stepOutputChars(base.windowTokens)
+            ? body
+            : `${body.slice(0, stepOutputChars(base.windowTokens))}\n…[обрезано]`,
+        });
+      }
+    }
+    return { description: task.description, text: text.trim(), steps, inputTokens, outputTokens };
   }
 
   /** Подключить терминалы: включает инструменты terminal_start/read/write/stop. */
@@ -897,6 +963,19 @@ export class AiService {
     // Картинки для модели: чтение и уменьшение файлов живут в main, инструмент
     // только просит. Права не спрашиваем — это чтение внутри проекта.
     toolContext.readImage = createReadImageRunner(this.workspace);
+    // Подзадача: свой прогон, та же обстановка. Провайдера и окно берём текущие —
+    // подзадача должна стоить столько же, сколько шаг основного агента.
+    toolContext.subagent = (task) =>
+      this.runSubagent(
+        task,
+        {
+          providerId: request.providerId,
+          ...(request.model ? { model: request.model } : {}),
+          signal,
+          windowTokens,
+        },
+        toolContext,
+      );
     // Чтение страницы по ссылке: своя настройка-разрешение, потому что это тоже
     // ход наружу. Адрес проверяется до запроса, а тело читается с потолком.
     if (settings.ai.webFetch?.enabled) {

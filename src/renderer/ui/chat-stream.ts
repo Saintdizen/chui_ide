@@ -168,6 +168,11 @@ export interface StreamHost {
   openRunLog(session: ChatSession): void;
   /** Текущий режим (вопрос / агент / план) — уходит провайдеру. */
   modes(): StreamModes;
+  /**
+   * Папка, с которой сейчас работает человек, от корня проекта. По ней main
+   * выбирает правила и навыки подпапок. Не знает — `undefined`.
+   */
+  workingFolder?(): string | undefined;
 }
 
 /** Чем кончился прогон: ответ дошёл, модель отказала или человек остановил. */
@@ -383,6 +388,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             ...(session.reads ? { reads: session.reads } : {}),
             // Беседа — для журнала прогонов: по ней строки одного разговора собираются вместе.
             conversationUid: session.uid,
+            folder: host.workingFolder?.(),
             // Свой каталог (п.31): у параллельной задачи он — её worktree, и инструменты
             // шага обязаны видеть её дерево, а не то, на которое переключено окно.
             ...(session.workspace ? { workspace: session.workspace } : {}),

@@ -3328,6 +3328,24 @@
   font-size: var(--font_small_size);
 }
 
+/* Расход за сегодня — самой первой строкой: «сколько ушло» спрашивают чаще,
+   чем «что было в прогоне», и ответ должен попадаться первым. */
+.telemetry-spend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  margin-bottom: 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+  font-size: var(--font_small_size);
+}
+
+/* Разбивка по моделям тише суммы: она нужна, когда сумма не понравилась. */
+.telemetry-spend-models {
+  color: var(--text_color_secondary);
+}
+
 .telemetry-list {
   display: flex;
   flex-direction: column;

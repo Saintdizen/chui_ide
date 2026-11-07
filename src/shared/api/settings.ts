@@ -5,6 +5,7 @@ import type { FileAssociation } from '../associations';
 import type { IconBadgeRule } from '../icon-badges';
 import type { Snippet } from '../snippets';
 import type { RunTelemetryRecord } from '../telemetry';
+import type { SpendSummary } from '../spend';
 import type { ToolPresetId } from '../tool-presets';
 import type { PullMode } from '../git-pull';
 import type { ThemeFile } from '../theme-file';
@@ -207,6 +208,11 @@ export interface AiTelemetrySnapshot {
   bytes: number;
   /** Последние записи, самые новые в конце (как они лежат в файле). */
   records: RunTelemetryRecord[];
+  /**
+   * Сводка расхода за сегодня по всему журналу, а не по хвосту: хвост — это
+   * `records`, и он обрезан, а «сколько за сегодня» обрезать нельзя.
+   */
+  today?: SpendSummary;
 }
 
 /**

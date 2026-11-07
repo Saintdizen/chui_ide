@@ -40,7 +40,19 @@ export interface SkillEntry {
   /** Абсолютный путь к файлу навыка. */
   path: string;
   scope: SkillScope;
+  /**
+   * Папка проекта, к которой навык привязан, относительно корня (`''` — корень).
+   * Навык из `.chui/skills` в подпапке действует только там: агент видит его, когда
+   * работает с файлами этой папки.
+   */
+  folder?: string;
 }
+
+/**
+ * Имя папки навыков в проекте. Одно и то же в корне и в подпапках: `src/.chui/skills`
+ * читается как «сценарии для `src`».
+ */
+export const SKILLS_DIR = '.chui/skills';
 
 /** Имя длиннее — это уже заголовок, а не имя: в вызове инструмента его не набрать. */
 export const MAX_SKILL_NAME = 64;
@@ -166,11 +178,58 @@ export function skillBody(text: string): string {
 /**
  * Навык по имени вызова: без учёта регистра и с той же нормализацией, что при
  * разборе (`Release Notes` в имени папки — это `release-notes` в вызове).
+ *
+ * Имена уникальны вместе с папкой, поэтому при выборе побеждает ближний: навык из
+ * папки файла важнее навыка корня. Тот же порядок, что у правил проекта.
  */
-export function findSkill(skills: readonly SkillEntry[], name: string): SkillEntry | null {
+export function findSkill(skills: readonly SkillEntry[], name: string, options: { folder?: string } = {}): SkillEntry | null {
   const wanted = normalizeSkillName(name);
   if (!wanted) return null;
-  return skills.find((skill) => skill.name === wanted) ?? null;
+  const here = normalizeFolder(options.folder);
+  let best: SkillEntry | null = null;
+  let bestDepth = -1;
+  for (const skill of skills) {
+    if (skill.name !== wanted) continue;
+    const folder = normalizeFolder(skill.folder);
+    if (!appliesTo(folder, here)) continue;
+    if (folder.length > bestDepth) {
+      best = skill;
+      bestDepth = folder.length;
+    }
+  }
+  return best;
+}
+
+/** Папка в одном виде: слеши прямые, без крайних — `''` — корень. */
+export function normalizeFolder(folder: string | undefined): string {
+  return (folder ?? '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+|\/+$/g, '');
+}
+
+/** Навык папки действует в ней и ниже; навык корня — везде. */
+export function appliesTo(skillFolder: string, folder: string): boolean {
+  if (!skillFolder) return true;
+  return folder === skillFolder || folder.startsWith(`${skillFolder}/`);
+}
+
+/** Путь подпапки от корня: `src` + `lib` → `src/lib`. */
+export function joinFolder(parent: string, name: string): string {
+  return parent ? `${parent}/${name}` : name;
+}
+
+/**
+ * Порядок для каталога: навыки корня раньше навыков подпапок (они шире по области),
+ * внутри одинаковой области — по имени. Так два навыка с одним именем дают
+ * предсказуемого победителя, и он одинаков от запуска к запуску.
+ */
+export function byFolderThenName(left: SkillEntry, right: SkillEntry): number {
+  const leftFolder = normalizeFolder(left.folder);
+  const rightFolder = normalizeFolder(right.folder);
+  if (leftFolder !== rightFolder) {
+    if (!leftFolder) return -1;
+    if (!rightFolder) return 1;
+    return leftFolder.localeCompare(rightFolder);
+  }
+  return left.name.localeCompare(right.name);
 }
 
 /**
@@ -179,12 +238,22 @@ export function findSkill(skills: readonly SkillEntry[], name: string): SkillEnt
  *
  * `null` — навыков нет: пустой заголовок в промпте только занимает место.
  */
-export function formatSkillCatalog(skills: readonly SkillEntry[]): string | null {
+export function formatSkillCatalog(skills: readonly SkillEntry[], options: { folder?: string } = {}): string | null {
   if (skills.length === 0) return null;
-  const lines = skills.slice(0, MAX_SKILLS).map((skill) => `- ${skill.name} — ${skill.description}`);
+  const here = normalizeFolder(options.folder);
+  const scoped = skills.filter((skill) => appliesTo(normalizeFolder(skill.folder), here));
+  if (scoped.length === 0) return null;
+  const lines = scoped.slice(0, MAX_SKILLS).map(formatSkillLine);
   return [
     'Навыки — готовые сценарии работы в этом проекте. Здесь только их список: тело навыка',
     'прочитай инструментом skill, когда он действительно нужен, а не на всякий случай.',
     ...lines,
   ].join('\n');
+}
+
+/** Строка каталога: навык подпапки помечен папкой — иначе имя не найти, они уникальны вместе с ней. */
+function formatSkillLine(skill: SkillEntry): string {
+  const folder = normalizeFolder(skill.folder);
+  const where = folder ? ` (${folder})` : '';
+  return `- ${skill.name}${where} — ${skill.description}`;
 }

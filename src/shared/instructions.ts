@@ -203,10 +203,22 @@ function formatSize(chars: number): string {
   return `${(chars / 1000).toFixed(1).replace('.', ',')} тыс. симв.`;
 }
 
-export function formatInstructionFile(name: string, text: string, room: number): string {
-  const budget = Math.max(400, room);
-  if (text.length <= budget) return `Инструкции из ${name}:\n${text}`;
+export function formatInstructionFile(name: string, text: string, room: number, folder = ''): string {
+  return formatInstructionScoped(name, text, room, folder);
+}
 
+/**
+ * То же, но с пометкой папки: правило из `src/AGENTS.md` действует только там,
+ * и без пометки модель приняла бы его за правило всего проекта (`''` — корень).
+ */
+export function formatInstructionScoped(name: string, text: string, room: number, folder = ''): string {
+  const where = scopeOf(folder);
+  return formatInstructionBody(name, text, room, where);
+}
+
+function formatInstructionBody(name: string, text: string, room: number, where: string): string {
+  const budget = Math.max(400, room);
+  if (text.length <= budget) return `Инструкции из ${name}${where}:\n${text}`;
   const head = cutAtLine(text, Math.floor(budget * HEAD_SHARE));
   const rest = text.slice(head.length);
   const sections: string[] = [];
@@ -222,8 +234,58 @@ export function formatInstructionFile(name: string, text: string, room: number):
       ? `дальше в файле разделы: ${sections.join(' · ')}.`
       : 'дальше в файле продолжение без заголовков.';
   return (
-    `Инструкции из ${name}:\n${head}\n` +
+    `Инструкции из ${name}${where}:\n${head}\n` +
     `… (правила длиннее, чем можно показать целиком — ${text.length} симв.; ${map} ` +
     `Нужное из отброшенного ищи по этому файлу: search с path=${name} или read с диапазоном строк.)`
   );
+}
+
+/** ` (в src/lib)` — так правило подпапки не путается с правилом всего проекта. */
+function scopeOf(folder: string): string {
+  const clean = normalizeInstructionFolder(folder);
+  return clean ? ` (действуют в ${clean} и ниже)` : '';
+}
+
+/** Папка от корня проекта: без `./`, без слешей по краям, всегда через `/`. */
+export function normalizeInstructionFolder(folder: string | undefined): string {
+  return (folder ?? '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+|\/+$/g, '');
+}
+
+/**
+ * Правило папки действует в ней самой и ниже, но не выше: `src/AGENTS.md` —
+ * не про `tests`. Правило корня действует везде.
+ */
+export function instructionAppliesTo(ruleFolder: string, folder: string): boolean {
+  const rule = normalizeInstructionFolder(ruleFolder);
+  if (!rule) return true;
+  const here = normalizeInstructionFolder(folder);
+  return here === rule || here.startsWith(`${rule}/`);
+}
+
+/**
+ * Папка для набора правил по пути файла: `src/app/main.ts` → `src/app`. Файл вне
+ * корня — это корень: правила чужого дерева к проекту не относятся.
+ */
+export function instructionScopeOf(file: string, root: string): string {
+  const path = file.replace(/\\/g, '/');
+  const base = root.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!base || !path.startsWith(`${base}/`)) return '';
+  const rel = path.slice(base.length + 1);
+  const cut = rel.lastIndexOf('/');
+  return cut < 0 ? '' : normalizeInstructionFolder(rel.slice(0, cut));
+}
+
+/** Набор правил, который видит агент в папке: из неё и всех родительских, плюс корень. */
+export function instructionFoldersFor(folder: string, at?: (dir: string) => boolean): string[] {
+  const clean = normalizeInstructionFolder(folder);
+  if (!clean) return [''];
+  const parts = clean.split('/').filter(Boolean);
+  const out: string[] = [''];
+  for (let count = 1; count <= parts.length; count += 1) {
+    const dir = parts.slice(0, count).join('/');
+    // Не всякая папка на пути существует как папка проекта (`src` бывает путём файла).
+    if (at && !at(dir)) continue;
+    out.push(dir);
+  }
+  return out;
 }

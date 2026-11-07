@@ -9,6 +9,7 @@
 
 import { confirmFile, coveredRequest, uncoverFiles } from '../../shared/read-coverage';
 import { isMcpToolName } from '../../shared/mcp';
+import { taskRun } from './agent-task';
 import { parseToolArguments } from '../../shared/tools';
 import {
   CHARS_PER_TOKEN,
@@ -506,6 +507,8 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await terminalAction(ctx, name, args);
       case 'skill':
         return await skillRead(ctx, args);
+      case 'task':
+        return await taskRun(ctx, args);
       default:
         return unknownTool(name);
     }

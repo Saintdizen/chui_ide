@@ -8,6 +8,7 @@ import { sanitizePlanExitDecision } from '../../../shared/plan-exit';
 import { addGrant, type CommandGrant, normalizeGrants, rememberedGrant } from '../../../shared/agent-grants';
 import { isDangerousCommand } from '../../ai/tool-rules';
 import { pushToRenderers } from '../push';
+import { summarizeSpend } from '../../../shared/spend';
 import type { RpcServices } from '../context';
 import { RpcFailure, type RpcRouter } from '../router';
 
@@ -245,7 +246,16 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
     const store = deps.telemetry;
     if (!store) return { enabled: false, path: '', bytes: 0, records: [] };
     const tail = await store.tail();
-    return { enabled: store.enabled, path: tail.path, bytes: tail.bytes, records: tail.records.slice(-50) };
+    // Сводку считаем по всему прочитанному журналу, а не по хвосту из 50 строк:
+    // «сколько за сегодня» ищут утром, и хвост к обеду уже за сегодняшний день
+    // не помещается.
+    return {
+      enabled: store.enabled,
+      path: tail.path,
+      bytes: tail.bytes,
+      records: tail.records.slice(-50),
+      today: summarizeSpend(tail.records),
+    };
   });
   router.register('ai.telemetryClear', async () => {
     await deps.telemetry?.clear();

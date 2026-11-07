@@ -2,7 +2,9 @@ import { promises as fs, type Dirent } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  byFolderThenName,
   findSkill,
+  joinFolder,
   MAX_SKILL_BODY_CHARS,
   MAX_SKILLS,
   parseSkillFile,
@@ -48,10 +50,19 @@ function skillsDirFor(root: string | null, scope: SkillScope, home: string): str
  * Прочитать один навык из файла. Ошибки чтения не всплывают: сломанный навык не
  * повод остаться без остальных.
  */
-async function readEntry(file: string, fallbackName: string, scope: SkillScope): Promise<SkillEntry | null> {
+async function readEntry(
+  file: string,
+  fallbackName: string,
+  scope: SkillScope,
+  folder = '',
+): Promise<SkillEntry | null> {
   try {
     const text = await fs.readFile(file, 'utf8');
-    return parseSkillFile(text.slice(0, MAX_SKILL_FILE_BYTES), { fallbackName, path: file, scope });
+    const entry = parseSkillFile(text.slice(0, MAX_SKILL_FILE_BYTES), { fallbackName, path: file, scope });
+    if (!entry) return null;
+    // Навык из `.chui/skills` подпапки действует только там: папку запоминаем,
+    // иначе он попал бы в каталог всего проекта и спорил бы с корневым одноимёнцем.
+    return folder ? { ...entry, folder } : entry;
   } catch {
     return null;
   }
@@ -61,7 +72,7 @@ async function readEntry(file: string, fallbackName: string, scope: SkillScope):
  * Навыки одного каталога. Порядок — по имени: каталог в промпте читают глазами,
  * и «прыгающий» от запуска к запуску список мешал бы сравнивать.
  */
-async function scanDir(dir: string, scope: SkillScope): Promise<SkillEntry[]> {
+async function scanDir(dir: string, scope: SkillScope, folder = '', depth = 0): Promise<SkillEntry[]> {
   let items: Dirent[];
   try {
     items = await fs.readdir(dir, { withFileTypes: true });
@@ -73,8 +84,18 @@ async function scanDir(dir: string, scope: SkillScope): Promise<SkillEntry[]> {
   for (const item of items) {
     if (item.name.startsWith('.')) continue;
     if (item.isDirectory()) {
-      const entry = await readEntry(path.join(dir, item.name, SKILL_FILE), item.name, scope);
-      if (entry) found.push(entry);
+      const skillFile = path.join(dir, item.name, SKILL_FILE);
+      const entry = await readEntry(skillFile, item.name, scope, folder);
+      if (entry) {
+        found.push(entry);
+        continue;
+      }
+      // Папка без `SKILL.md` — не навык, но в ней может лежать свой `.chui/skills`:
+      // вложенность держим неглубокой, иначе обход всего дерева на каждом шаге.
+      if (depth === 0 && !item.name.startsWith('.chui')) {
+        const nested = await scanDir(path.join(dir, item.name, SKILLS_DIR), scope, joinFolder(folder, item.name), depth + 1);
+        found.push(...nested);
+      }
       continue;
     }
     // Одиночный файл: `release.md` — навык `release`. `SKILL.md`, лежащий прямо в
@@ -82,7 +103,7 @@ async function scanDir(dir: string, scope: SkillScope): Promise<SkillEntry[]> {
     if (!item.isFile() || !item.name.toLowerCase().endsWith('.md')) continue;
     const base = item.name.slice(0, -3);
     const fallbackName = base.toLowerCase() === 'skill' ? path.basename(dir) : base;
-    const entry = await readEntry(path.join(dir, item.name), fallbackName, scope);
+    const entry = await readEntry(path.join(dir, item.name), fallbackName, scope, folder);
     if (entry) found.push(entry);
   }
 
@@ -99,8 +120,17 @@ export async function loadSkills(root: string | null, home: string = os.homedir(
   const own = workspaceDir ? await scanDir(workspaceDir, 'workspace') : [];
   const shared = await scanDir(skillsDirFor(root, 'global', home)!, 'global');
 
-  const taken = new Set(own.map((skill) => skill.name));
-  const all = [...own, ...shared.filter((skill) => !taken.has(skill.name))];
+  // Одно имя — одна вещь. Приоритет задаём явно: свои раньше общих, корневые раньше
+  // навыков подпапок (они шире), внутри группы — по алфавиту. Сортировка `scanDir`
+  // сама такое не гарантирует: она видит только свою папку.
+  const ranked = [...own, ...shared].sort(byFolderThenName);
+  const taken = new Set<string>();
+  const all: SkillEntry[] = [];
+  for (const skill of ranked) {
+    if (taken.has(skill.name)) continue;
+    taken.add(skill.name);
+    all.push(skill);
+  }
   return all.slice(0, MAX_SKILLS);
 }
 

@@ -1,6 +1,8 @@
 import type { AiTelemetrySnapshot } from '../../shared/api';
 import { digestLine, digestRuns } from '../../shared/run-digest';
 import { describeRecord, finishedLabel } from '../../shared/telemetry';
+import { describeSpend } from '../../shared/spend';
+import { formatCost } from '../../shared/usage';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
 import { createModal } from './modal';
@@ -91,6 +93,35 @@ export function createTelemetryModal(deps: TelemetryModalDeps): TelemetryModalVi
       return;
     }
 
+    // Расход за сегодня — первой строкой: «сколько я потратил» спрашивают чаще,
+    // чем «что было в прогоне». Считается в main по всему журналу, а не по
+    // показанному хвосту: утром хвост ещё сегодняшний, к вечеру — уже нет.
+    if (snapshot.today && snapshot.today.runs > 0) {
+      const spend = h('div', { class: 'telemetry-spend' });
+      spend.append(describeSpend(snapshot.today));
+      // Разбивка по моделям: строка сводки даёт сумму, а тут видно, что её наело.
+      const perModel = snapshot.today.rows
+        .slice(0, VISIBLE_DIGESTS)
+        .map((row) => `${row.model}: ${row.runs} прогон(ов)${row.cost === null ? '' : `, $${formatCost(row.cost)}`}`)
+        .join(' · ');
+      if (perModel) spend.append(h('div', { class: 'telemetry-spend-models' }, perModel));
+      if (snapshot.today.unpricedRuns > 0) {
+        spend.append(
+          h(
+            'div',
+            { class: 'telemetry-spend-models' },
+            `${snapshot.today.unpricedRuns} прогон(ов) без цены: модели нет в таблице тарифов`,
+          ),
+        );
+      }
+      listBox.append(spend);
+    }
+
+    if (snapshot.records.length === 0) {
+      listBox.append(h('p', { class: 'telemetry-empty' }, 'Записей пока нет: прогон ещё не шёл.'));
+      return;
+    }
+
     noteBox.append(
       'Файл: ' +
         (snapshot.path || 'ещё не создан') +
@@ -99,11 +130,6 @@ export function createTelemetryModal(deps: TelemetryModalDeps): TelemetryModalVi
         '. ' +
         'Ключи и пароли вычищаются при записи; файл лежит только на этой машине.',
     );
-
-    if (snapshot.records.length === 0) {
-      listBox.append(h('p', { class: 'telemetry-empty' }, 'Записей пока нет: прогон ещё не шёл.'));
-      return;
-    }
 
     // Сводка по беседам — над лентой записей. Записи отвечают «что было»,
     // сводка — «сколько это стоило и что в этом сломалось»; человек приходит
