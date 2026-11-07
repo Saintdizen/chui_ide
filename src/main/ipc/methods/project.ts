@@ -9,6 +9,7 @@ import { analyzeProject } from '../../project/analyze';
 import { typecheckProject } from '../../project/typecheck';
 import { findPackages } from '../../project/packages';
 import { loadSpellDictionary } from '../../spell/dictionary';
+import type { LayoutSettings } from '../../../shared/api/settings';
 import type { RpcServices } from '../context';
 import { RpcFailure, type RpcRouter } from '../router';
 
@@ -47,13 +48,23 @@ export function registerProjectMethods(router: RpcRouter, deps: RpcServices): vo
     deps.sessions?.save(params.root, params.state);
   });
   // Настройки уровня проекта — в `<root>/.chui_ide/`. Свои для каждого проекта,
-  // поэтому корень берём из параметров, а не из глобальных настроек. Макет
-  // рабочей области сюда не входит: он общий и живёт в settings.json (userData).
+  // поэтому корень берём из параметров, а не из глобальных настроек.
   router.register('project.config', (params) => deps.projectConfig?.load(params.root) ?? {});
   router.register(
     'project.updateSettings',
     (params) => deps.projectConfig?.updateSettings(params.root, params.patch) ?? {},
   );
+  // Макет рабочей области проекта — `<root>/.chui_ide/layout.json`. `null` — своего
+  // макета нет, действует общий из settings.json (userData).
+  router.register('project.layout', (params) => deps.projectConfig?.loadLayout(params.root) ?? null);
+  router.register(
+    'project.saveLayout',
+    async (params): Promise<LayoutSettings> =>
+      (await deps.projectConfig?.saveLayout(params.root, params.layout)) ?? ({} as LayoutSettings),
+  );
+  router.register('project.clearLayout', async (params) => {
+    await deps.projectConfig?.clearLayout(params.root);
+  });
   router.register('project.packages', () => findPackages(deps.requireRoot()));
 
   // Отчёты покрытия: пишем во временный каталог, а не в корень проекта. Имя каталога

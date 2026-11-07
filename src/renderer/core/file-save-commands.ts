@@ -42,6 +42,7 @@ export function registerFileSaveCommands(define: DefineCommand, deps: FileSaveDe
       category: 'Файл',
       keybinding: 'Ctrl+S',
       enabled: () => openEditors.active !== null,
+      disabledReason: () => 'Нет открытого файла',
     },
     async () => {
       const document = openEditors.active;
@@ -60,6 +61,7 @@ export function registerFileSaveCommands(define: DefineCommand, deps: FileSaveDe
       category: 'Файл',
       keybinding: 'Ctrl+Shift+S',
       enabled: () => openEditors.active !== null,
+      disabledReason: () => 'Нет открытого файла',
     },
     // Путь приходит из меню вкладки: сохраняем тот файл, по которому кликнули,
     // а не активный. Без аргумента — активный (палитра, горячая клавиша).
@@ -82,6 +84,7 @@ export function registerFileSaveCommands(define: DefineCommand, deps: FileSaveDe
       // Ctrl+Shift+S отдано «Сохранить как…» — привычному сочетанию.
       keybinding: 'Ctrl+Alt+S',
       enabled: () => documents.dirty().length > 0,
+      disabledReason: () => 'Нечего сохранять: все файлы уже на диске',
     },
     async () => {
       const dirty = documents.dirty();
@@ -103,6 +106,8 @@ export function registerFileSaveCommands(define: DefineCommand, deps: FileSaveDe
       category: 'Файл',
       keybinding: 'Ctrl+Alt+F',
       enabled: () => openEditors.active !== null && deps.formatDocument !== undefined,
+      disabledReason: () =>
+        openEditors.active === null ? 'Нет открытого файла' : 'Форматирование недоступно',
     },
     async () => {
       const document = openEditors.active;
@@ -131,6 +136,7 @@ export function registerFileSaveCommands(define: DefineCommand, deps: FileSaveDe
       // Доступна, пока есть хоть один правленый буфер: команда умеет и путь в аргументе
       // (правый клик по вкладке), и активный файл — гасить её по одному файлу незачем.
       enabled: () => documents.dirty().length > 0,
+      disabledReason: () => 'Все буферы совпадают с диском',
     },
     (pathArg) => {
       const target = typeof pathArg === 'string' ? pathArg : (openEditors.active?.path ?? null);
@@ -147,6 +153,7 @@ export function registerFileSaveCommands(define: DefineCommand, deps: FileSaveDe
       title: 'Перечитать все файлы с диска',
       category: 'Файл',
       enabled: () => documents.dirty().length > 0,
+      disabledReason: () => 'Все буферы совпадают с диском',
     },
     () => revertFilesToDisk(documents.dirty().map((document) => document.path)),
   );

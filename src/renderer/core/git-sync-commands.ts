@@ -80,7 +80,13 @@ export function registerGitSyncCommands(define: DefineCommand, deps: GitSyncDeps
   // поэтому отдельного вопроса не задаём; об исходе говорит уведомление, а провал
   // (нет remote, отказ авторизации, конфликт) приходит текстом от git.
   define(
-    { id: 'git.fetch', title: 'Забрать изменения (fetch)', category: 'Git', enabled: () => git.isRepository },
+    {
+      id: 'git.fetch',
+      title: 'Забрать изменения (fetch)',
+      category: 'Git',
+      enabled: () => git.isRepository,
+      disabledReason: () => 'В проекте нет git-репозитория',
+    },
     async () => {
       const result = await git.fetch();
       showToast(`fetch: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
@@ -94,6 +100,7 @@ export function registerGitSyncCommands(define: DefineCommand, deps: GitSyncDeps
       title: 'Забрать изменения во всех папках (fetch)',
       category: 'Git',
       enabled: () => deps.isMultiRoot(),
+      disabledReason: () => 'Проект из одной папки — обновлять нечего разом',
     },
     async () => {
       const results = await git.fetchRoots();
@@ -105,7 +112,13 @@ export function registerGitSyncCommands(define: DefineCommand, deps: GitSyncDeps
   // Режим pull берём из настроек (проектных): у команд разные привычки — кому слияние,
   // кому перебазирование. `default` не подсказывает флагов, и git ведёт себя как настроен.
   define(
-    { id: 'git.pull', title: 'Влить изменения (pull)', category: 'Git', enabled: () => git.isRepository },
+    {
+      id: 'git.pull',
+      title: 'Влить изменения (pull)',
+      category: 'Git',
+      enabled: () => git.isRepository,
+      disabledReason: () => 'В проекте нет git-репозитория',
+    },
     async () => {
       const result = await git.pull(deps.pullMode());
       showToast(`pull: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
@@ -120,6 +133,7 @@ export function registerGitSyncCommands(define: DefineCommand, deps: GitSyncDeps
       title: 'Влить изменения (pull) с перебазированием',
       category: 'Git',
       enabled: () => git.isRepository,
+      disabledReason: () => 'В проекте нет git-репозитория',
     },
     async () => {
       const result = await git.pull('rebase');
@@ -128,7 +142,13 @@ export function registerGitSyncCommands(define: DefineCommand, deps: GitSyncDeps
   );
 
   define(
-    { id: 'git.push', title: 'Отправить коммиты (push)', category: 'Git', enabled: () => git.isRepository },
+    {
+      id: 'git.push',
+      title: 'Отправить коммиты (push)',
+      category: 'Git',
+      enabled: () => git.isRepository,
+      disabledReason: () => 'В проекте нет git-репозитория',
+    },
     async () => {
       // Счётчики считает main: без них push уходил «в пустоту» (всё отправлено) или
       // отваливался отказом non-fast-forward вместо понятного «сначала влейте».
@@ -154,6 +174,7 @@ export function registerGitSyncCommands(define: DefineCommand, deps: GitSyncDeps
       title: 'Проиндексировать все изменения',
       category: 'Git',
       enabled: () => git.unstaged.length > 0,
+      disabledReason: () => 'Нет неизменённых правок',
     },
     async () => {
       const paths = git.unstaged.map((file) => file.path);
@@ -166,7 +187,13 @@ export function registerGitSyncCommands(define: DefineCommand, deps: GitSyncDeps
   );
 
   define(
-    { id: 'git.unstageAll', title: 'Убрать всё из индекса', category: 'Git', enabled: () => git.staged.length > 0 },
+    {
+      id: 'git.unstageAll',
+      title: 'Убрать всё из индекса',
+      category: 'Git',
+      enabled: () => git.staged.length > 0,
+      disabledReason: () => 'В индексе ничего нет',
+    },
     async () => {
       const paths = git.staged.map((file) => file.path);
       if (paths.length === 0) {
@@ -178,7 +205,13 @@ export function registerGitSyncCommands(define: DefineCommand, deps: GitSyncDeps
   );
 
   define(
-    { id: 'git.discardAll', title: 'Откатить все правки', category: 'Git', enabled: () => git.unstaged.length > 0 },
+    {
+      id: 'git.discardAll',
+      title: 'Откатить все правки',
+      category: 'Git',
+      enabled: () => git.unstaged.length > 0,
+      disabledReason: () => 'Нет неизменённых правок',
+    },
     async () => {
       const paths = git.unstaged.map((file) => file.path);
       if (paths.length === 0) {

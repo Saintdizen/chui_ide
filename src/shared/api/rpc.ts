@@ -88,7 +88,7 @@ import type {
   RecentProject,
   TestGenerationResult,
 } from './git';
-import type { AiTelemetrySnapshot } from './settings';
+import type { AiTelemetrySnapshot, LayoutSettings } from './settings';
 import type {
   CreateVenvOptions,
   CreateVenvResult,
@@ -447,10 +447,18 @@ export interface ChuiMethods {
   /**
    * Настройки уровня проекта из `<root>/.chui_ide/`: редактор, дерево, запуск и
    * LSP. Лежат в самом проекте, чтобы их можно было версионировать вместе с кодом,
-   * в отличие от userData. Макет панелей сюда не входит: он общий для всех проектов.
+   * в отличие от userData.
    */
   'project.config': { params: { root: string }; result: ProjectSettings };
   'project.updateSettings': { params: { root: string; patch: ProjectSettings }; result: ProjectSettings };
+  /**
+   * Макет рабочей области проекта: `<root>/.chui_ide/layout.json`. Пока проекта
+   * нет или своего макета он не завёл — `null`, и действует общий из userData.
+   */
+  'project.layout': { params: { root: string }; result: LayoutSettings | null };
+  'project.saveLayout': { params: { root: string; layout: LayoutSettings }; result: LayoutSettings };
+  /** Убрать макет проекта: дальше снова действует общий. */
+  'project.clearLayout': { params: { root: string }; result: void };
 
   /** Виртуальные окружения Python в проекте: главное — первым. */
   'python.environments': { params: void; result: PythonEnvironment[] };

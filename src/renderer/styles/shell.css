@@ -1269,6 +1269,21 @@ body > .overlay {
   font-size: var(--font_labels_size);
 }
 
+/*
+ * Почему недоступная команда недоступна (TASKS п.3). Стоит сразу за названием,
+ * а не в хвосте: причина относится к пункту, а не к его разделу. Приглушена
+ * сильнее названия, но читается на сером пункте — иначе смысл теряется.
+ */
+.palette-item-reason {
+  margin-left: 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .palette-item-key {
   padding: 1px 6px;
   border: 1px solid var(--border_color);

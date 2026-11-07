@@ -510,8 +510,9 @@ export interface WorkspaceSettings {
 export type SidebarPosition = 'left' | 'right';
 
 /**
- * Макет рабочей области: размеры и видимость панелей. Общий для всех проектов —
- * это рабочее место человека, а не свойство кода.
+ * Макет рабочей области: размеры и видимость панелей. По умолчанию общий для всех
+ * проектов, но проект может держать свой — макет лежит в `.chui_ide/layout.json`
+ * и накладывается поверх общего при открытии проекта (как и прочие проектные настройки).
  */
 export interface LayoutSettings {
   /** Ширина боковой панели, px. */
@@ -530,4 +531,45 @@ export interface LayoutSettings {
   dockVisible: boolean;
   /** Область редактора (по центру). Скрывают, когда нужны только панели. */
   editorVisible: boolean;
+}
+
+/** Значения макета по умолчанию: одинаковые для общих настроек и для проектных. */
+export const DEFAULT_LAYOUT: LayoutSettings = {
+  sidebarSize: 280,
+  rightSize: 420,
+  dockSize: 220,
+  sidebarVisible: true,
+  rightVisible: false,
+  sidebarPosition: 'left',
+  dockVisible: false,
+  editorVisible: true,
+};
+
+/**
+ * Приводит любой макет к допустимому: размеры — целые положительные, видимость —
+ * строгие boolean, положение панели — только `left` или `right`.
+ *
+ * Общая на два места: и общие настройки, и `.chui_ide/layout.json`. Одна функция
+ * — один предел: иначе клавиши, форма и файл разошлись бы в том, что считается
+ * допустимым (так уже было с кеглем редактора).
+ */
+export function sanitizeLayout(value: Partial<LayoutSettings> | undefined, fallback: LayoutSettings = DEFAULT_LAYOUT): LayoutSettings {
+  const source = value ?? {};
+  const size = (raw: unknown, def: number): number => {
+    const rounded = Math.round(Number(raw));
+    return Number.isFinite(rounded) && rounded > 0 ? rounded : def;
+  };
+  const flag = (raw: unknown, def: boolean): boolean => (typeof raw === 'boolean' ? raw : def);
+  return {
+    sidebarSize: size(source.sidebarSize, fallback.sidebarSize),
+    rightSize: size(source.rightSize, fallback.rightSize),
+    dockSize: size(source.dockSize, fallback.dockSize),
+    sidebarVisible: flag(source.sidebarVisible, fallback.sidebarVisible),
+    rightVisible: flag(source.rightVisible, fallback.rightVisible),
+    // Чужое значение (опечатка, старая версия) — как «слева»: молча ставим панель
+    // на место, а не роняем весь макет.
+    sidebarPosition: source.sidebarPosition === 'right' ? 'right' : 'left',
+    dockVisible: flag(source.dockVisible, fallback.dockVisible),
+    editorVisible: flag(source.editorVisible, fallback.editorVisible),
+  };
 }

@@ -341,6 +341,8 @@ export async function startApplication(
   // ОбщеIDE-настройки хранятся в userData; настройки проекта (.chui_ide) ложатся поверх.
   let baseSettings = await rpc.request("settings.get");
   let projectSettings: ProjectSettings = {};
+  /** Макет рабочей области проекта; `null` — своего нет, действует общий из userData. */
+  let projectLayout: LayoutSettings | null = null;
   let settings = baseSettings;
   const layoutGuard = { applying: false };
   /**
@@ -385,24 +387,29 @@ export async function startApplication(
     return next;
   }
 
-  // Макет рабочей области общий для всех проектов, поэтому живёт в userData
-  // (settings.json), а не в `.chui_ide` конкретного проекта.
+  // Макет рабочей области: свой у каждого проекта (`.chui_ide/layout.json`), а общий
+  // из userData — запасной. Переключил проект — вернулись его панели, а не чужие.
   async function persistLayout(): Promise<void> {
     if (layoutGuard.applying) return;
-    baseSettings = await rpc
-      .request("settings.update", {
-        layout: {
-          sidebarSize: layout.sidebarSize,
-          rightSize: layout.rightSize,
-          dockSize: layout.dockSize,
-          sidebarVisible: layout.sidebarVisible,
-          rightVisible: layout.rightVisible,
-          sidebarPosition: layout.sidebarPosition,
-          dockVisible: layout.dockVisible,
-          editorVisible: layout.editorVisible,
-        },
-      })
-      .catch(() => baseSettings);
+    const snapshot: LayoutSettings = {
+      sidebarSize: layout.sidebarSize,
+      rightSize: layout.rightSize,
+      dockSize: layout.dockSize,
+      sidebarVisible: layout.sidebarVisible,
+      rightVisible: layout.rightVisible,
+      sidebarPosition: layout.sidebarPosition,
+      dockVisible: layout.dockVisible,
+      editorVisible: layout.editorVisible,
+    };
+    projectLayout = snapshot;
+    // Без проекта (пустое окно) писать некуда — тогда запоминаем общий макет.
+    if (!workspace.root) {
+      baseSettings = await rpc
+        .request("settings.update", { layout: snapshot })
+        .catch(() => baseSettings);
+      return;
+    }
+    await rpc.request("project.saveLayout", { root: workspace.root, layout: snapshot }).catch(() => null);
   }
 
   /** Программное изменение макета не должно сохранять само себя. */
@@ -432,16 +439,23 @@ export async function startApplication(
 
   // При открытии проекта накладываем настройки из его `.chui_ide` поверх общих.
   async function loadProjectConfig(root: string): Promise<void> {
-    const config = await rpc
-      .request("project.config", { root })
-      .catch(() => null);
+    const [config, savedLayout] = await Promise.all([
+      rpc.request("project.config", { root }).catch(() => null),
+      // Своего макета может не быть — тогда `null` и остаётся общий.
+      rpc.request("project.layout", { root }).catch(() => null),
+    ]);
     projectSettings = config ?? {};
+    projectLayout = savedLayout;
     applySettings(rebuildSettings());
+    applyLayoutSettings(projectLayout ?? baseSettings.layout);
   }
 
   function resetProjectConfig(): void {
     projectSettings = {};
     applySettings(rebuildSettings());
+    // Проекта нет — возвращаемся к общему макету из userData.
+    projectLayout = null;
+    applyLayoutSettings(baseSettings.layout);
   }
 
   // Макет восстановлен из userData ещё до открытия проекта: панели сразу на месте.

@@ -128,4 +128,41 @@ describe('окно быстрого перехода', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(quick.element.hidden).toBe(true);
   });
+
+  // TASKS п.1.3: серый пункт обязан объяснить, чего не хватает. Без причины
+  // «недоступно» читается как поломка, и человек идёт искать причину в догадках.
+  it('недоступная команда называет причину рядом с названием', async () => {
+    const quick = view({
+      commands: {
+        list: () => [
+          { id: 'git.pull', title: 'Влить изменения', category: 'Git' },
+          { id: 'file.save', title: 'Сохранить', category: 'Файл' },
+        ],
+        isEnabled: (id: string) => id !== 'git.pull',
+        disabledReason: (id: string) => (id === 'git.pull' ? 'В проекте нет git-репозитория' : ''),
+        run: vi.fn(),
+      },
+    } as unknown as Partial<Deps>);
+    document.body.append(quick.element);
+    await quick.open('>');
+    const reasons = [...quick.element.querySelectorAll('.palette-item-reason')].map((node) => node.textContent);
+    expect(reasons).toEqual(['В проекте нет git-репозитория']);
+    // Причина стоит у того пункта, которого касается, а не отдельной строкой.
+    const disabled = quick.element.querySelector('.is-disabled');
+    expect(disabled?.querySelector('.palette-item-reason')?.textContent).toBe('В проекте нет git-репозитория');
+  });
+
+  it('доступная команда причины не показывает — даже если причина есть', async () => {
+    const quick = view({
+      commands: {
+        list: () => [{ id: 'file.save', title: 'Сохранить', category: 'Файл' }],
+        isEnabled: () => true,
+        disabledReason: () => 'Нет открытого файла',
+        run: vi.fn(),
+      },
+    } as unknown as Partial<Deps>);
+    document.body.append(quick.element);
+    await quick.open('>');
+    expect(quick.element.querySelectorAll('.palette-item-reason').length).toBe(0);
+  });
 });

@@ -50,6 +50,11 @@ type Row =
       title: string;
       category: string;
       enabled: boolean;
+      /**
+       * Почему команда недоступна — там же, где название. Серый пункт без
+       * причины читается как поломка, а не как «сейчас нечего делать».
+       */
+      reason?: string;
       positions: readonly number[];
     }
   | { kind: 'place'; place: QuickPlace; icon: IconName };
@@ -79,6 +84,8 @@ export function createQuickOpen(deps: {
   commands?: {
     list(): CommandDescriptor[];
     isEnabled(id: string): boolean;
+    /** Почему команда недоступна — для серого пункта. Нет — причину не показываем. */
+    disabledReason?(id: string): string | null;
     run(id: string): void;
     /** Перед показом списка: действия редактора живут своей жизнью и меняются. */
     refresh?(): void;
@@ -333,6 +340,7 @@ export function createQuickOpen(deps: {
             'aria-disabled': row.enabled ? undefined : 'true',
           },
           h('span', { class: 'palette-item-title' }, ...highlight(row.title, row.positions)),
+          row.reason ? h('span', { class: 'palette-item-reason' }, row.reason) : null,
           h('span', { class: 'palette-item-category' }, row.category),
         ),
         row,
@@ -365,15 +373,25 @@ export function createQuickOpen(deps: {
       list.appendChild(h('div', { class: 'palette-empty' }, 'Реестр команд недоступен'));
       return;
     }
-    const ranked = rankCommandMatches(registry.list(), query, deps.recentCommands?.() ?? [], 50) ?? [];
-    rows = ranked.map((item) => ({
-      kind: 'command',
-      id: item.descriptor.id,
-      title: item.descriptor.title,
-      category: item.descriptor.category,
-      enabled: registry.isEnabled(item.descriptor.id),
-      positions: item.positions,
-    }));
+    // Пустой запрос — это «покажи всё», а не «искать нечего»: `rankCommandMatches`
+    // в этом случае отвечает `null`, и без явной ветки режим `>` открывался пустым.
+    const ranked = query.trim()
+      ? (rankCommandMatches(registry.list(), query, deps.recentCommands?.() ?? [], 50) ?? [])
+      : registry.list().map((descriptor) => ({ descriptor, positions: [] as number[] }));
+    rows = ranked.map((item) => {
+      const enabled = registry.isEnabled(item.descriptor.id);
+      return {
+        kind: 'command' as const,
+        id: item.descriptor.id,
+        title: item.descriptor.title,
+        category: item.descriptor.category,
+        enabled,
+        // Причину спрашиваем только у выключенного пункта: у доступного её нет
+        // по определению, и звать источник лишний раз — лишняя работа на рендер.
+        reason: enabled ? undefined : registry.disabledReason?.(item.descriptor.id) || undefined,
+        positions: item.positions,
+      };
+    });
     cursor = Math.min(cursor, Math.max(rows.length - 1, 0));
     if (rows.length === 0) {
       list.appendChild(h('div', { class: 'palette-empty' }, 'Команда не найдена'));

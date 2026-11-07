@@ -179,6 +179,9 @@ export function createPalette(deps: {
         list.appendChild(h('div', { class: 'palette-group' }, header));
       }
       const disabled = !deps.commands.isEnabled(descriptor.id);
+      // Серый пункт без причины читается как поломка. Причина — там же, где
+      // название, и вслух тоже: `aria-disabled` говорит «нельзя», а не «почему».
+      const disabledReason = disabled ? (deps.commands.disabledReason?.(descriptor.id) ?? '') : '';
       const item = h(
         'button',
         {
@@ -198,6 +201,7 @@ export function createPalette(deps: {
         // Подсветка — ответ на «почему эта команда тут»: без неё нечёткое
         // совпадение (`свн`) выглядит как случайная строка в списке.
         h('span', { class: 'palette-item-title' }, ...highlighted(descriptor.title, positions)),
+        disabledReason ? h('span', { class: 'palette-item-reason' }, disabledReason) : null,
         // Категория у пункта не нужна, когда она уже стоит заголовком группы.
         grouped ? null : h('span', { class: 'palette-item-category' }, descriptor.category),
         deps.openKeybindingSettings || descriptor.keybinding
