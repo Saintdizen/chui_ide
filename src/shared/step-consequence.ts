@@ -105,11 +105,17 @@ export interface EditsConsequence {
  * «12 правок», и правильный вопрос при решении — сколько мест пострадает, если
  * откатывать руками.
  */
-export function editsConsequence(paths: readonly string[]): EditsConsequence {
+export function editsConsequence(paths: readonly string[], lines?: number): EditsConsequence {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return { level: 'safe', note: 'ничего не изменится' };
+  // Строки — вторая половина «сколько»: двадцать файлов по строке — это одно,
+  // а один файл на четыреста строк — совсем другое решение.
+  const scope = lines && lines > 0 ? `, строк: ${lines}` : '';
   return {
     level: 'writes',
-    note: unique.length === 1 ? `перезапишет 1 файл: ${unique[0]}` : `перезапишет файлов: ${unique.length}`,
+    note:
+      unique.length === 1
+        ? `перезапишет 1 файл${scope}: ${unique[0]}`
+        : `перезапишет файлов: ${unique.length}${scope}`,
   };
 }

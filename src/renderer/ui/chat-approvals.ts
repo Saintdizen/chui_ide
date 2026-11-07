@@ -140,7 +140,15 @@ export function createEditReview(host: ApprovalHost): EditReview {
     // Что будет, если согласиться, — одной фразой над диффами. Дифф говорит «как»,
     // но решение принимают по «сколько»: один файл или двадцать. Пустую строку не
     // рисуем: «ничего не изменится» на каждой карточке — шум.
+    // Строки, а не только файлы: «перезапишет 3 файла» человек уже видит, но
+    // решение часто упирается в объём — правка на одну строку в трёх файлах и
+    // переписанный модуль это разные решения.
+    const lines = files.reduce((sum, file) => {
+      const hunks = file.hunks.reduce((n, hunk) => n + hunk.added.length + hunk.removed.length, 0);
+      return sum + hunks;
+    }, 0);
     const effect = editsConsequence(files.map((file) => file.path));
+    if (effect.note && lines > 0) effect.note += `, строк: ${lines}`;
     if (effect.note) {
       block.appendChild(
         h(
