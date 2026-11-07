@@ -8,6 +8,8 @@ import type { DefineCommand } from './command-args';
 
 export interface SettingsRpc {
   request(method: 'settings.revealFile'): Promise<{ path: string }>;
+  request(method: 'settings.exportProfileTo'): Promise<{ ok: boolean; path?: string; canceled: boolean }>;
+  request(method: 'settings.importProfileFrom'): Promise<{ ok: boolean; canceled: boolean }>;
 }
 
 export interface SettingsModal {
@@ -32,5 +34,20 @@ export function registerSettingsCommands(define: DefineCommand, deps: SettingsDe
   define({ id: 'settings.revealFile', title: 'Открыть settings.json', category: 'Настройки' }, async () => {
     const result = await rpc.request('settings.revealFile');
     showToast(`Настройки: ${result.path}`);
+  });
+
+  // Профиль — всё рабочее окружение одним файлом: настройки, макет и тема. Так его
+  // переносят на другую машину; ключи провайдеров в профиль не входят и приезжают
+  // отдельно — иначе файл стал бы переносителем секретов.
+  define({ id: 'settings.exportProfile', title: 'Выгрузить профиль в файл', category: 'Настройки' }, async () => {
+    const result = await rpc.request('settings.exportProfileTo');
+    if (result.canceled) return;
+    showToast(result.path ? `Профиль сохранён: ${result.path}` : 'Профиль не сохранён');
+  });
+
+  define({ id: 'settings.importProfile', title: 'Загрузить профиль из файла', category: 'Настройки' }, async () => {
+    const result = await rpc.request('settings.importProfileFrom');
+    if (result.canceled) return;
+    showToast(result.ok ? 'Профиль применён' : 'Файл профиля не подошёл');
   });
 }

@@ -29,7 +29,12 @@ function setup() {
 describe('registerSettingsCommands', () => {
   it('регистрирует окно и файл настроек', () => {
     const { commands } = setup();
-    expect([...commands.keys()].sort()).toEqual(['settings.open', 'settings.revealFile']);
+    expect([...commands.keys()].sort()).toEqual([
+      'settings.exportProfile',
+      'settings.importProfile',
+      'settings.open',
+      'settings.revealFile',
+    ]);
   });
 
   it('окно настроек открывается без обращения к main', async () => {

@@ -32,6 +32,7 @@ import { enablePerf, perf } from '../shared/perf';
 import { MAX_VIEW_PDF_BYTES, isPdfPath } from '../shared/pdf';
 import { activationForInterpreter, pythonInterpreterFor, venvDirOfPython } from './python/environments';
 import { SessionStore } from './session-store';
+import { ProfileService } from './profile';
 import { ProjectConfigStore } from './project-config';
 import { ReviewStore } from './project/review-store';
 import { HistoryStore } from './project/history-store';
@@ -395,6 +396,10 @@ if (!app.requestSingleInstanceLock()) {
     // Сессия редактора: вкладки, раскрытые папки, видимость панелей — на каждый проект.
     const sessions = new SessionStore();
     const projectConfig = new ProjectConfigStore();
+    const profile = new ProfileService(
+      () => settings.get(),
+      (patch) => settings.update(patch as never),
+    );
     const reviews = new ReviewStore();
     const history = new HistoryStore(path.join(app.getPath('userData'), 'history'));
     // Снимок прежнего содержимого перед каждой перезаписью — источник локальной
@@ -474,6 +479,7 @@ if (!app.requestSingleInstanceLock()) {
       debug,
       sessions,
       projectConfig,
+      profile,
       reviews,
       history,
       mcp,

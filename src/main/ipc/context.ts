@@ -10,6 +10,7 @@ import type { SettingsStore } from '../settings';
 import type { GitService } from '../git/git';
 import type { SessionStore } from '../session-store';
 import type { ProjectConfigStore } from '../project-config';
+import type { ProfileService } from '../profile';
 import type { ReviewStore } from '../project/review-store';
 import type { HistoryStore } from '../project/history-store';
 import type { TelemetryStore } from '../ai/telemetry';
@@ -56,6 +57,8 @@ export interface AppDependencies {
   telemetry?: TelemetryStore;
   /** Папка пользовательских сниппетов (`userData/snippets`). Необязательно для пробников. */
   snippetsDir?: () => string;
+  /** Профиль одним файлом: экспорт/импорт настроек с макетом. Не нужен пробникам. */
+  profile?: ProfileService;
 }
 
 /**

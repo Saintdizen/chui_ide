@@ -843,6 +843,14 @@ export interface ChuiMethods {
 
   'settings.get': { params: void; result: Settings };
   'settings.update': { params: SettingsPatch; result: Settings };
+  'settings.exportProfileTo': {
+    params: void;
+    result: { ok: boolean; canceled: boolean; path?: string; sections?: readonly string[] };
+  };
+  'settings.importProfileFrom': {
+    params: void;
+    result: { ok: boolean; canceled: boolean; path?: string; applied?: readonly string[] };
+  };
   'settings.revealFile': { params: void; result: { path: string } };
 
   /* Темы из файла: импорт, экспорт шаблона и снятие. */

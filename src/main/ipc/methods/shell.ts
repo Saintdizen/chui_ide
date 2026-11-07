@@ -1,11 +1,14 @@
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { shell } from 'electron';
+import { dialog, shell } from 'electron';
 import type { SettingsPatch } from '../../../shared/api';
 import { knownLinuxTerminals, pickExternalTerminal } from '../../../shared/external-terminal';
 import { isOnPath } from '../../lsp/detect';
 import type { RpcServices } from '../context';
+import { senderWindow } from '../context';
+import { PROFILE_EXTENSION } from '../../../shared/profile';
 import type { RpcRouter } from '../router';
+import { RpcFailure } from '../router';
 
 /**
  * Окружение рабочего стола: системный браузер, файлы в проводнике системы,
@@ -146,6 +149,30 @@ export function registerShellMethods(router: RpcRouter, deps: RpcServices): void
 
   router.register('settings.get', () => deps.settings.get());
   router.register('settings.update', (patch: SettingsPatch) => deps.settings.update(patch));
+  // Профиль: экспорт/импорт одним файлом — настройки (вместе с темой) и макет.
+  // Экспорт/импорт профиля с диалогом — как у темы: путь спрашиваем в main,
+  // renderer получает готовый итог и не знает про файловую систему.
+  router.register('settings.exportProfileTo', async (_params, ctx) => {
+    if (!deps.profile) throw new RpcFailure(-32603, 'Профиль недоступен');
+    const picked = await dialog.showSaveDialog(senderWindow(ctx), {
+      title: 'Сохранить профиль',
+      defaultPath: `chui-ide-profile${PROFILE_EXTENSION}`,
+      filters: [{ name: 'Профиль chui_ide', extensions: ['json'] }],
+    });
+    if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
+    return { ...(await deps.profile.exportTo(picked.filePath)), canceled: false };
+  });
+  router.register('settings.importProfileFrom', async (_params, ctx) => {
+    if (!deps.profile) throw new RpcFailure(-32603, 'Профиль недоступен');
+    const picked = await dialog.showOpenDialog(senderWindow(ctx), {
+      title: 'Открыть профиль',
+      properties: ['openFile'],
+      filters: [{ name: 'Профиль chui_ide', extensions: ['json'] }],
+    });
+    const file = picked.filePaths[0];
+    if (picked.canceled || !file) return { ok: false, canceled: true };
+    return { ...(await deps.profile.importFrom(file)), canceled: false };
+  });
   router.register('settings.revealFile', async () => {
     const file = deps.settings.file();
     await shell.openPath(file).catch(() => undefined);
