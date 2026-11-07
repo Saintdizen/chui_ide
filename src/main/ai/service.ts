@@ -80,6 +80,7 @@ import {
   type ReadRange,
 } from '../../shared/read-coverage';
 import { callFlags } from '../../shared/step-counts';
+import { planStepCalls } from '../../shared/parallel-calls';
 import { renderSessionReferences } from '../../shared/session-context';
 import {
   permissionFlags,
@@ -1513,6 +1514,18 @@ export class AiService {
       // задачи не отвечает — три чтения подряд дают 180 000 символов, и обрезка
       // истории выбрасывает уже потраченный шаг целиком.
       toolContext.stepBudget = { left: stepOutputChars(windowTokens) };
+      // Какие вызовы шага можно исполнить вместе. Решается ДО цикла по всему списку:
+      // судьбу пачки нельзя решать по кускам, когда соседи уже отчитались.
+      const plan = planStepCalls(calls);
+      const groupOf = new Map<string, number>();
+      const groupSize = new Map<number, number>();
+      plan.forEach((group, index) => {
+        groupSize.set(index, group.length);
+        for (const call of group) groupOf.set(call.id, index);
+      });
+      // Готовые результаты по id: заполняет отработка читающих групп.
+      const prefetched = new Map<string, ToolOutcome>();
+      const started = new Map<string, number>();
       for (const raw of calls) {
         // Старое имя из сохранённой беседы приводим к нынешнему ДО всех проверок:
         // иначе набор скажет «такого нет», хотя инструмент есть под другим именем.
@@ -1761,10 +1774,33 @@ export class AiService {
         let outcome: ToolOutcome;
         // Замер шага: карточка показывает имена и аргументы, а стоило ли это
         // секунду или пять минут — раньше видно не было.
-        const startedAt = Date.now();
-        // Опись на время вызова: без неё «стоп» не знает, что инструмент ещё жив,
-        // и человек не видит, что именно идёт.
-        if (callId) this.running.toolStart(callId, call.name, startedAt);
+        let startedAt = Date.now();
+        // Группа читающих вызовов едет целиком в первый же свой вызов: пока модель
+        // ждёт ответа на первое чтение, остальные уже в памяти. Порядок вывода не
+        // меняется — каждое событие и сообщение идут там же, где шли раньше.
+        const groupIndex = groupOf.get(call.id);
+        const group = groupIndex === undefined ? undefined : plan[groupIndex];
+        if (group && group.length > 1) {
+          const fresh = group.filter((item) => !prefetched.has(item.id));
+          if (fresh.length > 0) {
+            const running = await Promise.all(
+              fresh.map(async (item) => {
+                const at = Date.now();
+                if (callId) this.running.toolStart(callId, item.name, at);
+                try {
+                  return { item, at, outcome: await runTool(toolContext, item.name, item.arguments) };
+                } finally {
+                  if (callId) this.running.toolFinish(callId, item.name);
+                }
+              }),
+            );
+            for (const item of running) {
+              prefetched.set(item.item.id, item.outcome);
+              started.set(item.item.id, item.at);
+            }
+          }
+        }
+        if (callId && !prefetched.has(call.id)) this.running.toolStart(callId, call.name, startedAt);
         if (repeated) {
           outcome = {
             ok: false,
@@ -1778,6 +1814,22 @@ export class AiService {
             summary: `${covered.path}: строки ${covered.from}–${covered.to} уже прочитаны`,
             detail: 'Этот диапазон уже есть выше в текущей ветке. Возьми текст оттуда, не читай повторно.',
           };
+        } else if (prefetched.has(call.id)) {
+          // Группа уже исполнила этот вызов: берём готовый результат, но пометки
+          // про прочитанное начисляем здесь — в том порядке, в каком модель назвала вызовы.
+          outcome = prefetched.get(call.id) as ToolOutcome;
+          startedAt = started.get(call.id) ?? startedAt;
+          if (outcome.read) rememberRead(coveredReads, outcome.read, call.id);
+          for (const read of outcome.reads ?? []) rememberRead(coveredReads, read, call.id);
+          if (readOnly) {
+            if (cacheable) executed.set(key, outcome);
+          } else {
+            forgetChangedFiles({ executed, coveredReads }, call.name, call.arguments, outcome.changes);
+          }
+          if (outcome.ok) {
+            didNewWork = true;
+            didWork = true;
+          }
         } else {
           const args = narrowed?.arguments ?? (batch ? JSON.stringify(batch.args) : call.arguments);
           outcome = await runTool(toolContext, call.name, args);
