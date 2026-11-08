@@ -292,19 +292,26 @@ function newClassList(owner?: any): any {
 }
 
 function newStyle(): any {
-  return {
+  const style: any = {
     cssText: '',
     props: {} as Record<string, string>,
     setProperty(key: string, value: string) {
-      this.props[key] = value;
+      style.props[key] = value;
+      // В настоящем DOM `setProperty` виден и как свойство: код пишет и
+      // `style.position = 'absolute'`, и `setProperty('position', ...)`, и
+      // оба должны читаться одинаково. Без этого тест видел бы пустую строку
+      // там, где стиль на самом деле задан.
+      style[key] = value;
     },
     removeProperty(key: string) {
-      delete this.props[key];
+      delete style.props[key];
+      delete style[key];
     },
     getPropertyValue(key: string) {
-      return this.props[key] ?? '';
+      return style.props[key] ?? style[key] ?? '';
     },
   };
+  return style;
 }
 
 /**
