@@ -931,6 +931,7 @@ export class EditorWorkspace {
       unfold: () => this.pane.unfoldAtCursor(),
       foldSelection: () => this.pane.foldSelection(),
       foldAll: () => this.pane.foldAll(),
+      foldExceptSelection: () => this.pane.foldExceptSelection(),
       unfoldAll: () => this.pane.unfoldAll(),
       foldToLevel: (level: number) => this.pane.foldToLevel(level),
       // Мультикурсор: команды палитры делают то же, что клавиши в панели.

@@ -112,6 +112,8 @@ export interface EditorCommandContext {
   /** Сложить ровно выделенный кусок — даже если язык не прислал для него блок. */
   foldSelection(): boolean;
   foldAll(): void;
+  /** Свернуть всё, кроме блоков под выделением. `false` — выделения нет. */
+  foldExceptSelection(): boolean;
   unfoldAll(): void;
   /** Сложить всё до уровня `level` включительно (1 — верхние блоки). */
   foldToLevel(level: number): void;
@@ -552,6 +554,15 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     alias: 'foldAll',
     category: CATEGORY,
     run: (context) => context.foldAll(),
+  },
+  {
+    id: 'editor.foldExceptSelection',
+    label: 'Свернуть всё, кроме выделенного',
+    alias: 'foldExceptSelection',
+    // Клавиш нет нарочно: в других редакторах этот жест занят, а придумывать
+    // свой значило бы спорить с привычкой. Живёт в палитре.
+    category: CATEGORY,
+    run: (context) => context.foldExceptSelection(),
   },
   {
     id: 'editor.unfoldAll',

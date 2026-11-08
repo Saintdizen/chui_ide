@@ -1176,6 +1176,12 @@ export class EditorView {
     this.render();
   }
 
+  /** Свернуть всё, кроме блоков под выделением `fromLine..toLine`. */
+  foldExcept(fromLine: number, toLine: number): void {
+    this.folds.collapseExcept(fromLine, toLine);
+    this.render();
+  }
+
   /** Сложить всё до уровня `level` включительно (1 — верхние блоки файла). */
   foldToLevel(level: number): void {
     this.folds.collapseToLevel(level);

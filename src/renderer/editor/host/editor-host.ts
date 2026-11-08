@@ -2641,6 +2641,15 @@ export class EditorHost {
     this.rememberFolds();
   }
 
+  /** Свернуть всё, кроме блоков под выделением: выделенное остаётся на экране. */
+  foldExceptSelection(): boolean {
+    const range = this.selectionRange();
+    if (range === null) return false;
+    this.view.foldExcept(range.startLine, range.endLine);
+    this.rememberFolds();
+    return true;
+  }
+
   /**
    * Сложить всё до уровня `level` (1 — верхние блоки файла).
    *

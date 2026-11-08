@@ -75,6 +75,33 @@ export class FoldModel {
     this.revisionCounter += 1;
   }
 
+  /**
+   * Сложить всё, кроме блоков, накрывающих выделение.
+   *
+   * Зачем именно так: человек выделил функцию и жмёт «свернуть всё остальное»,
+   * чтобы она осталась одна на экране. Обычное «свернуть всё» сложило бы и её,
+   * а затем разворачивать её руками в файле на тысячу строк — то же самое, что
+   * искать её заново.
+   *
+   * Блок «накрывает выделение», если пересекается с ним хотя бы строкой:
+   * выделение внутри функции или сама функция — оба случая должны остаться
+   * открытыми. Границы `[from, to]` включительные.
+   */
+  collapseExcept(fromLine: number, toLine: number): void {
+    const keep = new Set<number>();
+    for (const range of this.ranges) {
+      // Диапазон свёртки занимает начало и конец включительно; тело — между.
+      if (range.startLine <= toLine && range.endLine >= fromLine) keep.add(range.startLine);
+    }
+    for (const range of this.ranges) {
+      if (!keep.has(range.startLine)) this.collapsed.add(range.startLine);
+    }
+    // Блоки, которые надо было оставить, — раскрываем: до этого они могли
+    // быть свёрнуты, и «кроме выделения» должно значить именно «видно».
+    for (const line of keep) this.collapsed.delete(line);
+    this.revisionCounter += 1;
+  }
+
   /** Раскрыть всё. */
   expandAll(): void {
     this.collapsed.clear();
