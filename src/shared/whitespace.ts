@@ -23,3 +23,15 @@ export function normalizeWhitespaceMode(value: unknown): WhitespaceMode {
     ? (value as WhitespaceMode)
     : 'none';
 }
+
+/**
+ * Следующий режим по кругу: нет → хвостовые → все → нет.
+ *
+ * Отдельно от редактора, потому что листают с двух мест (команда и чип в строке
+ * состояния), и порядок должен быть один: два разных порядка читались бы как
+ * поломка — нажал дважды, вернулся не туда, где был.
+ */
+export function nextWhitespaceMode(mode: WhitespaceMode): WhitespaceMode {
+  const index = WHITESPACE_MODES.indexOf(mode);
+  return WHITESPACE_MODES[(index + 1) % WHITESPACE_MODES.length] ?? 'none';
+}

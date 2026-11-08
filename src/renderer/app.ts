@@ -540,6 +540,11 @@ export async function startApplication(
       cursorBlink: settings.editor.cursorBlink,
       rulers: settings.editor.rulers,
       whitespace: settings.editor.renderWhitespace,
+      // Клик по чипу в строке состояния листает режим — иначе выбор жил бы до
+      // первой смены кегля, которая пересобирает вид из настроек.
+      onWhitespaceChanged: (mode) => {
+        void saveSettingsPatch({ editor: { renderWhitespace: mode } }).catch(() => undefined);
+      },
       minimap: settings.editor.minimap,
       overview: settings.editor.overviewRuler,
       wordWrap: settings.editor.wordWrap,
@@ -4454,6 +4459,8 @@ export async function startApplication(
       // Концы строк — у документа, а не у файла на лету: после выбора формата в
       // заголовке видно новое значение ещё до сохранения (`document.lineEnding`).
       eol: format === null && active ? active.lineEnding : null,
+      // Невидимые — у текста: в картинке пробелов не бывает (`format !== null`).
+      whitespace: format === null && active ? settings.editor.renderWhitespace : null,
       languageIndent: indent,
       settings: {
         tabSize: settings.editor.tabSize,

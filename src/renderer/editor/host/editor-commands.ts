@@ -41,6 +41,8 @@ export interface EditorCommandContext {
   openFind(mode: 'find' | 'replace'): void;
   /** Открыть панель перехода к строке. */
   openGoto(): void;
+  /** Листнуть режим невидимых символов: нет → хвостовые → все. */
+  cycleWhitespace(): void;
   indent(): void;
   outdent(): void;
   /** Закомментировать или расскомментировать строки выделения (знак — по языку файла). */
@@ -243,6 +245,13 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     keybinding: 'Ctrl+G',
     category: CATEGORY,
     run: (context) => context.openGoto(),
+  },
+  {
+    id: 'editor.cycleWhitespace',
+    label: 'Показать невидимое: нет → хвостовые → все',
+    alias: 'cycleWhitespace',
+    category: CATEGORY,
+    run: (context) => context.cycleWhitespace(),
   },
   {
     id: 'editor.indent',

@@ -7,6 +7,14 @@ import { problemsWidget } from './problems-widget';
 import type { ProjectProblemCounts } from './problems-widget';
 import type { VimMode } from '../editor/input/vim';
 import { highlightOffChip, type HighlightOffReason } from '../../shared/large-file';
+import type { WhitespaceMode } from '../../shared/whitespace';
+
+/** Подписи для чипа: коротко, чтобы не толкать соседей вправо. */
+const WHITESPACE_LABELS: Record<WhitespaceMode, string> = {
+  none: 'П· ',
+  trailing: '· ',
+  all: '¶· ',
+};
 
 // Вид счётчиков живёт в чистом модуле, а тип — там же: его читают тесты без DOM.
 export type { ProjectProblemCounts };
@@ -39,6 +47,8 @@ export interface StatusState {
   useTabs: boolean;
   /** Подпись концов строк: `LF` / `CRLF`. `null` — не текст, виджет скрыт. */
   eol: string | null;
+  /** Режим невидимых: `none` / `trailing` / `all`. `null` — не текст, чип скрыт. */
+  whitespace: WhitespaceMode | null;
   encoding: string;
   /** Ветка или null, если репозитория нет. */
   branch: string | null;
@@ -163,6 +173,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     tabSize: 2,
     useTabs: false,
     eol: null,
+    whitespace: null,
     encoding: 'UTF-8',
     branch: null,
     changes: 0,
@@ -234,6 +245,14 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     type: 'button',
     title: 'Выбрать отступы',
     onClick: (event: Event) => deps.openChoice('indent', event.currentTarget as HTMLElement),
+  });
+  // Невидимые символы: одна кнопка листает три положения (нет → хвостовые → все).
+  // Три положения в чипе, а не три пункта меню: сюда заглядывают на секунду.
+  const whitespaceItem = h('button', {
+    class: 'status-item',
+    type: 'button',
+    onClick: (event: Event) =>
+      deps.runCommand('editor.cycleWhitespace', event.currentTarget as HTMLElement),
   });
   const languageItem = h('button', {
     class: 'status-item',
@@ -336,6 +355,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       versionItem,
       positionItem,
       eolItem,
+      whitespaceItem,
       encodingItem,
       indentItem,
       readOnlyItem,
@@ -365,6 +385,20 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       state.eol === null ? 'Концы строк' : `Концы строк: ${state.eol}. Выбрать`,
     );
     encodingItem.textContent = state.encoding;
+    // Невидимые: три положения в одном чипе — пиктограмма и текущее словами.
+    // У картинок и документов пробелов нет: чип скрыт, как и концы строк.
+    whitespaceItem.hidden = state.whitespace === null;
+    if (state.whitespace !== null) {
+      whitespaceItem.textContent = WHITESPACE_LABELS[state.whitespace];
+      whitespaceItem.classList.toggle('is-on', state.whitespace !== 'none');
+      whitespaceItem.title =
+        state.whitespace === 'none'
+          ? 'Невидимые символы скрыты. Показать все'
+          : state.whitespace === 'trailing'
+            ? 'Показаны только хвостовые пробелы. Показать все'
+            : 'Показаны все невидимые символы. Скрыть';
+      whitespaceItem.setAttribute('aria-label', `${whitespaceItem.title}`);
+    }
     indentItem.textContent = state.useTabs ? `таб ${state.tabSize}` : `${state.tabSize} пробела`;
     indentItem.setAttribute(
       'aria-label',

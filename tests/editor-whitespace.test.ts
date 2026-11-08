@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { whitespaceMarks } from '../src/renderer/editor/view/whitespace';
-import { normalizeWhitespaceMode } from '../src/shared/whitespace';
+import { nextWhitespaceMode, normalizeWhitespaceMode } from '../src/shared/whitespace';
 
 /**
  * Разбор невидимых знаков строки: где поставить точку (пробел) и где стрелку
@@ -60,5 +60,24 @@ describe('normalizeWhitespaceMode', () => {
     expect(normalizeWhitespaceMode('yes')).toBe('none');
     expect(normalizeWhitespaceMode(undefined)).toBe('none');
     expect(normalizeWhitespaceMode(3)).toBe('none');
+  });
+});
+
+/**
+ * Листание режима: чип в строке состояния и команда palетры листают по одному
+ * кругу. Три положения — полный цикл возвращает исходное за три нажатия.
+ */
+describe('nextWhitespaceMode: листание по кругу', () => {
+  it('нет → хвостовые → все → нет', () => {
+    expect(nextWhitespaceMode('none')).toBe('trailing');
+    expect(nextWhitespaceMode('trailing')).toBe('all');
+    expect(nextWhitespaceMode('all')).toBe('none');
+  });
+
+  it('полный круг возвращает исходное', () => {
+    let mode = nextWhitespaceMode('none');
+    mode = nextWhitespaceMode(mode);
+    mode = nextWhitespaceMode(mode);
+    expect(mode).toBe('none');
   });
 });

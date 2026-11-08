@@ -71,6 +71,7 @@ import type { MacroStep } from '../input/macro';
 import type { VimMode } from '../input/vim';
 import type { HighlightOffReason } from '../../../shared/large-file';
 import type { WhitespaceMode } from '../view/whitespace';
+import { nextWhitespaceMode } from '../../../shared/whitespace';
 
 /** Значение выражения для подсказки отладчика: что показать и какого типа. */
 export interface DebugHoverValue {
@@ -103,6 +104,8 @@ export interface EditorWorkspaceOptions {
   rulers?: readonly number[];
   /** Показывать ли невидимые знаки: `none`, `trailing` или `all`. */
   whitespace?: WhitespaceMode;
+  /** Сообщить о смене режима невидимых — для записи в настройки. */
+  onWhitespaceChanged?: (mode: WhitespaceMode) => void;
   /** Показывать ли миникарту — сжатый вид всего файла справа. */
   minimap?: boolean;
   /** Полоса меток справа: ошибки, поиск, правки git (см. `view/overview.ts`). */
@@ -316,6 +319,8 @@ export class EditorWorkspace {
   private readonly rulers: readonly number[] | undefined;
   /** Невидимые знаки: панели равны, как отступы и кегль. */
   private readonly whitespace: WhitespaceMode | undefined;
+  /** Куда сообщить о смене невидимых: хозяин запишет в настройки. */
+  private onWhitespaceChanged: ((mode: WhitespaceMode) => void) | undefined;
   private readonly minimap: boolean | undefined;
   private readonly overview: boolean | undefined;
   private readonly wordWrap: boolean | undefined;
@@ -474,6 +479,7 @@ export class EditorWorkspace {
     this.cursorBlink = options.cursorBlink;
     this.rulers = options.rulers;
     this.whitespace = options.whitespace;
+    this.onWhitespaceChanged = options.onWhitespaceChanged;
     this.minimap = options.minimap;
     this.overview = options.overview;
     this.wordWrap = options.wordWrap;
@@ -896,6 +902,14 @@ export class EditorWorkspace {
       selectAll: () => this.pane.selectAll(),
       openFind: (mode) => this.pane.openFind(mode),
       openGoto: () => this.pane.openGoto(),
+      // Листаем настройку, а не вид: режим живёт в настройках, как в других
+      // редакторах, — после перезапуска человек видит то же, что оставил.
+      cycleWhitespace: () => {
+        const mode = this.cycleWhitespace();
+        // Вид уже применён; записываем выбор в настройку, иначе после перезапуска
+        // (или смены кегля, которая пересобирает вид из настроек) вернётся прежний.
+        this.onWhitespaceChanged?.(mode);
+      },
       indent: () => this.pane.indent(),
       outdent: () => this.pane.outdent(),
       // Правки строк: те же действия, что по клавишам, — теперь и в палитре.
@@ -1164,6 +1178,21 @@ export class EditorWorkspace {
   /** Включить или выключить Emacs-режим во всех панелях. */
   setEmacsMode(on: boolean): void {
     for (const pane of this.panes) pane.setEmacsMode(on);
+  }
+
+  /**
+   * Листнуть невидимые символы: нет → хвостовые → все. Возвращает новое значение,
+   * чтобы вызывающий записал его в настройку (сам вид уже применён).
+   *
+   * Почему не просто «переключить tумблер»: у режима три положения, и человек,
+   * нажавший чип в строке состояния, ждёт такого же листания, как у концов строк.
+   * Поменять вид, но не записать настройку значило бы разойтись с настройками
+   * после следующего пересчёта вида (его вызывает любая смена кегля).
+   */
+  cycleWhitespace(): WhitespaceMode {
+    const next = nextWhitespaceMode(this.whitespace ?? 'none');
+    for (const pane of this.panes) pane.applyOptions({ whitespace: next });
+    return next;
   }
 
   /** Дзен-режим: панели прячут миникарту и возвращают её на выходе. */
