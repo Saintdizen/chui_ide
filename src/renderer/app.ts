@@ -148,6 +148,7 @@ import { isNodeLanguage } from "../shared/languages";
 import { indentFoldRanges, mergeFoldRanges } from "../shared/fold-ranges";
 import { featureOff } from "../shared/lsp-visibility";
 import { FORMATTER_LABELS, normalizeFormatterChoice } from "../shared/formatter";
+import { createChangedLinesCache } from "../shared/changed-lines";
 import { surroundOptions } from "./editor/input/surround";
 import { semanticFoldRanges } from "./editor/highlight/folds";
 import { languageGrammar } from "./editor/highlight/lazy-registry";
@@ -4783,6 +4784,28 @@ export async function startApplication(
   // документ станет грязным сразу после открытия.
   documents.onDidOpen((document) => {
     void applyEditorConfig(document);
+  });
+
+  /**
+   * Тепловая карта несохранённых правок на мини-карте: пересчёт на каждое
+   * изменение документа. Отдаём списком строк, а не «где каретка», — карта
+   * показывает файл целиком, без прокрутки к месту.
+   *
+   * Считаем отложенным кадром: за один набор текста документ меняется на каждый
+   * символ, а карта нужна раз в кадр — иначе сравнение текстов шло бы десятки
+   * раз в секунду на файле в тысячу строк.
+   */
+  const changedLinesCache = createChangedLinesCache();
+  let changesFrame = 0;
+  documents.onDidChange(({ document }) => {
+    if (changesFrame !== 0) return;
+    changesFrame = requestAnimationFrame(() => {
+      changesFrame = 0;
+      const live = documents.get(document.path);
+      if (!live) return;
+      const lines = changedLinesCache.lines(live.value, live.savedText, live.version);
+      editors.setChangedLines(live.path, lines);
+    });
   });
 
   /** Настройки файла из `.editorconfig`. Нет правил — ничего не трогаем. */

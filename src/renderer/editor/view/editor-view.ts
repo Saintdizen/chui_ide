@@ -1929,6 +1929,16 @@ export class EditorView {
     this.minimap.setBookmarks(lines);
   }
 
+  /**
+   * Несохранённые правки на карте.
+   *
+   * Список строк считает хозяин документа (у представления нет базы — текста
+   * на диске), карта его только рисует и не перерисовывается зря.
+   */
+  setMinimapChanges(lines: readonly number[]): void {
+    this.minimap.setChanges(lines);
+  }
+
   /** Показать или спрятать миникарту. */
   setMinimap(on: boolean): void {
     if (this.minimapVisible === on) return;

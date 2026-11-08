@@ -39,6 +39,8 @@ export class TextDocument {
   private text: string;
   private currentVersion = 1;
   private savedVersion = 1;
+  /** Текст на момент последнего сохранения — база для списка правок. */
+  private savedBase: string;
   private diskMtimeMs = 0;
   /**
    * Каким концом строк файл лежит на диске. Модель документа всегда в `\n`, а
@@ -61,6 +63,8 @@ export class TextDocument {
   ) {
     this.uri = pathToUri(path);
     this.text = normalize(initialText);
+    // Открытый файл совпадает с диском: база правок пуста, карта чистая.
+    this.savedBase = this.text;
     this.eol = detectLineEnding(initialText);
     this.diskEol = this.eol;
     this._onDidChange = this.changes.event;
@@ -176,10 +180,22 @@ export class TextDocument {
     return edits.length;
   }
 
+  /**
+   * Текст на диске — база для тепловой карты правок.
+   *
+   * Хранится копией, хотя документ и так «знает» версию сохранения: версия
+   * говорит, ЧТО файл грязный, но не говорит, ЧТО именно изменено. Список правок
+   * нужен мини-карте, а сравнить текущее можно только с сохранённым текстом.
+   */
+  get savedText(): string {
+    return this.savedBase;
+  }
+
   /** Отмечает, что содержимое совпадает с диском. `mtimeMs` — время той записи. */
   markSaved(mtimeMs: number = this.diskMtimeMs): void {
     const wasDirty = this.dirty;
     this.savedVersion = this.currentVersion;
+    this.savedBase = this.text;
     this.diskEol = this.eol;
     this.diskMtimeMs = mtimeMs;
     // Событие — только когда пометка действительно снята: `markSaved` зовут и на

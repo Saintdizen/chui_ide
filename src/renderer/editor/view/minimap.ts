@@ -91,6 +91,8 @@ export interface MinimapOptions {
    * холст сам не перекрашивается — цвет надо спросить заново.
    */
   readonly bookmarkColor?: () => string;
+  /** Цвет правок: тем же правилом, что и закладки — спрашиваем у темы. */
+  readonly changeColor?: () => string;
   /** Перейти к ряду (поставить его в верх окна). */
   readonly scrollToRow: (row: number) => void;
   /** Ширина карты, px. */
@@ -104,6 +106,7 @@ export class Minimap {
   private readonly slider: HTMLElement;
   private readonly width: number;
   private bookmarks: readonly number[] = [];
+  private changes: readonly number[] = [];
 
   constructor(private readonly options: MinimapOptions) {
     this.width = options.width ?? 80;
@@ -131,6 +134,25 @@ export class Minimap {
       next.length === this.bookmarks.length && next.every((line, index) => line === this.bookmarks[index]);
     if (same) return;
     this.bookmarks = next;
+    this.render();
+  }
+
+  /**
+   * Несохранённые правки — тепловой картой вдоль всей карты.
+   *
+   * Строки с правками красим слева, самой широкой полосой: закладки справа,
+   * их немного и они точечные, а правок после большой вставки — сотни, и
+   * спутать одни с другими значило бы искать не там.
+   *
+   * Закраска не сплошной: три соседние изменённые строки сливаются в одно
+   * пятно, и карта показывает ДЫХАНИЕ правки, а не список строк.
+   */
+  setChanges(lines: readonly number[]): void {
+    const next = [...lines].sort((a, b) => a - b);
+    const same =
+      next.length === this.changes.length && next.every((line, index) => line === this.changes[index]);
+    if (same) return;
+    this.changes = next;
     this.render();
   }
 
@@ -164,6 +186,7 @@ export class Minimap {
     }
     ctx.globalAlpha = 1;
     this.drawBookmarks(ctx, height, rowCount, rowHeight, step);
+    this.drawChanges(ctx, height, rowCount, rowHeight, step);
   }
 
   /**
@@ -191,6 +214,28 @@ export class Minimap {
       const y = Math.min(height - markHeight, (line - 1) * rowHeight);
       ctx.fillRect(this.width - width, y, width, markHeight);
     }
+  }
+
+  /** Правки — слева, полупрозрачной полосой во всю высоту отведённого места. */
+  private drawChanges(
+    ctx: CanvasRenderingContext2D,
+    height: number,
+    rowCount: number,
+    rowHeight: number,
+    step: number,
+  ): void {
+    if (this.changes.length === 0 || rowCount <= 0) return;
+    const markHeight = Math.max(2, rowHeight * step);
+    const width = Math.max(3, Math.min(6, this.width / 5));
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = this.options.changeColor?.() ?? this.options.color();
+    for (const line of this.changes) {
+      if (line < 1 || line > rowCount) continue;
+      const y = Math.min(height - markHeight, (line - 1) * rowHeight);
+      ctx.fillRect(0, y, width, markHeight);
+    }
+    ctx.restore();
   }
 
   private positionSlider(height: number, rowCount: number): void {

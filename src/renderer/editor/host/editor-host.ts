@@ -705,6 +705,7 @@ export class EditorHost {
   private testOutcomes: ReadonlyMap<string, TestOutcome> = new Map();
   private readonly breakpoints = new Map<string, readonly BreakpointInput[]>();
   /** Строки закладок по файлам: список ведёт приложение, редактор только рисует значки. */
+  private readonly changedLines = new Map<string, readonly number[]>();
   private readonly bookmarks = new Map<string, readonly number[]>();
   private readonly coverageLines = new Map<string, ReadonlySet<number>>();
   /**
@@ -1816,6 +1817,7 @@ export class EditorHost {
     // Закладки — тоже на карту: точка на ней видна на весь файл, а значок в поле
     // слева — только у видимых строк.
     if (this.path === path) this.view.setMinimapBookmarks(this.bookmarks.get(path) ?? []);
+    if (this.path === path) this.view.setMinimapChanges(this.changedLines.get(path) ?? []);
     if (this.path === path) this.refreshOverview();
   }
 
@@ -2134,6 +2136,18 @@ export class EditorHost {
     if (breakpoints.length === 0) this.breakpoints.delete(path);
     else this.breakpoints.set(path, breakpoints);
     this.refreshDecorations(path);
+  }
+
+  /**
+   * Строки с несохранёнными правками — тепловой картой на мини-карте.
+   *
+   * Отдельно от `setBookmarks`: закладки справа и точечные, правки слева и
+   * сплошные — спутать их в одной полосе значило бы искать не там.
+   */
+  setChangedLines(path: string, lines: readonly number[]): void {
+    if (lines.length === 0) this.changedLines.delete(path);
+    else this.changedLines.set(path, lines);
+    if (this.path === path) this.view.setMinimapChanges(lines);
   }
 
   /** Строки закладок файла: пустой набор — значков закладок у файла нет. */

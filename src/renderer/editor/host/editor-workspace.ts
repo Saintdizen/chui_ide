@@ -1256,6 +1256,11 @@ export class EditorWorkspace {
     for (const pane of this.panes) pane.setBreakpoints(path, breakpoints);
   }
 
+  /** Несохранённые правки на мини-карте: во всех панелях файла сразу. */
+  setChangedLines(path: string, lines: readonly number[]): void {
+    for (const pane of this.panes) pane.setChangedLines(path, lines);
+  }
+
   setBookmarks(path: string, lines: readonly number[]): void {
     for (const pane of this.panes) pane.setBookmarks(path, lines);
   }
