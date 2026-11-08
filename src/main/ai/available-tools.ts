@@ -124,6 +124,9 @@ export function canRunTool(tool: AgentToolSpec, env: ToolAvailability): boolean 
   // отладчик, а человек — что агент запустил. Условие одно на все действия.
   if (tool.name === 'debug') return env.debug !== undefined && host !== undefined;
   if (tool.name === 'open_files') return host?.openFiles !== undefined;
+  // Сборка: резолвер команд живёт в main, но без окна агент не увидит, куда идёт
+  // вывод и что подтвердил человек, — условие одно на все скрипты.
+  if (tool.name === 'run') return host?.confirmCommand !== undefined;
   // Поиск одним именем: действия `code` и `sessions` без своей возможности
   // откажут словами в обработчике, а текстовый и документация есть всегда.
   if (tool.name === 'web') return canUseWebSearch(env) || env.webFetchEnabled;

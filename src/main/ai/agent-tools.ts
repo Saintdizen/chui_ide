@@ -44,6 +44,7 @@ import type { ToolContext, ToolOutcome } from './tool-context';
 import { checksAction } from './agent-checks';
 import { debugAction } from './agent-debug';
 import { openFiles } from './agent-open-files';
+import { runBuild } from './agent-run';
 import { readImage } from './agent-code';
 import { lspAction } from './agent-lsp';
 import { mindAction } from './agent-memory';
@@ -479,6 +480,8 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await checksAction(ctx, args);
       case 'run_tests':
         return await runTests(ctx, args);
+      case 'run':
+        return await runBuild(ctx, args);
       case 'project_map':
         return await projectMap(ctx.workspace);
       case 'debug':

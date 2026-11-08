@@ -58,6 +58,7 @@ export type AgentToolName =
   | 'checks'
   | 'debug'
   | 'open_files'
+  | 'run'
   | 'run_tests'
   | 'mcp'
   | 'edit'
@@ -316,6 +317,23 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         target: {
           type: 'string',
           description: 'Test file or test name; default all. After an edit, just its test.',
+        },
+      },
+    },
+  },
+  {
+    name: 'run',
+    side: 'main',
+    description:
+      'Run a project build or script: typecheck, build, lint, dev. The IDE picks the command from ' +
+      'the project (tsc, npm run) — do not hand-roll it through terminal. `script` names one; ' +
+      'without it the default build runs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        script: {
+          type: 'string',
+          description: 'package.json script or task: build, lint, typecheck.',
         },
       },
     },

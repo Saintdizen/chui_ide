@@ -61,6 +61,8 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   // Прошлые беседы и следы прогонов: журнал только читают, проекта не касаются.
   history: { readOnly: true, plan: true, alwaysAvailable: true },
   project_map: { readOnly: true, plan: true, alwaysAvailable: true },
+  // Сборка запускает код проекта: в плане и режиме «только чтение» её нет.
+  run: {},
   // Что открыто — такое же чтение, как карта, и нужно в каждом режиме,
   // включая план: спрашивать «что у тебя открыто» незачем, когда видно.
   open_files: { readOnly: true, plan: true, alwaysAvailable: true },
