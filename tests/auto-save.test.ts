@@ -73,6 +73,49 @@ describe('разбор настроек', () => {
 });
 
 describe('таймер автосохранения', () => {
+  /*
+   * Пока save() пишет (форматирование на сохранении, большой файл), человек
+   * мог набрать ещё, а окно — уйти в фон. Прежний `if (saving) return` выбрасывал
+   * такой запрос: таймер следующей правки снимался уходом фокуса, и правка
+   * оставалась в буфере до следующего ввода — или гибла при закрытии вкладки.
+   */
+  it('flush во время записи дожидается её и пишет ещё раз', async () => {
+    const releases: Array<() => void> = [];
+    const save = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    // flush снимает таймер и зовёт runSave сам — таймеров в этом тесте нет.
+    const controller = new AutoSave({
+      mode: () => 'afterDelay',
+      delay: () => 1000,
+      save,
+      schedule: () => 0,
+      cancel: () => undefined,
+    });
+
+    const first = controller.flush();
+    // `flush()` очищает таймер и зовёт runSave через `async`, но первая запись
+    // стартует сразу (видно по `releases`), поэтому второй flush честно попадает
+    // в «идёт запись» и обязан ответить после неё — досыпанием, не одним микротаском.
+    const second = controller.flush();
+    expect(save).toHaveBeenCalledTimes(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(save).toHaveBeenCalledTimes(1);
+
+    // Отпускаем первую запись: только теперь появляется вторая.
+    releases[0]!();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(save).toHaveBeenCalledTimes(2);
+
+    releases[1]!();
+    await first;
+    await second;
+  });
+
   it('пауза после правки не пишет, пока не истекла', () => {
     const { controller, saved, fireDelay } = standIn(() => 'afterDelay');
     controller.documentChanged();
@@ -139,3 +182,4 @@ describe('таймер автосохранения', () => {
     await Promise.resolve();
   });
 });
+

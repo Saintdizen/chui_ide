@@ -35,6 +35,11 @@ export class AutoSave {
   private readonly cancel: (handle: unknown) => void;
   /** Запись идёт: новое событие не должно запускать вторую. */
   private saving = false;
+  /**
+   * Запрос на запись, пришедший ПОКА шла запись (`flush` при закрытии вкладки,
+   * уход фокуса окна). Без него такой запрос молча терялся вместе с правкой.
+   */
+  private saveAgain = false;
 
   constructor(private readonly deps: AutoSaveDeps) {
     this.schedule = deps.schedule ?? ((run, ms) => setTimeout(run, ms));
@@ -100,12 +105,24 @@ export class AutoSave {
   }
 
   private async runSave(): Promise<void> {
-    if (this.saving) return;
+    // Запись идёт — запрос не выбрасываем, а копим: пока `save()` пишет, человек
+    // мог набрать ещё строку или окно уйти в фон. Забытый запрос — потерянная
+    // правка: следующий ввод назначит таймер, но flush()/уход фокуса его снимут.
+    if (this.saving) {
+      this.saveAgain = true;
+      return;
+    }
     this.saving = true;
     try {
       await this.deps.save();
     } finally {
       this.saving = false;
+      if (this.saveAgain) {
+        // Один проход, а не цикл: свежий запрос во время дописи снова поднимет флаг
+        // и будет обслужен своим вызовом, а не бесконечной очередью здесь.
+        this.saveAgain = false;
+        await this.runSave();
+      }
     }
   }
 }
