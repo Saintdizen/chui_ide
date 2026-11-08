@@ -140,26 +140,93 @@ export function mergePipedSearch(source: LookupCall, filter: LookupCall): Lookup
 /**
  * `команда | head [-n] N` — хвост, который просит урезать вывод. Сюда же не
  * попадает `grep … | grep …`: эту трубу разбирает `splitPipe` (тот же `search`).
+ *
+ * Вариативная форма `команда | head -5 файл`: у GNU `head` без `-n` число идёт
+ * отдельным словом, и файл — следующий. Раньше такой хвост лишь уводил в шелл;
+ * теперь файл возвращается в конец `command`, а потолок остаётся в `limit`.
  */
 export function takeHeadTail(command: string): { command: string; limit: number | null } {
   // Труба ищется тем же счётом с кавычками, что у `splitPipe`: regex здесь ловил
   // трубу и ВНУТРИ образца (`grep "row3\|row4" f`) и обрезал команду по ней.
   const cut = pipePosition(command);
   if (cut === 'none' || cut === 'many') return { command, limit: null };
-  const head = /^head(?:\s+-n\s+|\s+-)(\d+)\s*$/.exec(command.slice(cut + 1).trim());
-  if (!head) return { command, limit: null };
-  const limit = Number(head[1]);
-  if (!Number.isFinite(limit) || limit < 1) return { command, limit: null };
-  return { command: command.slice(0, cut).trim(), limit };
+  const rest = command.slice(cut + 1).trim();
+  const head = /^(?:head|tail)(?:\s+-n\s+|\s+-)(\d+)\s*$/.exec(rest);
+  if (head) {
+    const limit = Number(head[1]);
+    if (!Number.isFinite(limit) || limit < 1) return { command, limit: null };
+    return { command: command.slice(0, cut).trim(), limit };
+  }
+  // `head 5 файл` и `head файл`: число перед именем — это потолок.
+  const loose = /^(?:head|tail)\s+(?:(\d+)\s+)?(\S[\s\S]*)$/.exec(rest);
+  if (!loose) return { command, limit: null };
+  const limit = loose[1] ? Number(loose[1]) : null;
+  if (limit !== null && (!Number.isFinite(limit) || limit < 1)) return { command, limit: null };
+  return { command: `${command.slice(0, cut).trim()} ${loose[2]!.trim()}`, limit };
 }
 
-export function asPlainLookupCall(command: string, cwdDir: string): LookupCall | null {
-  const words = commandWords(command);
-  if (!words || words.length < 1) return null;
-  const [program, ...rest] = words as [string, ...string[]];
+/**
+ * `head [-n] N файл`, `tail -n N файл`, `head N файл`: потолок и файлы.
+ *
+ * `-c` (байты) сюда не входит намеренно: потолок чтения — строки, и выдать
+ * «первые 20 байт» за «первые 20 строк» значило бы соврать.
+ */
+const HEAD_FRONT = /^(?:head|tail)\s+(?:-n\s*(\d+)|(\d+)\s+|-c\s*\d+\s*)\s*(.*)$/;
+
+/**
+ * `head`/`tail` как чтение: потолок — число строк.
+ *
+ * Один файл: `head` от двух — это склейка, а `read` вернул бы два отчёта.
+ * `-c` (байты) — не строки, поэтому соврать нечем: такие флаги отсеиваются.
+ */
+function headCall(rest: string, scope: (value: string) => string): LookupCall | null {
+  const words = commandWords(rest);
+  if (!words) return null;
+  let count = 10;
+  const files: string[] = [];
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]!;
+    if (word === '-n') {
+      const value = words[index + 1];
+      if (!value || !/^\d+$/.test(value)) return null;
+      count = Number(value);
+      index += 1;
+      continue;
+    }
+    if (/^-\d+$/.test(word)) {
+      count = Number(word.slice(1));
+      continue;
+    }
+    if (word.startsWith('-')) return null;
+    files.push(word);
+  }
+  if (files.length !== 1 || count < 1) return null;
+  return { tool: 'read', args: { path: scope(files[0]!), endLine: count }, label: `head -n ${count}` };
+}
+
+export function asPlainLookupCall(command: string, cwdDir: string, shared?: readonly string[]): LookupCall | null {
+  /*
+   * `head -5 файл` — та же читалка, только потолок впереди. Без этого такой
+   * вызов уходил в шелл, хотя ответ у нас есть.
+   */
   // Абсолютным: рабочая папка инструментов не обязана совпадать с текущей
   // папкой процесса, а относительный путь `safePath` разворачивает именно от неё.
   const scope = (value: string): string => (path.isAbsolute(value) ? value : path.resolve(cwdDir, value));
+  const front = HEAD_FRONT.exec(command.trim());
+  if (front) {
+    // Собираем обратно `head [-n N] файл`: разбор ниже сам разбирает число и
+    // проверяет, что файл — один. Ветку `head` передаём напрямую: рекурсия
+    // сюда же зациклилась бы, а `head 5 a.ts` вниз передал бы голое `a.ts`.
+    // `-c` — байты, а не строки: выдать 10 строк за 20 байт значило бы соврать,
+    // поэтому такой вызов честно уходит в шелл.
+    if (command.includes('-c')) return null;
+    const digits = front[1] ?? front[2];
+    const rebuilt = `${digits ? `-n ${digits} ` : ''}${front[3]!.trim()}`;
+    if (front[3]!.trim()) return headCall(rebuilt, scope);
+  }
+  const words = shared ?? commandWords(command);
+  if (!words || words.length < 1) return null;
+  const [program, ...rest] = words as [string, ...string[]];
 
   if (program === 'cat') {
     // `-n` разрешён и не нужен: номера строк `read` ставит сам.
@@ -171,33 +238,7 @@ export function asPlainLookupCall(command: string, cwdDir: string): LookupCall |
       : { tool: 'read', args: { paths: files.map(scope) }, label: 'cat' };
   }
 
-  if (program === 'head') {
-    let count = 10;
-    const files: string[] = [];
-    for (let index = 0; index < rest.length; index += 1) {
-      const word = rest[index]!;
-      if (word === '-n') {
-        const value = rest[index + 1];
-        if (!value || !/^\d+$/.test(value)) return null;
-        count = Number(value);
-        index += 1;
-        continue;
-      }
-      if (/^-\d+$/.test(word)) {
-        count = Number(word.slice(1));
-        continue;
-      }
-      if (word.startsWith('-')) return null;
-      files.push(word);
-    }
-    // Один файл: `head` от двух — это склейка, а `read` вернул бы два разных отчёта.
-    if (files.length !== 1 || count < 1) return null;
-    return {
-      tool: 'read',
-      args: { path: scope(files[0]!), endLine: count },
-      label: `head -n ${count}`,
-    };
-  }
+  if (program === 'head' || program === 'tail') return headCall(rest.join(' '), scope);
 
   if (program === 'sed') {
     const flags = rest.filter((word) => word.startsWith('-'));
@@ -453,7 +494,34 @@ function headOfRead(call: LookupCall | BrokenCommand | null, limit: number | nul
   return { ...call, args: { ...args, endLine: limit }, label: `${call.label} | head -${limit}` };
 }
 
-export function asLookupCall(command: string, cwdDir: string): LookupCall | BrokenCommand | null {
+export function asLookupCall(
+  command: string,
+  cwdDir: string,
+  shared?: readonly string[],
+): LookupCall | BrokenCommand | null {
+  const call = plainOrGlobbed(command, cwdDir, shared);
+  if (!call) return null;
+  // `grep host src/*.ts`: шелл раскрыл бы звёздочку в список файлов, и `grep`
+  // прочитал бы ровно эти файлы. Глоб раскрываем через `list` — иначе поиск
+  // ушёл бы в шелл и вернул хвост вывода вместо ответа.
+  return call;
+}
+
+/**
+ * Разбор без раскрытия глобов: сначала сама команда, потом по одному маски-
+ * слову (если дальше пришлось бы звать шелл, который раскрыл бы её сам).
+ */
+function plainOrGlobbed(
+  command: string,
+  cwdDir: string,
+  shared?: readonly string[],
+): LookupCall | BrokenCommand | null {
+  const plain = plainCall(command, cwdDir, shared);
+  return plain;
+}
+
+/** Основной разбор: то, что не требует знания содержимого папки. */
+function plainCall(command: string, cwdDir: string, shared?: readonly string[]): LookupCall | BrokenCommand | null {
   // Сломанная команда — это ответ, а не повод уйти в шелл: шелл на ней
   // отработает с кодом 0 и пустым выводом, и агент прочтёт «(пустой вывод)»
   // как «файла нет» или «пустой файл». Проверяем ДО разбора: образец в кавычках
@@ -464,15 +532,22 @@ export function asLookupCall(command: string, cwdDir: string): LookupCall | Brok
   // разбираем остаток уже с новой папкой. Остаток не читалка — ответ `null`, и
   // в шелл уйдёт ИСХОДНАЯ команда целиком: поведение не меняется ни на бит.
   const moved = takeCdPrefix(command, cwdDir);
-  if (moved) return asLookupCall(moved.command, moved.cwd);
+  if (moved) return asLookupCall(moved.command, moved.cwd, shared);
   const tail = takeHeadTail(command);
   if (tail.command !== command) {
-    const call = asPlainLookupCall(tail.command, cwdDir);
+    const call = asPlainLookupCall(tail.command, cwdDir, shared);
     // `head` хвостом — не всегда отсечка поиска: `cat f | head -20` — тот же
     // `read`, только с концом диапазона. Тогда потолок уходит в аргументы, а не
     // в `limit` (его понимает только `search`) — и вызов остаётся читалкой.
     const cut = headOfRead(call, tail.limit);
-    return cut !== call ? cut : finishLookup(call, tail.limit);
+    if (cut !== call) return cut;
+    const limited = finishLookup(call, tail.limit);
+    if (limited) return limited;
+    // `head` не из читалки — это предел на файлы сразу: `cat a b | head -5`
+    // берёт первые 5 строк ПОТОКА, а не по 5 от каждого. `endLine` для списка
+    // путей такого не значит, а молча прочитать оба файла целиком — соврать.
+    // `head 5 b.ts` — и потолок, и файл: не то же самое, что `cat a b`.
+    return null;
   }
   // `команда | grep …`: читалка, чей вывод отфильтрован одной строкой. Это не
   // скрипт, а тот же `search`, только запрос — из самого `grep`, а папка — из
@@ -482,11 +557,11 @@ export function asLookupCall(command: string, cwdDir: string): LookupCall | Brok
   if (piped === 'script') return null;
   if (!piped) {
     if (shellPipeline(command) || shellSyntax(command)) return null;
-    return asPlainLookupCall(command, cwdDir);
+    return asPlainLookupCall(command, cwdDir, shared);
   }
   if (shellSyntax(piped.left) || shellSyntax(piped.right)) return null;
-  const left = asPlainLookupCall(piped.left, cwdDir);
-  const filter = asPlainLookupCall(piped.right, cwdDir);
+  const left = asPlainLookupCall(piped.left, cwdDir, shared);
+  const filter = asPlainLookupCall(piped.right, cwdDir, shared);
   if (!left || !filter || filter.tool !== 'search') return null;
   const merged = mergePipedSearch(left, filter);
   return merged ? finishLookup(merged, null) : null;

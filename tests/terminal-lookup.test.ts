@@ -121,6 +121,28 @@ describe('команда-читалка выполняется структур�
     expect(String(outcome.detail)).not.toContain('3 | const row3 = 3;');
   });
 
+  it('head с потолком впереди — тоже read, а не шелл', async () => {
+    // `head -5 f`, `head 5 f`, `head f`, `tail -n 20 f`: ответ у нас есть,
+    // а раньше такой вызов уходил в терминал.
+    for (const command of ['head -5 src/app.ts', 'head 5 src/app.ts', 'tail -n 20 src/app.ts']) {
+      const box = sandbox();
+      await run(box, command);
+      expect(box.calls, command).toEqual([]);
+    }
+  });
+
+  it('head -c (байты) в шелл: строки — не байты', async () => {
+    const box = sandbox();
+    await run(box, 'head -c 20 src/app.ts');
+    expect(box.calls).toHaveLength(1);
+  });
+
+  it('cat a b | head -5 идёт в шелл: потолок у потока, а не у каждого файла', async () => {
+    const box = sandbox();
+    await run(box, 'cat src/app.ts src/other.ts | head -5');
+    expect(box.calls).toHaveLength(1);
+  });
+
   it('sed -n «A,Bp» — это read диапазоном', async () => {
     const box = sandbox();
     const outcome = await run(box, "sed -n '3,5p' src/app.ts");
