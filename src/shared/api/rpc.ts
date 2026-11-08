@@ -316,6 +316,14 @@ export interface ChuiMethods {
    * renderer не имеет доступа к файловой системе и не должен его получать.
    */
   'dialog.pickImages': { params: void; result: PickedImage[] };
+  /**
+   * Выбор ОДНОГО существующего файла. Нужен импорту карт клавиш: набирать
+   * путь к `keybindings.json` руками — работа, которую делает диалог.
+   */
+  'dialog.openFile': {
+    params: { title?: string; filters?: Array<{ name: string; extensions: string[] }> };
+    result: { path: string | null };
+  };
 
   'workspace.open': { params: { path: string }; result: WorkspaceInfo };
   'workspace.readDir': { params: { path: string }; result: DirEntry[] };

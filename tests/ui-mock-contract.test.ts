@@ -100,6 +100,8 @@ const NOT_MOCKED: Record<string, string[]> = {
   'отмена одного вызова живёт в main (AbortController прогона)': ['ai.abortTool'],
   // Снимок окна снимает main (capturePage) и коммит читает main (git).
   'поиск импортирующих читает диск целиком: мок отдаёт пустое': ['workspace.importers'],
+  // Импорт карт клавиш: файл выбирает системный диалог, его в моке нет.
+  'выбор файла для импорта клавиш живёт в main (showOpenDialog)': ['dialog.openFile'],
   'снимок окна и коммит живут в main: в моке окна их нет': [
     'window.captureScreenshot',
     'git.commitShow',

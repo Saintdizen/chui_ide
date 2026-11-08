@@ -67,6 +67,16 @@ export function registerDialogMethods(router: RpcRouter, deps: RpcServices): voi
     return { path: result.canceled ? null : (result.filePaths[0] ?? null) };
   });
 
+  // Выбор одного файла (импорт карт клавиш): фильтры даёт вызывающий.
+  router.register('dialog.openFile', async (params: ParamsOf<'dialog.openFile'>) => {
+    const result = await dialog.showOpenDialog({
+      title: params.title ?? 'Выбрать файл',
+      properties: ['openFile'],
+      ...(params.filters ? { filters: params.filters } : {}),
+    });
+    return { path: result.canceled ? null : (result.filePaths[0] ?? null) };
+  });
+
   // Сохранение ПОД ДРУГИМ ИМЕНЕМ (Save As): путь выбирает системный диалог, а не мы.
   // Отдаём ему папку и имя текущего файла — диалог открывается там, где файл лежит,
   // а имя можно править, а не набирать заново. Подтверждение перезаписи уже

@@ -118,6 +118,7 @@ import {
 } from "./core/editor-mode-commands";
 import { registerFileSaveCommands } from "./core/file-save-commands";
 import { registerFileTabCommands } from "./core/file-tab-commands";
+import { registerKeymapImportCommands } from './core/keymap-import-command';
 import { registerExplorerCommands } from "./core/explorer-commands";
 import { registerRunCommands } from "./core/run-commands";
 import { registerPythonCommands } from "./core/python-commands";
@@ -3722,6 +3723,16 @@ export async function startApplication(
   // Дерево, рабочая область и уведомления — в `core/explorer-commands.ts`: сами команды
   // решают, что перерисовать и что сказать человеку, а модели дерева и области живут у
   // себя. `applySettings` передаём лениво — она объявлена ниже, а нужна в момент вызова.
+  // Импорт чужих карт клавиш: VS Code и IDEA — по команде на каждую.
+  registerKeymapImportCommands(define, {
+    rpc,
+    current: () => rebuildSettings().keybindings.overrides ?? [],
+    apply: (overrides) => {
+      void saveSettingsPatch({ keybindings: { overrides } }).catch(() => undefined);
+    },
+    notify: (message, kind) => showToast(message, kind),
+  });
+
   registerExplorerCommands(define, {
     workspace,
     explorer,
