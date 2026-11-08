@@ -10,6 +10,7 @@ import {
   type EditorSettings,
   type ExplorerSettings,
   type GitSettings,
+  type SavedLayout,
   type LayoutSettings,
   type LspSettings,
   type ReasoningEffort,
@@ -23,6 +24,7 @@ import { sanitizeEditorFontSize } from '../shared/editor-font-scale';
 import { normalizeFormatterChoice } from '../shared/formatter';
 import { COMPACT_AT_TOKENS, COMPACT_EVERY_TURNS } from '../shared/context-fit';
 import { normalizeFavorites } from '../shared/favorites';
+import { sanitizePresets } from '../shared/layout-presets';
 import { parseFsAddress, formatFsAddress } from '../shared/fs-address';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { normalizeAgentHooks, type AgentHookConfig } from '../shared/agent-hooks';
@@ -165,6 +167,11 @@ interface StoredSettings {
   appearance: AppearanceSettings;
   workspace: WorkspaceSettings;
   layout: LayoutSettings;
+  /**
+   * Именованные раскладки: «дебаг», «ревизия», «литература». Хранятся рядом с
+   * общей раскладкой, а не в файле проекта: это привычка машины, а не проекта.
+   */
+  layoutPresets: SavedLayout[];
   lsp: LspSettings;
   git: GitSettings;
   keybindings: KeybindingSettings;
@@ -403,6 +410,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
     dockVisible: false,
     editorVisible: true,
   },
+  layoutPresets: [],
   lsp: {
     // По умолчанию ВКЛЮЧЕНО: часть серверов едет вместе с IDE (см.
     // `shared/lsp-bundled.ts`) и подставляется сама, поэтому подсказки и переходы
@@ -565,6 +573,7 @@ export class SettingsStore {
         remoteRoots: [...this.data.workspace.remoteRoots],
       },
       layout: { ...this.data.layout },
+      layoutPresets: this.data.layoutPresets.map((preset) => ({ ...preset })),
       lsp: {
         enabled: this.data.lsp.enabled,
         trace: this.data.lsp.trace,
@@ -693,6 +702,7 @@ export class SettingsStore {
     }
     if (patch.layout) {
       this.data.layout = sanitizeLayout({ ...this.data.layout, ...patch.layout });
+      if (patch.layoutPresets) this.data.layoutPresets = sanitizePresets(patch.layoutPresets);
     }
     if (patch.lsp) {
       this.data.lsp = sanitizeLsp({ ...this.data.lsp, ...patch.lsp });
@@ -1210,6 +1220,9 @@ function loadSettings(filePath: string): StoredSettings {
       customTheme: sanitizeThemeFile(parsed.appearance?.customTheme),
     },
     layout: sanitizeLayout({ ...DEFAULT_SETTINGS.layout, ...(parsed.layout ?? {}) }),
+    // Раскладки-заготовки: мусорные записи отбрасываем молча — лучше пустой
+    // список, чем пункт меню, который падает при выборе.
+    layoutPresets: sanitizePresets(parsed.layoutPresets),
     workspace: {
       ...DEFAULT_SETTINGS.workspace,
       ...(parsed.workspace ?? {}),

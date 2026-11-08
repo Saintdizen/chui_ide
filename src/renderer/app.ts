@@ -3958,6 +3958,42 @@ export async function startApplication(
     toggleMinimap,
     regexTester,
     showToast,
+    // Именованные раскладки: «дебаг», «ревизия». Хранятся в общих настройках,
+    // а не в проекте: это привычка машины.
+    presets: {
+      get: () => settings.layoutPresets,
+      save: (layouts) => {
+        // Патч целиком: раскладок немного, а поштучная правка списка дала бы
+        // гонку «сохранил, пока другой экземпляр удалял».
+        const next = { ...settings, layoutPresets: layouts };
+        applySettings(next);
+        void saveSettingsPatch({ layoutPresets: layouts }).catch(() => undefined);
+      },
+      askName: (title, value) =>
+        new Promise<string | null>((resolve) => {
+          conditionInput.open({
+            title,
+            label: 'Имя раскладки',
+            value,
+            confirmLabel: 'Готово',
+            onAccept: (answer) => resolve(answer.trim().length > 0 ? answer.trim() : null),
+            onCancel: () => resolve(null),
+          });
+        }),
+      snapshot: () => ({
+        sidebarSize: layout.sidebarSize,
+        rightSize: layout.rightSize,
+        dockSize: layout.dockSize,
+        sidebarVisible: layout.sidebarVisible,
+        rightVisible: layout.rightVisible,
+        dockVisible: layout.dockVisible,
+        sidebarPosition: layout.sidebarPosition,
+        editorVisible: layout.editorVisible,
+      }),
+      // Применяем тем же путём, что раскладку проекта: `withoutPersist` не даёт
+      // промежуточным шагам записать раскладку в проектный файл.
+      apply: (saved) => applyLayoutSettings(saved),
+    },
     uiScale: {
       get: () => settings.appearance.uiScale,
       // Тем же путём, что и список в настройках: значение одно и живёт в

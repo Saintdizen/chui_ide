@@ -13,6 +13,7 @@ export * from './api/window';
 export * from './api/terminal';
 export * from './api/git';
 export * from './api/settings';
+export * from './layout-presets';
 export * from './api/python';
 export * from './api/lsp';
 export * from './api/debug';

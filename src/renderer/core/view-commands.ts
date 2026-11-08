@@ -1,6 +1,8 @@
 import { editorFontSizeLabel, stepEditorFontSize } from '../../shared/editor-font-scale';
 import { stepUiScale, uiScaleLabel } from '../../shared/ui-scale';
 import type { SidebarPosition } from '../../shared/api/settings';
+import type { LayoutSettings } from '../../shared/api/settings';
+import { dropLayout, findLayout, saveLayout, type SavedLayout } from '../../shared/layout-presets';
 import type { ToastKind, ToastOptions } from '../ui/toast';
 import type { DefineCommand } from './command-args';
 
@@ -45,6 +47,24 @@ export interface ViewCommandDeps {
   dock: ViewDock;
   /** Кнопки вида в шапке обязаны отражать новое состояние сразу. */
   syncViewButtons(): void;
+  /**
+   * Именованные раскладки панелей: сохранить текущую и вернуть одну командой.
+   *
+   * Это привычка машины («дебаг», «ревизия»), поэтому живёт в общих
+   * настройках, а не в файле проекта — и снимается целиком, как и читается.
+   */
+  presets: {
+    get(): readonly SavedLayout[];
+    save(layouts: SavedLayout[]): void;
+    /** Спросить имя: `null` — человек передумал. */
+    askName(title: string, value: string): Promise<string | null>;
+    /**
+     * Снимок и возврат раскладки. Возврат ПОСЛЕ снимка: применять через
+     * `withoutPersist`, иначе проектная раскладка перезапишется по дороге.
+     */
+    snapshot(): LayoutSettings;
+    apply(layout: LayoutSettings): void;
+  };
   /** Спрятанный макет сохранять нельзя — прячем внутри этого. */
   withoutPersist(run: () => void): void;
   /** Дзен-режим помнит, что было видно: состояние живёт в замыкании окна. */
@@ -104,6 +124,72 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
   define({ id: 'view.toggleSidebar', title: 'Боковая панель', category: 'Вид', keybinding: 'Ctrl+B' }, () => {
     layout.setSidebarVisible(!layout.sidebarVisible);
     syncViewButtons();
+  });
+
+  /**
+   * Сохранить текущую раскладку под именем.
+   *
+   * Имя спрашиваем всегда, даже если раскладка уже была: «перезаписать
+   * дебаг» и «сохранить как дебаг-2» — разные намерения, и угадывать между
+   * ними значило бы терять чужую раскладку молча.
+   */
+  define({ id: 'view.savePreset', title: 'Сохранить раскладку как…', category: 'Вид' }, async () => {
+    const name = await deps.presets.askName('Сохранить раскладку как', '');
+    if (name === null) return;
+    const layouts = saveLayout(deps.presets.get(), name, deps.presets.snapshot());
+    deps.presets.save(layouts);
+    showToast(`Раскладка «${name.trim()}» сохранена`, 'info');
+  });
+
+  /**
+   * Вернуть раскладку по имени. Без имени — список: пункт палитры не знает,
+   * какую из них хотят, а меню настроек открывает ту же команду с именем.
+   */
+  define(
+    { id: 'view.applyPreset', title: 'Вернуть раскладку', category: 'Вид', keywords: ['preset'] },
+    async (raw?: unknown) => {
+      const layouts = deps.presets.get();
+      if (layouts.length === 0) {
+        showToast('Сохранённых раскладок нет', 'info');
+        return;
+      }
+      const name =
+        typeof raw === 'string' && raw.length > 0
+          ? raw
+          : await deps.presets.askName(
+              `Раскладка: ${layouts.map((entry) => entry.name).join(', ')}`,
+              layouts[0]!.name,
+            );
+      if (name === null) return;
+      const layout = findLayout(layouts, name);
+      // Не нашли — молчим не молча: промах по имени и «нет такой» снаружи
+      // выглядят одинаково, а разница важна (опечатка против пустого списка).
+      if (layout === null) {
+        showToast(`Нет раскладки «${name}»`, 'error');
+        return;
+      }
+      deps.presets.apply(layout);
+      showToast(`Раскладка «${name}» включена`, 'info');
+    },
+  );
+
+  define({ id: 'view.dropPreset', title: 'Удалить раскладку', category: 'Вид' }, async (raw?: unknown) => {
+    const layouts = deps.presets.get();
+    const name =
+      typeof raw === 'string' && raw.length > 0
+        ? raw
+        : await deps.presets.askName(
+            `Удалить раскладку: ${layouts.map((entry) => entry.name).join(', ')}`,
+            layouts[0]?.name ?? '',
+          );
+    if (name === null) return;
+    const next = dropLayout(layouts, name);
+    if (next.length === layouts.length) {
+      showToast(`Нет раскладки «${name}»`, 'error');
+      return;
+    }
+    deps.presets.save(next);
+    showToast(`Раскладка «${name}» удалена`, 'info');
   });
 
   // Сторона боковой панели — часть макета, как её ширина и видимость, поэтому

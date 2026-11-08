@@ -146,6 +146,8 @@ export interface DebugExceptionFilters {
   caught: boolean;
 }
 
+import type { SavedLayout } from '../layout-presets';
+
 export interface Settings {
   ai: AiSettings;
   editor: EditorSettings;
@@ -154,6 +156,8 @@ export interface Settings {
   appearance: AppearanceSettings;
   workspace: WorkspaceSettings;
   layout: LayoutSettings;
+  /** Именованные раскладки: привычка машины («дебаг», «ревизия»), не проекта. */
+  layoutPresets: SavedLayout[];
   lsp: LspSettings;
   git: GitSettings;
   /** Изменённые горячие клавиши: поверх сочетаний по умолчанию. */
@@ -340,6 +344,8 @@ export interface SettingsPatch {
   run?: Partial<RunSettings>;
   appearance?: Partial<AppearanceSettings>;
   layout?: Partial<LayoutSettings>;
+  /** Полный список именованных раскладок: их немного, кладём целиком. */
+  layoutPresets?: SavedLayout[];
   workspace?: WorkspaceSettingsPatch;
   lsp?: Partial<LspSettings>;
   git?: Partial<GitSettings>;
