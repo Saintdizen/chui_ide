@@ -120,10 +120,41 @@ export function looseScore(name: string, pattern: string): number {
   return relevance(name, pattern, positions);
 }
 
-/** Совпадает ли знак имени с набранным знаком: заглавная требует заглавной, строчная — любой. */
+/**
+ * Пары «латинская → русская» для набранного не в той раскладке.
+ *
+ * Человек печатает `bcrnfr` вместо `текст` — и подсказка молчит, хотя имя
+ * он знает точно. Ошибка дешёвая и частая; исправляется сравнением знаков по
+ * соседним клавишам. По одной букве — только односторонне (лат → рус):
+ * строчная `b` — это ещё и `и`, но набравший латиницу этим словом ничего не
+ * искал.
+ */
+const LATIN_TO_CYRILLIC: Readonly<Record<string, string>> = {
+  q: 'й', w: 'ц', e: 'у', r: 'к', t: 'е', y: 'н', u: 'г', i: 'ш', o: 'щ', p: 'з',
+  '[': 'х', ']': 'ъ', a: 'ф', s: 'ы', d: 'в', f: 'а', g: 'п', h: 'р', j: 'о',
+  k: 'л', l: 'д', ';': 'ж', "'": 'э', z: 'я', x: 'ч', c: 'с', v: 'м', b: 'и',
+  n: 'т', m: 'ь', ',': 'б', '.': 'ю', '`': 'ё',
+};
+
+/** Обратная таблица: русская → латинская. Строится один раз из прямой. */
+const CYRILLIC_TO_LATIN: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(LATIN_TO_CYRILLIC).map(([latin, cyrillic]) => [cyrillic, latin]),
+);
+
+function byLayout(char: string, table: Readonly<Record<string, string>>): string | undefined {
+  const lower = char.toLowerCase();
+  const mapped = table[lower];
+  if (!mapped) return undefined;
+  return char === lower ? mapped : mapped.toUpperCase();
+}
+
 function charMatches(candidate: string, wanted: string): boolean {
   if (isUpper(wanted)) return candidate === wanted;
-  return candidate.toLowerCase() === wanted.toLowerCase();
+  if (candidate.toLowerCase() === wanted.toLowerCase()) return true;
+  // Набрано не в той раскладке: `bcrnfr` ≡ `текст`. Одна замена знака — и совпало.
+  const swapped = byLayout(wanted, LATIN_TO_CYRILLIC) ?? byLayout(wanted, CYRILLIC_TO_LATIN);
+  if (swapped !== undefined && candidate.toLowerCase() === swapped.toLowerCase()) return true;
+  return false;
 }
 
 /** Начало слова в имени: самый первый знак, после разделителя, после цифры или горб (`aB`). */
