@@ -486,7 +486,10 @@ export async function startApplication(
    * у всех панелей общий, и слово, добавленное где-то, снимает отметку везде.
    */
   const spell = new SpellCheck();
+  // Три слоя, и нижний — проектный: `spellWords` из `.chui_ide`, если проект открыт.
+  // Слово, добавленное в проекте, живёт в его репозитории, а не в настройках человека.
   spell.setUserWords(settings.editor.spellWords);
+  spell.setProjectWords(settings.editor.spellProjectWords ?? []);
   void rpc
     .request("spell.dictionary")
     .then((dictionary) => spell.setDictionary(dictionary.words))
@@ -556,11 +559,13 @@ export async function startApplication(
       // Проверка орфографии: словарь общий, настройка — живой геттер.
       spellcheck: spell,
       spellcheckEnabled: () => settings.editor.spellcheck,
-      // Слово, добавленное в словарь, запоминаем в настройках — тем же путём, что
-      // и прочие правки: секция `editor` уходит в .chui_ide (или в userData без проекта).
+      // Слово, добавленное в словарь. С открытым проектом `editor` целиком уходит
+      // в `.chui_ide/settings.json` (`splitSettingsPatch`), поэтому пишем свой список
+      // `spellProjectWords`: слово живёт с кодом, а не с машиной. Без проекта тот же
+      // список ляжет в общие настройки человека — читаем его оттуда же.
       spellSaveWord: (word) => {
         void saveSettingsPatch({
-          editor: { spellWords: [...settings.editor.spellWords, word] },
+          editor: { spellProjectWords: [...(settings.editor.spellProjectWords ?? []), word] },
         }).catch(() => undefined);
       },
       snippets: () => [
@@ -4522,8 +4527,12 @@ export async function startApplication(
       document.languageId = languageFromPath(document.path);
     }
     editors.refreshLanguages();
-    // Словарь человека изменили — пересобираем модель (она сама перепроверит текст).
-    if (plan.spellWords) spell.setUserWords(next.editor.spellWords);
+    // Словарь изменили — пересобираем модель (она сама перепроверит текст).
+    // Проектный список тоже: правка слова в открытом проекте ложится в `.chui_ide`.
+    if (plan.spellWords || plan.spellProjectWords) {
+      spell.setUserWords(next.editor.spellWords);
+      spell.setProjectWords(next.editor.spellProjectWords ?? []);
+    }
     // Автосохранение сменили — режим или паузу: снимаем уже назначенную запись или
     // ставим новую с новой задержкой. Иначе правка ждала бы прежней задержки.
     if (plan.autoSave) autoSave.settingsChanged();

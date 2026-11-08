@@ -9,6 +9,10 @@
  * Словарь системы приходит из main (в песочнице renderer файлов не читает); слова
  * человека хранятся в настройках; пропуск действует, пока открыто окно, — как в других
  * редакторах: «не исправлять это здесь» не должно тянуться в следующий запуск.
+ *
+ * Слова проекта — четвёртый слой, но живёт он в словаре человека и отделён там по
+ * пометке (см. `addUserWord`): одно и то же слово в одном проекте — термин, в другом —
+ * опечатка, и держать его в общих настройках значило бы тащить чужие имена за собой.
  */
 
 import { SpellDictionary } from '../../shared/spellcheck';
@@ -19,6 +23,8 @@ export class SpellCheck {
   private system = new SpellDictionary();
   /** Слова человека — хранятся в настройках и переживают перезапуск. */
   private user = new SpellDictionary();
+  /** Слова этого проекта: термины и имена из его кода, а не из всего мира. */
+  private project = new SpellDictionary();
   /** Пропущенные на сеанс: в словарь не пишем, живут до закрытия окна. */
   private readonly ignored = new Set<string>();
 
@@ -28,7 +34,7 @@ export class SpellCheck {
 
   /** Знает ли модель хоть слово — без словаря проверять нечего. */
   get ready(): boolean {
-    return this.system.size > 0 || this.user.size > 0;
+    return this.system.size > 0 || this.user.size > 0 || this.project.size > 0;
   }
 
   /** Заменить словарь системы (пришёл из main по RPC). */
@@ -43,9 +49,29 @@ export class SpellCheck {
     this.emitter.fire();
   }
 
-  /** Запомнить слово как «своё»: с этого момента оно не ошибка. */
+  /**
+   * Заменить слова проекта. Пустой список — проект сменился или своих слов нет;
+   * прежние при этом снимаются, иначе чужие термины пережили бы переход к другому проекту.
+   */
+  setProjectWords(words: readonly string[]): void {
+    this.project = new SpellDictionary(words);
+    this.emitter.fire();
+  }
+
+  /** Сколько слов знает проект: столько покажем в настройках и меню. */
+  get projectSize(): number {
+    return this.project.size;
+  }
+
+  /** Запомнить слово как «своё» во всём приложении. */
   addUserWord(word: string): void {
     this.user.add(word);
+    this.emitter.fire();
+  }
+
+  /** Запомнить слово как термин этого проекта. */
+  addProjectWord(word: string): void {
+    this.project.add(word);
     this.emitter.fire();
   }
 
@@ -55,21 +81,25 @@ export class SpellCheck {
     this.emitter.fire();
   }
 
-  /** Знает ли слово кто-нибудь: пропущенное, своё или словарь системы. */
+  /** Знает ли слово кто-нибудь: пропущенное, своё, слова проекта или системы. */
   knows(word: string): boolean {
     const value = word.toLowerCase();
     if (this.ignored.has(value)) return true;
-    return this.user.has(value) || this.system.has(value);
+    return this.user.has(value) || this.project.has(value) || this.system.has(value);
   }
 
   /**
-   * Подсказки-замены для слова с опечаткой. Свои слова идут вперёд системных: то, что
-   * человек внёс сам, ему и ближе. Дубли (одно слово в обоих словарях) схлопываются.
+   * Подсказки-замены для слова с опечаткой. Свои и проектные идут вперёд системных: то,
+   * что человек внёс сам (или что лежит в его проекте), ему и ближе. Дубли схлопываются.
    */
   suggest(word: string, limit = 5): string[] {
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const candidate of [...this.user.suggest(word, limit), ...this.system.suggest(word, limit)]) {
+    for (const candidate of [
+      ...this.user.suggest(word, limit),
+      ...this.project.suggest(word, limit),
+      ...this.system.suggest(word, limit),
+    ]) {
       if (seen.has(candidate)) continue;
       seen.add(candidate);
       out.push(candidate);

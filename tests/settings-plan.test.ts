@@ -19,6 +19,7 @@ describe('план применения настроек', () => {
     const value = settings();
     expect(settingsPlan(value, structuredClone(value))).toEqual({
       spellWords: false,
+      spellProjectWords: false,
       autoSave: false,
       warmLsp: false,
       imports: false,

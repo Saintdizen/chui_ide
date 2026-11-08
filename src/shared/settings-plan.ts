@@ -20,6 +20,8 @@ import type { Settings } from './api';
 export interface SettingsPlan {
   /** Пересобрать модель словаря человека: он мог измениться. */
   spellWords: boolean;
+  /** Пересобрать проектный словарь: правили `.chui_ide` или открыли другой проект. */
+  spellProjectWords: boolean;
   /** Перезапустить таймер автосохранения: сменили режим или паузу. */
   autoSave: boolean;
   /** Разбудить языковые серверы: их включили тумблером. */
@@ -44,6 +46,10 @@ function same(a: unknown, b: unknown): boolean {
 export function settingsPlan(previous: Settings, next: Settings): SettingsPlan {
   return {
     spellWords: !same(previous.editor.spellWords, next.editor.spellWords),
+    spellProjectWords: !same(
+      previous.editor.spellProjectWords ?? [],
+      next.editor.spellProjectWords ?? [],
+    ),
     autoSave:
       previous.editor.autoSave !== next.editor.autoSave ||
       previous.editor.autoSaveDelayMs !== next.editor.autoSaveDelayMs,
