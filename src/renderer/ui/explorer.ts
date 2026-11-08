@@ -958,6 +958,32 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   /* ── контекстное меню ──────────────────────────────────────────────────── */
 
+  /**
+   * «Кто ссылается»: список импортирующих файлов в панели поиска.
+   *
+   * Показываем через поиск, а не отдельным окном: там уже есть переход к
+   * строке, своя история и «закрыть всё». Отдельное окно для одного вопроса
+   * жило бы рядом с поиском и делало бы то же самое иначе.
+   */
+  const showImporters = async (entry: DirEntry, event: MouseEvent): Promise<void> => {
+    try {
+      const { files } = await deps.rpc.request('workspace.importers', { path: entry.path });
+      const name = nameOf(entry.path);
+      // Ноль ссылок — это ответ, а не пустота: папку библиотеки никто не
+      // импортирует, и молчание заставило бы думать, что меню не сработало.
+      if (files.length === 0) {
+        deps.notify?.(`На «${name}» никто не ссылается`, 'info');
+        return;
+      }
+      // Показ просмотром, а не панелью поиска: поиск ищет по тексту и показал
+      // бы строки с совпадением, а нужен список ФАЙЛОВ, которые ссылаются.
+      // Он уже умеет листаться по списку — это тот же «просмотр нескольких».
+      deps.peekFiles?.(files, menuAnchor(event));
+    } catch (error) {
+      deps.notify?.(error instanceof Error ? error.message : String(error), 'error');
+    }
+  };
+
   const openMenu = (entry: DirEntry | null, event: MouseEvent): void => {
     event.preventDefault();
     event.stopPropagation();
@@ -1037,8 +1063,17 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
                     { separator: true as const },
                   ]
                 : []),
+          ...(entryIsDirectory(entry)
+            ? [
+                // Кто ссылается на папку — обычно ноль строк, но когда папку
+                // переименовывают, вопрос «кто на неё смотрит» важнее ответа.
+                { label: 'Кто ссылается на папку', onSelect: () => void showImporters(entry, event) },
+                { separator: true as const },
+              ]
+            : []),
           ...(entryIsFile(entry)
             ? [
+                { label: 'Кто ссылается на файл', onSelect: () => void showImporters(entry, event) },
                 ...(deps.peekFiles
                   ? [
                       {
@@ -1093,6 +1128,29 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             label: 'Открыть терминал в папке',
             onSelect: () => void deps.commands.execute('terminal.openIn', parent),
           },
+          // Поиск внутри выбранного: иначе лишние попадания по всему проекту
+          // разбирают глазами, хотя человек уже сказал, где искать.
+          {
+            label: entryIsDirectory(entry) ? 'Найти в этой папке' : 'Найти в этом файле',
+            onSelect: () => void deps.commands.execute('search.inFolder', entry.path),
+          },
+          // Свернуть только то, что ВНУТРИ: сама папка остаётся раскрытой —
+          // иначе после сворачивания не видно ни её, ни того, что рядом.
+          ...(entryIsDirectory(entry)
+            ? [
+                {
+                  label: 'Свернуть вложенное',
+                  onSelect: () => {
+                    const prefix = `${entry.path}/`;
+                    for (const path of [...expanded]) {
+                      if (path === entry.path || !path.startsWith(prefix)) continue;
+                      expanded.delete(path);
+                    }
+                    render();
+                  },
+                },
+              ]
+            : []),
           {
             label: 'Открыть терминал системы',
             onSelect: () => void deps.commands.execute('terminal.openExternal', parent),

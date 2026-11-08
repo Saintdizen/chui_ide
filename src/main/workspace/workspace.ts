@@ -29,7 +29,7 @@ import { absoluteSearchPath, escapesRoot, isInsideRoot } from './path-guard';
 import { globToRegExp } from '../../shared/glob';
 import { parseRipgrepJson, ripgrepArgs } from '../../shared/ripgrep';
 import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
-import { importStyleOf, rewriteImports } from '../../shared/import-rewrite';
+import { importStyleOf, importsOf, rewriteImports } from '../../shared/import-rewrite';
 import { replaceAll } from '../../shared/replace';
 import type {
   StructuralProjectMatches,
@@ -1252,6 +1252,39 @@ export class WorkspaceService {
    * здесь только обход и запись. Файлы внутри самой переименованной папки не
    * трогаем: их собственные относительные пути от переезда не изменились.
    */
+  /**
+   * Кто ссылается на файл или папку — для меню проводника.
+   *
+   * Правила разбора те же, что у `updateImports` (`importsOf` в
+   * `shared/import-rewrite.ts`): сравнение по тому, как файл писал бы путь к
+   * цели, а не «заканчивается ли на имя файла» — иначе `./bar` в `src/a.ts` и
+   * в `src/x/a.ts` считались бы одной ссылкой на чужой файл.
+   *
+   * Обход тот же, что при переименовании: файлы до `MAX_FILE_BYTES`, разбор
+   * только тех языков, что знает `importStyleOf`.
+   */
+  async findImporters(targetPath: string): Promise<{ files: string[] }> {
+    const root = this.requireRoot();
+    const target = path.relative(root, path.resolve(targetPath)).split(path.sep).join('/');
+    if (!target || target.startsWith('..')) return { files: [] };
+
+    const found: string[] = [];
+    for (const file of await this.collectFiles()) {
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      if (relative === target) continue;
+      if (!importStyleOf(relative)) continue;
+
+      const stat = await fs.stat(file).catch(() => null);
+      if (!stat || stat.size > MAX_FILE_BYTES) continue;
+      const buffer = await fs.readFile(file).catch(() => null);
+      if (!buffer) continue;
+
+      const hits = importsOf(buffer.toString('utf8').replace(/\r\n/g, '\n'), { file: relative, target });
+      if (hits.length > 0) found.push(file);
+    }
+    return { files: found };
+  }
+
   async updateImports(oldPath: string, newPath: string): Promise<{ files: string[] }> {
     const root = this.requireRoot();
     // Сначала спрашиваем языковой сервер (`workspace/willRenameFiles`): он знает

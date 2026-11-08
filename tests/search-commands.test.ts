@@ -25,9 +25,14 @@ function setup() {
 }
 
 describe('registerSearchCommands', () => {
-  it('регистрирует три команды поиска', () => {
+  it('регистрирует четыре команды поиска', () => {
     const { commands } = setup();
-    expect([...commands.keys()].sort()).toEqual(['editor.structuralReplace', 'search.project', 'search.todo']);
+    expect([...commands.keys()].sort()).toEqual([
+      'editor.structuralReplace',
+      'search.inFolder',
+      'search.project',
+      'search.todo',
+    ]);
   });
 
   it('поиск по проекту только показывает панель, запрос не запускает', async () => {

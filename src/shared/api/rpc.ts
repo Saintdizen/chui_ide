@@ -412,6 +412,11 @@ export interface ChuiMethods {
    * папку): относительные спецификаторы в файлах проекта переводятся на новый путь.
    */
   'workspace.updateImports': { params: { oldPath: string; newPath: string }; result: { files: string[] } };
+  /**
+   * Кто ссылается на файл или папку (импорты, реэкспорты, `from … import`).
+   * Для меню проводника: «найти ссылки на файл» и «показать зависимости».
+   */
+  'workspace.importers': { params: { path: string }; result: { files: string[] } };
   /** Копия файла или папки: существующий объект в цели не перетирается. */
   'workspace.copy': { params: { from: string; to: string }; result: { path: string } };
   /**

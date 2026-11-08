@@ -279,3 +279,78 @@ function prefixReplace(module: string, oldModule: string, newModule: string): st
   if (module !== oldModule && !module.startsWith(`${oldModule}.`)) return null;
   return newModule + module.slice(oldModule.length);
 }
+
+/* ── кто ссылается на файл ──────────────────────────────────────────────── */
+
+/**
+ * Указывает ли спецификатор на цель — та же арифметика, что в `rewriteImports`,
+ * только в обратную сторону: нам не «переписать», а «найти».
+ *
+ * Способ от того же дня: считаем, как ЭТОТ файл писал бы путь к цели, и
+ * сравниваем с написанным. Сравнивать «а не заканчивается ли спецификатор на
+ * имя файла» нельзя: `./bar` в `src/a.ts` и `./bar` в `src/x/a.ts` — разные
+ * файлы, и такая проверка нашла бы ссылки на чужой `bar.ts`.
+ */
+export interface ImportTargetOptions {
+  /** Файл, в котором ищем: путь от корня проекта с `/`. */
+  file: string;
+  /** Искомый файл или папка от корня проекта с `/`. */
+  target: string;
+}
+
+/**
+ * Спецификаторы файла, указывающие на цель (их текст, как написаны).
+ *
+ * Возвращаются именно строки, а не «да/нет»: в списке ссылок человеку нужно
+ * видеть, что там написано, иначе непонятно, чем этот импорт отличается от
+ * соседнего.
+ */
+export function importsOf(text: string, options: ImportTargetOptions): string[] {
+  const style = importStyleOf(options.file);
+  if (style === null || text.length === 0 || options.target.length === 0) return [];
+  return style === 'python' ? pythonImportsOf(text, options) : jsImportsOf(text, options);
+}
+
+function jsImportsOf(text: string, options: ImportTargetOptions): string[] {
+  const fromDir = dirOf(options.file);
+  const targetBase = relativeSpecifier(fromDir, splitExtension(options.target).base);
+  const found: string[] = [];
+  for (const match of text.matchAll(JS_SPECIFIER)) {
+    const specifier = match[2]!;
+    const at = match.index ?? 0;
+    if (!precededByImportKeyword(text, at)) continue;
+    if (!specifier.startsWith('.')) continue;
+    const { base } = splitExtension(specifier);
+    // Граница сегмента: `./utils` — наша цель, `./utilsx` — чужая.
+    if (base !== targetBase && !base.startsWith(`${targetBase}/`)) continue;
+    found.push(specifier);
+  }
+  return found;
+}
+
+function pythonImportsOf(text: string, options: ImportTargetOptions): string[] {
+  const packageParts = dirOf(options.file) === '' ? [] : dirOf(options.file).split('/');
+  const moduleParts = pythonModule(options.target);
+  if (moduleParts.length === 0) return [];
+  const relative = pythonRelative(packageParts, moduleParts);
+  const absolute = moduleParts.join('.');
+  const hit = (module: string): boolean =>
+    module === relative ||
+    module === absolute ||
+    module.startsWith(`${relative}.`) ||
+    module.startsWith(`${absolute}.`);
+
+  const found: string[] = [];
+  for (const match of text.matchAll(PY_FROM)) {
+    const module = match[2]!;
+    if (hit(module)) found.push(module);
+  }
+  for (const match of text.matchAll(PY_IMPORT)) {
+    // `import a, b as c` — имён несколько, проверяем каждое.
+    for (const raw of (match[2] ?? '').split(',')) {
+      const module = raw.trim().split(/\s+as\s+/)[0] ?? '';
+      if (module.length > 0 && hit(module)) found.push(module);
+    }
+  }
+  return found;
+}

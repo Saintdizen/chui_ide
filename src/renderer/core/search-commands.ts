@@ -10,8 +10,11 @@ import type { DefineCommand } from './command-args';
  * Панель поиска: запуск запроса. Показ делает dock — панель уже живёт в нём,
  * и второй способ её показать был бы лишним путём к тому же результату.
  */
-export interface SearchPanel {
-  search(query: string, options: { isRegex: boolean }): void;
+export interface SearchView {
+  search(query: string, options?: { isRegex?: boolean }): void;
+  /** Где искать: папка (или файл) проекта; `null` — весь проект. */
+  setScope(path: string | null): void;
+  focus(): void;
 }
 
 /** Окно структурного поиска — своё, не панель. */
@@ -21,7 +24,7 @@ export interface StructuralSearchDialog {
 
 export interface SearchDeps {
   dock: { show(view: 'search'): void };
-  searchView: SearchPanel;
+  searchView: SearchView;
   structuralSearch: StructuralSearchDialog;
 }
 
@@ -36,6 +39,22 @@ export function registerSearchCommands(define: DefineCommand, deps: SearchDeps):
 
   define({ id: 'search.project', title: 'Поиск по проекту', category: 'Поиск', keybinding: 'Ctrl+Shift+F' }, () =>
     dock.show('search'),
+  );
+
+  /**
+   * Поиск внутри папки (или внутри файла): область задаётся путём и уходит в
+   * сам запрос. Без этого «искать в папке» пришлось бы делать руками — чистить
+   * лишние попадания глазами по всему проекту.
+   */
+  define(
+    { id: 'search.inFolder', title: 'Найти в этой папке', category: 'Поиск' },
+    (raw?: unknown) => {
+      const path = typeof raw === 'string' && raw.length > 0 ? raw : null;
+      // Область сбрасываем явно: без пути ищем по проекту, а не в прошлой папке.
+      deps.searchView.setScope(path);
+      deps.dock.show('search');
+      deps.searchView.focus();
+    },
   );
 
   // TODO/FIXME — тот же поиск по проекту, только запрос готовый: регулярка ловит

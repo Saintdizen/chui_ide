@@ -21,6 +21,8 @@ export function registerWorkspaceMethods(router: RpcRouter, deps: RpcServices): 
   router.register('workspace.readOffice', (params) => deps.workspace.readOffice(params.path));
   router.register('workspace.writeFile', (params) => deps.workspace.writeFile(params.path, params.text));
   router.register('workspace.stat', (params) => deps.workspace.stat(params.path));
+  // Кто ссылается на файл — для меню проводника (ссылки и зависимости).
+  router.register('workspace.importers', (params) => deps.workspace.findImporters(params.path));
   router.register('workspace.search', (params) => deps.workspace.search(params));
   router.register('workspace.listFiles', () => deps.workspace.listFiles());
   // Алиасы `paths` из tsconfig: подсказка после точки разворачивает по ним импорт

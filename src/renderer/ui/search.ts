@@ -373,6 +373,10 @@ export function createSearchView(deps: SearchDeps): SearchView {
         query,
         maxResults: 300,
         ...(regexOverride ? { isRegex: true } : {}),
+        // Область уходила только в подпись «область: src/app»: запрос искал
+        // по всему проекту, а надпись обещала обратное. Хуже молчания —
+        // человек верит надписи и не находит, почему лишние попадания.
+        ...(scope && mode === 'project' ? { path: scope } : {}),
       });
       perf.end('search:project');
       if (current !== sequence) return;

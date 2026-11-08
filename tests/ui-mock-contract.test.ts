@@ -99,6 +99,7 @@ const NOT_MOCKED: Record<string, string[]> = {
   // Отмена инструмента гасит настоящий AbortController в main — мок одного окна этого не имеет.
   'отмена одного вызова живёт в main (AbortController прогона)': ['ai.abortTool'],
   // Снимок окна снимает main (capturePage) и коммит читает main (git).
+  'поиск импортирующих читает диск целиком: мок отдаёт пустое': ['workspace.importers'],
   'снимок окна и коммит живут в main: в моке окна их нет': [
     'window.captureScreenshot',
     'git.commitShow',
