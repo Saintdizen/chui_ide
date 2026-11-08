@@ -146,6 +146,37 @@ function toolFilePath(name: string, raw: string): string | null {
 }
 
 /** Иконка карточки инструмента: у файловых операций — цветной значок типа файла. */
+/**
+ * Строка, на которую указывает вызов: `line` или `start_line` из аргументов.
+ *
+ * Из JSON, а не из подписи: подпись сокращают до «app.ts:120 · 5 мест», и у
+ * разных инструментов она разная. Нет числа — прыгаем в начало файла: это
+ * всё равно полезнее, чем ничего.
+ */
+function toolStartLine(raw: string): number | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    for (const key of ['line', 'start_line', 'startLine']) {
+      const value = (parsed as Record<string, unknown>)[key];
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.floor(value);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Путь покороче для ленты: абсолютный занимает полстроки и не читается.
+ * Последние две части — «src/main/app.ts»; в одном файле хватает имени.
+ */
+function shortPath(path: string): string {
+  const parts = path.replace(/\\/g, '/').split('/').filter((part) => part.length > 0);
+  if (parts.length <= 2) return parts.join('/');
+  return parts.slice(-2).join('/');
+}
+
 function toolIconNode(name: string, raw: string): SVGSVGElement {
   const path = toolFilePath(name, raw);
   return path ? fileIcon(path, 13) : svgIcon(toolIcon(name), 13);
@@ -662,6 +693,31 @@ function createToolGroup(
       return list;
     };
 
+    /**
+     * Путь из аргументов — ссылкой. Клик по шапке раскрывает разбор, поэтому
+     * клик по ссылке гасим: иначе одно нажатие делало бы два дела.
+     */
+    const pathLink = (callPayload: ChatToolStartPayload): HTMLElement | null => {
+      const path = toolFilePath(callPayload.name, callPayload.args);
+      if (path === null) return null;
+      const line = toolStartLine(callPayload.args);
+      const name = shortPath(path);
+      const where = line !== null ? `${name}:${line}` : name;
+      const open = (): void => void onOpenFile?.(path, { line: line ?? 1, column: 1 });
+      const link = h('span', { class: 'tool-path', role: 'link', tabindex: '0', title: `Открыть ${where}` }, where);
+      link.addEventListener('click', (event) => {
+        event.stopPropagation();
+        open();
+      });
+      link.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        open();
+      });
+      return link;
+    };
+
     const cardState = toolStateElement();
     const panel = h('div', { class: 'tool-panel', hidden: true });
     const card = h('div', { class: 'tool-card' });
@@ -724,6 +780,9 @@ function createToolGroup(
         },
         toolIconNode(call.name, call.args),
         h('span', { class: 'tool-name' }, label),
+        // Путь — ссылкой, а не текстом: в ленте «read src/main/app.ts:120»
+        // бесполезен, пока в него нельзя прыгнуть.
+        pathLink(call),
         h('span', { class: 'tool-args' }, summarizeArgs(call.args)),
         time,
         cardState,

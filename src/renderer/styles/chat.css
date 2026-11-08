@@ -3514,3 +3514,23 @@
   color: var(--text_color_tertiary);
   font-size: var(--font_small_size);
 }
+
+/* Путь в шапке карточки инструмента — ссылка с прыжком в файл. В ленте
+   «read src/main/app.ts:120» бесполезен, пока в него нельзя кликнуть. */
+.tool-path {
+  margin-left: 6px;
+  color: var(--accent_fill);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-path:hover,
+.tool-path:focus-visible {
+  text-decoration-color: currentColor;
+}
