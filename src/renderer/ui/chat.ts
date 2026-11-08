@@ -157,6 +157,10 @@ export interface ChatView {
    * Через этот метод вложение кладётся в активную беседу, как из скрепки или Ctrl+V.
    */
   attachImage(image: PickedImage): void;
+  /** Приложить коммит по хешу — `#commit` спрашивает хеш и зовёт это. */
+  attachCommit(hash: string): void;
+  /** Приложить снимок окна — `#screen`. */
+  attachScreen(): void;
   /** Приложить готовый контекст (журнал консоли страницы и подобное). */
   attachContext(item: ChatAttachment): void;
 }
@@ -231,6 +235,8 @@ export interface ChatDeps {
   codebase?: (query: string) => Promise<readonly CodebasePlace[]>;
   /** Адрес открытой страницы встроенного браузера — для `#web`. */
   browserUrl?(): string;
+  /** Спросить хеш коммита для `#commit`. `null` — человек передумал. */
+  askCommit?(): string | null;
   settings: Settings;
   /** Модальное окно со всеми настройками приложения. */
   settingsModal: SettingsOpener;
@@ -619,6 +625,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // по тому, что уже набрано в поле ввода.
     ...(deps.codebase ? { codebase: deps.codebase } : {}),
     ...(deps.browserUrl ? { browserUrl: deps.browserUrl } : {}),
+    // Коммит спрашиваем: «вот этот» почти всегда не последний.
+    ...(deps.askCommit ? { askCommit: deps.askCommit } : {}),
     composerText: () => input.value,
     session: () => active(),
     // Бюджет вложений — тот же расчёт, что у кольца и у проверки перед отправкой
@@ -3687,6 +3695,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       approvals.scrollToEnd();
     },
     attachImage: (image: PickedImage) => attachments.attachImage(image),
+    attachCommit: (hash: string) => void attachments.attachCommit(hash),
+    attachScreen: () => void attachments.attachScreen(),
     attachContext: (item: ChatAttachment) => attachments.attachContext(item),
     applySettings(next: Settings) {
       // До подмены: после неё `currentModel()` уже новая, и сравнить не с чем.

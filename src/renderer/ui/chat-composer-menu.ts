@@ -36,7 +36,16 @@ export interface MentionSession {
 }
 
 /** Вид контекста, который прикладывают: им же помечен `#`-пункт. */
-export type ContextKind = 'selection' | 'file' | 'problems' | 'diff' | 'codebase' | 'web';
+export type ContextKind =
+  | 'selection'
+  | 'file'
+  | 'problems'
+  | 'diff'
+  | 'codebase'
+  | 'web'
+  // Коммит и снимок экрана спрашиваю у человека: их нельзя взять «что видно сейчас».
+  | 'commit'
+  | 'screen';
 
 /** Слэш-команды: подставляют готовый запрос и сами прикладывают контекст. */
 const SLASH_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string; prompt: string }> = [
@@ -85,6 +94,10 @@ const CONTEXT_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string;
   { id: '#codebase', title: 'Места в проекте', hint: 'Файлы и строки, близкие по смыслу', kind: 'codebase' },
   // Страница из встроенного браузера: адрес открытой вкладки — то, о чём речь.
   { id: '#web', title: 'Страница браузера', hint: 'Адрес открытой вкладки', kind: 'web' },
+  // «Почему это сломалось» чаще отвечает коммит, а не файл.
+  { id: '#commit', title: 'Коммит', hint: 'Заголовок и список файлов с числом строк', kind: 'commit' },
+  // Экран: человек показывает, а не описывает словами.
+  { id: '#screen', title: 'Снимок экрана', hint: 'Что видно в окне прямо сейчас', kind: 'screen' },
 ];
 
 export interface ComposerMenuDeps {

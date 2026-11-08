@@ -41,6 +41,15 @@ export function registerWindowMethods(router: RpcRouter, deps: RpcServices): voi
   router.register('window.close', (_params, ctx) => {
     senderWindow(ctx).close();
   });
+  // Снимок окна для чата: человек показывает, а не описывает словами.
+  // Уменьшаем по ширине — полный снимок retina-экрана слишком тяжёл для контекста.
+  router.register('window.captureScreenshot', async (params, ctx) => {
+    const image = await senderWindow(ctx).webContents.capturePage();
+    const width = params.maxWidth ?? 1280;
+    const size = image.getSize();
+    const resized = size.width > width ? image.resize({ width, quality: 'good' }) : image;
+    return `data:image/png;base64,${resized.toPNG().toString('base64')}`;
+  });
   router.register('menu.role', (params, ctx) => {
     performMenuRole(senderWindow(ctx).webContents, params.role);
   });

@@ -29,6 +29,8 @@ export function registerGitMethods(router: RpcRouter, deps: RpcServices): void {
   router.register('git.blame', (params) =>
     deps.git.blame(params.path, { startLine: params.startLine, endLine: params.endLine }),
   );
+  // Что несёт коммит — для контекста ассистента: файлы и число строк.
+  router.register('git.commitShow', (params) => deps.git.commitShow(params.hash));
   router.register('git.log', (params) => deps.git.log(params.limit, params.path));
   router.register('git.headText', (params) => deps.git.headText(params.path));
 

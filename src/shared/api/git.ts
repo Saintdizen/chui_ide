@@ -221,3 +221,20 @@ export const VenvEvent = {
 export interface CloneProgressPayload {
   line: string;
 }
+
+/** Один файл в коммите: как он изменился и на сколько строк. */
+export interface CommitFile {
+  readonly path: string;
+  readonly status: 'added' | 'modified' | 'deleted' | 'renamed' | 'other';
+  readonly insertions: number;
+  readonly deletions: number;
+}
+
+/** Что несёт коммит — для контекста ассистента. */
+export interface CommitShow {
+  readonly hash: string;
+  readonly summary: string;
+  readonly files: readonly CommitFile[];
+  /** Обрезан ли список файлов: у огромного коммита остальное не читаем. */
+  readonly truncated: boolean;
+}

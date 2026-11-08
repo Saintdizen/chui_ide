@@ -7,6 +7,7 @@ import {
   RpcErrorCode,
   type GitBranch,
   type GitCommit,
+  type CommitShow,
   type GitCommitDiff,
   type GitFileHunks,
   type GitCommitInfo,
@@ -28,6 +29,7 @@ import type { GitRefDiff } from '../../shared/git-ref-diff';
 import type { GitBisectState } from '../../shared/git-bisect';
 import { bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, reset, revert } from './inspect';
+import { commitShow } from './show-commit';
 import { commitDiff, discard, discardHunk, fileHunks, stage, stageHunk, unstage, unstageHunk } from './index-staging';
 import { markResolved as gitMarkResolved, remerge as gitRemerge } from './conflict';
 import { checkIgnore as gitCheckIgnore } from './check-ignore';
@@ -822,6 +824,11 @@ export class GitService {
 
   async discard(paths: string[]): Promise<{ status: GitStatus; undo: string | null }> {
     return discard(this.gitContext(), paths);
+  }
+
+  /** Что несёт коммит: заголовок и файлы с числом строк (контекст ассистента). */
+  async commitShow(hash: string): Promise<CommitShow> {
+    return commitShow(this.gitContext(), hash);
   }
 
   async commitDiff(): Promise<GitCommitDiff> {

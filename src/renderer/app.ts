@@ -2282,6 +2282,23 @@ export async function startApplication(
     onBusyHint: setChatBusyHint,
     // Страница встроенного браузера: адрес открытой вкладки — для `#web`.
     browserUrl: () => browserView.url,
+    // Хеш коммита — окном ввода: последний коммит почти никогда не тот, о
+    // котором спрашивают. Вложение создаётся в ответ на ввод, а не на выбор:
+    // окно синхронного возврата не даёт (`open` зовёт `onAccept`).
+    askCommit: () => {
+      conditionInput.open({
+        title: "Какой коммит приложить",
+        label: "Хеш (или его начало) — из панели истории",
+        value: "",
+        confirmLabel: "Приложить",
+        onAccept: (value) => {
+          const hash = value.trim();
+          if (hash.length > 0) chat.attachCommit(hash);
+        },
+        onCancel: () => undefined,
+      });
+      return null;
+    },
     // `#codebase`: места проекта по смыслу — те же два источника, что у палитры.
     // Без открытого проекта список пуст: прикладывать нечего, и об этом скажет чат.
     codebase: async (query: string) => {

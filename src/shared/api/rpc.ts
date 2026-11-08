@@ -3,6 +3,7 @@ import type { MenuRole } from '../app-menu';
 import type { AccountBalance } from '../balance';
 import type { EditorConfigValues } from '../editorconfig';
 import type { LspDiagnostic } from './lsp';
+import type { CommitShow } from '../api/git';
 import type { OfficePreview } from '../office';
 import type { ApplyResult, FileEdit, TextEdit } from '../edits';
 import type { BlameLine } from '../git-blame';
@@ -575,6 +576,11 @@ export interface ChuiMethods {
   /** История коммитов: все или только трогавшие указанный файл. */
   'git.log': { params: { path?: string; limit?: number }; result: GitCommit[] };
   /**
+   * Что несёт коммит: заголовок и файлы с числом строк. Для контекста
+   * ассистента — «почему это сломалось» часто отвечает коммит, а не файл.
+   */
+  'git.commitShow': { params: { hash: string }; result: CommitShow };
+  /**
    * Содержимое файла в HEAD — база для полосок изменений в жёлобе. `null` —
    * файл вне репозитория; пустая строка — файл новый или без коммитов.
    */
@@ -814,6 +820,11 @@ export interface ChuiMethods {
   'window.minimize': { params: void; result: void };
   'window.toggleMaximize': { params: void; result: WindowState };
   'window.close': { params: void; result: void };
+  /**
+   * Снимок окна в data-URL — для «#screen»: приложить видимое, а не описывать
+   * словами. Снимает само окно, поэтому берём в main: у окна есть `capturePage`.
+   */
+  'window.captureScreenshot': { params: { maxWidth?: number }; result: string };
   /** Действие меню, которое умеет только main: буфер обмена, масштаб, окно. */
   'menu.role': { params: { role: MenuRole }; result: void };
 

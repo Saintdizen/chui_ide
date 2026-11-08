@@ -66,6 +66,12 @@ export interface AttachmentsDeps {
   /** Изменения репозитория: нужны только для `#diff`. */
   git?: GitModel;
   /**
+   * Спросить, какой коммит приложить (`#commit`). Хеш или его начало;
+   * `null` — человек передумал. Спрашиваем, а не берём последний: «вот этот
+   * коммит» почти всегда не последний, и угадывание его раздражает.
+   */
+  askCommit?: () => string | null;
+  /**
    * Места по смыслу — для `#codebase`: запрос словами → готовые места проекта.
    * Тот же поиск, что у палитры по смыслу; без него пункт молчит и говорит, почему.
    */
@@ -104,7 +110,17 @@ function describeDriftChip(drift: NonNullable<ChatAttachment['drift']>): string 
 }
 
 /** Виды контекста, у которых есть пункт `#` (без изображений и буфера). */
-export type ContextNoArg = 'selection' | 'file' | 'problems' | 'diff' | 'codebase' | 'web';
+export type ContextNoArg =
+  | 'selection'
+  | 'file'
+  | 'problems'
+  | 'diff'
+  | 'codebase'
+  | 'web'
+  /** Коммит: спрашиваем хеш, остальное берём из git. */
+  | 'commit'
+  /** Снимок экрана: его показывает только main. */
+  | 'screen';
 
 export interface AttachmentsView {
   /** Полоса чипов: приложенный к вопросу контекст. */
@@ -136,6 +152,10 @@ export interface AttachmentsView {
   attachPath(target: string): Promise<void>;
   /** Приложить файл проекта по пути из `@`-подсказки. */
   attachMention(path: string): void;
+  /** Приложить снимок окна. */
+  attachScreen(): Promise<void>;
+  /** Приложить коммит (хеш или его начало) вместе с diff. */
+  attachCommit(hash: string): void;
   /** Список путей для `@`-подсказки; `null` — ещё не собран. */
   mentionPaths(): string[] | null;
   /** Пересобрать список путей (при смене папки). */
@@ -658,6 +678,68 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     render();
   }
 
+  /**
+   * Приложить коммит: хеш, заголовок и его diff.
+   *
+   * Зачем в контекст-пикере: «почему это сломалось» чаще всего отвечает не
+   * файл, а коммит, который его изменил. Приносить его вручную — копировать
+   * `git show` в чат — работа, которую IDE может сделать сама.
+   */
+  async function attachCommit(hash: string): Promise<void> {
+    try {
+      const shown = await deps.rpc.request('git.commitShow', { hash });
+      // Список файлов и числа строк, а не весь патч: патч большого коммита
+      // съедает контекст целиком, а «что тронуто» обычно и есть ответ на
+      // вопрос. Сам diff прикладывают отдельно — `#diff`.
+      const lines = shown.files.map(
+        (file) =>
+          `${file.status.padEnd(9)} ${file.path} (+${file.insertions} −${file.deletions})`,
+      );
+      const body = [
+        `Коммит ${shown.hash}: ${shown.summary}`,
+        '',
+        ...lines,
+        shown.truncated ? '' : '',
+        shown.truncated ? '(список файлов обрезан)' : '',
+      ].join('\n');
+      deps.session().attachments.push({
+        kind: 'note',
+        label: `коммит ${shown.hash}`,
+        title: `Коммит ${shown.hash}`,
+        text: body,
+      });
+      render();
+    } catch (error) {
+      showToast(errorText(error), 'error');
+    }
+  }
+
+  /**
+   * Приложить снимок окна.
+   *
+   * Снимает main (`window.captureScreenshot`): у окна есть `capturePage`, а у
+   * страницы нет. Уменьшение по ширине там же — retina-снимок в контексте
+   * модели стоит дороже, чем вся переписка вокруг него.
+   */
+  async function attachScreen(): Promise<void> {
+    try {
+      const dataUrl = await deps.rpc.request('window.captureScreenshot', { maxWidth: 1280 });
+      if (!dataUrl.startsWith('data:image/')) {
+        showToast('Снимок окна не получился', 'error');
+        return;
+      }
+      const [head, payload] = dataUrl.split(',', 2);
+      const mime = /data:([^;]+);/.exec(head ?? '')?.[1] ?? 'image/png';
+      const data = payload ?? '';
+      // Байты считаем из base64: размер нужен чипу приложения, а main уже
+      // отдал готовый data-URL, второй раз картинку не читаем.
+      const bytes = Math.floor((data.length * 3) / 4);
+      addImage({ name: 'снимок экрана.png', mime, bytes, dataUrl });
+    } catch (error) {
+      showToast(errorText(error), 'error');
+    }
+  }
+
   /** Вложение из пути: тип определяем через stat, чтобы папка и файл шли разными путями. */
   async function attachPath(target: string): Promise<void> {
     try {
@@ -741,6 +823,15 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
 
   /** Приложить контекст вида `#`. */
   function attachFrom(kind: ContextNoArg): void {
+    if (kind === 'commit') {
+      const hash = deps.askCommit?.() ?? null;
+      if (hash) void attachCommit(hash);
+      return;
+    }
+    if (kind === 'screen') {
+      void attachScreen();
+      return;
+    }
     // Страница браузера — только адрес: вкладку открывает человек, а не мы.
     if (kind === 'web') {
       const url = deps.browserUrl?.() ?? '';
@@ -811,6 +902,8 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     attachFiles,
     attachPath,
     attachMention,
+    attachCommit,
+    attachScreen,
     mentionPaths: () => mentionCache,
     requestMentions: () => void collectMentions(),
   };

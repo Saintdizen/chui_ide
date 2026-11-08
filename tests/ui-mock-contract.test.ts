@@ -98,6 +98,11 @@ const NOT_MOCKED: Record<string, string[]> = {
   'правила .editorconfig читаются с диска: в моке диска нет': ['editor.editorConfig'],
   // Отмена инструмента гасит настоящий AbortController в main — мок одного окна этого не имеет.
   'отмена одного вызова живёт в main (AbortController прогона)': ['ai.abortTool'],
+  // Снимок окна снимает main (capturePage) и коммит читает main (git).
+  'снимок окна и коммит живут в main: в моке окна их нет': [
+    'window.captureScreenshot',
+    'git.commitShow',
+  ],
   'нужен настоящий репозиторий и клиент git — в моке их нет': [
     'git.bisectMark',
     'git.bisectReset',
