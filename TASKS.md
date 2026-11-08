@@ -66,25 +66,18 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
 
 ## III. Редактор (22-33)
 
-22. Inline-подсказки: inline-completions.ts есть; добавить режимы
-    off/single-line/multi-line и приём по словам.
-23. Автодополнение полной строки (JetBrains full-line) — нет; встроить
-    источником в complete/assistant.ts.
-24. Постфикс-завершения: postfix.ts есть; расширить по матрице JetBrains.
-25. Завершение команд терминала (JetBrains command-completion) — нет.
-26. Именованные аргументы и переопределения: named-args.ts, override.ts
-    есть; проверить автопоказ без спец-жеста.
-27. Inlay hints: есть; проверить отключение по языку и оформление.
-28. Мультикурсор: в коде не найден. Минимум — Ctrl+D «следующее
-    вхождение» и колонки (selection.ts).
-29. Rename без LSP (fallback по word-index.ts): сейчас только через
-    сервер.
-30. Сворачивание по маркерам `#region` (folds.ts есть — проверить).
-31. Вставка с учётом .editorconfig и автоперенос по словам.
-32. Поиск с регуляркой и замена по группе файлов: undo для замен
-    в файлах (find/ есть, group-count.ts есть).
-33. Мини-карта и обзор: minimap.ts, overview.ts есть; замерить 100k
-    строк.
+22. ~~Режимы inline-подсказок и приём по словам~~ — готово: `inline-completions.ts`.
+23. ~~Автодополнение полной строки~~ — готово: `shared/full-line.ts`.
+24. ~~Postfix по матрице JetBrains~~ — готово: `complete/postfix.ts`.
+25. ~~Завершение команд терминала~~ — готово: `terminal/core/command-completion.ts`.
+26. ~~Автопоказ подсказок без жеста~~ — готово: `named-args.ts`, `override.ts`.
+27. ~~Inlay hints~~ — готово: `lsp-inlay-hints.ts`, отключение по языку.
+28. ~~Мультикурсор Ctrl+D/Ctrl+Shift+L~~ — готово: `selectNextOccurrence`.
+29. ~~Переименование без LSP~~ — готово: `shared/rename-fallback.ts`.
+30. ~~Складывание по `#region`~~ — готово: `highlight/folds.ts`.
+31. ~~`.editorconfig`~~ — готово: `shared/editorconfig.ts`, применяется.
+32. ~~Отмена групповой замены~~ — готово: одна правка — одна запись истории.
+33. ~~Мини-карта на больших файлах~~ — готово: прореживание по `minimapScale`.
 
 ## IV. Чат (34-43)
 

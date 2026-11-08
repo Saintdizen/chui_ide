@@ -63,6 +63,7 @@ import { type CommandName, EditorInputBinding, type KeyInterceptor } from '../in
 import type { CaseStyle } from '../input/case-convert';
 import { blockCommentFor, lineCommentFor } from '../input/comments';
 import { InlineCompletions } from '../input/inline-completions';
+import { bestFullLine } from '../../../shared/full-line';
 import { EmmetExpander } from '../input/emmet';
 import type { SurroundOption } from '../input/surround';
 import type { VimMode } from '../input/vim';
@@ -416,6 +417,8 @@ export interface EditorHostOptions {
    * Inline-подсказка «допиши за меня»: включение, задержка и запрос к модели. Не задана —
    * призрачного текста в панели нет вовсе (прежде это был провайдер движка).
    */
+  /** Строки открытых документов для подсказки целой строки. */
+  fullLineCorpus?: () => readonly string[];
   inlineCompletion?: {
     enabled(): boolean;
     /** Сколько показывать за раз; не задан — `multi-line`. */
@@ -498,6 +501,8 @@ export class EditorHost {
   private readonly navigation: SymbolNavigation | null;
   /** Подсказка «допиши за меня». `null` — источника нет, призрачного текста не будет. */
   private readonly inline: InlineCompletions | null;
+  /** Корпус строк для подсказки целой строки: даёт рабочее место. */
+  private readonly fullLineCorpusSource: (() => readonly string[]) | undefined;
   /** Язык открытого файла: нужен подсказке и подсветке. */
   private languageId = 'plaintext';
   /** Выбор человека по миникарте (`editor.minimap`): дзен прячет её, но не отменяет. */
@@ -991,12 +996,16 @@ export class EditorHost {
 
     // Подсказка «допиши за меня»: призрачный текст у каретки. Есть только когда дан
     // источник (запрос к модели) — иначе спрашивать нечего.
+    this.fullLineCorpusSource = options.fullLineCorpus;
     const inlineSource = options.inlineCompletion;
     this.inline = inlineSource
       ? new InlineCompletions(this.view, this.controller, {
           enabled: () => inlineSource.enabled(),
           mode: () => inlineSource.mode?.() ?? 'multi-line',
           debounceMs: () => inlineSource.debounceMs(),
+          // Сначала своей подсказки: она мгновенная и бесплатная. Не нашлось
+          // строки в открытых файлах — тогда спрашиваем модель.
+          fullLine: (prefix) => bestFullLine(prefix, (this.fullLineCorpusSource?.() ?? []))?.insert ?? null,
           complete: (prefix, suffix) =>
             inlineSource.complete({ path: this.path ?? '', language: this.languageId, prefix, suffix }),
         })
@@ -1697,6 +1706,11 @@ export class EditorHost {
     const from = buffer.positionAt(start);
     const to = buffer.positionAt(end);
     return { startLine: from.line, startColumn: from.column, endLine: to.line, endColumn: to.column };
+  }
+
+  /** Путь открытого файла — рабочему месту он нужен для корпуса строк. */
+  get documentPath(): string | null {
+    return this.path;
   }
 
   /** Язык открытого файла: по нему выбираются доступные обёртки. */

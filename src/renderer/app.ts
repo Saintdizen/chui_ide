@@ -862,6 +862,7 @@ export async function startApplication(
         })();
       },
       // Inline-подсказка «допиши за меня»: запрос к модели уходит в main через RPC.
+      fullLineCorpus: () => editors.fullLineLines(),
       inlineCompletion: {
         // Два замка, а не один: личная галочка автодополнения и мастер-тумблер AI.
         // Main оба тоже проверяет (`requireAiEnabled`), но он тогда уже ответил

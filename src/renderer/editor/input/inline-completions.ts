@@ -49,6 +49,11 @@ export interface InlineCompletionOptions {
    * `multi-line`: старые вызовы и тесты работают как раньше.
    */
   mode?(): 'off' | 'single-line' | 'multi-line';
+  /**
+   * Локальная подсказка целой строки: продолжение по тому, что уже написано
+   * в открытых файлах. Быстрее модели и не требует запроса.
+   */
+  fullLine?(prefix: string): string | null;
   /** Пауза после последнего ввода перед запросом, мс: на каждую букву не спрашиваем. */
   debounceMs(): number;
   /** Запрос к модели: контекст вокруг курсора → готовый текст. `null`/пусто — подсказки нет. */
@@ -222,6 +227,22 @@ export class InlineCompletions {
 
     const id = ++this.requestId;
     this.requests += 1;
+
+    // Своя подсказка идёт первой: она готова сразу и не стоит денег. Модель
+    // спрашиваем только если локально продолжения не нашлось.
+    const local = this.options.fullLine?.(prefix) ?? null;
+    if (local) {
+      const cleanLocal = cleanCompletion(local);
+      if (cleanLocal && id === this.requestId && this.controller.caret === caret) {
+        const shownLocal =
+          this.options.mode?.() === 'single-line' ? firstLine(cleanLocal) : cleanLocal;
+        if (shownLocal) {
+          this.suggestion = { offset: caret, text: shownLocal };
+          this.view.setGhostText(caret, shownLocal);
+          return;
+        }
+      }
+    }
 
     let text: string | null = null;
     try {

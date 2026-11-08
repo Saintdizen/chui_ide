@@ -290,6 +290,8 @@ export interface EditorWorkspaceOptions {
    * Inline-подсказка «допиши за меня»: включение, задержка и запрос к модели. Не задана —
    * призрачного текста в панелях нет вовсе.
    */
+  /** Строки открытых документов — корпус для подсказки целой строки. */
+  fullLineCorpus?: () => readonly string[];
   inlineCompletion?: {
     enabled(): boolean;
     /** Сколько показывать за раз; не задан — `multi-line`. */
@@ -428,6 +430,7 @@ export class EditorWorkspace {
   /** Правый клик по тексту: меню собирает приложение (у него реестр команд и буфер обмена). */
   private readonly contextMenu: EditorWorkspaceOptions['contextMenu'];
   /** Inline-подсказка «допиши за меня». */
+  private readonly fullLineCorpusSource: (() => readonly string[]) | undefined;
   private readonly inlineCompletion: EditorWorkspaceOptions['inlineCompletion'];
   /** Оценка выражения под курсором в остановленном файле; задаёт app (там контроллер отладки). */
   private debugHoverEvaluator:
@@ -541,6 +544,7 @@ export class EditorWorkspace {
     this.onNotice = options.onNotice;
     this.contextMenu = options.contextMenu;
     this.inlineCompletion = options.inlineCompletion;
+    this.fullLineCorpusSource = options.fullLineCorpus;
     // Переход по пометкам: список берём из своего хранилища, а переход отдаём наружу
     // (`revealLocation`), если приложение его дало: иначе файл может быть не открыт,
     // а открыть его умеет только приложение — в панели он лишь запомнит место.
@@ -660,6 +664,7 @@ export class EditorWorkspace {
       relativePath: this.relativePath,
       onNotice: this.onNotice,
       contextMenu: this.contextMenu,
+      fullLineCorpus: this.fullLineCorpusSource,
       inlineCompletion: this.inlineCompletion,
       // Отладочная подсказка: слово и его строка → значение из кадра (см. `setDebugHover`).
       debugHover: (word, at) => this.debugHoverText(word, at),
@@ -1113,6 +1118,20 @@ export class EditorWorkspace {
    */
   async wordAt(_path: string, _line: number, _column: number): Promise<string | null> {
     return this.pane.wordAtCursor();
+  }
+
+  /**
+   * Строки открытых документов — корпус для подсказки целой строки.
+   * Только открытые: подсказка мгновенная и бесплатная, а чтение всего проекта
+   * ради неё стоило бы диска на каждую паузу.
+   */
+  fullLineLines(): string[] {
+    const lines: string[] = [];
+    for (const pane of this.panes) {
+      const text = pane.documentPath ? this.registry.get(pane.documentPath)?.text : null;
+      if (text) lines.push(...text.split('\n'));
+    }
+    return lines;
   }
 
   /** Слово под кареткой активной панели (`null` — не слово). */
