@@ -147,6 +147,7 @@ import { createInstallActions } from "./core/install-actions";
 import { isNodeLanguage } from "../shared/languages";
 import { indentFoldRanges, mergeFoldRanges } from "../shared/fold-ranges";
 import { featureOff } from "../shared/lsp-visibility";
+import { FORMATTER_LABELS, normalizeFormatterChoice } from "../shared/formatter";
 import { surroundOptions } from "./editor/input/surround";
 import { semanticFoldRanges } from "./editor/highlight/folds";
 import { languageGrammar } from "./editor/highlight/lazy-registry";
@@ -314,6 +315,23 @@ export async function startApplication(
   const panelAuto = new AutoPanelLayout();
   const statusBar = createStatusBar({
     openGitManager: (anchor) => openGitManager(anchor),
+    // Линзы для файла: переключаем список «языков без линз» в настройках.
+    toggleLenses: () => {
+      const path = editors.currentPath;
+      if (!path) return;
+      const language = languageFromPath(path).toLowerCase();
+      const current = Array.isArray(settings.lsp.codeLensOff) ? settings.lsp.codeLensOff : [];
+      const off = current.includes(language);
+      const next = off ? current.filter((item) => item !== language) : [...current, language];
+      void saveSettingsPatch({ lsp: { codeLensOff: next } }).catch(() => undefined);
+      setTimeout(() => refreshStatus(), 0);
+    },
+    // Форматирование при сохранении: одно на всё окно, как и настройка.
+    toggleFormatter: () => {
+      const on = rebuildSettings().editor.formatOnSave !== false;
+      void saveSettingsPatch({ editor: { formatOnSave: !on } }).catch(() => undefined);
+      setTimeout(() => refreshStatus(), 0);
+    },
     openPythonEnv: (anchor) => openPythonEnv(anchor),
     openNodeEnv: (anchor) => openNodeEnv(anchor),
     openProblems: () => editors.revealNextProblem(),
@@ -360,6 +378,22 @@ export async function startApplication(
     root.style.setProperty("--density", String(scale));
   };
   applyUiScale(settings.appearance.uiScale);
+
+  /** Есть ли у файла линзы и включены ли они: чип в строке состояния. */
+  function lensesStatus(path: string | null): { on: boolean } | null {
+    if (!path) return null;
+    return { on: !featureOff(rebuildSettings(), 'codeLensOff', path) };
+  }
+
+  /** Чем файл отформатируется: настройка плюс расширение файла. */
+  function formatterStatus(): { name: string; off: boolean } | null {
+    const current = rebuildSettings();
+    if (current.editor.formatOnSave === false) return { name: 'без автоформата', off: true };
+    const choice = normalizeFormatterChoice(current.editor.formatter);
+    // Показываем имя профиля, а не «да»: «да» не отвечает на вопрос, КТО это
+    // сделает, — а спрашивают ровно об этом, когда файл вдруг переформатировался.
+    return { name: FORMATTER_LABELS[choice] ?? choice, off: false };
+  }
 
   const rebuildSettings = (): Settings => {
     const merged = mergeDeep(baseSettings, projectSettings);
@@ -4576,6 +4610,10 @@ export async function startApplication(
       problems: problemsStatus(),
       vim: settings.editor.vimMode ? editors.vimMode() : null,
       highlightOff: active ? editors.highlightStatus().offReason : null,
+      // Линзы и профиль форматирования: в строке видно, чем файл будет
+      // отформатирован и спрятаны ли подписи-действия.
+      lenses: lensesStatus(active?.path ?? null),
+      formatter: active ? formatterStatus() : null,
       macro: editors.isRecordingMacro()
         ? { steps: editors.macroSteps().length }
         : null,

@@ -3572,3 +3572,18 @@
   font-size: var(--font_small_size);
   cursor: help;
 }
+
+/* Профиль форматирования и линзы в строке состояния: видно, КТО отформатирует
+   и спрятаны ли подписи-действия. Выключенное — приглушённым, а не скрытым:
+   «выключено» само по себе ответ. */
+.status-formatter,
+.status-lenses {
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.status-formatter.is-off,
+.status-lenses.is-off {
+  opacity: 0.55;
+}

@@ -95,6 +95,10 @@ export interface StatusState {
    * (или языка нет — про это молчит другой виджет). Клик по чипу включает всё равно.
    */
   highlightOff: HighlightOffReason | null;
+  /** Чем файл отформатируется и выключено ли это для него. `null` — не знаем. */
+  formatter: { name: string; off: boolean } | null;
+  /** Есть ли у файла линзы и включены ли они. */
+  lenses: { on: boolean } | null;
 }
 
 export interface StatusBarView {
@@ -130,6 +134,10 @@ export interface StatusBarDeps {
   openProblems(anchor: HTMLElement): void;
   /** Человек нажал «включить всё равно»: подсветить крупный файл несмотря на порог. */
   forceHighlight: () => void;
+  /** Включить/выключить форматирование при сохранении для этого файла. */
+  toggleFormatter?: () => void;
+  /** Показать/спрятать код-линзы для этого файла. */
+  toggleLenses?: () => void;
   /**
    * Нажатие на полосу долгой работы: прервать её. Доступно, только когда полоса
    * говорит `cancellable` — молчаливый клик по «просто показателю» обманывает.
@@ -185,6 +193,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     macro: null,
     vim: null,
     highlightOff: null,
+    formatter: null,
+    lenses: null,
     problems: { errors: 0, warnings: 0 },
     check: null,
   };
@@ -311,6 +321,33 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const macroCount = macroItem.querySelector<HTMLElement>('.status-macro-count')!;
   // Режим Vim: короткое слово (НОРМ, ВСТАВКА, ВИЗУАЛ) в левой части полосы.
   const vimItem = h('span', { class: 'status-item status-vim' });
+
+  /**
+   * Профиль форматирования файла: чем он будет отформатирован при сохранении.
+   *
+   * Зачем в строке состояния: «почему файл переформатировался не тем» — вопрос,
+   * который задают уже после. Клик переключает между «как настроено» и
+   * «не форматировать»: это два состояния, между которыми человек и мечется.
+   */
+  const formatterItem = h('button', {
+    class: 'status-item status-formatter',
+    type: 'button',
+    hidden: true,
+    title: 'Профиль форматирования — клик: вкл/выкл для этого файла',
+    onClick: () => deps.toggleFormatter?.(),
+  });
+
+  /**
+   * Линзы: одним щелчком спрятать подписи-действия над объявлениями, не уходя
+   * в настройки. Показываем только когда линзы есть — иначе чип про пустоту.
+   */
+  const lensItem = h('button', {
+    class: 'status-item status-lenses',
+    type: 'button',
+    hidden: true,
+    title: 'Код-линзы — клик: показать/скрыть',
+    onClick: () => deps.toggleLenses?.(),
+  });
   // Подсветка выключена из-за размера файла. Нарочно КЛИКАБЕЛЬНЫЙ: сказать «почему
   // её нет» мало — человек пришёл читать код, и ему нужен выход (``включить всё равно``).
   const highlightItem = h('button', {
@@ -348,6 +385,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       'div',
       { class: 'status-group', role: 'presentation' },
       vimItem,
+      formatterItem,
+      lensItem,
       highlightItem,
       meterItem,
       macroItem,
@@ -448,6 +487,22 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
 
     // Подсветка выключена размером — говорим почему и даём выход. Текст короткий:
     // место в полосе дорогое, а причина — в подсказке.
+    // Профиль форматирования: видно, КТО это сделает и выключено ли. Пусто —
+    // форматировать нечем, и чип молчит, а не показывает прочерк.
+    const formatter = state.formatter;
+    formatterItem.hidden = formatter === null;
+    if (formatter) {
+      formatterItem.textContent = `⛭ ${formatter.name}${formatter.off ? ' (выкл)' : ''}`;
+      formatterItem.classList.toggle('is-off', formatter.off);
+    }
+
+    const lenses = state.lenses;
+    lensItem.hidden = lenses === null;
+    if (lenses) {
+      lensItem.textContent = lenses.on ? '❯ линзы' : '❯ линзы (выкл)';
+      lensItem.classList.toggle('is-off', !lenses.on);
+    }
+
     const off = state.highlightOff;
     highlightItem.hidden = off === null;
     if (off) {
