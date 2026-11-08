@@ -287,6 +287,8 @@ export interface EditorWorkspaceOptions {
    */
   inlineCompletion?: {
     enabled(): boolean;
+    /** Сколько показывать за раз; не задан — `multi-line`. */
+    mode?(): 'off' | 'single-line' | 'multi-line';
     debounceMs(): number;
     complete(request: { path: string; language: string; prefix: string; suffix: string }): Promise<string | null>;
   };

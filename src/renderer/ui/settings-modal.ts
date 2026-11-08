@@ -693,6 +693,27 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           (value) => void patch({ ai: { inlineCompletion: { debounceMs: value } } }),
         ),
       ),
+      field(
+        'Сколько показывать за раз',
+        selectInput(
+          [
+            { value: 'off', label: 'Не показывать' },
+            { value: 'single-line', label: 'Одна строка' },
+            { value: 'multi-line', label: 'Несколько строк' },
+          ],
+          ai.inlineCompletion.mode ?? 'multi-line',
+          (value) =>
+            void patch({
+              ai: { inlineCompletion: { mode: value as 'off' | 'single-line' | 'multi-line' } },
+            }),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Одна строка — модель дописывает только остаток строки: чаще всего именно это и нужно, ' +
+          'а целая функция не заслоняет код. Ctrl+→ принимает из подсказки одно слово.',
+      ),
       h('div', { class: 'settings-divider' }),
       switchRow(
         'Писать журнал прогонов в файл',

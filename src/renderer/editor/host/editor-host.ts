@@ -418,6 +418,8 @@ export interface EditorHostOptions {
    */
   inlineCompletion?: {
     enabled(): boolean;
+    /** Сколько показывать за раз; не задан — `multi-line`. */
+    mode?(): 'off' | 'single-line' | 'multi-line';
     debounceMs(): number;
     /** Контекст вокруг курсора → готовый текст. `null`/пусто — подсказки нет. */
     complete(request: { path: string; language: string; prefix: string; suffix: string }): Promise<string | null>;
@@ -993,6 +995,7 @@ export class EditorHost {
     this.inline = inlineSource
       ? new InlineCompletions(this.view, this.controller, {
           enabled: () => inlineSource.enabled(),
+          mode: () => inlineSource.mode?.() ?? 'multi-line',
           debounceMs: () => inlineSource.debounceMs(),
           complete: (prefix, suffix) =>
             inlineSource.complete({ path: this.path ?? '', language: this.languageId, prefix, suffix }),

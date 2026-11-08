@@ -856,6 +856,7 @@ export async function startApplication(
         // и сыпался бы toast об ошибке. Редактор должен молчать сам.
         // Серверный путь работает и без модели: `enabled` пропускает, если есть хоть один источник.
         enabled: () => settings.ai.inlineCompletion.enabled,
+        mode: () => settings.ai.inlineCompletion.mode ?? 'multi-line',
         debounceMs: () => settings.ai.inlineCompletion.debounceMs,
         complete: async ({ path, language, prefix, suffix }) => {
           // Проверяем ещё и здесь: `enabled()` спрашивают по краю, а пауза в наборе

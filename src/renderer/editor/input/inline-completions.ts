@@ -44,6 +44,11 @@ export interface GhostController {
 export interface InlineCompletionOptions {
   /** Включено ли автодополнение сейчас (настройка `ai.inlineCompletion.enabled`). */
   enabled(): boolean;
+  /**
+   * Сколько показывать за раз (`ai.inlineCompletion.mode`). Не задан —
+   * `multi-line`: старые вызовы и тесты работают как раньше.
+   */
+  mode?(): 'off' | 'single-line' | 'multi-line';
   /** Пауза после последнего ввода перед запросом, мс: на каждую букву не спрашиваем. */
   debounceMs(): number;
   /** Запрос к модели: контекст вокруг курсора → готовый текст. `null`/пусто — подсказки нет. */
@@ -56,6 +61,12 @@ export interface InlineCompletionOptions {
 function defaultSchedule(run: () => void, ms: number): () => void {
   const timer = window.setTimeout(run, ms);
   return () => window.clearTimeout(timer);
+}
+
+/** Первая строка подсказки без хвостового перевода. */
+function firstLine(text: string): string {
+  const end = text.indexOf('\n');
+  return end < 0 ? text : text.slice(0, end);
 }
 
 export class InlineCompletions {
@@ -120,6 +131,8 @@ export class InlineCompletions {
     }
     this.dismiss();
     if (!this.options.enabled()) return;
+    // `off` — то же, что выключено, но читается прямо из настройки режима.
+    if ((this.options.mode?.() ?? 'multi-line') === 'off') return;
     this.startTimer();
   }
 
@@ -135,12 +148,45 @@ export class InlineCompletions {
       this.accept();
       return true;
     }
+    if (event.key === 'ArrowRight' && (event.ctrlKey || event.altKey)) {
+      // Приём по слову (как в JetBrains): взять из подсказки одно слово и оставить
+      // остальное видимым. Используется, когда из десяти слов верны первые два.
+      event.preventDefault();
+      this.acceptWord();
+      return true;
+    }
     if (event.key === 'Escape') {
       event.preventDefault();
       this.dismiss();
       return true;
     }
     return false;
+  }
+
+  /**
+   * Принять одно слово из подсказки. Последнее слово забирается целиком вместе
+   * с тем, что идёт до следующего разделителя, — иначе остался бы висящий хвост
+   * подсказки, который некуда принять.
+   */
+  private acceptWord(): void {
+    const suggestion = this.suggestion;
+    if (!suggestion) return;
+    const match = /^[\s\S]*?\w+\W*/.exec(suggestion.text);
+    const part = match ? match[0] : suggestion.text;
+    if (part.length === 0) return;
+    const rest = suggestion.text.slice(part.length);
+    this.accepts += 1;
+    this.suppressNext = true;
+    this.controller.applyEdit({ start: suggestion.offset, removed: '', inserted: part });
+    // Хвост остаётся подсказкой на новом месте — курсор уже за принятым словом.
+    const offset = suggestion.offset + part.length;
+    if (rest === '') {
+      this.suggestion = null;
+      this.view.clearGhostText();
+      return;
+    }
+    this.suggestion = { offset, text: rest };
+    this.view.setGhostText(offset, rest);
   }
 
   /** Убрать подсказку и обесценить ответы в полёте. */
@@ -189,9 +235,14 @@ export class InlineCompletions {
     if (id !== this.requestId || this.controller.caret !== caret) return;
     const clean = text ? cleanCompletion(text) : '';
     if (!clean) return;
+    // `single-line` — одна строка: модель часто уезжает в целую функцию, а
+    // просили дописать строку. Отрезаем всё после первого перевода, но строку
+    // без перевода оставляем как есть.
+    const shown = this.options.mode?.() === 'single-line' ? firstLine(clean) : clean;
+    if (!shown) return;
 
-    this.suggestion = { offset: caret, text: clean };
-    this.view.setGhostText(caret, clean);
+    this.suggestion = { offset: caret, text: shown };
+    this.view.setGhostText(caret, shown);
     this.shown += 1;
   }
 

@@ -257,7 +257,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
     mcpServers: [],
     // Автодополнение выключено: каждый запрос — это обращение к модели (время и
     // деньги) на каждую паузу в наборе. Включается осознанно.
-    inlineCompletion: { enabled: false, debounceMs: 350 },
+    inlineCompletion: { enabled: false, debounceMs: 350, mode: 'multi-line' },
     // Журнал прогонов выключен: в записи лежат инструкции и ответы модели.
     telemetry: { enabled: false },
   },
@@ -1135,6 +1135,8 @@ function loadSettings(filePath: string): StoredSettings {
   ai.inlineCompletion = {
     enabled: storedInline.enabled === true,
     debounceMs: Number.isFinite(debounce) && debounce > 0 ? Math.min(Math.max(debounce, 100), 5000) : 350,
+    // Неизвестное значение — как было: новые режимы не должны ломать старые настройки.
+    mode: storedInline.mode === 'off' || storedInline.mode === 'single-line' ? storedInline.mode : 'multi-line',
   };
 
   // Журнал прогонов включён только явным `true`: у тех, кто обновляется со старой

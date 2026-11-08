@@ -243,3 +243,70 @@ describe('призрачная подсказка: принятие и снят�
     expect(inline.diagnostics).toEqual({ requests: 1, shown: 1, accepts: 1, dismisses: 1 });
   });
 });
+
+/** Подсказка у курсора с заданными режимом и ответом модели. */
+async function withMode(
+  mode: 'off' | 'single-line' | 'multi-line' | undefined,
+  answer: string,
+): Promise<{ inline: InlineCompletions; view: ReturnType<typeof fakeView> }> {
+  const view = fakeView();
+  const controller = fakeController('const a = 1;\n');
+  controller.caret = 11;
+  const clock = manualSchedule();
+  const inline = new InlineCompletions(view, controller, {
+    enabled: () => true,
+    ...(mode === undefined ? {} : { mode: () => mode }),
+    debounceMs: () => 350,
+    complete: async () => answer,
+    schedule: clock.schedule,
+  });
+  inline.onChange({ kind: 'text', from: 11 });
+  clock.fire();
+  await flush();
+  return { inline, view };
+}
+
+describe('режимы показа', () => {
+  it('off — запроса нет вовсе', async () => {
+    const { inline, view } = await withMode('off', ' = 2;');
+    expect(inline.isVisible).toBe(false);
+    expect(view.shown).toEqual([]);
+    expect(inline.diagnostics.requests).toBe(0);
+  });
+
+  it('single-line — остаётся только первая строка', async () => {
+    const { inline } = await withMode('single-line', ' = 2;\nfunction f() {\n  return 1;\n}');
+    expect(inline.text).toBe(' = 2;');
+  });
+
+  it('multi-line — режим по умолчанию, когда не задан', async () => {
+    const { inline } = await withMode(undefined, ' = 2;\nfunction f() {\n  return 1;\n}');
+    expect(inline.text).toContain('\n');
+  });
+});
+
+describe('приём по словам', () => {
+  it('Ctrl+→ берёт одно слово и оставляет остальное', async () => {
+    const { inline } = await withMode('multi-line', ' = compute(value) + 1;');
+    expect(inline.isVisible).toBe(true);
+    const handled = inline.handleKey({
+      key: 'ArrowRight',
+      ctrlKey: true,
+      preventDefault: vi.fn(),
+    } as unknown as KeyboardEvent);
+    expect(handled).toBe(true);
+    // Взято первое слово вместе с тем, что перед ним: ` = compute(`. Это и есть
+    // одно «слово» для приёма — до следующего разделителя, чтобы не осталось висящего хвоста.
+    expect(inline.text).toBe('value) + 1;');
+    expect(inline.isVisible).toBe(true);
+  });
+
+  it('без Ctrl стрелка остаётся редактору', async () => {
+    const { inline } = await withMode('multi-line', ' = 2;');
+    const handled = inline.handleKey({
+      key: 'ArrowRight',
+      preventDefault: vi.fn(),
+    } as unknown as KeyboardEvent);
+    expect(handled).toBe(false);
+  });
+});
