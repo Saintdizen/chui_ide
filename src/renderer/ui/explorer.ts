@@ -1,6 +1,8 @@
 import type { DirEntry, ExplorerSettings, GitChange, WorkspaceInfo } from '../../shared/api';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { submoduleStateLabel, type GitSubmodule } from '../../shared/git-submodules';
+import { pasteNotice, planPaste, type FileClip } from '../core/file-clipboard';
+import { duplicatePlan } from '../core/duplicate-name';
 import { maskToRegExp } from '../../shared/glob';
 import { plural } from '../../shared/review';
 import { countExcluded, excludedLabel } from '../core/excluded-notes';
@@ -98,6 +100,14 @@ export interface ExplorerView {
   /** Создание с инлайн-вводом имени: цель — выбранная папка или её родитель. */
   startCreate(entryKind: 'file' | 'directory'): void;
   startRename(path: string): void;
+  /**
+   * Каким путём ляжет копия: соседний файл с новым именем по образцу
+   * `name (копия)`. Занятые имена знает дерево — оно их и видит. `null` — путь
+   * вне дерева: дублировать то, чего не видно, не за что.
+   */
+  duplicateTarget(path: string, isDirectory: boolean): string | null;
+  /** Папка ли это — дерево знает то, чего не знает команда. */
+  isDirectory(path: string): boolean;
   /** Раскрытые папки — сохраняются в сессии проекта. */
   expandedPaths(): string[];
   /**
@@ -309,6 +319,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   const pending = new Map<string, Promise<void>>();
   const failed = new Set<string>();
   let inlineEdit: InlineEdit | null = null;
+  /**
+   * Буфер копирования/переноса внутри дерева. Свой, а не системный: в системном
+   * пути лежат текстом и не отличимы от скопированного имени файла.
+   */
+  let clip: FileClip | null = null;
   /** Просьба вернуть фокус дереву на ближайшей отрисовке (см. обработчик клика). */
   let refocusTreeOnce = false;
   /**
@@ -347,6 +362,32 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       filterInput?.focus();
       filterInput?.select();
       return;
+    }
+    // Ctrl+X/C/V — те же действия, что в меню строки. До типизированного поиска:
+    // иначе `v` без модификаторов прыгал бы к файлу на букву `v`.
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+      const letter = event.key.toLowerCase();
+      if (letter === 'c' || letter === 'x') {
+        const paths = selection.paths.length > 0 ? [...selection.paths] : selected ? [selected] : [];
+        if (paths.length > 0) {
+          event.preventDefault();
+          clipPaths(letter === 'c' ? 'copy' : 'move', paths);
+        }
+        return;
+      }
+      if (letter === 'v' && clip !== null) {
+        event.preventDefault();
+        const anchor = selection.paths.length === 1 ? selection.paths[0]! : selected;
+        // Вставка идёт в выделенную папку, иначе — рядом с выделенным файлом.
+        const dir =
+          anchor === null
+            ? (deps.workspace.roots[0]?.root ?? '')
+            : (findEntry(anchor) !== undefined && entryIsDirectory(findEntry(anchor)!))
+              ? anchor
+              : parentOf(anchor);
+        void pasteInto(dir);
+        return;
+      }
     }
     // Показанная копия забирает свои клавиши первой: она видна, а фокус — в дереве.
     if (deps.peekKey?.(event)) {
@@ -1141,6 +1182,26 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             ],
           },
           { separator: true as const },
+          {
+            label: 'Дублировать',
+            onSelect: () => void deps.commands.execute('file.duplicate', entry.path),
+          },
+          {
+            label: 'Копировать',
+            onSelect: () => clipPaths('copy', effective),
+          },
+          {
+            label: 'Вырезать',
+            onSelect: () => clipPaths('move', effective),
+          },
+          {
+            label: 'Вставить',
+            // Без буфера пункт ничего не делает — лучше показывать это выключенным,
+            // чем удивлять молчанием.
+            disabled: clip === null || clip.paths.length === 0,
+            onSelect: () => void pasteInto(entryIsDirectory(entry) ? entry.path : parentOf(entry.path)),
+          },
+          { separator: true as const },
           // Открытие вне IDE: файл — программой системы, папка — в системном
           // проводнике, а терминал поднимается в той папке, где лежит выбранное.
           {
@@ -1203,6 +1264,43 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         ];
 
     showContextMenu(items, event.clientX, event.clientY);
+  };
+
+  /** Сложить в буфер выделенное (или один путь из меню). */
+  const clipPaths = (mode: FileClip['mode'], paths: readonly string[]): void => {
+    // Папка целиком не копируется в собственный подкаталог: проверка в плане
+    // вставки, а здесь — только запись того, что человек выбрал.
+    clip = { mode, paths: [...paths] };
+    const noun = mode === 'copy' ? 'скопировано' : 'вырезано';
+    deps.notify?.(`${noun}: ${paths.length}`);
+  };
+
+  /**
+   * Вставить буфер в папку. Имена, которые уже есть, не перезаписываются: 
+   * перезапись файла без вопроса — потеря, которую человек не заметит.
+   */
+  const pasteInto = async (targetDir: string): Promise<void> => {
+    if (!clip || clip.paths.length === 0) return;
+    const mode = clip.mode;
+    const plan = planPaste(clip, targetDir, (path) => findEntry(path) !== undefined);
+    for (let i = 0; i < plan.sources.length; i += 1) {
+      const source = plan.sources[i]!;
+      const target = plan.targets[i]!;
+      try {
+        await deps.rpc.request('workspace.copy', { from: source, to: target });
+        // Перенос — это копия с удалением источника; так один путь и одни проверки.
+        if (mode === 'move') await deps.commands.execute('file.delete', source);
+      } catch {
+        // Одно не удалось — остальные всё равно делаем: один отказ не повод
+        // терять всю вставку, а сообщение в конце посчитает результат.
+      }
+    }
+    const notice = pasteNotice(plan, clip);
+    if (notice) deps.notify?.(notice);
+    // После переноса буфер пуст: вставить его второй раз уже нечего.
+    if (mode === 'move') clip = null;
+    await refresh();
+    paint();
   };
 
   const startCreateIn = (parent: string, entryKind: 'file' | 'directory'): void => {
@@ -2911,6 +3009,18 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     expand: expandPublic,
     startCreate,
     startRename,
+    duplicateTarget(path, isDirectory) {
+      // Занятость — по тому, что видно в дереве: копия ляжет рядом с исходным,
+      // значит имена соседей уже загружены.
+      const taken = new Set((children.get(parentOf(path)) ?? []).map((entry) => entry.name));
+      // Имени копии ещё нет в списке — в этом и смысл, но если рядом лежит
+      // копия копии, шагаем дальше.
+      return duplicatePlan(path, isDirectory, (candidate) => taken.has(nameOf(candidate))).target;
+    },
+    isDirectory(path) {
+      const found = findEntry(path);
+      return found !== undefined && entryIsDirectory(found);
+    },
     expandedPaths: () => [...expanded],
     draggedPath: () => dragging[0] ?? null,
     restoreExpanded(paths) {

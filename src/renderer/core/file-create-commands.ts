@@ -19,7 +19,14 @@ export interface FileCreateDeps {
   /** Откат переименования закрывает вкладку — через ту же команду, что и человек. */
   commands: CommandRegistry;
   openEditors: OpenEditors;
-  explorer: { scheduleRefresh(): void; startCreate(entryKind: 'file' | 'directory'): void };
+  explorer: {
+    scheduleRefresh(): void;
+    startCreate(entryKind: 'file' | 'directory'): void;
+    /** Файл или папка — знает только дерево, у команды путь без вида. */
+    isDirectory(path: string): boolean;
+    /** Соседний путь с именем по образцу `name (копия)`. `null` — некуда. */
+    duplicateTarget(path: string, isDirectory: boolean): string | null;
+  };
   /** Нужен один флаг: править ли ссылки на переименованный файл. */
   settings: { explorer: { updateImportsOnRename: boolean } };
   showToast(message: string, kind?: ToastKind, options?: ToastOptions): void;
@@ -102,6 +109,27 @@ export function registerFileCreateCommands(define: DefineCommand, deps: FileCrea
 
   define({ id: 'file.newFolder', title: 'Новая папка…', category: 'Файл' }, () => {
     explorer.startCreate('directory');
+  });
+
+  // Дублирование: копия рядом с исходным, с новым именем. Источник берётся из
+  // дерева — команда не знает, файл это или папка, ей это скажет `isDirectory`.
+  define({ id: 'file.duplicate', title: 'Дублировать', category: 'Файл' }, async (path) => {
+    if (typeof path !== 'string') return undefined;
+    const isDirectory = explorer.isDirectory(path);
+    const target = explorer.duplicateTarget(path, isDirectory);
+    if (!target) return undefined;
+    const copied = await rpc.request('workspace.copy', { from: path, to: target });
+    explorer.scheduleRefresh();
+    showToast(`Создана копия ${basename(copied.path)}`, 'info', {
+      action: {
+        label: 'Отменить',
+        run: async () => {
+          await rpc.request('workspace.trash', { path: copied.path }).catch(() => undefined);
+          explorer.scheduleRefresh();
+        },
+      },
+    });
+    return copied.path;
   });
 
   // Сценарий по шагам. Порядок не косметика: активность запоминается ДО закрытия

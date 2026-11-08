@@ -43,10 +43,11 @@ function setup(opts: { active?: string | null; updateImports?: boolean } = {}) {
 const run = (f: ReturnType<typeof setup>, id: string, ...args: unknown[]) => f.commands.get(id)!(...args);
 
 describe('registerFileCreateCommands', () => {
-  it('регистрирует создание и переименование — пять команд', () => {
+  it('регистрирует создание, переименование и дублирование — шесть команд', () => {
     expect([...setup().commands.keys()].sort()).toEqual([
       'file.createFile',
       'file.createFolder',
+      'file.duplicate',
       'file.newFile',
       'file.newFolder',
       'file.rename',
