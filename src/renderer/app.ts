@@ -2363,6 +2363,8 @@ export async function startApplication(
 
   // Источники вкладок — одна запись на двоих: по ней полоса рисует вкладки, а
   // остров редактора (`applySurfaces`) спрашивает, чьё имя ему носить.
+  let draggedTabPath: string | null = null;
+
   const tabSources: Parameters<typeof createTabs>[0] = {
     openEditors,
     documents,
@@ -2378,6 +2380,13 @@ export async function startApplication(
     // Перетащили файл из дерева на вкладку — значит «сравни с ней». Источник
     // перетаскивания живёт в дереве, полоса только спрашивает.
     draggedFile: () => explorer.draggedPath(),
+    // Своё перетаскивание: какая вкладка едет. Держим здесь, потому что в
+    // `dragover` браузер не отдаёт данные, а отличить «едет вкладка» от
+    // «тянут файл из дерева» надо именно там.
+    draggedTab: () => draggedTabPath,
+    setDraggedTab: (path) => {
+      draggedTabPath = path;
+    },
   };
 
   const tabs = createTabs(tabSources);

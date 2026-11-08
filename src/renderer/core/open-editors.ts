@@ -229,6 +229,49 @@ export class OpenEditors {
     if (!wasPinned || wasPreview) this.changeEmitter.fire();
   }
 
+  /**
+   * Переставить вкладку на место `before` (путь вкладки, перед которой стать;
+   * `null` — в конец). Отдаёт новый порядок или `null`, если переставлять
+   * нечего.
+   *
+   * Закреплённые вкладки двигаются только среди закреплённых: иначе
+   * перетаскивание младшей вкладки через закреплённую сломало бы саму идею
+   * закрепления — «эти всегда слева».
+   */
+  move(path: string, before: string | null): string[] | null {
+    const from = this.order.indexOf(path);
+    if (from < 0) return null;
+    const pinnedCount = this.pinnedCount();
+    const isPinned = this.pinned.has(path);
+
+    let to = before === null ? this.order.length : this.order.indexOf(before);
+    if (to < 0) return null;
+
+    // Индекс цели считался до извлечения: если двигаем вперёд, сдвигаем на один.
+    // Это ДО ограничения зонами: сначала переводим «перед целью» в «место в
+    // списке», потом держим место внутри своей зоны. Наоборот — граница
+    // закреплённых сдвигалась бы вместе с движением.
+    const target = from < to ? to - 1 : to;
+    // Границы зон: закреплённые в начале, остальные после них.
+    const lowest = isPinned ? 0 : pinnedCount;
+    const highest = isPinned ? pinnedCount - 1 : this.order.length - 1;
+    const clamped = Math.min(Math.max(target, lowest), highest);
+    if (clamped === from) return null;
+
+    this.order.splice(from, 1);
+    this.order.splice(clamped, 0, path);
+    this.changeEmitter.fire();
+    return [...this.order];
+  }
+
+  /** Сколько закреплённых идут в начале — граница между зонами вкладок. */
+  private pinnedCount(): number {
+    let count = 0;
+    for (const path of this.order) if (!this.pinned.has(path)) break;
+    else count += 1;
+    return count;
+  }
+
   unpin(path: string): void {
     if (this.pinned.delete(path)) this.changeEmitter.fire();
   }

@@ -4,8 +4,59 @@ import type { OpenEditors } from '../core/open-editors';
 import { showContextMenu } from './context-menu';
 import { basename, clear, h, svgIcon } from './dom';
 
+/** Свой mime перетаскивания вкладок: по нему отличаем от файла из дерева. */
+const TAB_DRAG_MIME = 'application/x-chui-tab';
+
+/**
+ * Перетаскивание самой вкладки по полосе.
+ *
+ * `dragover` на цели спрашивает `deps.draggedTab()`, а не `dataTransfer`:
+ * браузер не отдаёт данные в `dragover`, и «едет вкладка» от «тянут файл из
+ * проводника» иначе не отличить — оба претендовали бы на один drop.
+ */
+function wireTabDrag(tab: HTMLElement, path: string, deps: TabsDeps): void {
+  tab.draggable = true;
+  tab.addEventListener('dragstart', (event) => {
+    event.dataTransfer!.setData(TAB_DRAG_MIME, path);
+    event.dataTransfer!.effectAllowed = 'move';
+    deps.setDraggedTab?.(path);
+    tab.classList.add('is-dragging');
+  });
+  tab.addEventListener('dragend', () => {
+    tab.classList.remove('is-dragging');
+    deps.setDraggedTab?.(null);
+  });
+  tab.addEventListener('dragover', (event) => {
+    const moving = deps.draggedTab?.() ?? null;
+    if (moving === null || moving === path) return;
+    // Гасим, иначе сработает обработчик полосы (перетащили файл) — он тут ни при чём.
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer!.dropEffect = 'move';
+    tab.classList.add('is-move-target');
+  });
+  tab.addEventListener('dragleave', () => tab.classList.remove('is-move-target'));
+  tab.addEventListener('drop', (event) => {
+    tab.classList.remove('is-move-target');
+    const moving = deps.draggedTab?.() ?? null;
+    if (moving === null || moving === path) return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Ставим ПЕРЕД целью: тащат «на место этой», и так одинаково при движении
+    // в любую сторону — иначе вправо и влево вели бы себя по-разному.
+    void deps.commands.execute('file.moveTab', moving, path);
+  });
+}
+
 export interface TabsDeps {
   openEditors: OpenEditors;
+  /**
+   * Какая вкладка сейчас едет (`null` — никакая). Хранится у хозяина: модель
+   * вкладок одна на всю полосу, и «кто едет» — её состояние, а не разметки.
+   */
+  draggedTab?: () => string | null;
+  /** Запомнить, что вкладка поехала (или что перетаскивание кончилось). */
+  setDraggedTab?: (path: string | null) => void;
   documents: DocumentStore;
   commands: CommandRegistry;
   /** Вкладки встроенного браузера: страницы стоят в той же полосе, что файлы. */
@@ -255,6 +306,7 @@ export function createTabs(deps: TabsDeps): Tabs {
       tab.addEventListener('auxclick', (event) => {
         if (event.button === 1) void deps.commands.execute('file.close', path);
       });
+      wireTabDrag(tab, path, deps);
 
       // Перетащили файл на вкладку — сравнить с этой вкладкой.
       //

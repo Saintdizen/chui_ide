@@ -3553,3 +3553,13 @@
   border-color: var(--accent_fill);
   outline: none;
 }
+
+/* Перетаскивание вкладки: та, что едет, гаснет, цель показывает вставку
+   слева от себя — туда вкладка и встанет. */
+.tab.is-dragging {
+  opacity: 0.5;
+}
+
+.tab.is-move-target {
+  box-shadow: inset 2px 0 0 var(--accent_fill);
+}

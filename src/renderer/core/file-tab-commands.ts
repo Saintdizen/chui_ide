@@ -66,6 +66,17 @@ export function registerFileTabCommands(define: DefineCommand, deps: FileTabDeps
     browserStrip.deactivate();
   });
 
+  /**
+   * Переставить вкладку: перетаскивание в полосе.
+   *
+   * `null` вместо цели — в конец. Модель бережёт границу закреплённых сама
+   * (см. `OpenEditors.move`), здесь только вызов.
+   */
+  define({ id: 'file.moveTab', title: 'Переставить вкладку', category: 'Файл' }, (path, before) => {
+    if (typeof path !== 'string') return;
+    openEditors.move(path, typeof before === 'string' && before.length > 0 ? before : null);
+  });
+
   // Перебор вкладок по порядку использования — как в VS Code: полоса хранит свой порядок,
   // а `Ctrl+Tab` идёт по истории показов. Снимок порядка держит `openEditors`.
   const cycleTab = (step: 1 | -1): void => {
