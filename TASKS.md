@@ -162,21 +162,16 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
 58. `symbols`: поиск по имени и по регулярке (JetBrains `search_symbol`,
     `search_regex`; Neovim `workspace/symbol`). code-index есть
     (symbols/store.ts, workspace/code-index.ts), инструмента нет.
-68. `debug`: отладочная сессия для агента. DebugService в
-    src/main/debug/debug.ts умеет start/attach/breakpoints/step/stack/
-    scopes/variables/evaluate/setVariable — агент не видит ни одного.
-    JetBrains отдаёт 13 xdebug_* инструментов. Минимум: точка останова,
-    старт, стек, значения, выражение.
-69. `run`: запуск конфигурации и сборки (JetBrains
-    `execute_run_configuration`, `build_project`). Сейчас только
-    `terminal` руками.
+68. ~~`debug`: отладочная сессия для агента~~ — сделано: инструмент
+    `debug`, девять действий на той же сессии, что панель.
+69. ~~`run`: запуск конфигурации и сборки~~ — сделано: инструмент
+    `run`, резолвер `src/main/project/build.ts`.
 70. `format`: переформатировать файл без сохранения (JetBrains
-    `reformat_file`; LSP-formatting у нас есть — 3 файла).
-71. `problems`: проблемы по файлу/проекту отдельным вызовом (JetBrains
+    `reformat_file`). Сейчас `checks` не правит.
+71. `problems`: все пометки проекта сразу, не только текущий файл (JetBrains
     `get_file_problems`, `lint_files`) — сейчас только `checks`.
-72. `open_files`: список открытых в редакторе файлов с курсорами
-    (JetBrains `get_all_open_file_paths`, Cursor). В чате о таком просят
-    постоянно, а агент не знает, что открыто.
+72. ~~`open_files`: открытые файлы с курсорами~~ — сделано: инструмент
+    `open_files`, активная вкладка первой.
 73. `move`/`copy_path`/`create_directory` (Zed, JetBrains
     `create_new_file`): создание и перенос отдельными именами, чтобы не
     собирать команды через `terminal`.
