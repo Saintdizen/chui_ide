@@ -1226,6 +1226,23 @@
 }
 
 /* Шапка плана — кнопка-переключатель: клик по ней сворачивает и разворачивает шаги. */
+/* «Выполнить до конца»: второе действие в карточке, поэтому не спорит с шапкой
+   по весу — подпись, а не кнопка с заливкой. */
+.plan-run {
+  margin-top: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color);
+  font: inherit;
+  cursor: pointer;
+}
+
+.plan-run:hover {
+  background: var(--element_background_hover);
+}
+
 .plan-head {
   display: flex;
   align-items: center;
