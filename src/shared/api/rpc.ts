@@ -1,4 +1,5 @@
 import type { CommandGrantScope } from '../agent-grants';
+import type { ReleaseNote } from '../whats-new';
 import type { MenuRole } from '../app-menu';
 import type { AccountBalance } from '../balance';
 import type { EditorConfigValues } from '../editorconfig';
@@ -303,6 +304,9 @@ export type HostResultOf<M extends HostMethodName> = HostMethods[M]['result'];
  */
 export interface ChuiMethods {
   'app.info': { params: void; result: AppInfo };
+  /** Записи «что нового» новее виденной версии: `ReleaseNote[]`. */
+  'app.whatsNew': { params: void; result: { releases: ReleaseNote[]; version: string } };
+  'app.whatsNewSeen': { params: { version: string }; result: void };
 
   'dialog.pickFolder': { params: { title?: string }; result: { path: string | null } };
   /**

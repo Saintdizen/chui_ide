@@ -155,6 +155,8 @@ export interface Settings {
   run: RunSettings;
   appearance: AppearanceSettings;
   workspace: WorkspaceSettings;
+  /** Виденная версия «что нового»: показывать только новее. */
+  whatsNewSeen?: string;
   layout: LayoutSettings;
   /** Именованные раскладки: привычка машины («дебаг», «ревизия»), не проекта. */
   layoutPresets: SavedLayout[];
@@ -347,6 +349,8 @@ export interface SettingsPatch {
   /** Полный список именованных раскладок: их немного, кладём целиком. */
   layoutPresets?: SavedLayout[];
   workspace?: WorkspaceSettingsPatch;
+  /** Отметка, что человек видел заметки этой версии. */
+  whatsNewSeen?: string;
   lsp?: Partial<LspSettings>;
   git?: Partial<GitSettings>;
   keybindings?: Partial<KeybindingSettings>;

@@ -650,6 +650,10 @@ module.exports = [
       platform: 'linux',
     }),
 
+    // «Что нового»: пустой список — мок не мешает окну стартовать.
+    'app.whatsNew': () => ({ releases: [], version: '0.1.0-mock' }),
+    'app.whatsNewSeen': () => undefined,
+
     'dialog.pickFolder': () => ({ path: ROOT }),
     // Подтверждение в проверке не мешает: мок соглашается сразу.
     'dialog.confirm': () => ({ confirmed: true }),

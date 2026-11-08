@@ -166,6 +166,12 @@ interface StoredSettings {
   run: RunSettings;
   appearance: AppearanceSettings;
   workspace: WorkspaceSettings;
+  /**
+   * Какая версия уже показана человеку окном «что нового». Пусто — не
+   * показывать вовсе (первый запуск: рассказывать не о чем, всё новое).
+   * Строка, а не число: версии сравниваются как версии, а не как числа.
+   */
+  whatsNewSeen?: string;
   layout: LayoutSettings;
   /**
    * Именованные раскладки: «дебаг», «ревизия», «литература». Хранятся рядом с

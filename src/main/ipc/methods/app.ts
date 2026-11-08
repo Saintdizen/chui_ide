@@ -7,6 +7,7 @@ import { starterFiles } from '../../project/scaffold';
 import { openProjectFolder } from '../register';
 import { openWelcomeWindow } from '../../window';
 import type { RpcServices } from '../context';
+import { unseenReleases, parseChangelog, type ReleaseNote } from '../../../shared/whats-new';
 import { RpcFailure, type RpcRouter } from '../router';
 
 /**
@@ -21,6 +22,26 @@ import { RpcFailure, type RpcRouter } from '../router';
  * Перенесено из `register.ts` без правок логики.
  */
 export function registerAppMethods(router: RpcRouter, deps: RpcServices): void {
+  /**
+   * «Что нового»: выпуски из CHANGELOG.md новее той, что человек уже видел.
+   * Файл лежит рядом с приложением, а не внутри — его правит тот, кто выпускает.
+   */
+  router.register('app.whatsNew', async (): Promise<{ releases: ReleaseNote[]; version: string }> => {
+    const version = app.getVersion();
+    const seen = deps.settings.get().whatsNewSeen;
+    if (!seen) return { releases: [], version };
+    try {
+      const text = await fs.readFile(path.join(app.getAppPath(), 'CHANGELOG.md'), 'utf8');
+      return { releases: unseenReleases(parseChangelog(text), version, seen), version };
+    } catch {
+      // Без файла — без экрана: это не ошибка, а отсутствие заметок.
+      return { releases: [], version };
+    }
+  });
+  router.register('app.whatsNewSeen', (params: { version: string }) => {
+    deps.settings.update({ whatsNewSeen: params.version });
+  });
+
   router.register(
     'app.info',
     (): AppInfo => ({

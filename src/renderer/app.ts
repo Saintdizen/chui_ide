@@ -507,6 +507,24 @@ export async function startApplication(
     `· Node ${info.node} · ${info.platform}`,
   );
 
+  // «Что нового»: что человек ещё не видел — тостом. Не модальное окно: заметки
+  // об изменениях не повод прервать работу, а тем более-в первый запуск.
+  void (async () => {
+    try {
+      const { releases, version } = await rpc.request('app.whatsNew');
+      const fresh = releases[0];
+      if (!fresh) return;
+      const more = releases.length > 1 ? ` и ещё ${releases.length - 1}` : '';
+      const first = fresh.items[0] ?? '';
+      showToast(`Что нового в ${fresh.version}: ${first}${more}`, 'info', {
+        key: 'whats-new',
+      });
+      await rpc.request('app.whatsNewSeen', { version });
+    } catch {
+      // Нет заметок — нет тоста: это не ошибка.
+    }
+  })();
+
   // Тема: схема одна — тёмная, сервис держит активную тему из файла.
   const theme = new ThemeService(rpc, settings.appearance.customTheme ?? null);
 
