@@ -7,7 +7,7 @@
  * живут рядом и в том же синтаксисе, но делают другое: подставляют свой текст в
  * вопрос. Здесь же — действие.
  */
-export type ChatActionId = 'compact' | 'new' | 'fork';
+export type ChatActionId = 'compact' | 'new' | 'fork' | 'compare';
 
 export interface ChatAction {
   id: ChatActionId;
@@ -35,6 +35,12 @@ export const CHAT_ACTIONS: readonly ChatAction[] = [
     command: '/fork',
     title: 'Ветка беседы',
     hint: 'копия переписки в новой вкладке; можно дать имя: /fork про кеш',
+  },
+  {
+    id: 'compare',
+    command: '/compare',
+    title: 'Сравнить ветки',
+    hint: 'показать, до какого места две беседы совпадают и чем расходятся',
   },
 ];
 

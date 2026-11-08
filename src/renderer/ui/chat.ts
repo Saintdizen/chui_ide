@@ -24,6 +24,7 @@ import { parentOf } from '../../shared/paths';
 import { CHAT_ACTIONS, type ChatAction, parseChatAction } from '../../shared/chat-actions';
 import { type CompactionFacts, compactionFacts, compactionLines } from '../../shared/compaction-facts';
 import { forkPlan } from './chat-fork';
+import { showForkCompare } from './chat-fork-compare';
 import { resolvePatches } from '../../shared/patch';
 import { turnsSinceCompact } from './compact-turns';
 import { keptContextMessage, restoreSent } from '../../shared/chat-attachments';
@@ -2746,6 +2747,22 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (action.id === 'new') {
       createSession();
       showToast('Новая беседа: прежняя осталась во вкладке');
+      return 'started';
+    }
+    if (action.id === 'compare') {
+      // Сравнение показывает панель, а не отвечает в ленте: это разговор
+      // о беседах, и место ему — в окне поверх, а не в истории одной из них.
+      showForkCompare(
+        {
+          sessions: () =>
+            sessions.map((item) => ({ title: item.title, transcript: item.transcript })),
+          open: (title) => {
+            const target = sessions.find((item) => item.title === title);
+            if (target) activate(target.id);
+          },
+        },
+        argument.trim() || undefined,
+      );
       return 'started';
     }
     const fork = forkActive(active(), null, argument);

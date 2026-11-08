@@ -52,3 +52,37 @@ export function forkPlan(
     ...(session.compacted ? { compacted: true } : {}),
   };
 }
+
+/** Общий предок двух веток: сколько первых сообщений у них совпадает. */
+export interface ForkCompare {
+  /** Число совпадающих сообщений от начала — место, где ветки разошлись. */
+  shared: number;
+  /** Что есть только в левой ветке (после точки расхождения). */
+  left: ChatMessage[];
+  /** Что есть только в правой. */
+  right: ChatMessage[];
+}
+
+/**
+ * Сравнить две ветки беседы.
+ *
+ * Сравниваем по `transcript`, а не по `history`: после компакции история
+ * сжата до резюме, и две ветки выглядели бы разными с первого сообщения,
+ * хотя человек их такими не делал.
+ *
+ * Сообщение считается общим по роли и тексту: id у копий разный, а слова —
+ * те же, и сравнивать надо именно слова.
+ */
+export function compareForks(
+  left: readonly ChatMessage[],
+  right: readonly ChatMessage[],
+): ForkCompare {
+  const same = (a: ChatMessage, b: ChatMessage): boolean =>
+    a.role === b.role && (a.content ?? '') === (b.content ?? '');
+
+  let shared = 0;
+  while (shared < left.length && shared < right.length && same(left[shared]!, right[shared]!)) {
+    shared += 1;
+  }
+  return { shared, left: left.slice(shared), right: right.slice(shared) };
+}

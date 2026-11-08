@@ -10,12 +10,12 @@ describe('свои команды беседы', () => {
     expect(parseChatAction('/ compact')).toBeNull();
   });
 
-  it('знает все три команды и не путает регистр', () => {
+  it('знает все команды беседы и не путает регистр', () => {
     for (const action of CHAT_ACTIONS) {
       expect(parseChatAction(action.command)?.action.id).toBe(action.id);
       expect(parseChatAction(action.command.toUpperCase())?.action.id).toBe(action.id);
     }
-    expect(CHAT_ACTIONS.map((action) => action.id)).toEqual(['compact', 'new', 'fork']);
+    expect(CHAT_ACTIONS.map((action) => action.id)).toEqual(['compact', 'new', 'fork', 'compare']);
   });
 
   it('хвост после команды — имя ветки, и он обрезан по краям', () => {
