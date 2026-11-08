@@ -276,6 +276,17 @@ export class Terminal {
     return this.scrollback;
   }
 
+  /**
+   * Весь видимый вывод: прокрутка сверху, экран снизу.
+   *
+   * Отдельно от `history()`: тому, кто показывает прокрутку, экран не нужен,
+   * а тому, кто читает вывод целиком (контекст чата), — нужен именно весь он.
+   * На альтернативной доске истории нет: там экран и есть всё.
+   */
+  output(): readonly Line[] {
+    return this.active === this.alt ? this.active.lines : [...this.scrollback, ...this.active.lines];
+  }
+
   /** Применить порцию вывода. */
   write(data: string): void {
     for (const event of this.parser.write(data)) this.applyEvent(event);

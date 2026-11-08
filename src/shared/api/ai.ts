@@ -48,6 +48,8 @@ export type ChatAttachmentKind =
   | 'file'
   | 'selection'
   | 'problems'
+  /** Вывод терминала: ошибка сборки обычно видна только там. */
+  | 'terminal'
   | 'diff'
   | 'codebase'
   | 'web'

@@ -40,6 +40,8 @@ export type ContextKind =
   | 'selection'
   | 'file'
   | 'problems'
+  /** Вывод терминала: ошибка сборки обычно видна только там. */
+  | 'terminal'
   | 'diff'
   | 'codebase'
   | 'web'
@@ -88,6 +90,8 @@ const CONTEXT_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string;
   { id: '#selection', title: 'Выделение', hint: 'Фрагмент из редактора', kind: 'selection' },
   { id: '#file', title: 'Открытый файл', hint: 'Содержимое целиком', kind: 'file' },
   { id: '#problems', title: 'Ошибки и предупреждения', hint: 'То, что подчёркивает редактор', kind: 'problems' },
+  // Вывод терминала: половина ошибок видна только там, а не в разметке редактора.
+  { id: '#terminal', title: 'Вывод терминала', hint: 'Последние строки активной вкладки', kind: 'terminal' },
   // Правки проекта: без него модель не видит, что уже изменено, и предлагает сделать это второй раз.
   { id: '#diff', title: 'Мои правки', hint: 'Незакоммиченные изменения репозитория', kind: 'diff' },
   // Места по смыслу: модель видит не только открытый файл, а весь проект под вопрос.

@@ -30,6 +30,7 @@ import {
 } from "../terminal/input/keys";
 import { TermView } from "../terminal/view/term-view";
 import { shortcutKey } from "../../shared/physical-key";
+import { terminalSnapshot, type TerminalSnapshot } from "../../shared/terminal-snapshot";
 import {
   completeTerminal,
   splitTail,
@@ -105,6 +106,11 @@ export interface TerminalPanelView {
   restoreTabs(tabs: readonly string[], active: number): Promise<void>;
   /** Новая сессия, при желании — в названной папке. */
   newSession(cwd?: string): Promise<void>;
+  /**
+   * Последние строки вывода активной вкладки — для контекста чата.
+   * `null` — терминал закрыт или сессия ещё не нарисовала ни строки.
+   */
+  activeOutput(): TerminalSnapshot | null;
   /**
    * Выполнить готовую команду в новой сессии.
    * Команда набирается в терминале, а не запускается «в фоне»: человек должен
@@ -828,6 +834,14 @@ export function createTerminalPanel(deps: {
       // Человек сам просит вкладку — восстановление прежних больше не уместно.
       restoring = true;
       await createSession(cwd);
+    },
+    activeOutput() {
+      const entry = active();
+      // Экран терминала — это `rows` с прокруткой; берём всё, отбор по смыслу
+      // делает снимок: пустые строки и хвост пробелов ему не нужны.
+      if (!entry) return null;
+      const snapshot = terminalSnapshot(entry.term.output());
+      return snapshot.lines === 0 ? null : snapshot;
     },
     tabsState() {
       const cwd: string[] = [];

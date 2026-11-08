@@ -65,6 +65,8 @@ export interface AttachmentsDeps {
   workspace: WorkspaceModel;
   /** Изменения репозитория: нужны только для `#diff`. */
   git?: GitModel;
+  /** Последний вывод терминала для `#terminal`; нет панели — вид недоступен. */
+  terminalOutput?: () => { text: string; lines: number } | null;
   /**
    * Спросить, какой коммит приложить (`#commit`). Хеш или его начало;
    * `null` — человек передумал. Спрашиваем, а не берём последний: «вот этот
@@ -114,6 +116,8 @@ export type ContextNoArg =
   | 'selection'
   | 'file'
   | 'problems'
+  /** Вывод терминала: ошибка сборки обычно видна только там. */
+  | 'terminal'
   | 'diff'
   | 'codebase'
   | 'web'
@@ -426,8 +430,24 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
   }
 
   /** Собрать вложение из того, что сейчас открыто в редакторе. */
-  function attachmentFrom(kind: 'selection' | 'file' | 'problems'): ChatAttachment | null {
+  function attachmentFrom(kind: 'selection' | 'file' | 'problems' | 'terminal'): ChatAttachment | null {
     const path = deps.editors.currentPath;
+
+    if (kind === 'terminal') {
+      const output = deps.terminalOutput?.() ?? null;
+      if (output === null) {
+        showToast('Терминал пуст или закрыт');
+        return null;
+      }
+      // Помечаем как вывод команды, а не как файл: модель ищет в тексте путь
+      // и правит исходник — а здесь результат запуска, и править в нём нечего.
+      return {
+        kind,
+        label: `терминал: ${output.lines} строк`,
+        title: 'Последний вывод терминала',
+        text: output.text,
+      };
+    }
 
     if (kind === 'problems') {
       const items = deps.editors.markers(path ?? undefined);

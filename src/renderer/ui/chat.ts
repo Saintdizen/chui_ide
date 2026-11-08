@@ -194,6 +194,8 @@ export interface ChatDeps {
    * ведь панель чата может жить и без открытого проекта.
    */
   git?: GitModel;
+  /** Последний вывод активной вкладки терминала для `#terminal`. */
+  terminalOutput?: () => { text: string; lines: number } | null;
   /**
    * Прогон кончился, а человек мог и не смотреть на ленту. Необязательно: без него
    * заметка всё равно выходит, только док и заголовок вкладки не подсвечиваются.
@@ -590,7 +592,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         }
       : {}),
   });
-  const planPanel = createPlanPanel();
+  const planPanel = createPlanPanel({
+    // «До конца» — обычное сообщение: агент продолжает с того шага, где стоит.
+    // Отдельной команды в main нет намеренно: продолжение — это такой же ход,
+    // и оно должно попасть в историю беседы, как любой другой.
+    onRunToEnd: () => void send('Продолжай по плану до конца, не останавливаясь на подтверждениях.'),
+  });
   /**
    * Окно «Прогон»: трасса последнего прогона этой беседы. Одна на панель —
    * открывается из строки под ответом и командой «Прогон агента».
@@ -624,6 +631,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     workspace: deps.workspace,
     ...(deps.git ? { git: deps.git } : {}),
     ...(deps.openFile ? { openFile: deps.openFile } : {}),
+    // Вывод терминала — снимок последних строк: панель решает, что считать выводом.
+    ...(deps.terminalOutput ? { terminalOutput: deps.terminalOutput } : {}),
     // Места проекта — тот же поиск по смыслу, что у палитры: `#codebase` спрашивает его
     // по тому, что уже набрано в поле ввода.
     ...(deps.codebase ? { codebase: deps.codebase } : {}),

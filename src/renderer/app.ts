@@ -2365,6 +2365,7 @@ export async function startApplication(
     commands,
     workspace,
     git,
+    terminalOutput: () => terminalPanel.activeOutput(),
     artifacts: runArtifacts,
     openDiff: (path, staged) => diffView.open(path, staged),
     // Прогон кончился, а человек на него не смотрел. Кроме заметки в окне (её

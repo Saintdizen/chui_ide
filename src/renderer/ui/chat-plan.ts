@@ -53,9 +53,14 @@ export interface PlanPanelView {
   renderHistory(entries: readonly PlanArchiveEntry[]): void;
   /** Спрятать панель (генерация кончилась). */
   hide(): void;
+  /**
+   * Что делать по кнопке «До конца». Не задано — кнопки нет: прогон может
+   * идти сам (агент продолжает шаги), и тогда она была бы вторым «поехали».
+   */
+  onRunToEnd?: () => void;
 }
 
-export function createPlanPanel(): PlanPanelView {
+export function createPlanPanel(options: { onRunToEnd?: () => void } = {}): PlanPanelView {
   const element = h('div', { class: 'composer-plan', hidden: true });
   /** Свёрнут ли чек-лист. Состояние переживает перерисовку: план обновляется часто. */
   let expanded = true;
@@ -142,6 +147,17 @@ export function createPlanPanel(): PlanPanelView {
     syncHead();
 
     const card = h('div', { class: 'plan-card' }, head, list);
+    // Кнопка «до конца» — только когда план не доведён и есть кому его доводить.
+    // Пока шаги ещё закрываются, она была бы вторым «поехали» поверх прогона.
+    if (done < steps.length) {
+      const runButton = h(
+        'button',
+        { class: 'plan-run', type: 'button', title: 'Продолжать без остановок до последнего шага' },
+        'Выполнить до конца',
+      );
+      runButton.addEventListener('click', () => options.onRunToEnd?.());
+      card.appendChild(runButton);
+    }
     // История — под текущим планом, последние сверху.
     if (historyEntries.length > 0) {
       card.appendChild(
