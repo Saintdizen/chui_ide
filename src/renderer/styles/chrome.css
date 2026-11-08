@@ -2832,6 +2832,23 @@ textarea {
   color: var(--text_color);
 }
 
+/* Галочка «заменить в этой строке»: маленькая и слева от номера, чтобы клик по
+   номеру и по тексту по-прежнему вёл к месту в файле. */
+.search-hit-toggle {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--accent_fill);
+  cursor: pointer;
+}
+
+/* Снятая строка: подчёркнута зачёркиванием — видно, что её замена не коснётся. */
+.search-hit s {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
 .search-line {
   min-width: 28px;
   color: var(--text_color_tertiary);

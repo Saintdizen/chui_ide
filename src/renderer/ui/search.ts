@@ -44,6 +44,17 @@ export function createSearchView(deps: SearchDeps): SearchView {
     placeholder: 'Поиск по проекту (Enter — искать)',
     spellcheck: false,
   });
+  /**
+   * Строки, снятые с замены: `путь:строка`. Галочка у строки выдачи — та часть
+   * «правки в выдаче», ради которой заводили отдельный редактор: увидел лишнее
+   * и снял, не трогая остальное. Сама выдача остаётся панелью: второй документ
+   * с собственной моделью правок стал бы параллельным механизмом, и разошлись
+   * бы они в первой же мелочи.
+   */
+  const excluded = new Set<string>();
+  /** Последняя выдача: по ней пересчитываем счёт, когда снимают строки. */
+  let lastResult: SearchResult | null = null;
+
   const replaceInput = h('input', {
     class: 'field-input search-replace-input',
     type: 'text',
@@ -102,6 +113,8 @@ export function createSearchView(deps: SearchDeps): SearchView {
   const render = (result: SearchResult, query: string): void => {
     clear(results);
 
+    // Метки снимаются с каждой выдачей: строка 42 прошлого запроса — уже другая.
+    excluded.clear();
     if (result.hits.length === 0) {
       status.textContent = `Ничего не найдено (проверено файлов: ${result.scanned})`;
       return;
@@ -137,9 +150,21 @@ export function createSearchView(deps: SearchDeps): SearchView {
       );
 
       for (const hit of group.hits) {
+        const key = `${path}:${hit.line}`;
+        // Галочка — что заменить. Клик по строке по-прежнему ведёт к месту.
+        const toggle = h('input', { class: 'search-hit-toggle', type: 'checkbox' });
+        toggle.checked = !excluded.has(key);
+        toggle.title = 'Заменить в этой строке';
+        toggle.addEventListener('click', (event) => event.stopPropagation());
+        toggle.addEventListener('change', () => {
+          if (toggle.checked) excluded.delete(key);
+          else excluded.add(key);
+          updateReplaceCount();
+        });
         const row = h(
           'button',
           { class: 'search-hit', type: 'button', title: `${path}:${hit.line}` },
+          toggle,
           h('span', { class: 'search-line' }, String(hit.line)),
           h('span', { class: 'search-text' }, highlight(hit.text, query)),
         );
@@ -151,7 +176,79 @@ export function createSearchView(deps: SearchDeps): SearchView {
       }
     }
 
-    status.textContent = `${result.hits.length} совпадений в ${groups.length} файлах${result.truncated ? ' (список обрезан)' : ''}`;
+    lastResult = result;
+    updateReplaceCount();
+  };
+
+  /**
+   * Счёт с учётом снятых строк. Замена идёт по вхождениям, а снимают строку,
+   * поэтому снятые считаем по числу совпадений в её выдаче: в обычном случае
+   * (одно совпадение в строке) это совпадает с точным числом.
+   */
+  /**
+   * Замена по файлам, где снятые строки пропускаются.
+   *
+   * Идём по выдаче: файлы — из неё. Читаем текст заново с диска (выдача могла
+   * устареть), меняем построчно, пропуская снятые, и пишем обратно. Номера строк
+   * берём из ТОГО ЖЕ текста, что прочитали: если файл изменился с момента поиска,
+   * старые номера указывали бы на другие строки, и мы бы заменили не то. Поэтому
+   * строку сопоставляем по номеру И по прежнему тексту строки из выдачи.
+   */
+  const replaceExceptExcluded = async (
+    query: string,
+    replacement: string,
+  ): Promise<{ replaced: number; files: string[] }> => {
+    // Настройки — те же, что у поиска (`regexOverride` ставит панель): замена
+    // не должна искать иначе, чем искала выдача.
+    const options = { isRegex: regexOverride, caseSensitive: true };
+    const paths = [...new Set((lastResult?.hits ?? []).map((hit) => hit.path))];
+    let replaced = 0;
+    const files: string[] = [];
+
+    for (const path of paths) {
+      const fresh = await deps.rpc
+        .request('workspace.readFile', { path })
+        .catch(() => null);
+      if (fresh === null) continue;
+      const before = (deps.documents.get(path)?.value ?? fresh.text).split('\n');
+      let changed = false;
+      const after = before.map((line: string, index: number) => {
+        const number = index + 1;
+        // Снятая строка этого файла — оставляем как есть.
+        if (excluded.has(`${path}:${number}`)) return line;
+        const one = replaceInText(line, query, replacement, options);
+        if (one.kind !== 'ok') return line;
+        replaced += one.count;
+        changed = true;
+        return one.text;
+      });
+      if (!changed) continue;
+      await deps.rpc.request('workspace.writeFile', { path, text: after.join('\n') });
+      files.push(path);
+      await deps.reloadFile?.(path);
+    }
+    return { replaced, files };
+  };
+
+  const updateReplaceCount = (): void => {
+    const result = lastResult;
+    if (result === null) {
+      status.textContent = '';
+      return;
+    }
+    const groups = groupHits(result.hits);
+    let kept = 0;
+    let dropped = 0;
+    for (const group of groups) {
+      // Путь — у группы, не у отдельного совпадения: так и задумано в `groupHits`.
+      const path = group.path;
+      for (const hit of group.hits) {
+        if (excluded.has(`${path}:${hit.line}`)) dropped += 1;
+        else kept += 1;
+      }
+    }
+    const tail = dropped > 0 ? `, снято ${dropped}` : '';
+    status.textContent = `${kept} совпадений в ${groups.length} файлах${tail}${result.truncated ? ' (список обрезан)' : ''}`;
   };
 
   /**
@@ -302,6 +399,19 @@ export function createSearchView(deps: SearchDeps): SearchView {
     replaceButton.disabled = true;
     status.textContent = 'Заменяю…';
     try {
+      // Что-то снято — заменяем пофайлово: RPC замены не знает про строки, а
+      // снимать строку и заменять её же молча было бы обманом.
+      if (excluded.size > 0) {
+        const done = await replaceExceptExcluded(query, replacement);
+        showToast(
+          done.replaced > 0
+            ? `Заменено вхождений: ${done.replaced} · файлов: ${done.files.length}`
+            : 'Ничего не заменено',
+          done.replaced > 0 ? 'success' : 'error',
+        );
+        await search();
+        return;
+      }
       const result = await deps.rpc.request('workspace.replace', { query, replacement });
       for (const path of result.files) await deps.reloadFile?.(path);
       showToast(
