@@ -2451,6 +2451,15 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         textInput((lsp.codeLensOff ?? []).join(', '), (v) => void patch({ lsp: { codeLensOff: splitLanguages(v) } })),
       ),
       h('div', { class: 'field-hint' }, 'Языки, где код-линзы («3 ссылки» над объявлением) не нужны.'),
+      field(
+        'Без подсказки при наведении (языки)',
+        textInput((lsp.hoverOff ?? []).join(', '), (v) => void patch({ lsp: { hoverOff: splitLanguages(v) } })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Языки, где карточка наведения закрывает данные (json, csv, xml). Пусто — подсказка всюду.',
+      ),
       field('Серверы', h('div', { class: 'lsp-servers' }, ...serverCards)),
       field('Серверы (JSON)', servers),
       languages

@@ -58,6 +58,11 @@ export interface LspSettings {
   inlayHintsOff?: string[];
   /** Языки, в которых код-линзы выключены (те же причины, что у inlay hints). */
   codeLensOff?: string[];
+  /**
+   * Языки, в которых подсказка при наведении выключена совсем. В машинных файлах
+   * (JSON, XML, CSV) она перекрывает данные, а сказать про значение нечего.
+   */
+  hoverOff?: string[];
   servers: LspServerConfig[];
 }
 

@@ -95,6 +95,26 @@ describe('наведение: пауза', () => {
     vi.advanceTimersByTime(HOVER_DELAY_MS - 1);
     expect(widget.isVisible).toBe(false);
   });
+
+  // П.34: «держи Ctrl — подсказка сразу». Ждать паузу, стоя замерев, — то, за что
+  // подсказку и выключают: она есть, но увидеть её надо через секунду.
+  it('Ctrl над словом — карточка сразу, без паузы', () => {
+    const { widget, dom, hover } = setup();
+    const viewport = dom.document.querySelector('.own-editor-viewport');
+    viewport.dispatchEvent({
+      type: 'mousemove',
+      clientX: TEXT.indexOf('value'),
+      clientY: 200,
+      ctrlKey: true,
+    });
+    expect(widget.isVisible).toBe(true);
+  });
+
+  it('без Ctrl до паузы карточки нет', () => {
+    const { widget, hover } = setup();
+    hover(TEXT.indexOf('value'));
+    expect(widget.isVisible).toBe(false);
+  });
 });
 
 describe('наведение: длинная карточка', () => {

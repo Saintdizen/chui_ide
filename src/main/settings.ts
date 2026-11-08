@@ -571,6 +571,7 @@ export class SettingsStore {
         requestTimeoutMs: this.data.lsp.requestTimeoutMs,
         inlayHintsOff: [...(this.data.lsp.inlayHintsOff ?? [])],
         codeLensOff: [...(this.data.lsp.codeLensOff ?? [])],
+        hoverOff: [...(this.data.lsp.hoverOff ?? [])],
         // Копия: снимок настроек не должен меняться вслед за правкой списка —
         // это касается и вложенных полей сервера (среды, доводов к `initialize`,
         // дополнительных корней).
@@ -1377,6 +1378,7 @@ function sanitizeLsp(value: LspSettings): LspSettings {
       : {}),
     inlayHintsOff: normalizeLanguages(value.inlayHintsOff),
     codeLensOff: normalizeLanguages(value.codeLensOff),
+    hoverOff: normalizeLanguages(value.hoverOff),
     servers,
   };
 }

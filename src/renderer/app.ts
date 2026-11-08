@@ -570,8 +570,11 @@ export async function startApplication(
         ...settings.editor.snippets,
         ...DEFAULT_SNIPPETS,
       ],
-      // Наведение от сервера: текст разметки в карточку.
+      // Наведение от сервера: текст разметки в карточку. Языки из `lsp.hoverOff`
+      // молчат совсем: в JSON или CSV карточка закрывает данные, а объяснять
+      // там нечего — держим настройку рядом с inlay hints / code lens.
       hoverFromLanguage: async (path, position) => {
+        if (featureOff(settings, 'hoverOff', path)) return null;
         const text = await lsp.hover(path, position);
         return text ? { text } : null;
       },

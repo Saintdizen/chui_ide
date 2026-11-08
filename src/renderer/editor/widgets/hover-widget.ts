@@ -293,13 +293,19 @@ export class HoverWidget {
     this.root.style.top = `${top}px`;
   }
 
+  private lastMouse: { x: number; y: number } | null = null;
+
   private readonly onMouseMove = (event: MouseEvent): void => {
     this.moves += 1;
     if (this.timer !== null) clearTimeout(this.timer);
     // Мышь поехала — прежняя подсказка уже не про то место.
     this.hide();
+    this.lastMouse = { x: event.clientX, y: event.clientY };
     const { clientX, clientY } = event;
-    if (this.delayMs <= 0) {
+    // `Ctrl` держат — ждать нечего: жест сам по себе означает «покажи сейчас».
+    // Без этого человеку, пришедшему за справкой, приходилось стоять замерев
+    // столько, сколько стоит задержка, — а она может быть и полсекунды.
+    if (this.delayMs <= 0 || event.ctrlKey) {
       // `0` — показывать сразу: пауза нулевая, таймер только отнял бы кадр.
       this.showAt(this.view.offsetAt(clientX, clientY), clientX, clientY);
       return;
@@ -319,6 +325,17 @@ export class HoverWidget {
    */
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== 'Control') return;
+    // Мышь уже стоит на слове, а карточки ещё нет: `Ctrl` — просьба показать сейчас.
+    // Иначе пришлось бы шевельнуть мышью, и жест читался бы как «раскрой показанное».
+    if (!this.visible && this.lastMouse !== null) {
+      if (this.timer !== null) {
+        clearTimeout(this.timer);
+        this.timer = null;
+      }
+      const { x, y } = this.lastMouse;
+      this.showAt(this.view.offsetAt(x, y), x, y);
+      return;
+    }
     if (!this.visible || this.collapsed === false) return;
     event.preventDefault();
     this.collapsed = false;

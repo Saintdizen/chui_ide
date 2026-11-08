@@ -2,7 +2,7 @@ import { languageFromPath } from './languages';
 import type { LspSettings } from './api/lsp';
 
 /** Возможности LSP, которые можно выключить по языку. */
-export type LspPerLanguageFeature = 'inlayHintsOff' | 'codeLensOff';
+export type LspPerLanguageFeature = 'inlayHintsOff' | 'codeLensOff' | 'hoverOff';
 
 /**
  * Выключена ли возможность (inlay hints / code lens) для языка этого файла.
