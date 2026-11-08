@@ -40,7 +40,7 @@ import { EXTERNAL_BONUS, matchScore } from '../../../shared/fuzzy';
 import { importPathAt, importPathItems, type ImportPathContext } from './import-path';
 import { expandPostfix, postfixAt, postfixOffers } from './postfix';
 import { callContextAt, namedArgumentItems } from './named-args';
-import { expandSnippet } from './snippet';
+import { expandSnippet, type SnippetVariables } from './snippet';
 import { SnippetSession } from './snippet-session';
 import { importsOf, memberAccessAt, type membersOf, membersOfPath, type MemberAccess } from './member-access';
 import { prefixAt } from './prefix';
@@ -392,6 +392,38 @@ export interface CompletionAssistantOptions {
   initialAliasesAt?: number;
 }
 
+/**
+ * Значения переменных сниппета из того, что знает окно.
+ *
+ * Полного набора `TM_*` (как у VS Code) нет нарочно: остальные требуют
+ * выделения, даты, имени буфера — и выдумывать их здесь значило бы вернуть
+ * пустую строку там, где человек ждал имя файла. Что знаем — отдаём:
+ * `TM_FILENAME`, `TM_FILENAME_BASE`, `TM_FILEPATH`, `TM_DIRECTORY`,
+ * `TM_LINE_NUMBER` и `TM_SELECTED_TEXT` (пустой: подсказку вызывают не
+ * поверх выделения).
+ */
+function snippetVariables(
+  path: string | null,
+  line: number,
+  selected: string,
+): SnippetVariables {
+  if (path === null) return { TM_SELECTED_TEXT: selected };
+  // Путь в проекте — с прямыми слэшами: сниппет не должен зависеть от того,
+  // на какой системе он раскрыт.
+  const full = path.replace(/\\/g, '/');
+  const base = full.slice(full.lastIndexOf('/') + 1);
+  const dot = base.lastIndexOf('.');
+  const dir = full.slice(0, Math.max(0, full.lastIndexOf('/')));
+  return {
+    TM_FILENAME: base,
+    TM_FILENAME_BASE: dot > 0 ? base.slice(0, dot) : base,
+    TM_FILEPATH: full,
+    TM_DIRECTORY: dir,
+    TM_LINE_NUMBER: String(line),
+    TM_SELECTED_TEXT: selected,
+  };
+}
+
 export class CompletionAssistant {
   private readonly view: EditorView;
   private readonly controller: EditorController;
@@ -491,6 +523,15 @@ export class CompletionAssistant {
   }
 
   /** Сменить язык (открыли другой файл). */
+  /** Выделенный текст текущей панели: пусто — выделения нет. */
+  private selectedText(): string {
+    const selection = this.controller.selection;
+    if (selection.active === selection.anchor) return '';
+    const from = Math.min(selection.anchor, selection.active);
+    const to = Math.max(selection.anchor, selection.active);
+    return this.buffer.text.slice(from, to);
+  }
+
   setLanguage(languageId: string): void {
     this.language = languageId;
     this.index.reset();
@@ -1240,7 +1281,17 @@ export class CompletionAssistant {
     // Сниппет раскрывается ПОСЛЕ вставки: разметка `${1:…}` в тексте не остаётся, а
     // курсор встаёт на первое место — так же ведёт себя вставка сниппета.
     if (item.snippet !== undefined) {
-      const expanded = expandSnippet(item.snippet);
+      // Переменные — из открытого файла: `${TM_FILENAME}` в заготовке должен
+      // дать имя этого файла, а не пустоту.
+      const expanded = expandSnippet(
+        item.snippet,
+        snippetVariables(
+          this.currentPath?.() ?? null,
+          // Строка с единицы — как её видит человек в строке состояния.
+          this.buffer.text.slice(0, this.controller.caret).split('\n').length,
+          this.selectedText(),
+        ),
+      );
       this.controller.applyEdit(
         { start, removed, inserted: expanded.text },
         { anchor: start + expanded.caret, active: start + expanded.selectionEnd },

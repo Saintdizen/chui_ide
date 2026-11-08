@@ -67,3 +67,44 @@ describe('раскрытие сниппета', () => {
     expect(result.caret).toBe(1);
   });
 });
+
+/**
+ * Переменные сниппета и выбор значений. Без них шаблон из `.vscode/snippets`
+ * вставлялся бы как есть: `${TM_FILENAME}` оставался бы текстом.
+ */
+describe('переменные и выбор в сниппете', () => {
+  it('${TM_FILENAME} подставляет значение', () => {
+    const result = expandSnippet('// ${TM_FILENAME}\n', { TM_FILENAME: 'app.ts' });
+    expect(result.text).toBe('// app.ts\n');
+  });
+
+  it('$TM_FILENAME без скобок тоже работает', () => {
+    const result = expandSnippet('$TM_FILEPATH', { TM_FILEPATH: '/p/a.ts' });
+    expect(result.text).toBe('/p/a.ts');
+  });
+
+  it('неизвестная переменная остаётся как есть, а не пропадает', () => {
+    // Пусто вместо `$TM_UNKNOWN` значило бы «здесь ничего не задумано», а
+    // на деле это опечатка в шаблоне — её должно быть видно.
+    expect(expandSnippet('$TM_UNKNOWN').text).toBe('$TM_UNKNOWN');
+    expect(expandSnippet('${TM_UNKNOWN}').text).toBe('');
+  });
+
+  it('${1|a,b|} ставит первый вариант и запоминает остальные', () => {
+    const result = expandSnippet('${1|да,нет|}');
+    expect(result.text).toBe('да');
+    expect(result.choices).toEqual([{ index: 1, start: 0, end: 2, options: ['да', 'нет'] }]);
+  });
+
+  it('двоеточие внутри варианта не ломает разбор выбора', () => {
+    const result = expandSnippet('${1|http://,file:|}');
+    expect(result.choices[0].options).toEqual(['http://', 'file:']);
+  });
+
+  it('выбор идёт по местам вместе с обычными', () => {
+    const result = expandSnippet('${1:имя} = ${2|да,нет|}');
+    expect(result.text).toBe('имя = да');
+    expect(result.tabstops.map((stop) => stop.index)).toEqual([1, 2]);
+    expect(result.caret).toBe(0);
+  });
+});
