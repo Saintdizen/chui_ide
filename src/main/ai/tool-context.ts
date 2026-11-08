@@ -38,6 +38,7 @@ import type { SkillLibrary } from './skills';
 import type { PatchFile } from '../../shared/patch';
 import type { ReadRange } from '../../shared/read-coverage';
 import type { SubagentResult, SubagentTask } from '../../shared/subagents';
+import type { ToolSubagent } from '../../shared/api/ai';
 import type { SessionSearchReport } from '../../shared/session-search';
 import type { FetchedPage } from '../../shared/web-fetch';
 import type { WebSearchHit } from '../../shared/web-search';
@@ -66,6 +67,8 @@ export interface ToolOutcome {
   failed?: boolean;
   /** Короткая строка для карточки в UI. */
   summary: string;
+  /** Подзадачи `task` — отдельными карточками в ленте (TASKS п.38). */
+  subagents?: ToolSubagent[];
   /** То, что уходит модели. Может быть длинным — усекается до `MAX_OUTPUT_CHARS`. */
   detail?: string;
   /**

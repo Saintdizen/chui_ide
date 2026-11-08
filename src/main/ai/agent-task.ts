@@ -9,6 +9,7 @@ import {
   type SubagentTask,
 } from '../../shared/subagents';
 import type { ToolContext, ToolOutcome } from './tool-context';
+import type { ToolSubagent } from '../../shared/api/ai';
 
 /**
  * Инструмент `task`: подзадача в своём контексте.
@@ -50,7 +51,26 @@ export async function taskRun(ctx: ToolContext, args: Record<string, unknown>): 
   const steps = results.reduce((sum, item) => sum + item.steps, 0);
   const title =
     results.length === 1 ? `Подзадача: ${results[0]!.description}` : `Подзадачи (${results.length}): ${steps} шагов`;
-  return { ok: failures.length === 0, summary: title, detail: formatSubagentReport(results, failures) };
+  // Те же данные, что в отчёте, но по одной подзадаче на карточку: лента
+  // показывает их вложенными, и там нужны шаги и токены, а не строка отчёта.
+  const subagents: ToolSubagent[] = [
+    ...results.map((item) => ({
+      description: item.description,
+      text: item.text,
+      steps: item.steps,
+      inputTokens: item.inputTokens,
+      outputTokens: item.outputTokens,
+    })),
+    ...failures.map((item) => ({
+      description: item.description,
+      text: '',
+      steps: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      failure: item.reason,
+    })),
+  ];
+  return { ok: failures.length === 0, summary: title, detail: formatSubagentReport(results, failures), subagents };
 }
 
 /** Перенести итог прогона в форму отчёта: числа нужны трассе, текст — модели. */

@@ -2006,6 +2006,7 @@ export class AiService {
           detail: outcome.detail,
           changes: outcome.changes,
           ms: callMs,
+          ...(outcome.subagents?.length ? { subagents: [...outcome.subagents] } : {}),
           // Картинка и в карточке: человек видит, что именно смотрел агент.
           ...(outcome.images?.length ? { images: outcome.images } : {}),
           // Файлы-результаты: в ленте карточка с кнопками «Открыть».

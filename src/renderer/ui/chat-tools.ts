@@ -1,4 +1,4 @@
-import type { ChatToolResultPayload, ChatToolStartPayload } from '../../shared/api';
+import type { ChatToolResultPayload, ChatToolStartPayload , ToolSubagent } from '../../shared/api';
 import { formatCallTime } from '../../shared/duration';
 import { touchedFiles } from '../../shared/tool-files';
 import { highlightInto } from '../core/highlight';
@@ -804,6 +804,13 @@ function createToolGroup(
           const block = presentBlock(result.presented);
           card.insertBefore(block, panel);
         }
+        // Подзадачи — вложенными карточками под своим `task`: их читают как
+        // отдельные ходы, а не как строки сводного отчёта.
+        if (result.subagents?.length) {
+          const wrap = h('div', { class: 'tool-subtasks' });
+          for (const task of result.subagents) wrap.appendChild(subtaskCard(task));
+          card.insertBefore(wrap, panel);
+        }
         card.classList.toggle('tool-failed', !result.ok);
         // Сколько шло: у долгой сборки это главное, что можно сказать о вызове.
         const spent = result.ms !== undefined && result.ms > 0 ? formatCallTime(result.ms) : '';
@@ -865,6 +872,29 @@ function createToolGroup(
  * группу: в ленте остаётся её шапка («Просмотр папки, Чтение файла и ещё 2
  * · 6 · готово»), а сами строки — под раскрытием.
  */
+
+/** Вложенная карточка подзадачи: описание, счёт и итог под сворачиванием. */
+function subtaskCard(task: ToolSubagent): HTMLElement {
+  const tokens = task.inputTokens + task.outputTokens;
+  const counts = [plural(task.steps, 'шаг', 'шага', 'шагов')];
+  if (tokens > 0) counts.push(`${tokens} токенов`);
+  const head = h('div', { class: 'tool-subtask-head' }, task.description, h('span', { class: 'tool-subtask-count' }, counts.join(' · ')));
+  // Отчёт — под сворачиванием: без него человек не верит карточке, с ним
+  // раскрытой она перекрывает саму беседу. Свёрнуты все, даже одна.
+  const body = h('div', { class: 'tool-subtask-body', hidden: true });
+  if (task.failure !== undefined) {
+    body.appendChild(h('div', { class: 'tool-subtask-fail' }, `Не вышло: ${task.failure}`));
+  }
+  if (task.text !== '') body.appendChild(h('pre', { class: 'tool-subtask-text' }, task.text));
+  const card = h('div', { class: 'tool-subtask' }, head, body);
+  card.classList.toggle('is-failed', task.failure !== undefined);
+  head.addEventListener('click', () => {
+    body.hidden = !body.hidden;
+    card.classList.toggle('is-open', !body.hidden);
+  });
+  return card;
+}
+
 export function createToolFeed(
   container: HTMLElement,
   anchor: Node | null = null,
