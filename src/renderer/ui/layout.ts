@@ -2,6 +2,7 @@ import { clear, h } from './dom';
 import { FILE_PANEL_ID } from './tabs';
 import { applyPanelIntent, type PanelState, panelOrder } from '../core/panel-layout';
 import type { SidebarPosition } from '../../shared/api/settings';
+import { centeredFloating, clampFloating, dragFloating, resizeFloating, type FloatingRect } from '../../shared/floating-dock';
 
 /**
  * Каркас в духе современных IDE: фон приложения темнее панелей, панели —
@@ -32,6 +33,11 @@ export interface Layout {
   setRightVisible(visible: boolean): void;
   setDockVisible(visible: boolean): void;
   setDockPosition(position: 'bottom' | 'right'): void;
+  /** Панель плавает поверх окна (`true`) или стоит в сетке (`false`). */
+  readonly dockFloating: boolean;
+  setDockFloating(on: boolean): void;
+  moveDockFloating(dx: number, dy: number): void;
+  resizeDockFloating(dx: number, dy: number): void;
   setEditorVisible(visible: boolean): void;
   readonly sidebarSize: number;
   readonly rightSize: number;
@@ -67,10 +73,51 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
 
   const dockSplitter = h('div', { class: 'splitter splitter-dock' });
   const dockHost = h('div', { class: 'dock-host' });
-  const dockIsland = h('section', { class: 'island dock' }, dockHost);
+  // Уголок размера — только в плавающем виде: у панели в сетке размер задаёт
+  // разделитель, и второй способ тянуть то же самое только путал бы.
+  const dockResizeGrip = h('div', {
+    class: 'dock-resize-grip',
+    role: 'presentation',
+    title: 'Потянуть за угол: размер панели',
+  });
+  const dockIsland = h('section', { class: 'island dock' }, dockHost, dockResizeGrip);
+  dockResizeGrip.addEventListener('pointerdown', (event) => {
+    if (floating === null || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dockResizeGrip.setPointerCapture(event.pointerId);
+    let lastX = event.clientX;
+    let lastY = event.clientY;
+    const move = (moveEvent: PointerEvent): void => {
+      // От предыдущего события, как и перетаскивание: иначе рывок догоняния.
+      floating =
+        floating === null
+          ? null
+          : resizeFloating(
+              floating,
+              { dx: moveEvent.clientX - lastX, dy: moveEvent.clientY - lastY },
+              { width: root.clientWidth, height: root.clientHeight },
+            );
+      lastX = moveEvent.clientX;
+      lastY = moveEvent.clientY;
+      applyFloating();
+    };
+    const end = (): void => {
+      dockResizeGrip.removeEventListener('pointermove', move);
+      dockResizeGrip.removeEventListener('pointerup', end);
+      dockResizeGrip.removeEventListener('pointercancel', end);
+      options.onChange?.();
+    };
+    dockResizeGrip.addEventListener('pointermove', move);
+    dockResizeGrip.addEventListener('pointerup', end);
+    dockResizeGrip.addEventListener('pointercancel', end);
+  });
   // Нижний остров — своей дорожкой сетки: только под редактором. Ни под проводником,
   // ни под правой панелью: обе идут вниз до строки состояния.
   const dockWrap = h('div', { class: 'dock-wrap' }, dockSplitter, dockIsland);
+  // Слой для плавающей панели: он же ловит клики ПО МИМО неё — но только пока
+  // панель плавает, иначе перекрывал бы всё окно.
+  const floatingLayer = h('div', { class: 'floating-layer', hidden: true });
 
   const center = h('div', { class: 'center' }, editorIsland);
   const rightSplitter = h('div', { class: 'splitter splitter-right' });
@@ -91,6 +138,9 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     rightPanel,
     dockWrap,
     statusBarHost,
+    // Слой плавающей панели — последним: он поверх всех, включая строку
+    // состояния, иначе панель, поднятая вниз, оказалась бы под ней.
+    floatingLayer,
   );
 
   // Видимость панелей — одним состоянием: редактор и правая панель связаны
@@ -99,10 +149,48 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
   let panels: PanelState = { sidebar: true, right: true, editor: true };
   let dockVisible = false;
   let dockPosition: 'bottom' | 'right' = 'bottom';
+  /**
+   * Плавающее положение панели; `null` — панель стоит в сетке.
+   *
+   * Панель при этом не создаётся заново: `dockIsland` переезжает между двумя
+   * хозяевами (сетка и слой поверх). Терминал и поиск живут в тех же узлах и
+   * переживают переезд — пересборка съела бы их содержимое и прокрутку.
+   */
+  let floating: FloatingRect | null = null;
   // Сторона, с которой стоит боковая панель. Хранится классом на корне и порядком
   // элементов сетки — так содержимое панели переезжает, не теряя состояния
   // (открытые блоки, прокрутка, фокус), и не нужно пересобирать DOM.
   let sidebarPosition: SidebarPosition = 'left';
+
+  /**
+   * Перевезти панель между сеткой и слоем поверх и поставить по размеру.
+   *
+   * Место в сетке после переезда держит `dockWrap` (он остаётся на месте),
+   * поэтому по возвращении панель встаёт туда же, где стояла, а не в конец.
+   */
+  const applyFloating = (): void => {
+    if (floating === null) {
+      // Назад в сетку: вставляем туда, где панель и была — после разделителя.
+      if (dockIsland.parentElement !== dockWrap) dockWrap.appendChild(dockIsland);
+      for (const key of ['position', 'left', 'top', 'width', 'height'] as const) {
+        dockIsland.style.removeProperty(key);
+      }
+      floatingLayer.hidden = true;
+      if (dockIsland.parentElement === floatingLayer) floatingLayer.removeChild(dockIsland);
+      return;
+    }
+    const rect = clampFloating(floating, {
+      width: root.clientWidth,
+      height: root.clientHeight,
+    });
+    floatingLayer.hidden = false;
+    if (dockIsland.parentElement !== floatingLayer) floatingLayer.appendChild(dockIsland);
+    dockIsland.style.position = 'absolute';
+    dockIsland.style.left = `${rect.left}px`;
+    dockIsland.style.top = `${rect.top}px`;
+    dockIsland.style.width = `${rect.width}px`;
+    dockIsland.style.height = `${rect.height}px`;
+  };
 
   const apply = (): void => {
     root.classList.toggle('is-sidebar-hidden', !panels.sidebar);
@@ -112,6 +200,8 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     // Имя раскладки берём из чистой функции — тест проверяет её, а не строку в CSS.
     root.classList.toggle('is-sidebar-right', panelOrder(sidebarPosition) === 'sidebar-last');
     root.classList.toggle('is-dock-right', dockPosition === 'right');
+    root.classList.toggle('is-dock-floating', floating !== null);
+    applyFloating();
   };
 
   clear(mount);
@@ -172,6 +262,9 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     get dockPosition() {
       return dockPosition;
     },
+    get dockFloating() {
+      return floating !== null;
+    },
     get dockVisible() {
       return dockVisible;
     },
@@ -201,6 +294,35 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
       dockPosition = position;
       apply();
       options.onChange?.();
+    },
+    /**
+     * Отпустить панель в свободное плавание или вернуть в сетку.
+     *
+     * `true` без размера — поставить по центру окна: отдавать повеление без
+     * места хуже, чем не отдавать вовсе: панель окажется в случайных координатах.
+     */
+    setDockFloating(on: boolean) {
+      floating = on ? centeredFloating({ width: root.clientWidth, height: root.clientHeight }) : null;
+      apply();
+      options.onChange?.();
+    },
+    /** Сдвинуть плавающую панель на смещение в пикселях (перетаскивание). */
+    moveDockFloating(dx: number, dy: number) {
+      if (floating === null) return;
+      floating = dragFloating(floating, { dx, dy }, {
+        width: root.clientWidth,
+        height: root.clientHeight,
+      });
+      applyFloating();
+    },
+    /** Потянуть за угол: размер окна, с пределом по содержимому. */
+    resizeDockFloating(dx: number, dy: number) {
+      if (floating === null) return;
+      floating = resizeFloating(floating, { dx, dy }, {
+        width: root.clientWidth,
+        height: root.clientHeight,
+      });
+      applyFloating();
     },
     setDockVisible(visible: boolean) {
       dockVisible = visible;

@@ -12,6 +12,13 @@ export interface DockTab {
 
 export interface DockView {
   element: HTMLElement;
+  /**
+   * Шапка с вкладками — за неё таскают плавающую панель.
+   *
+   * Отдаём наружу, а не вешаем обработчик здесь: таскать имеет смысл только
+   * плавающую панель, и знает об этом раскладка, а не сама панель.
+   */
+  handle: HTMLElement;
   register(tab: DockTab): void;
   show(id: string): void;
   /** Показать вкладку и увести в неё фокус: шаг с клавиатуры, а не только вид. */
@@ -137,6 +144,7 @@ export function createDock(): DockView {
 
   return {
     element,
+    handle: header,
     register(tab) {
       tabs.push(tab);
       tab.element.hidden = true;

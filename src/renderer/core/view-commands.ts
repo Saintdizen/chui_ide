@@ -28,6 +28,9 @@ export interface ViewLayout {
   /** Сторона нижней панели: «снизу» или «справа» колонкой. */
   readonly dockPosition: 'bottom' | 'right';
   setDockPosition(position: 'bottom' | 'right'): void;
+  /** Панель плавает поверх окна или стоит в сетке. */
+  readonly dockFloating: boolean;
+  setDockFloating(on: boolean): void;
   setEditorVisible(on: boolean): void;
 }
 
@@ -139,6 +142,23 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
     const next = deps.layout.dockPosition === 'right' ? 'bottom' : 'right';
     deps.layout.setDockPosition(next);
     showToast(next === 'right' ? 'Панель справа' : 'Панель снизу');
+  });
+
+  /**
+   * Плавающая панель: терминал перестаёт занимать место в раскладке и висит
+   * поверх окна, где его и таскают.
+   *
+   * Зачем не просто «свернуть»: держать терминал на глазах, не отдавая ему
+   * строку раскладки, — обычное дело, когда правишь по логу.
+   *
+   * Если панель была спрятана, показываем: команда «сделать плавающей»
+   * невидимую панель не имеет смысла, и молча ничего не делать — хуже всего.
+   */
+  define({ id: 'view.dockFloating', title: 'Панель: поверх окна', category: 'Вид' }, () => {
+    const on = !deps.layout.dockFloating;
+    if (on && !deps.dock.visible) deps.dock.show(deps.dock.activeId ?? '');
+    deps.layout.setDockFloating(on);
+    showToast(on ? 'Панель поверх окна' : 'Панель вернулась в раскладку');
   });
 
   /**

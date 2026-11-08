@@ -2010,6 +2010,37 @@ export async function startApplication(
   });
   layout.dockHost.appendChild(dock.element);
 
+  // Таскать плавающую панель — за шапку вкладок. Слушатели висят всегда, но
+  // реагируют только когда панель плавает: включать-выключать их на каждой
+  // смене режима значило бы держать список подписок ради двух строк.
+  dock.handle.addEventListener('pointerdown', (event) => {
+    if (!layout.dockFloating || event.button !== 0) return;
+    // Клик по вкладке — это выбор вкладки, а не начало перетаскивания.
+    if ((event.target as HTMLElement | null)?.closest('.dock-tab, button')) return;
+    let lastX = event.clientX;
+    let lastY = event.clientY;
+    dock.handle.setPointerCapture(event.pointerId);
+    layout.root.classList.add('is-dock-dragging');
+    event.preventDefault();
+
+    const move = (moveEvent: PointerEvent): void => {
+      // Считаем от ПРЕДЫДУЩЕГО события, а не от начала: так панель не
+      // «догоняет» курсор рывком, если тот ушёл вперёд за один кадр.
+      layout.moveDockFloating(moveEvent.clientX - lastX, moveEvent.clientY - lastY);
+      lastX = moveEvent.clientX;
+      lastY = moveEvent.clientY;
+    };
+    const end = (): void => {
+      dock.handle.removeEventListener('pointermove', move);
+      dock.handle.removeEventListener('pointerup', end);
+      dock.handle.removeEventListener('pointercancel', end);
+      layout.root.classList.remove('is-dock-dragging');
+    };
+    dock.handle.addEventListener('pointermove', move);
+    dock.handle.addEventListener('pointerup', end);
+    dock.handle.addEventListener('pointercancel', end);
+  });
+
   /* ── чат ───────────────────────────────────────────────────────────────── */
 
   // Вьюер картинок: та же область, но показывает изображение вместо текста.

@@ -2892,3 +2892,57 @@ textarea {
 .app.is-dock-right .dock {
   height: 100%;
 }
+
+/* Плавающая панель: поверх окна, со своей тенью — иначе не отличить от
+   обычной панели, прилипшей к краю. Слой не перехватывает клики: панель
+   продолжает жить рядом с редактором, а не заслоняет его. */
+.floating-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+}
+
+.floating-layer > .dock {
+  pointer-events: auto;
+  position: relative;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 35%);
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  overflow: hidden;
+}
+
+/* Место в сетке плавающая панель не занимает: строка остаётся нулевой. */
+.app.is-dock-floating .dock-wrap {
+  --dock-height: 0px;
+}
+
+.app.is-dock-floating .dock-wrap > .splitter-dock {
+  display: none;
+}
+
+/* Якорь перетаскивания — шапка вкладок: за неё и таскают. */
+.app.is-dock-floating .dock-tabs {
+  cursor: move;
+}
+
+/* Уголок размера: виден только у плавающей панели — у панели в сетке размер
+   задаёт разделитель, и второй способ путал бы. */
+.dock-resize-grip {
+  display: none;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+.app.is-dock-floating .dock-resize-grip {
+  display: block;
+}
+
+/* Пока тащат — никаких переходов и захвата текста в шапке. */
+.app.is-dock-dragging {
+  user-select: none;
+}
