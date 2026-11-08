@@ -1,14 +1,23 @@
 # TASKS
 
-Цель — довести до идеала шесть срезов. Источники сверки: VS Code
-(docs/agents, docs/editing, sitemap), JetBrains IDEA (llms.txt:
-using-code-editor, inlay-hints, advanced/full-line/postfix/command
-completion, agents-in-ide, mcp-server, agentic-debugging, refactoring),
-Zed (ai/tools: 16 инструментов, ai/zed-agent), Neovim (runtime/doc/lsp.txt,
-nvim-lspconfig), Cursor Agent tools, Xcode docs. Сверка с кодом проекта —
-перед каждым пунктом; чего не нашёл — пометил явно.
+Цель — довести до идеала шесть срезов. Источники сверки:
 
-Нумерация сквозная 1-64.
+VS Code — docs/agents (tools, tools-reference, planning, subagents,
+  memory, optimize-usage), docs/editing (intellisense, editingevolved,
+  refactoring).
+JetBrains IDEA — llms.txt, using-code-editor, inlay-hints, advanced/
+  full-line/postfix/command completion, agents-in-ide, agentic-debugging,
+  refactoring, mcp-server (все 64 инструмента).
+Zed — ai/tools (16 инструментов), ai/zed-agent.
+Neovim — runtime/doc/lsp.txt, nvim-lspconfig.
+Cursor — cursor.com/llms.txt → .md: agent/tools/terminal, search, canvas,
+  plan-mode, debug-mode, security/run-modes, rules, skills, subagents.
+Xcode — JSON-API справки: source-editor (coding intelligence), debugging,
+  testing.
+
+Сверка с кодом проекта — перед каждым пунктом; чего не нашёл — пометил.
+
+Нумерация сквозная 1-74.
 
 ## Правила
 
@@ -115,7 +124,7 @@ nvim-lspconfig), Cursor Agent tools, Xcode docs. Сверка с кодом пр
 52. Code actions: «исправить всё» и группировка quickfix/refactor/source.
 53. Форматирование: format-on-save по проекту и диапазонное.
 
-## VI. Инструменты агента (54-64)
+## VI. Инструменты агента и экономия (54-57, 59-67)
 
 54. `glob`: сверить наш набор (list/read/search/history/read_image/lsp/
     checks/run_tests/project_map/mcp/edit/web/terminal/terminalOpen/
@@ -128,17 +137,48 @@ nvim-lspconfig), Cursor Agent tools, Xcode docs. Сверка с кодом пр
 55. `diagnostics` отдельным именем: проверить, что `checks` покрывает
     файл/папку/проект так же, как Zed.
 56. `fetch` с сохранением страницы в файл и учётом размера.
-57. `git` (status/diff/blame/log) вместо работы через `terminal`.
-58. `symbols` по code-index (symbols/store.ts, workspace/code-index.ts).
+57. `git` (status/diff/blame/log, откат файла) вместо работы через
+    `terminal`.
 59. `todo` по коду (todo-panel.ts есть, в наборе агента нет).
 60. `venv`/`pyenv`: venv-lookup.ts есть — решить, нужен ли в наборе.
-61. Экономия: кэш `read`/`search` по mtime+размеру с метрикой попаданий
+61. Экономия: режимы `read` как у JetBrains `read_file` — `lines` (есть),
+    `indentation` (дерево по отступам), `maxLines`, `offsets`, карта
+    импортов. Сейчас есть только path/paths/startLine/endLine/force.
+62. Экономия: `smart`-режим `search_file`: при совпадении с именем файла
+    отдать файл целиком одним вызовом вместо списка.
+63. Экономия: `list_directory_tree(depth, maxLines)` с ограничением
+    глубины — у нас `list` не знает глубины.
+64. Экономия: кэш `read`/`search` по mtime+размеру с метрикой попаданий
     (age-results.ts — базис).
-62. Экономия: сворачивание повторов до «без изменений» сквозным
+65. Экономия: сворачивание повторов до «без изменений» сквозным
     счётчиком (output-trim.ts — базис).
-63. Экономия: подбор фрагментов контекста по задаче через code-index
+66. Экономия: подбор фрагментов контекста по задаче через code-index
     с ранжированием.
-64. Замер экономии: сводка токенов на сессию (вход/выход/кэш) в UI,
+67. Замер экономии: сводка токенов на сессию (вход/выход/кэш) в UI,
     чтобы каждый пункт экономии проверялся числом.
 
-4. Экономия без числа до и после не считается сделанной.
+## VII. Донабор по Cursor / Xcode / Neovim (58, 68-74)
+
+58. `symbols`: поиск по имени и по регулярке (JetBrains `search_symbol`,
+    `search_regex`; Neovim `workspace/symbol`). code-index есть
+    (symbols/store.ts, workspace/code-index.ts), инструмента нет.
+68. `debug`: отладочная сессия для агента. DebugService в
+    src/main/debug/debug.ts умеет start/attach/breakpoints/step/stack/
+    scopes/variables/evaluate/setVariable — агент не видит ни одного.
+    JetBrains отдаёт 13 xdebug_* инструментов. Минимум: точка останова,
+    старт, стек, значения, выражение.
+69. `run`: запуск конфигурации и сборки (JetBrains
+    `execute_run_configuration`, `build_project`). Сейчас только
+    `terminal` руками.
+70. `format`: переформатировать файл без сохранения (JetBrains
+    `reformat_file`; LSP-formatting у нас есть — 3 файла).
+71. `problems`: проблемы по файлу/проекту отдельным вызовом (JetBrains
+    `get_file_problems`, `lint_files`) — сейчас только `checks`.
+72. `open_files`: список открытых в редакторе файлов с курсорами
+    (JetBrains `get_all_open_file_paths`, Cursor). В чате о таком просят
+    постоянно, а агент не знает, что открыто.
+73. `move`/`copy_path`/`create_directory` (Zed, JetBrains
+    `create_new_file`): создание и перенос отдельными именами, чтобы не
+    собирать команды через `terminal`.
+74. Режимы исполнения как у Cursor run-modes (allow/deny по типу
+    действия) — настройка поверх текущего подтверждения опасных команд.
