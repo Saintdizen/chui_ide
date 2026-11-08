@@ -25,6 +25,7 @@ import { perf } from "../shared/perf";
 import type { FileOperation } from "../shared/lsp-workspace-edit";
 import type { LspProgress } from "../shared/lsp-progress";
 import type { LspProjectDiagnosticsPayload } from "../shared/api";
+import type { NotesState } from "../shared/notes";
 import { createLspProgressController } from "./core/lsp-progress";
 import { createProjectDiagnosticsApplier } from "./core/project-diagnostics";
 import { createSpellServerCheck } from "./core/spell-server-check";
@@ -1124,12 +1125,20 @@ export async function startApplication(
 
   /* ── панели ────────────────────────────────────────────────────────────── */
 
+  let notes: NotesState = { project: null, files: [] };
+
   const explorer = createExplorer({
     workspace,
     rpc,
     commands,
     openEditors,
     git,
+    // Заметки — в сессии проекта: переживают перезапуск вместе с ним.
+    notesOf: () => notes,
+    setNotes: (next) => {
+      notes = next;
+      session.scheduleSave();
+    },
     documents,
     // Закрепление — часть рабочего места: сохраняем при изменении (сессия ниже).
     onPinsChange: () => session.scheduleSave(),
@@ -3336,6 +3345,12 @@ export async function startApplication(
   const session = createSessionControl({
     rpc,
     documents,
+    // Заметки: читаем из сессии при запуске, пишем при изменении.
+    notesOf: () => notes,
+    restoreNotes: (restored) => {
+      notes = restored;
+      explorer.refreshNotes?.();
+    },
     openEditors,
     editors,
     debug,
@@ -3719,6 +3734,18 @@ export async function startApplication(
     // сейчас, а не ту, что была при регистрации команд.
     settingsOf: () => rebuildSettings(),
     basename,
+    // Текст заметки — окном ввода: заметка своя, заготовок у неё не бывает.
+    askNote: (title, value) =>
+      new Promise<string | null>((resolve) => {
+        conditionInput.open({
+          title,
+          label: 'Текст заметки',
+          value,
+          confirmLabel: 'Сохранить',
+          onAccept: (answer) => resolve(answer),
+          onCancel: () => resolve(null),
+        });
+      }),
   });
 
   // Вкладки — в `core/file-tab-commands.ts`. Открытие пути осталось здесь: только оно

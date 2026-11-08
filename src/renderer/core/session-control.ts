@@ -8,6 +8,7 @@ import type {
 import { sanitizeMacroSteps } from "../editor/input/macro";
 import { selectUnsavedBuffers } from "../../shared/session";
 import type { BookmarkRecord } from "../../shared/bookmarks";
+import type { NotesState } from '../../shared/notes';
 import type { FileLabelRecord } from "../../shared/file-labels";
 import type { WorkspaceRoot } from "../../shared/workspace-roots";
 import type { DockView } from "../ui/dock";
@@ -30,6 +31,9 @@ export interface ExpandedTree {
   /** Метки файлов в дереве — цветные ярлыки; тоже часть рабочего места проекта. */
   labels(): FileLabelRecord[];
   restoreLabels(records: unknown): void;
+  /** Заметки человека: пишутся в сессию и возвращаются из неё при запуске. */
+  notesOf?(): NotesState;
+  restoreNotes?(notes: NotesState): void;
 }
 
 /**
@@ -61,6 +65,11 @@ export interface LayoutVisibility {
   setRightVisible(visible: boolean): void;
 }
 
+/** Есть ли что писать: пустые заметки в файл сессии не кладём. */
+function hasNotes(state: NotesState): boolean {
+  return (state.project ?? '').length > 0 || state.files.length > 0;
+}
+
 export interface SessionDeps {
   rpc: RpcClient;
   documents: DocumentStore;
@@ -68,6 +77,9 @@ export interface SessionDeps {
   editors: EditorApi;
   debug: DebugController;
   explorer: ExpandedTree;
+  /** Заметки: читаются при запуске, пишутся при изменении. */
+  notesOf?(): NotesState;
+  restoreNotes?(notes: NotesState): void;
   /**
    * Вкладки терминала: их каталоги и та, что на экране. Необязательно — без этого
    * терминал не входит в сессию проекта.
@@ -267,6 +279,9 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
         : {}),
       pinned: explorer.pinnedPaths(),
       ...(explorer.labels().length > 0 ? { labels: explorer.labels() } : {}),
+      // Заметки пишем только когда они есть: пустой блок в файле сессии —
+      // мусор, который пережил бы сотню проектов.
+      ...(deps.notesOf && hasNotes(deps.notesOf()) ? { notes: deps.notesOf() } : {}),
       ...(dock.activeId ? { dockActive: dock.activeId } : {}),
       // Вкладки терминала — часть рабочего места проекта: они открываются в его папках,
       // и человек возвращается к тому же. Оболочки живут только в текущем окне, поэтому
@@ -393,6 +408,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       explorer.restoreScroll(state.explorerScroll ?? 0);
       explorer.restorePinned(state.pinned ?? []);
       explorer.restoreLabels(state.labels ?? []);
+      // Заметки — в своё состояние хозяина: дерево их только читает.
+      deps.restoreNotes?.(state.notes ?? { project: null, files: [] });
       // Корни области: открываем заново те, что были, и возвращаем активный. Сбой на
       // одном (папку могли удалить) не отменяет остальные.
       for (const extra of state.roots ?? []) {

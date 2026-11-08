@@ -1,4 +1,5 @@
 import type { BookmarkRecord } from "../bookmarks";
+import type { NotesState } from "../notes";
 import type { FileLabelRecord } from "../file-labels";
 import type { DebugExceptionFilters, DebugLaunchOptions } from "./debug";
 
@@ -73,6 +74,13 @@ export interface SessionState {
   bookmarks?: BookmarkRecord[];
   /** Метки файлов в дереве: цветные ярлыки («в работе», «срочно»). */
   labels?: FileLabelRecord[];
+  /**
+   * Заметки человека: к файлам и к проекту целиком.
+   *
+   * В сессии проекта, а не в настройках: «тут гонка при сохранении» — знание
+   * об ЭТОМ коде, и переживать перезапуск оно должно вместе с ним.
+   */
+  notes?: NotesState;
   /** Где стоял курсор в каждом открытом файле (1-based). */
   cursors?: Record<string, CursorPosition>;
   /**

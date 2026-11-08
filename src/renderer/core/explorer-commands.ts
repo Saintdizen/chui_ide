@@ -1,6 +1,7 @@
 import type { Settings } from '../../shared/api';
 import type { DefineCommand } from './command-args';
 import type { RpcClient } from './rpc';
+import { noteOf, setFileNote, setProjectNote, type NotesState } from '../../shared/notes';
 import type { WorkspaceModel } from './workspace-model';
 
 /**
@@ -21,6 +22,12 @@ export interface ExplorerTree {
   /** «Только изменённые» — тоже режим: включается и выключается на ходу. */
   toggleOnlyChanged(): void;
   isOnlyChanged(): boolean;
+  /** Заметки к файлам и проекту: у дерева — источник и его перерисовка. */
+  notes: {
+    get: () => NotesState;
+    set: (next: NotesState) => void;
+    reveal: (path: string) => void;
+  };
 }
 
 /**
@@ -36,6 +43,8 @@ export interface ExplorerCommandDeps {
   rpc: RpcClient;
   commands: { execute(id: string, ...args: unknown[]): unknown };
   showToast(message: string, kind?: 'info' | 'error' | 'success'): void;
+  /** Спросить текст заметки: `null` — человек отказался. */
+  askNote(title: string, value: string): Promise<string | null>;
   applySettings(settings: Settings): void;
   /** Текущие настройки: переключателю скрытых нужно оттолкнуться от них, а не от копии. */
   settingsOf(): Settings;
@@ -148,6 +157,37 @@ export function registerExplorerCommands(define: DefineCommand, deps: ExplorerCo
     const wasPinned = explorer.pinnedPaths().includes(target);
     explorer.togglePin(target);
     showToast(wasPinned ? 'Откреплено сверху дерева' : 'Закреплено сверху дерева');
+  });
+
+  /**
+   * Заметка к файлу: то, что не помещается в имя («здесь гонка при сохранении»).
+   *
+   * Текст спрашиваем окном ввода, а не подменю с заготовками: заметка — это
+   * своё, и предлагать готовые фразы значило бы получить одинаковые заметки
+   * там, где всё разное. Пустая строка — снять заметку: стереть её надо так
+   * же просто, как поставить.
+   */
+  define({ id: 'explorer.note', title: 'Заметка к файлу…', category: 'Файл' }, async (path) => {
+    const target = typeof path === 'string' && path !== '' ? path : editors.currentPath;
+    if (!target) return;
+    const root = workspace.root;
+    const current = noteOf(explorer.notes.get(), target, root);
+    const text = await deps.askNote('Заметка к файлу', current?.text ?? '');
+    if (text === null) return;
+    const next = setFileNote(explorer.notes.get(), target, text, Date.now(), root);
+    // Заметка на файл — повод его показать: иначе поставил и не понял, куда.
+    if (text.trim().length > 0) explorer.reveal(target);
+    explorer.notes.set(next);
+    showToast(text.trim().length > 0 ? 'Заметка сохранена' : 'Заметка снята');
+  });
+
+  /** Заметка ко всему проекту: одна на проект, для того, что не про один файл. */
+  define({ id: 'explorer.projectNote', title: 'Заметка к проекту…', category: 'Файл' }, async () => {
+    const current = explorer.notes.get().project ?? '';
+    const text = await deps.askNote('Заметка к проекту', current);
+    if (text === null) return;
+    explorer.notes.set(setProjectNote(explorer.notes.get(), text));
+    showToast(text.trim().length > 0 ? 'Заметка к проекту сохранена' : 'Заметка к проекту снята');
   });
 
   // Скрытое — не только настройка: точка в имени и `files.exclude` прячут файлы,

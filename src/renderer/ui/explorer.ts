@@ -21,6 +21,7 @@ import type { GitInsideChange, GitModel } from '../core/git-model';
 import type { OpenEditors } from '../core/open-editors';
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
+import { noteOf, type NotesState } from '../../shared/notes';
 import { entryIsDirectory, entryIsFile, entryIsSymlink, symlinkLabel } from '../../shared/entry-kind';
 import { pairFromSelection } from '../core/file-compare';
 import { effectiveNestingRules, nestEntries } from '../core/file-nesting';
@@ -134,6 +135,15 @@ export interface ExplorerView {
   toggleOnlyChanged(): void;
   /** Включён ли сейчас режим «только изменённые» (нужно подписи кнопки и команде). */
   isOnlyChanged(): boolean;
+  /** Заметки человека: к файлам и к проекту. Хранятся в сессии проекта. */
+  notes: {
+    get: () => NotesState;
+    set: (next: NotesState) => void;
+    /** Показать файл в дереве: поставил заметку — она должна быть видна. */
+    reveal: (path: string) => void;
+  };
+  /** Перерисовать дерево после того, как заметки пришли из сессии. */
+  refreshNotes?(): void;
   /**
    * «Избранное»: постоянный список мест. Живёт в настройках IDE и переживает смену
    * проекта — в отличие от закрепления, которое принадлежит сессии проекта
@@ -196,8 +206,17 @@ function menuAnchor(event: MouseEvent): PeekAnchorPoint {
   return { left: event.clientX, top: event.clientY, bottom: event.clientY + 1 };
 }
 
+/** Пустое состояние заметок: один объект на всех, пока заметок нет. */
+export const EMPTY_NOTES: NotesState = { project: null, files: [] };
+
 export interface ExplorerDeps {
   workspace: WorkspaceModel;
+  /**
+   * Заметки человека из сессии проекта и их запись (см. `notes` в `ExplorerView`).
+   * Необязательны: дерево без них работает как раньше, только без значков.
+   */
+  notesOf?: () => NotesState;
+  setNotes?: (next: NotesState) => void;
   rpc: RpcClient;
   commands: CommandRegistry;
   openEditors: OpenEditors;
@@ -1068,12 +1087,20 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
                 // Кто ссылается на папку — обычно ноль строк, но когда папку
                 // переименовывают, вопрос «кто на неё смотрит» важнее ответа.
                 { label: 'Кто ссылается на папку', onSelect: () => void showImporters(entry, event) },
+                { label: 'Заметка к проекту…', onSelect: () => void deps.commands.execute('explorer.projectNote') },
                 { separator: true as const },
               ]
             : []),
           ...(entryIsFile(entry)
             ? [
                 { label: 'Кто ссылается на файл', onSelect: () => void showImporters(entry, event) },
+                {
+                  label:
+                    deps.notesOf && noteOf(deps.notesOf(), entry.path)
+                      ? 'Изменить заметку…'
+                      : 'Заметка…',
+                  onSelect: () => void deps.commands.execute('explorer.note', entry.path),
+                },
                 ...(deps.peekFiles
                   ? [
                       {
@@ -1328,6 +1355,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // Значок от стороннего набора: чужую пометку проекта IDE придумать не может,
     // её приносит человек или набор значков (`explorer.badges`).
     const badge = options.badges.length > 0 ? badgeFor(entry.path, relativeOf(entry.path), options.badges) : null;
+    const entryNote = deps.notesOf ? noteOf(deps.notesOf(), entry.path) : null;
 
     const place = ariaPlace(entry.path);
     const row = h(
@@ -1379,6 +1407,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       // иначе по склеенной подписи не понять, где она кончается.
       // Подсветка — по тому имени, которое видно: у сжатой вложенности это цепочка.
       h('span', { class: 'tree-name' }, ...nameWithHits(flags.chain ?? entry.name)),
+      // Заметка — значок с текстом в подсказке: сама заметка длиннее строки,
+      // и рисовать её в дереве значило бы превратить список в простыню.
+      entryNote
+        ? h('span', { class: 'tree-note-mark', title: `Заметка: ${entryNote.text}` }, '✎')
+        : null,
       // Метка — цветной ярлык: первая среди правых отметок, если она есть.
       label ? h('span', { class: `tree-label is-${label}`, title: `Метка: ${fileLabelName(label)}` }) : null,
       badge
@@ -2915,6 +2948,20 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     togglePin: setPinned,
     toggleOnlyChanged,
     isOnlyChanged: () => onlyChanged,
+    // Заметки живут в сессии проекта, как любимые и закреплённые: дерево только
+    // читает их и просит хозяина записать. Свой источник оно бы не имело —
+    // перезапуск читает сессию заново.
+    notes: {
+      get: () => deps.notesOf?.() ?? EMPTY_NOTES,
+      set: (next: NotesState) => {
+        deps.setNotes?.(next);
+        render();
+      },
+      reveal: (path: string) => {
+        void reveal(path);
+      },
+    },
+    refreshNotes: () => render(),
     /** Скрытые — только в слое дерева: настройку пишет команда `explorer.toggleHidden`. */
     toggleHidden() {
       options = { ...options, showHidden: !options.showHidden };

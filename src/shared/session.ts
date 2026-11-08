@@ -7,6 +7,7 @@ import type {
   UnsavedBuffer,
 } from "./api";
 import { sanitizeBookmarks } from "./bookmarks";
+import { sanitizeNotes } from "./notes";
 import { rawMacroSteps } from "./macro";
 
 /**
@@ -116,6 +117,9 @@ export function sanitizeSession(raw: unknown): SessionState {
   // Закладки — часть рабочего места проекта: строки, к которым человек возвращается.
   const bookmarks = sanitizeBookmarks(value.bookmarks);
   if (bookmarks.length > 0) state.bookmarks = bookmarks;
+  // Заметки: пустые не тащим — блок пустого состояния нечего рисовать.
+  const notes = sanitizeNotes(value.notes, state.roots?.[0] ?? null);
+  if ((notes.project ?? '').length > 0 || notes.files.length > 0) state.notes = notes;
   // Позиции курсоров — только для открытых файлов: у закрытого она мертва.
   const cursors = cursorPositions(value.cursors, tabs);
   if (Object.keys(cursors).length > 0) state.cursors = cursors;

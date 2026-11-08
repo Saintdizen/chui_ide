@@ -3563,3 +3563,12 @@
 .tab.is-move-target {
   box-shadow: inset 2px 0 0 var(--accent_fill);
 }
+
+/* Заметка человека у файла: значок, текст — в подсказке. Сама заметка длиннее
+   строки дерева, и рисовать её там значило бы превратить список в простыню. */
+.tree-note-mark {
+  margin-left: 4px;
+  color: var(--accent_fill);
+  font-size: var(--font_small_size);
+  cursor: help;
+}
