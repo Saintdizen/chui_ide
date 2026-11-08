@@ -69,6 +69,12 @@ const SLASH_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string; p
 /** Сколько бесед показываем в `@`-подсказке: больше — и файл уже не найти. */
 const MAX_MENTION_SESSIONS = 5;
 
+/**
+ * Сколько путей показывать в `#`-подсказке. Путей в проекте тысячи, и список
+ * без потолка превращает подсказку в простыню, по которой не попасть стрелками.
+ */
+const MAX_MENTION_PATHS = 20;
+
 const CONTEXT_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string; kind: ContextKind }> = [
   { id: '#selection', title: 'Выделение', hint: 'Фрагмент из редактора', kind: 'selection' },
   { id: '#file', title: 'Открытый файл', hint: 'Содержимое целиком', kind: 'file' },
@@ -261,11 +267,17 @@ export function createComposerMenu(deps: ComposerMenuDeps): ComposerMenuView {
       return;
     }
 
+    // `#` — один вход и для команд контекста, и для путей проекта.
+    //
+    // Разделять их нечем: `#sel` и `#src/app.ts` — одинаковый набор символов, и
+    // угадывать по префиксу значило бы гадать. Поэтому показываем оба списка
+    // подряд, команды первыми (их конечный список, путей может быть тысяча),
+    // и сужаем по мере набора: набравший `#app` увидит путь, `#sel` — команду.
     const hash = value.lastIndexOf('#');
-    if (hash >= 0 && /(^|\s)#[\w-]*$/.test(value)) {
+    if (hash >= 0 && /(^|\s)#[\w./-]*$/.test(value)) {
       const query = value.slice(hash + 1).toLowerCase();
-      show(
-        CONTEXT_COMMANDS.filter((item) => item.id.slice(1).startsWith(query)).map((item) => ({
+      const commands = CONTEXT_COMMANDS.filter((item) => item.id.slice(1).startsWith(query)).map(
+        (item) => ({
           title: `${item.id} — ${item.title}`,
           hint: costHint(item.kind, item.hint),
           run: () => {
@@ -274,8 +286,30 @@ export function createComposerMenu(deps: ComposerMenuDeps): ComposerMenuView {
             deps.onContext(item.kind);
             deps.input.focus();
           },
-        })),
+        }),
       );
+      // Путь, набранный после `#`, ищем по вхождению: помнят «app.ts», а не
+      // «src/main/app.ts». Слэш в набранном значит, что человек уже идёт по
+      // папкам, — тогда сужаем по началу пути, чтобы не мешать вложенные.
+      const paths = (deps.mentionPaths() ?? [])
+        .filter((path) =>
+          query.includes('/')
+            ? path.toLowerCase().startsWith(query)
+            : path.toLowerCase().includes(query),
+        )
+        .slice(0, MAX_MENTION_PATHS)
+        .map((path) => ({
+          title: `#${path}`,
+          hint: 'файл проекта',
+          run: () => {
+            deps.input.value = `${value.slice(0, hash).trimEnd()} `.trimStart();
+            deps.onMention(path);
+            deps.input.focus();
+          },
+        }));
+      // Список путей ещё собирают — просим его: следующий `#` покажет больше.
+      if (paths.length === 0 && query.length > 0) deps.requestMentions();
+      show([...commands, ...paths]);
       return;
     }
 

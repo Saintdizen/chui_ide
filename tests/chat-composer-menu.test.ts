@@ -95,3 +95,71 @@ describe('`#` и `@` в композере', () => {
     expect(view.isOpen()).toBe(false);
   });
 });
+
+/**
+ * `#` в композере — один вход и для команд контекста, и для путей проекта.
+ * Разделить их нечем: `#sel` и `#src/app.ts` — одинаковый набор символов.
+ * Команды идут первыми (их конечный список), пути — по вхождению: помнят
+ * «app.ts», а не «src/main/app.ts».
+ */
+describe('пути в `#`-подсказке', () => {
+  const PATHS = ['src/main/app.ts', 'src/renderer/app.ts', 'docs/readme.md'];
+
+  it('набранный `#` показывает команды контекста и пути проекта', () => {
+    const { view, titles } = harness('#', PATHS);
+    view.sync();
+    const all = titles();
+    expect(all.some((title) => title.startsWith('#sel'))).toBe(true);
+    expect(all.some((title) => title.includes('#src/main/app.ts'))).toBe(true);
+  });
+
+  it('буквы после `#` сужают и то и другое', () => {
+    const { view, titles } = harness('#app', PATHS);
+    view.sync();
+    const all = titles();
+    expect(all.every((title) => title.toLowerCase().includes('app') || title.startsWith('#'))).toBe(true);
+    expect(all.some((title) => title.includes('#src/main/app.ts'))).toBe(true);
+    expect(all.some((title) => title.includes('readme.md'))).toBe(false);
+  });
+
+  it('слэш в набранном сужает по началу пути, а не по вхождению', () => {
+    // `#src/main` — человек идёт по папкам: `docs/src/main` не должен лезть.
+    const { view, titles } = harness('#src/main', ['src/main/app.ts', 'docs/src/main/x.ts']);
+    view.sync();
+    const all = titles();
+    expect(all.some((title) => title.includes('#src/main/app.ts'))).toBe(true);
+    expect(all.some((title) => title.includes('docs/src/main/x.ts'))).toBe(false);
+  });
+
+  it('выбор пути прикладывает его и вычищает `#` из ввода', () => {
+    const { view, input, mentions, titles } = harness('смотри #app', PATHS);
+    view.sync();
+    const index = titles().findIndex((title) => title.includes('#src/main/app.ts'));
+    view.moveCursor(index + 1);
+    (view.element.querySelectorAll('.composer-menu-item')[index] as HTMLElement).click();
+    expect(mentions).toEqual(['src/main/app.ts']);
+    // Пробел перед `#` остаётся и становится хвостом: набранный маркер вырезан,
+    // текст вокруг не переписывается.
+    expect(input.value.trimEnd()).toBe('смотри');
+  });
+
+  it('пустой список путей просит их собрать', () => {
+    const collected: number[] = [];
+    const view = createComposerMenu({
+      input: Object.assign(h('textarea') as unknown as HTMLTextAreaElement, { value: '#app' }),
+      onContext: () => undefined,
+      onPickImage: () => undefined,
+      onAttachBest: () => undefined,
+      onMention: () => undefined,
+      mentionPaths: () => [],
+      requestMentions: () => collected.push(1),
+      projectCommands: () => [],
+      sessions: () => [],
+      onMentionSession: () => undefined,
+      requestCommands: () => undefined,
+      onChatAction: () => undefined,
+    });
+    view.sync();
+    expect(collected).toHaveLength(1);
+  });
+});
