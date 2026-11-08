@@ -1,6 +1,7 @@
 import type { CommandGrantScope } from '../agent-grants';
 import type { MenuRole } from '../app-menu';
 import type { AccountBalance } from '../balance';
+import type { LspDiagnostic } from './lsp';
 import type { OfficePreview } from '../office';
 import type { ApplyResult, FileEdit, TextEdit } from '../edits';
 import type { BlameLine } from '../git-blame';
@@ -891,6 +892,16 @@ export interface ChuiMethods {
   'lsp.prewarm': { params: { languages: string[] }; result: void };
   /** Символы проекта по запросу: классы, функции, переменные — «перейти к символу». */
   'lsp.symbols': { params: { query: string }; result: ProjectSymbol[] };
+  /**
+   * Орфография через cSpell (см. `main/spell/server.ts`): разбор одного файла
+   * словарями проекта. Встроенная проверка (`shared/spellcheck.ts`) знает два языка
+   * из файла, а здесь — словарь самого проекта, как в его CI.
+   * `words` — свои слова сверх словарей: те, что уже есть в настройках.
+   */
+  'spell.serverDiagnostics': {
+    params: { path: string; text: string; words?: string[] };
+    result: LspDiagnostic[];
+  };
   /**
    * Состояние карты символов проекта (см. `main/symbols/indexer.ts`): собрана ли она,
    * сколько файлов и объявлений. Карта собирается в фоне при открытии проекта, и по

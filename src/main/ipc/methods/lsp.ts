@@ -3,6 +3,7 @@ import { EMPTY_INDEX_STATUS, type InheritedResult } from '../../../shared/symbol
 import { readFile } from 'node:fs/promises';
 
 import { detectLspSources } from '../../lsp/detect';
+import { spellServerDiagnostics } from '../../spell/server';
 import { checkLspCommand } from '../../lsp/check';
 import { parseTrace } from '../../../shared/lsp-trace';
 import { mergeByPriority } from '../../../shared/lsp-bundled';
@@ -70,6 +71,11 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
   );
   // Символы проекта: сервер ищет по всему проекту, а не по открытому файлу.
   router.register('lsp.symbols', (params) => deps.lsp?.projectSymbols(params.query) ?? []);
+  // Орфография через cSpell (`main/spell/server.ts`): те же словари, что у проекта
+  // в CI, поэтому подчёркивания совпадают с прогоном `cspell` в сборке.
+  router.register('spell.serverDiagnostics', async (params) =>
+    spellServerDiagnostics(params.path, params.text, params.words ?? []),
+  );
   // Карта символов: то, что уже разобрано и лежит на диске. Нужна двум вещам —
   // быстрому поиску, пока сервер молчит, и пересборке после правок (её зовёт проба).
   router.register('index.status', () => deps.index?.status() ?? EMPTY_INDEX_STATUS);

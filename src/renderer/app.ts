@@ -27,6 +27,7 @@ import type { LspProgress } from "../shared/lsp-progress";
 import type { LspProjectDiagnosticsPayload } from "../shared/api";
 import { createLspProgressController } from "./core/lsp-progress";
 import { createProjectDiagnosticsApplier } from "./core/project-diagnostics";
+import { createSpellServerCheck } from "./core/spell-server-check";
 import { PROJECT_STAGE_EVENT } from "../shared/project-analysis";
 import type { ProjectStageEvent } from "../shared/project-analysis";
 import {
@@ -4406,6 +4407,15 @@ export async function startApplication(
       editors.setExternalMarkers(path, "lsp-project", diagnostics),
   });
 
+  // Орфография проекта (cSpell): источники разные с LSP — иначе один прогон
+  // стирал бы пометки другого.
+  const checkSpelling = createSpellServerCheck({
+    rpc,
+    setMarkers: (path, diagnostics) => editors.setExternalMarkers(path, "cspell", diagnostics),
+    enabled: () => settings.editor.spellcheck,
+    projectWords: () => settings.editor.spellProjectWords ?? [],
+  });
+
   const refreshStatus = (): void => {
     const active = openEditors.active;
     const projectTools = tools.get();
@@ -4777,6 +4787,10 @@ export async function startApplication(
       editors.setBreakpoints(path, debug.breakpointsOf(path));
     // Другая вкладка может быть другим кадром стека — значения в ней свои.
     void refreshDebugInlineValues();
+    // Орфография проекта считается в main по запросу: текст открытого файла,
+    // а не сохранённый — иначе подчёркивания отставали бы на одно сохранение.
+    const viewing = openEditors.active;
+    if (viewing) void checkSpelling(viewing.path, viewing.value);
   });
   // Счётчик правок и ветка в статусбаре живут по тому же снимку, что и дерево.
   git.onDidChange(refreshStatus);
