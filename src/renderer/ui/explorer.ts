@@ -1709,6 +1709,19 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       moving.push(source);
     }
     if (moving.length === 0) return;
+    // Перенос из-за пределов проекта меняет файлы ВНЕ его: спрашиваем только
+    // когда перенос, а не копия — копия ничего не теряет.
+    if (kind === 'move') {
+      const { confirmed } = await deps.rpc.request('dialog.confirm', {
+        title: 'Перенести в проект?',
+        message:
+          moving.length === 1
+            ? `${nameOf(moving[0]!)} переедет в ${nameOf(dir)} и исчезнет со старого места.`
+            : `${moving.length} файлов переедут в ${nameOf(dir)} и исчезнут со старых мест.`,
+        confirmLabel: 'Перенести',
+      });
+      if (!confirmed) return;
+    }
     await deps.commands.execute(kind === 'copy' ? 'file.copyInto' : 'file.moveInto', moving, dir);
   };
 
