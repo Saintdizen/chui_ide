@@ -1,4 +1,5 @@
 import { installLanguageOf, installMenuItems, installSuggestions } from '../../shared/import-install';
+import { actionImpact } from '../../shared/code-action-impact';
 import { codeActionKindLabel, groupCodeActions, type CodeActionItem } from '../../shared/lsp-code-actions';
 import { packageForModule } from '../../shared/python-packages';
 import type { ImportChecker } from './import-check';
@@ -107,9 +108,13 @@ export function createEditorFixes(deps: EditorFixesDeps) {
       // Одиночное действие без вида заголовка не заслуживает: он его только обособит.
       if (groups.length > 1) sections.push({ heading: true, label: group.label });
       for (const action of group.actions) {
+        // Что действие сделает — ДО выбора: «Вынести в переменную» без «3 файла, 12 мест»
+        // читается как правка одной строки. Подсказка справа, когда известно;
+        // вид действия — когда сказать нечего (только команда сервера).
+        const impact = actionImpact(action.edits, path).label;
         sections.push({
           label: action.title,
-          hint: codeActionKindLabel(action.kind),
+          hint: impact || codeActionKindLabel(action.kind),
           onSelect: () => void applyCodeAction(path, action),
         });
       }
