@@ -39,7 +39,7 @@ describe('workspace.searchDocs', () => {
     expect(result.files).toBe(1);
     expect(result.hits).toHaveLength(1);
     expect(result.hits[0]).toMatchObject({
-      path: path.join(dir, 'README.md'),
+      path: 'README.md',
       line: 5,
       heading: 'Проект > Установка',
     });
@@ -48,7 +48,7 @@ describe('workspace.searchDocs', () => {
   it('ищет и в подпапке docs', async () => {
     await write('docs/guide.md', '# Руководство\n\n## Сборка\n\nКак собрать проект: npm run build\n');
     const result = await workspace.searchDocs({ query: 'как собрать' });
-    expect(result.hits[0]?.path).toBe(path.join(dir, 'docs/guide.md'));
+    expect(result.hits[0]?.path).toBe('docs/guide.md');
   });
 
   it('файлы, не являющиеся документацией, не просматриваются', async () => {
@@ -68,5 +68,23 @@ describe('workspace.searchDocs', () => {
     const result = await workspace.searchDocs({ query: 'космический деплой' });
     expect(result.files).toBe(1);
     expect(result.hits).toEqual([]);
+  });
+});
+
+describe('пути в ответе', () => {
+  /*
+   * Ответ инструмента уходит модели. Абсолютный путь в нём — рассказ о машине
+   * человека за пределы проекта (и в лог API-провайдера): модель и документы
+   * проекта с ним ничего не теряют, а приватности — теряют.
+   */
+  it('путь раздела относительный, а не абсолютный', async () => {
+    await write('docs/guide.md', '# Установка\nПоставь пакет.\n');
+    const result = await workspace.searchDocs({ query: 'установка' });
+    expect(result.hits.length).toBeGreaterThan(0);
+    for (const hit of result.hits) {
+      expect(hit.path.startsWith('/')).toBe(false);
+      expect(hit.path).not.toContain(dir);
+    }
+    expect(result.hits[0].path).toBe('docs/guide.md');
   });
 });

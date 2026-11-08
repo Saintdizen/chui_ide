@@ -1235,7 +1235,9 @@ export class WorkspaceService {
       files += 1;
 
       const text = buffer.toString('utf8');
-      for (const chunk of splitDocChunks(file, text)) chunks.push(chunk);
+      // Разделы нарезаются с ОТНОСИТЕЛЬНЫМ путём, как `relative` выше: адрес
+      // этого файла на машине не должен уходить модели в ответе инструмента.
+      for (const chunk of splitDocChunks(relative, text)) chunks.push(chunk);
     }
 
     return { query, hits: rankDocChunks(chunks, query, limit), files, chunks: chunks.length };
