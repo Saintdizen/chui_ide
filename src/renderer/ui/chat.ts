@@ -85,6 +85,7 @@ import {
 } from './chat-approvals';
 import { mergePatchResult } from './chat-patches';
 import { countLines, plural, snippetFor, titleFrom } from './chat-text';
+import { formatChatDate } from '../../shared/chat-date';
 import { createChatTabs, type ChatSearchHit } from './chat-tabs';
 import { createRunInspector } from './run-inspector';
 import { createChatPersistence, newChatUid } from './chat-persistence';
@@ -797,16 +798,38 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /** Поиск по беседам: одна строка на беседу, в которой нашлось совпадение. */
   function searchChats(query: string): ChatSearchHit[] {
+    const text = query.trim().toLowerCase();
+    if (text === '') return [];
     const hits: ChatSearchHit[] = [];
     for (const session of sessions) {
-      for (const message of session.history) {
+      // Сначала дата: «12.03», «март», «2026-03» — беседы за время, без слов.
+      // Так ищут, когда помнят «когда», а не «о чём».
+      if (matchesDate(session.updatedAt, text)) {
+        hits.push({
+          id: session.id,
+          title: session.title,
+          snippet: `изменена ${formatChatDate(session.updatedAt)}`,
+          updatedAt: session.updatedAt,
+        });
+        continue;
+      }
+      // Транскрипт, а не история: после компакции в `history` остаётся резюме,
+      // и слова из старых сообщений иначе не найти.
+      for (const message of session.transcript) {
         const snippet = snippetFor(message.content ?? '', query);
         if (snippet === null) continue;
-        hits.push({ id: session.id, title: session.title, snippet });
+        hits.push({ id: session.id, title: session.title, snippet, updatedAt: session.updatedAt });
         break; // одна строка на беседу — список читается легче
       }
     }
-    return hits;
+    // Свежие сверху: в поиске по старым беседам чаще нужна последняя.
+    return hits.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  /** Совпадает ли дата беседы с запросом: «2026-03», «12.03», «март», «12». */
+  function matchesDate(at: number, query: string): boolean {
+    if (at <= 0) return false;
+    return formatChatDate(at).toLowerCase().includes(query);
   }
 
   /** Таймер снятия подсветки поиска: она подсказка, а не разметка ленты. */
@@ -955,6 +978,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       id: nextId,
       uid,
       title: `Беседа ${nextId}`,
+      // Новая беседа ещё не сохранена — даты у неё нет, и в поиске по дате она не всплывает.
+      updatedAt: 0,
       // `role="log"` — лента читается диктором: новое сообщение объявляется само,
       // не только когда в него ткнут мышью. `polite` — не перебивать набор в поле.
       thread: h('div', { class: 'chat-thread', role: 'log', 'aria-live': 'polite', 'aria-relevant': 'additions' }),
@@ -1184,6 +1209,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       for (const conversation of history.conversations) {
         const session = createSession(conversation.uid);
         session.title = conversation.title;
+        session.updatedAt = conversation.updatedAt;
         // Лента — из переписки, контекст — из сжатой части, если беседа сжималась.
         session.transcript = [...conversation.messages];
         session.history = [...(conversation.context ?? conversation.messages)];

@@ -32,6 +32,8 @@ export interface ChatSearchHit {
   id: number;
   title: string;
   snippet: string;
+  /** Время последнего изменения: по нему список идёт свежими вперёд. */
+  updatedAt: number;
 }
 
 export interface ChatTabsDeps {
