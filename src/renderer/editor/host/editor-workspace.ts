@@ -221,6 +221,11 @@ export interface EditorWorkspaceOptions {
    * приложения, а не панели.
    */
   renameSymbol?: (path: string, position: { line: number; column: number }) => void;
+  /**
+   * Переименование без языкового сервера: символ сервер не знает, но слово
+   * под кареткой есть — ищем его по проекту и меняем найденное.
+   */
+  renameBySearch?: (path: string, position: { line: number; column: number }) => Promise<void>;
   /** Перейти к месту: открыть файл и поставить курсор. Дело приложения (оно знает, как открыть). */
   revealLocation?: (path: string, line: number, column: number) => void;
   /**
@@ -369,6 +374,7 @@ export class EditorWorkspace {
   private readonly documentHighlights: EditorWorkspaceOptions['documentHighlights'];
   /** Переименование символа: шов к приложению (диалог имени и применение правок). */
   private readonly renameSymbol: ((path: string, position: { line: number; column: number }) => void) | undefined;
+  private readonly renameBySearch: ((path: string, position: { line: number; column: number }) => Promise<void>) | undefined;
   /** Перейти к месту — открыть файл и поставить курсор. */
   private readonly revealLocation: ((path: string, line: number, column: number) => void) | undefined;
   /** Чтение текста файла: нужно «заглядыванию» в определение (см. `peek-controller.ts`). */
@@ -522,6 +528,7 @@ export class EditorWorkspace {
     this.documentColors = options.documentColors;
     this.documentHighlights = options.documentHighlights;
     this.renameSymbol = options.renameSymbol;
+    this.renameBySearch = options.renameBySearch;
     this.revealLocation = options.revealLocation;
     this.readText = options.readText;
     this.onDidWriteFile = options.onDidWriteFile;
@@ -1100,9 +1107,22 @@ export class EditorWorkspace {
     return this.pane.documentLanguage;
   }
 
+  /**
+   * Слово под курсором. Путь и координаты — для совместимости с вызовом из
+   * переименования: слово берётся из активной панели, её они и описали бы.
+   */
+  async wordAt(_path: string, _line: number, _column: number): Promise<string | null> {
+    return this.pane.wordAtCursor();
+  }
+
   /** Слово под кареткой активной панели (`null` — не слово). */
   wordAtCursor(): string | null {
     return this.pane.wordAtCursor();
+  }
+
+  /** Переименование без языкового сервера: запасной путь, когда символа нет. */
+  renameBySearchSymbol(path: string, position: { line: number; column: number }): Promise<void> {
+    return this.renameBySearch?.(path, position) ?? Promise.resolve();
   }
 
   /** Слово под курсором активной панели, если оно отмечено как ошибка орфографии. */

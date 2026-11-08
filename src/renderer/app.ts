@@ -47,6 +47,7 @@ import type { TextDocument } from "./core/document";
 import { uriToPath } from "./core/document";
 import { DocumentStore } from "./core/document-store";
 import { EditService } from "./core/edits";
+import { renameBySearchFallback } from "./core/rename-by-search";
 import { HostService } from "./core/host";
 import { EditorWorkspace } from "./editor/host/editor-workspace";
 import { DocumentRegistry } from "./editor/host/document-registry";
@@ -787,6 +788,18 @@ export async function startApplication(
           if (!document.dirty) listener(document.path);
         }).dispose,
       onNotice: (text) => showToast(text),
+      renameBySearch: (path, position) => renameBySearchFallback(path, position, {
+        wordAt: (at, line, column) => editors.wordAt(at, line, column),
+        ask: (title, value) =>
+          promptValue({ title, label: 'Новое имя', value }).then((answer) => answer),
+        search: (query) =>
+          rpc
+            .request('workspace.search', { query, maxResults: 500 })
+            .then((result) => result.hits),
+        apply: (files) => edits.applyFileEdits(files),
+        notify: showToast,
+      }),
+
       // Переименование: имя спрашиваем диалогом, правки применяет документная модель.
       renameSymbol: (path, position) => {
         void (async () => {
@@ -798,7 +811,7 @@ export async function startApplication(
             .prepareRename(path, position)
             .catch(() => null);
           if (!prepared) {
-            showToast("Здесь нечего переименовать", "info");
+            await editors.renameBySearchSymbol(path, position);
             return;
           }
           if (prepared.message) {
