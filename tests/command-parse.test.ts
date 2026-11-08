@@ -48,10 +48,20 @@ describe('что запускается', () => {
     expect(names('eval "rm -rf build"')).toEqual(['eval', 'rm']);
   });
 
-  it('подстановки отмечены как неизвестные', () => {
-    expect(parseCommand('echo $(rm -rf build)').unknown).toBe(true);
-    expect(parseCommand('echo `rm -rf build`').unknown).toBe(true);
-    expect(parseCommand('echo "$(id)"').unknown).toBe(true);
+  it('подстановки разбираются: они выполняются раньше команды', () => {
+    // В истории оболочек `echo $(rm -rf build)` не отличить от `rm -rf build`.
+    expect(names('echo $(rm -rf build)')).toContain('rm');
+    expect(names('echo `rm -rf build`')).toContain('rm');
+    expect(names('echo "$(rm -rf x)"')).toContain('rm');
+    // Вложенность скобок не рвёт захват: `$(cat $(pwd)/l)`
+    expect(names('cat $(cat $(pwd)/list)')).toEqual(['cat', 'cat', 'pwd']);
+  });
+
+  it('значение переменной не наше — помечаем неясность', () => {
+    // `${HOME}` — запуск не в нём, но значение неизвестно.
+    expect(parseCommand('ls ${HOME}').unknown).toBe(true);
+    // `$(id)` уже разобрана — это просто вызов `id`.
+    expect(names('echo $(id)')).toEqual(['echo', 'id']);
   });
 
   it('обычные аргументы кодом не считаются', () => {

@@ -41,13 +41,38 @@ const isSeparator = (char: string): boolean => '\n;&|()'.includes(char);
 /** Из них те, что внутри двойных кавычек литеральны (`"a; b"` — одно слово). */
 const isQuoteSeparator = (char: string): boolean => '\n;&|'.includes(char);
 
+/**
+ * Тело `$( … )` от позиции после `$(`: уважает вложенные скобки и кавычки.
+ * `null` — закрылась не наша: такой строке верить нельзя.
+ */
+function captureParen(text: string, from: number): { inner: string; end: number } | null {
+  let depth = 1;
+  let quote: string | null = null;
+  for (let i = from; i < text.length; i += 1) {
+    const char = text[i]!;
+    if (quote !== null) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") quote = char;
+    else if (char === '(') depth += 1;
+    else if (char === ')') {
+      depth -= 1;
+      if (depth === 0) return { inner: text.slice(from, i), end: i };
+    }
+  }
+  return null;
+}
+
 interface Segment {
   /** Текст с кавычками — из него потом достаются слова с их границами. */
   raw: string;
   /** Содержимое сегмента без наружных кавычек — готовые слова вызова. */
   text: string;
-  /** В сегменте есть подстановка — то есть чужой запуск, которого мы не видим. */
+  /** В сегменте есть подстановка — то есть чужой запуск внутри этой же строки. */
   foreign: boolean;
+  /** Тексты подстановок: их тоже выполнит шелл, пока идёт этот вызов. */
+  inner: string[];
 }
 
 /** Режем строку на вызовы, снимая кавычки; учитываем побеги и переносы. */
@@ -56,6 +81,7 @@ function splitSegments(text: string): Segment[] {
   let current = '';
   let raw = '';
   let foreign = false;
+  let inner: string[] = [];
   let quote: '"' | "'" | null = null;
 
   for (let i = 0; i < text.length; i += 1) {
@@ -88,8 +114,28 @@ function splitSegments(text: string): Segment[] {
     if (quote === '"') {
       if (char === '"') quote = null;
       else {
-        if (isQuoteSeparator(char) || char === '`') foreign = true;
-        if (char === '$' && text[i + 1] === '(') foreign = true;
+        // Внутри двойных кавычек подстановка тоже работает: `"$(rm -rf x)"`.
+        if (char === '`') {
+          const end = text.indexOf('`', i + 1);
+          if (end > 0) {
+            inner.push(text.slice(i + 1, end));
+            i = end;
+            current += ' ';
+            continue;
+          }
+          foreign = true;
+        }
+        if (char === '$' && text[i + 1] === '(') {
+          const captured = captureParen(text, i + 2);
+          if (captured) {
+            inner.push(captured.inner);
+            i = captured.end;
+            current += ' ';
+            continue;
+          }
+          foreign = true;
+        }
+        if (isQuoteSeparator(char)) foreign = true;
         current += char;
       }
       continue;
@@ -99,22 +145,45 @@ function splitSegments(text: string): Segment[] {
       continue;
     }
     if (char === '`') {
+      // `` `rm -rf x` `` — подстановка: содержимое выполнится, но отдельно.
+      const end = text.indexOf('`', i + 1);
+      if (end > 0) {
+        inner.push(text.slice(i + 1, end));
+        i = end;
+        current += ' ';
+        continue;
+      }
       foreign = true;
       current += char;
       continue;
     }
-    if (char === '$' && (text[i + 1] === '(' || text[i + 1] === '{')) foreign = true;
+    if (char === '$' && text[i + 1] === '(') {
+      const captured = captureParen(text, i + 2);
+      if (captured) {
+        // Из вызова `$(…)` вырезается: путь собирается на лету, и что там
+        // окажется — не наше дело. Но выполнится она раньше, поэтому её
+        // содержимое уходит в общий разбор.
+        inner.push(captured.inner);
+        i = captured.end;
+        current += ' ';
+        continue;
+      }
+      foreign = true;
+    }
+    // `${VAR}` — имя из переменной: значение не наше.
+    if (char === '$' && text[i + 1] === '{') foreign = true;
     if (isSeparator(char)) {
       // Разделитель в сырой текст не идёт: он режет вызовы, а не слова.
-      segments.push({ raw: raw.slice(0, -1), text: current, foreign });
+      segments.push({ raw: raw.slice(0, -1), text: current, foreign, inner });
       current = '';
       raw = '';
       foreign = false;
+      inner = [];
       continue;
     }
     current += char;
   }
-  segments.push({ raw, text: current, foreign });
+  segments.push({ raw, text: current, foreign, inner });
   return segments;
 }
 
@@ -345,7 +414,25 @@ export function parseCommand(command: string, depth = 0): ParsedCommand {
       continue;
     }
     calls.push({ name, args, ...(bare ? { indirect: true } : {}) });
-    if (bare || indirect || segment.foreign) unknown = true;
+    if (bare || indirect) unknown = true;
+
+    /*
+     * Подстановки (`$(…)`, `` `…` ``) выполняются РАНЬШЕ самой команды, и в
+     * истории оболочек `echo $(rm -rf build)` не отличить от `rm -rf build`.
+     * Поэтому их содержимое уходит в общий разбор: опасное найдётся и без
+     * знания того, что вернёт подстановка.
+     */
+    for (const text of segment.inner) {
+      if (!text.trim()) continue;
+      if (depth >= MAX_DEPTH) {
+        unknown = true;
+        continue;
+      }
+      const nested = parseCommand(text, depth + 1);
+      calls.push(...nested.calls);
+      if (nested.unknown) unknown = true;
+    }
+    if (segment.foreign) unknown = true;
 
     /*
      * Текст кода берём из СЫРОГО сегмента, а не из слов: `sh -c 'rm -rf x'`
