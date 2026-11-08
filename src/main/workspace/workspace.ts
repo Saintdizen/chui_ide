@@ -25,7 +25,7 @@ import { parseOfficeDocument } from '../doc/office';
 import { nextActiveRoot, type WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
 import { ContentCache, type ContentCacheStats } from './content-cache';
-import { absoluteSearchPath, escapesRoot, isInsideRoot } from './path-guard';
+import { absoluteSearchPath, escapesRoot, isInsideRoot, resolveRealTarget } from './path-guard';
 import { globToRegExp } from '../../shared/glob';
 import { parseRipgrepJson, ripgrepArgs } from '../../shared/ripgrep';
 import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
@@ -1437,11 +1437,15 @@ export class WorkspaceService {
 
     if (!options.allowOutsideSymlink) {
       const real = await fs.realpath(resolved).catch(() => null);
+      // Куда путь ведёт на самом деле. Файла может ещё не быть (создание,
+      // переименование) — тогда раскрываем ближайшего существующего предка:
+      // файла в папке-симлинке наружу ещё нет, а запись в него — запись НАРУЖУ.
+      const realTarget = resolveRealTarget(owner?.rootReal ?? null, resolved, real);
       // Симлинк обязан остаться внутри ХОТЯ БЫ ОДНОГО корня области (или каталога зависимостей).
       const inside =
-        this.roots.some((state) => !escapesRoot(state.rootReal, real)) ||
-        (dependency && real !== null && this.isDependencyPath(real)) ||
-        (real !== null && this.isReadOnlyPath(real));
+        this.roots.some((state) => !escapesRoot(state.rootReal, realTarget)) ||
+        (dependency && this.isDependencyPath(realTarget)) ||
+        this.isReadOnlyPath(realTarget);
       if (!inside) {
         throw new RpcFailure(RpcErrorCode.InvalidParams, 'Путь вне рабочей папки (симлинк)');
       }

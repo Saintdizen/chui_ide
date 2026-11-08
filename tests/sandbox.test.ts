@@ -75,6 +75,23 @@ describe('normalizeSandboxWorkdir', () => {
     expect(normalizeSandboxWorkdir('/a b')).toBe(DEFAULT_SANDBOX_WORKDIR);
     expect(normalizeSandboxWorkdir('/../etc')).toBe(DEFAULT_SANDBOX_WORKDIR);
   });
+
+  /*
+   * Дыра: проверка ловила только путь, НАЧИНАЮЩИЙСЯ с `/..`. А `..` по дороге
+   * уводит туда же: `/tmp/../../etc` — это `/etc`, и с проектом, смонтированным
+   * в `/etc`, контейнер видел бы корень файловой системы вместо проекта.
+   */
+  it('не пропускает выход наверх через .. в середине пути', () => {
+    for (const raw of ['/w/../../../etc', '/tmp/../../etc', '/a/b/../../../']) {
+      expect(normalizeSandboxWorkdir(raw)).toBe(DEFAULT_SANDBOX_WORKDIR);
+    }
+  });
+
+  it('глубокий .. в до-корне не путает, если путь в итоге вложен', () => {
+    // `/a/../b` — это `/b`: .. есть, но выше корня не вылезли.
+    expect(normalizeSandboxWorkdir('/a/../b')).toBe('/b');
+    expect(normalizeSandboxWorkdir('/w/tmp/../src')).toBe('/w/src');
+  });
 });
 
 describe('sanitizeSandbox', () => {

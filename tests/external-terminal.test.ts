@@ -78,3 +78,41 @@ describe('knownLinuxTerminals', () => {
     expect(knownLinuxTerminals()).toContain('xterm');
   });
 });
+
+describe('вход извне не превращается в чужую запускаемую строку', () => {
+  /*
+   * Дыры, которые эти проверки держат:
+   *  * рабочий каталог попадал в доводы как есть, и каталог, начинающийся с
+   *    дефиса, читался терминалом как опция (см. ниже);
+   *  * `$TERMINAL` брался как команда целиком со всеми аргументами.
+   */
+  it('каталог с началом флага не становится опцией терминала', () => {
+    const launch = pickExternalTerminal('linux', '--working-directory=/', (c) => c === 'gnome-terminal', {});
+    expect(launch?.args).toEqual(['--working-directory=--working-directory=/']);
+  });
+
+  it('каталог, совпавший с флагом, всё равно остаётся доводом', () => {
+    const launch = pickExternalTerminal('linux', '-e', (c) => c === 'kitty', {});
+    expect(launch?.args).toEqual(['--directory', '-e']);
+  });
+
+  it('$TERMINAL с доводами не запускается как команда', () => {
+    const ran: string[] = [];
+    const launch = pickExternalTerminal(
+      'linux',
+      '/p',
+      (c) => {
+        ran.push(c);
+        return true;
+      },
+      { preferred: 'xterm -e bash' },
+    );
+    expect(launch?.command).not.toBe('xterm -e bash');
+  });
+
+  it('ComSpec с символами командной строки отбрасывается', () => {
+    const launch = pickExternalTerminal('win32', 'C:/p', (c) => c === 'cmd.exe', { comspec: 'cmd.exe & calc' });
+    expect(launch?.command).toBe('cmd.exe');
+    expect(launch?.args).toEqual(['/c', 'start', '', 'cmd']);
+  });
+});

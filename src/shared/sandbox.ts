@@ -9,6 +9,7 @@
  * Модуль чистый, поэтому аргументы разбираются тестами: запуск чужой команды —
  * самое опасное, что делает агент, и «вылезти» из своей позиции она не должна.
  */
+import path from 'node:path';
 
 /** Настройки песочницы. Живут в `settings.json` (`ai.sandbox`). */
 export interface AiSandboxSettings {
@@ -81,9 +82,22 @@ export function normalizeSandboxWorkdir(raw: string | undefined): string {
   if (/\s/.test(value)) return DEFAULT_SANDBOX_WORKDIR;
 
   const absolute = value.startsWith('/') ? value : `/${value}`;
-  const normalized = absolute.replace(/\/{2,}/g, '/').replace(/\/\.\//g, '/');
+  // Разбираем по-настоящему, а не перестановкой подстрок. Нормализация снимает
+  // `.` и `/` в конце — и уводит за корень: `/../etc` становится `/etc`, то же
+  // с `/w/../../../`. Сам разбор это не ловит (выход за корень — понятие
+  // ФАЙЛОВОЙ СИСТЕМЫ, а не строки), поэтому проверяем и то, и другое.
+  const normalized = path.posix.normalize(absolute);
   // Корень монтировать нельзя: проект накрыл бы всю файловую систему контейнера.
-  if (normalized === '/' || normalized.startsWith('/..')) return DEFAULT_SANDBOX_WORKDIR;
+  if (normalized === '/' || normalized === '.' || normalized.startsWith('/../')) return DEFAULT_SANDBOX_WORKDIR;
+  // Разбор добрался до корня, а исходно путь уходил выше: `/../etc` стал `/etc`
+  // и выглядит безобидно. Считать, насколько глубоко влезли, — `..`, оставшийся
+  // в пути, этого не покажет: `path.posix.normalize` уже его съел.
+  let depth = 0;
+  for (const part of absolute.split('/')) {
+    if (part === '..') depth -= 1;
+    else if (part !== '' && part !== '.') depth += 1;
+    if (depth < 0) return DEFAULT_SANDBOX_WORKDIR;
+  }
   return normalized.replace(/\/$/, '') || DEFAULT_SANDBOX_WORKDIR;
 }
 

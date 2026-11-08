@@ -1,3 +1,4 @@
+import fsSync from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -13,6 +14,60 @@ import path from 'node:path';
 export function isInsideRoot(root: string, target: string): boolean {
   const resolved = path.resolve(target);
   return resolved === root || resolved.startsWith(root + path.sep);
+}
+
+/**
+ * Путь — это другой корень области или его потомок.
+ *
+ * Нужен для областей из нескольких папок: файл из второго корня не обязан
+ * лежать внутри первого, и проверять его надо против своего.
+ */
+export function isInsideAnyRoot(roots: readonly string[], target: string): boolean {
+  return roots.some((root) => isInsideRoot(root, target));
+}
+
+/**
+ * Куда на самом деле ведёт путь.
+ *
+ * `real` — то, что вернул `fs.realpath`; `null`, когда раскрыть не удалось
+ * (файла ещё нет — например, при создании). Обратного раскрытия мало:
+ * `realpath` раскрывает ТОЛЬКО последний элемент, а папка, в которой он лежит,
+ * может сама оказаться симлинком наружу.
+ *
+ * Раскрыть нечего — файла нет, но папка может быть симлинком наружу: тогда
+ * `resolved` обманывает, он начинается с корня, а ведёт совсем в другое место.
+ * Поэтому при создании файла раскрываем ближайшего существующего предка и
+ * подклеиваем остаток. Раскрыть не удалось совсем — верим `resolved`: иначе
+ * нельзя было бы создать папку, которой ещё нет.
+ */
+export function resolveRealTarget(rootReal: string | null, resolved: string, real: string | null): string {
+  if (real !== null) return real;
+  // Нет корня — нет и рамки, о которой спрашивают: раскрывать не о чем.
+  if (!rootReal) return path.resolve(resolved);
+  return realOfNearestAncestor(path.resolve(resolved));
+}
+
+/**
+ * Раскрыть ближайшего СУЩЕСТВУЮЩЕГО предка и подклеить остаток.
+ *
+ * Так и находится настоящий адрес файла, которого ещё нет. Синхронно: функция
+ * остаётся решением без `await`, её зовут внутри проверки пути.
+ */
+function realOfNearestAncestor(resolved: string): string {
+  let probe = resolved;
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return path.join(fsSync.realpathSync(probe), ...tail);
+    } catch {
+      const parent = path.dirname(probe);
+      // Дошли до корня файловой системы и ничего живого не нашли: сказать
+      // нечего — возвращаем как было, иначе создание папок перестанет работать.
+      if (parent === probe) return resolved;
+      tail.unshift(path.basename(probe));
+      probe = parent;
+    }
+  }
 }
 
 /**

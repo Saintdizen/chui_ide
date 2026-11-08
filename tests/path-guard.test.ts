@@ -1,6 +1,8 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { absoluteSearchPath, escapesRoot, isInsideRoot } from '../src/main/workspace/path-guard';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { absoluteSearchPath, escapesRoot, isInsideRoot, resolveRealTarget } from '../src/main/workspace/path-guard';
 
 /**
  * Проверки пути. Первая защищает от `..` в запросе, вторая — от чтения чужих
@@ -71,5 +73,63 @@ describe('absoluteSearchPath', () => {
   it('абсолютный путь не переписывается относительно cwd', () => {
     const absolute = path.resolve('/proj/src/app.ts');
     expect(absoluteSearchPath(cwd, absolute)).toBe(absolute);
+  });
+});
+
+describe('resolveRealTarget — файла ещё нет', () => {
+  /*
+   * Дыра, которую эти тесты закрывают: раскрытие симлинка обращалось к диску
+   * только для СУЩЕСТВУЮЩЕГО файла. При создании нового (`write.txt` внутри
+   * папки-симлинка наружу) раскрыть было нечего, `resolved` начинался с корня —
+   * и проверка пропускала запись за пределы проекта. Доказано опытом: файл вне
+   * проекта перезаписывался через такой путь.
+   */
+  let base: string;
+  let root: string;
+  let outside: string;
+
+  beforeEach(async () => {
+    base = await fs.mkdtemp(path.join(os.tmpdir(), 'pathguard-'));
+    root = path.join(base, 'project');
+    outside = path.join(base, 'outside');
+    await fs.mkdir(root);
+    await fs.mkdir(outside);
+  });
+
+  afterEach(async () => {
+    await fs.rm(base, { recursive: true, force: true });
+  });
+
+  it('раскрывает существующий файл как раньше', async () => {
+    const file = path.join(root, 'a.txt');
+    await fs.writeFile(file, 'x');
+    const real = await fs.realpath(file);
+    expect(resolveRealTarget(root, file, real)).toBe(real);
+  });
+
+  it('новый файл внутри проекта остаётся внутри', async () => {
+    const created = path.join(root, 'sub', 'new.txt');
+    const real = resolveRealTarget(root, created, null);
+    expect(real.startsWith(await fs.realpath(root))).toBe(true);
+  });
+
+  it('НОВЫЙ файл в папке-симлинке наружу не считается своим', async () => {
+    // Папка проекта целиком настоящая; симлинком наружу является её потомок.
+    await fs.symlink(outside, path.join(root, 'link'));
+    const created = path.join(root, 'link', 'secret.txt');
+    const real = resolveRealTarget(root, created, null);
+    // Раскрыт предок: путь обязан выйти за корень, а не притвориться своим.
+    expect(real.startsWith(await fs.realpath(outside))).toBe(true);
+    expect(real.startsWith(await fs.realpath(root))).toBe(false);
+  });
+
+  it('папка, которой ещё нет, не ломает создание', async () => {
+    const created = path.join(root, 'a', 'b', 'c.txt');
+    expect(() => resolveRealTarget(root, created, null)).not.toThrow();
+  });
+
+  it('корень слоя, которого ещё нет, не роняет проверку', () => {
+    const created = path.join(root, 'x.txt');
+    expect(() => resolveRealTarget('', created, null)).not.toThrow();
   });
 });

@@ -60,8 +60,16 @@ export function pickExternalTerminal(
   isAvailable: (command: string) => boolean,
   choice: TerminalChoice = {},
 ): TerminalLaunch | null {
-  const chosen = choice.preferred?.trim();
-  if (chosen && isAvailable(chosen)) return { command: chosen, args: [] };
+  // `$TERMINAL` — тоже вход извне: он приходит из окружения, а не из кода.
+  // Строка `"xterm -e bash"` — это аргументы, а не команда: `isOnPath` искала
+  // бы файл с таким именем и, найдя похожий, запустила бы его. Берём только
+  // одну команду без доводов, а с доводами — отказываемся: безопаснее показать
+  // встроенный терминал IDE, чем угадывать чужие аргументы.
+  const preferred = choice.preferred?.trim() ?? '';
+  // Первое слово — и вся строка целиком: `spawn` берёт одну команду, и
+  // `xterm --title got` в качестве команды — не то, что человек имел в виду.
+  const chosen = preferred === '' ? '' : preferred.split(/\s/)[0] ?? '';
+  if (chosen && chosen === preferred && isAvailable(chosen)) return { command: chosen, args: [] };
 
   if (platform === 'darwin') {
     // `open -a Terminal` открывает привычный терминал macOS в нужной папке.
@@ -70,7 +78,11 @@ export function pickExternalTerminal(
 
   if (platform === 'win32') {
     // `start` открывает НОВОЕ окно консоли; рабочий каталог наследуется от `cwd`.
-    const command = choice.comspec || 'cmd.exe';
+    // `ComSpec` — тоже из окружения: он должен быть ПОЛНЫМ путём к исполняемому
+    // файлу, иначе `cmd.exe` из PATH. Значение с доводами или скобками, которые
+    // `cmd` трактует как команду, отбрасываем: запускать его — выполнить чужой текст.
+    const comspec = choice.comspec?.trim() ?? '';
+    const command = comspec && !/[\s"'&|<>^()%]/.test(comspec) ? comspec : 'cmd.exe';
     return isAvailable(command) ? { command, args: ['/c', 'start', '', 'cmd'] } : null;
   }
 
