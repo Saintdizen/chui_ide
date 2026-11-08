@@ -221,14 +221,17 @@ export async function terminalWrite(ctx: ToolContext, args: Record<string, unkno
   const data = requireString(args, 'data');
 
   // Ввод в терминал может быть чем угодно — страховка ловит необратимое и здесь.
-  const { refused: refusal } = await confirmRun(ctx, data, `[${id}] ${data.replace(/\n/g, '⏎')}`);
-  if (refusal) return refusal;
+  // Отдаём то, что отдал человек: если он собрал строку заново в карточке (а не
+  // отменил), в терминал должна уйти его версия — как и у `terminal run`.
+  const confirmed = await confirmRun(ctx, data, `[${id}] ${data.replace(/\n/g, '⏎')}`);
+  if (confirmed.refused) return confirmed.refused;
+  const text = confirmed.command;
 
-  ctx.terminals.write(id, data);
+  ctx.terminals.write(id, text);
   return {
     ok: true,
     summary: `отправлено в ${id}`,
-    detail: `В сессию ${id} отправлено символов: ${data.length}. Прочитай вывод через terminal (action read).`,
+    detail: `В сессию ${id} отправлено символов: ${text.length}. Прочитай вывод через terminal (action read).`,
   };
 }
 

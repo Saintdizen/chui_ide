@@ -163,6 +163,34 @@ describe('песочница', () => {
   });
 });
 
+describe('правка человека в карточке доходит до терминала', () => {
+  /*
+   * Решение «правка» в карточке подтверждения означает: человек прочитал и
+   * переписал строку. У `terminal run` его текст уходил в шелл, а ввод в
+   * сессию отбрасывал `confirmed.command` и слал исходный — карточка
+   * показывала одно, терминал исполнял другое.
+   */
+  it('в сессию пишется версия человека, а не агента', async () => {
+    const written: string[] = [];
+    const term = {
+      ...terminals(),
+      write: (_id: string, data: string) => written.push(data),
+    } as unknown as TerminalAgent;
+    const ctx = {
+      workspace: workspace(),
+      terminals: term,
+      allowAll: true,
+      confirmDangerous: true,
+      confirmCommand: async () => ({ allowed: true, command: 'git status' }),
+    } as unknown as ToolContext;
+
+    const outcome = await runTool(ctx, 'terminalWrite', JSON.stringify({ id: 't1', data: 'git push --force' }));
+
+    expect(outcome.ok).toBe(true);
+    expect(written).toEqual(['git status']);
+  });
+});
+
 describe('отказ — одним словом', () => {
   /** Мост подтверждений, который на всё отвечает «нет». */
   const deny = async () => false;
