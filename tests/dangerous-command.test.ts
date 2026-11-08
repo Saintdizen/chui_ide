@@ -56,6 +56,42 @@ describe('isDangerousCommand', () => {
     expect(isDangerousCommand('cat list | xargs rm -rf')).toBe(true);
   });
 
+  /*
+   * Полный доступ с включённой страховкой — единственное место, где необратимая
+   * команда не спрашивает человека. Всё ниже проходило МОЛЧА, хотя сносит
+   * ровно то же, что и `rm -rf`. Разделитель перед глаголом — не только пробел
+   * и `;`: скобка, слэш в пути и обёртка вроде `xargs` тянут его за собой.
+   */
+  it('скобки и голый путь не прячут удаление', () => {
+    expect(isDangerousCommand('(rm -rf build)')).toBe(true);
+    expect(isDangerousCommand('/bin/rm -rf build')).toBe(true);
+    expect(isDangerousCommand('\u005crm -rf build')).toBe(true);
+    expect(isDangerousCommand('sudo\trm x')).toBe(true);
+  });
+
+  it('глагол за обёрткой', () => {
+    expect(isDangerousCommand('xargs rm')).toBe(true);
+    expect(isDangerousCommand('env rm -f x')).toBe(true);
+    expect(isDangerousCommand('exec /bin/rm x')).toBe(true);
+  });
+
+  it('снос без разбора', () => {
+    expect(isDangerousCommand('find . -delete')).toBe(true);
+    expect(isDangerousCommand('find . -name "*.log" -delete')).toBe(true);
+    expect(isDangerousCommand('rsync -a --delete /src/ ~/backup/')).toBe(true);
+    expect(isDangerousCommand('rm build/*')).toBe(true);
+    expect(isDangerousCommand('rm -rf /*')).toBe(true);
+    expect(isDangerousCommand('mv ~/.ssh ~/.ssh.bak')).toBe(true);
+  });
+
+  it('git clean любыми флагами', () => {
+    // `-fdx` раньше проходил: шаблон ждал ровно «f…d».
+    expect(isDangerousCommand('git clean -fdx')).toBe(true);
+    expect(isDangerousCommand('git clean -fdX')).toBe(true);
+    // Пробный прогон ничего не меняет.
+    expect(isDangerousCommand('git clean -n')).toBe(false);
+  });
+
   it('безобидные команды проходят', () => {
     expect(isDangerousCommand('ls -la')).toBe(false);
     expect(isDangerousCommand('npm run build')).toBe(false);

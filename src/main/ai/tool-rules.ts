@@ -42,9 +42,9 @@ export const ECHO_COMMAND_CHARS = 120;
  */
 export const DANGEROUS_COMMAND = new RegExp(
   [
-    String.raw`(^|[\s;&|])(sudo|doas|su)\s`,
-    String.raw`(^|[\s;&|])(rm|rmdir|shred|wipefs|mkfs\S*|fdisk|sfdisk|parted|shutdown|reboot|poweroff|halt|killall|pkill)\s`,
-    String.raw`(^|[\s;&|])dd\s+[^\n]*\bif=`,
+    String.raw`(^|[\s;&|()])(sudo|doas|su)\s`,
+    String.raw`(^|[\s;&|()])(rm|rmdir|shred|wipefs|mkfs\S*|fdisk|sfdisk|parted|shutdown|reboot|poweroff|halt|killall|pkill)\s`,
+    String.raw`(^|[\s;&|()])dd\s+[^\n]*\bif=`,
     String.raw`>\s*\/dev\/(sd|nvme|hd|disk)`,
     String.raw`>\s*(\/etc\/|\/boot\/|\/usr\/|~?\/?\.ssh\/|~?\/?\.bashrc|~?\/?\.zshrc)`,
     String.raw`:\s*\(\s*\)\s*\{`,
@@ -54,9 +54,24 @@ export const DANGEROUS_COMMAND = new RegExp(
     // ассистента нет. Поэтому здесь ловятся и записи в историю, и сеть: иначе
     // полный доступ молча пушил бы и коммитил. Чтение (`status`, `diff`, `log`)
     // остаётся без вопроса — этот ряд про необратимое.
-    String.raw`(^|[\s;&|])git\s+(-[cC]\s+\S+\s+|--\S+\s+)*(push|commit|pull|fetch|merge|rebase|reset|restore|revert|am|apply|cherry-pick|stash\s+(drop|clear|pop)|checkout\s+--|switch|branch\s+(-D|-d)|tag\s+-d|clean\s+-[a-z]*f[a-z]*d)(?![\w-])`,
+    String.raw`(^|[\s;&|])git\s+(-[cC]\s+\S+\s+|--\S+\s+)*(push|commit|pull|fetch|merge|rebase|reset|restore|revert|am|apply|cherry-pick|stash\s+(drop|clear|pop)|checkout\s+--|switch|branch\s+(-D|-d)|tag\s+-d|clean\s+-[a-z]*f[a-z]*)(?![\w-])`,
     String.raw`(curl|wget)\b[^\n|]*\|\s*(ba|z|fi|da)?sh\b`,
     `--no-preserve-root`,
+    // Мусор, а не путь: удаление кучи прямо в корне.
+    String.raw`(^|[\s;&|()])(rm|rsync)\s[^\n]*\s\/\s*(\*|\*\S*|$)`,
+    // Снос без разбора: `rsync --delete` и `find -delete` не спрашивают, что убирают.
+    String.raw`--delete`,
+    String.raw`(^|[\s;&|()])find\s[^\n]*\s-delete`,
+    // Уносит файлы из кармана: `~/.ssh`, история шелла, конфиги.
+    String.raw`(^|[\s;&|()])mv\s[^\n]*~\/(\.|Documents|Desktop|Pictures|Downloads)`,
+    // Опасный глагол за обёрткой: `xargs rm`, `env rm`, `nice rm`, `exec /bin/rm`.
+    String.raw`(^|[\s;&|()])(xargs|env|nice|time|exec|command)\s+(\/[^\s]*[/\\])?(rm|rmdir|shred|dd)(\s|$)`,
+    // Команда голым путём: `/bin/rm -rf build` — перед `rm` слэш, а не разделитель команд.
+    String.raw`(\/[^\s;&|]*[/\\])(rm|rmdir|shred|dd|sudo)(\s|$)`,
+    // Обратный слэш глушит алиасы: `\\rm -rf x` сработает так же.
+    String.raw`(^|[\s;&|()])\\(rm|rmdir|shred|dd|sudo)(\s|$)`,
+    // Маска в путях удаления: `rm build/*` стирает всё, что там было.
+    String.raw`(^|[\s;&|()])rm\s[^\n]*\s\*`,
   ].join('|'),
   'i',
 );
