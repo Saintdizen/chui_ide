@@ -184,6 +184,9 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
 
   // Снять инструменты беседы, не гася прогон: зависшая команда переживает
   // «стоп» только потому, что её нечем было погасить — теперь есть чем.
+  // Один вызов, а не весь прогон: зависла команда — гасим её, остальное живёт.
+  router.register('ai.abortTool', (params) => deps.ai.running.abortTool(params.callId, params.name));
+
   router.register('ai.abortConversation', (params) => {
     let affected = 0;
     for (const run of deps.ai.running.forConversation(params.conversationUid)) {

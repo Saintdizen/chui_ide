@@ -96,6 +96,8 @@ const NOT_MOCKED: Record<string, string[]> = {
   'словари cSpell живут в main — в окне только пометки': ['spell.serverDiagnostics'],
   // Правила `.editorconfig` читаются с диска: в моке диска нет.
   'правила .editorconfig читаются с диска: в моке диска нет': ['editor.editorConfig'],
+  // Отмена инструмента гасит настоящий AbortController в main — мок одного окна этого не имеет.
+  'отмена одного вызова живёт в main (AbortController прогона)': ['ai.abortTool'],
   'нужен настоящий репозиторий и клиент git — в моке их нет': [
     'git.bisectMark',
     'git.bisectReset',

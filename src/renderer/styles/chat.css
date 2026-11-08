@@ -3429,3 +3429,39 @@
   color: var(--text_color_tertiary);
   font-size: var(--font_small_size);
 }
+
+/* Список инструментов прогона: кто именно идёт, и крестик у каждого — снять
+   один вызов, не гася остальной ответ. */
+.chat-running-tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.chat-running-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 6px;
+  border-radius: var(--radius_xs);
+  background: var(--element_background);
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.chat-running-tool-drop {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.chat-running-tool-drop:hover {
+  color: var(--text_color);
+}

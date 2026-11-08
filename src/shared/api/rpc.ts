@@ -1082,6 +1082,15 @@ export interface ChuiMethods {
    * и продолжить. Возвращает, сколько прогонов было задето.
    */
   'ai.abortConversation': { params: { conversationUid: string }; result: number };
+  /**
+   * Погасить ОДИН инструмент прогона, не трогая остальные.
+   *
+   * `abortConversation` гасит всё: когда зависла одна команда, а остальной
+   * прогон живой, это слишком много. Инструменты и так имеют свой контроллер —
+   * им гасят вызов, а прогон идёт дальше и получает отмену как обычную ошибку
+   * инструмента.
+   */
+  'ai.abortTool': { params: { callId: string; name: string }; result: boolean };
 
   'ai.chat': { params: ChatRequest; result: ChatStreamDone };
   /**

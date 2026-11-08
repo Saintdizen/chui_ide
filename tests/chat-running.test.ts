@@ -75,3 +75,44 @@ describe('полоса «что ещё идёт»', () => {
     expect(abort).toHaveBeenCalledOnce();
   });
 });
+
+/**
+ * Снять один вызов, не гася прогон: зависший терминал — обычная беда, а
+ * прекращать из-за него весь ответ — терять остальную работу.
+ */
+describe('снятие одного инструмента', () => {
+  it('крестик у имени зовёт abortTool с callId и именем', async () => {
+    const dropped: { callId: string; name: string }[] = [];
+    const view = createChatRunning({
+      snapshot: async () => snapshot(['terminal', 'read']),
+      abort: () => undefined,
+      abortTool: (callId, name) => dropped.push({ callId, name }),
+    });
+
+    view.refresh();
+    await vi.waitFor(() => expect(view.element.hidden).toBe(false));
+
+    const drop = view.element.querySelectorAll('.chat-running-tool-drop')[0] as HTMLElement;
+    drop.click();
+    expect(dropped).toEqual([{ callId: 'c', name: 'terminal' }]);
+  });
+
+  it('на каждый идущий инструмент — своя кнопка', async () => {
+    const view = createChatRunning({
+      snapshot: async () => snapshot(['terminal', 'read', 'edit']),
+      abort: () => undefined,
+      abortTool: () => undefined,
+    });
+    view.refresh();
+    await vi.waitFor(() => expect(view.element.hidden).toBe(false));
+    expect(view.element.querySelectorAll('.chat-running-tool-drop')).toHaveLength(3);
+  });
+
+  it('без обработчика кнопка есть, но не падает', async () => {
+    const view = createChatRunning({ snapshot: async () => snapshot(['terminal']), abort: () => undefined });
+    view.refresh();
+    await vi.waitFor(() => expect(view.element.hidden).toBe(false));
+    const drop = view.element.querySelector('.chat-running-tool-drop') as HTMLElement;
+    expect(() => drop.click()).not.toThrow();
+  });
+});

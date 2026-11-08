@@ -1430,6 +1430,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       const session = active();
       void deps.rpc.request('ai.abortConversation', { conversationUid: session.uid }).catch(() => undefined);
     },
+    abortTool: (callId, name) => {
+      // Прогон идёт дальше: main получит отмену инструмента как обычную ошибку.
+      void deps.rpc.request('ai.abortTool', { callId, name }).catch(() => undefined);
+    },
   });
 
   const statusElement = h(

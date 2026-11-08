@@ -18,6 +18,14 @@ export interface ChatRunningDeps {
   snapshot: () => Promise<RunningSnapshot | null>;
   /** Остановить всё, что идёт в беседе. */
   abort: () => void;
+  /**
+   * Снять ОДИН инструмент, не гася прогон.
+   *
+   * Зачем отдельно от `abort`: зависший терминал — обычная беда, а гасить
+   * из-за него весь ответ — терять остальную работу. Прогон получит отмену
+   * инструмента как ошибку и пойдёт дальше.
+   */
+  abortTool?: (callId: string, name: string) => void;
   intervalMs?: number;
   /** Часы: подменяются в тестах, чтобы возраст был предсказуем. */
   now?: () => number;
@@ -69,7 +77,10 @@ export function createChatRunning(deps: ChatRunningDeps): ChatRunningView {
     },
     'остановить',
   );
-  const element = h('div', { class: 'chat-running' }, label, stopButton);
+  // Список поимённо: сводка «идёт 2 · 40 с» не говорит, что именно висит, а
+  // гасить хочется конкретное. Отдельной строкой на каждый инструмент.
+  const perTool = h('div', { class: 'chat-running-tools' });
+  const element = h('div', { class: 'chat-running' }, label, perTool, stopButton);
   element.hidden = true;
 
   /** Последний снимок и момент, когда он пришёл: от него считается возраст. */
@@ -94,6 +105,43 @@ export function createChatRunning(deps: ChatRunningDeps): ChatRunningView {
     const text = runningLabel(grown);
     element.hidden = text === '';
     if (text) label.textContent = text;
+    paintTools(snapshot);
+  }
+
+  /**
+   * Список инструментов с крестиком у каждого. Дети пересоздаются только при
+   * смене набора: перерисовка каждую секунду сбрасывала бы наведение и фокус
+   * с кнопки, которую человек собирается нажать.
+   */
+  let shownKey = '';
+  function paintTools(snapshot: RunningSnapshot): void {
+    const entries = snapshot.tools.flatMap((run) =>
+      run.names.map((name) => ({ callId: run.callId, name })),
+    );
+    const key = entries.map((entry) => `${entry.callId}:${entry.name}`).join('|');
+    if (key === shownKey) return;
+    shownKey = key;
+    perTool.replaceChildren(
+      ...entries.map((entry) =>
+        h(
+          'span',
+          { class: 'chat-running-tool' },
+          h('span', { class: 'chat-running-tool-name' }, entry.name),
+          h(
+            'button',
+            {
+              class: 'chat-running-tool-drop',
+              type: 'button',
+              title: `Снять «${entry.name}», не трогая остальное`,
+              'aria-label': `Снять ${entry.name}`,
+              onclick: () => deps.abortTool?.(entry.callId, entry.name),
+            },
+            '×',
+          ),
+        ),
+      ),
+    );
+    perTool.hidden = entries.length === 0;
   }
 
   function refresh(): void {
