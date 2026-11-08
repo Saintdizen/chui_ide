@@ -92,6 +92,31 @@ describe('isDangerousCommand', () => {
     expect(isDangerousCommand('git clean -n')).toBe(false);
   });
 
+  /*
+   * Обходы текстового шаблона: всё это раньше проходило МОЛЧА при полном
+   * доступе, хотя внутри — тот же `rm -rf`. Ловит их разбор строки
+   * (`command-parse.ts`), а не регэксп.
+   */
+  it('команда, спрятанная в кавычках шелла', () => {
+    expect(isDangerousCommand("sh -c 'rm -rf build'")).toBe(true);
+    expect(isDangerousCommand('bash -lc "git push --force"')).toBe(true);
+    expect(isDangerousCommand('eval "rm -rf build"')).toBe(true);
+  });
+
+  it('внутри цикла и подстановки', () => {
+    expect(isDangerousCommand('while read l; do rm "$l"; done')).toBe(true);
+    expect(isDangerousCommand('for f in *; do rm "$f"; done')).toBe(true);
+    expect(isDangerousCommand('echo $(rm -rf build)')).toBe(true);
+    expect(isDangerousCommand('echo `rm -rf build`')).toBe(true);
+  });
+
+  it('пробный прогон git clean вопросов не поднимает', () => {
+    // Из-за разбора `-n` перестало попадать в `-f`-шаблон: проверяем отдельно.
+    expect(isDangerousCommand('git clean -n')).toBe(false);
+    // А `-nfd` — уже с `f`: удаляет по-настоящему, спрашиваем.
+    expect(isDangerousCommand('git clean -nfd')).toBe(true);
+  });
+
   it('безобидные команды проходят', () => {
     expect(isDangerousCommand('ls -la')).toBe(false);
     expect(isDangerousCommand('npm run build')).toBe(false);

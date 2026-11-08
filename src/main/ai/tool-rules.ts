@@ -16,6 +16,7 @@ import {
   rememberedGrant,
 } from '../../shared/agent-grants';
 import type { ToolContext, ToolOutcome } from './tool-context';
+import { parseCommand } from './command-parse';
 
 /**
  * Команда длиннее — это уже не команда, а попытка спрятать скрипт.
@@ -54,13 +55,13 @@ export const DANGEROUS_COMMAND = new RegExp(
     // ассистента нет. Поэтому здесь ловятся и записи в историю, и сеть: иначе
     // полный доступ молча пушил бы и коммитил. Чтение (`status`, `diff`, `log`)
     // остаётся без вопроса — этот ряд про необратимое.
-    String.raw`(^|[\s;&|])git\s+(-[cC]\s+\S+\s+|--\S+\s+)*(push|commit|pull|fetch|merge|rebase|reset|restore|revert|am|apply|cherry-pick|stash\s+(drop|clear|pop)|checkout\s+--|switch|branch\s+(-D|-d)|tag\s+-d|clean\s+-[a-z]*f[a-z]*)(?![\w-])`,
+    String.raw`(^|[\s;&|])git\s+(-[cC]\s+\S+\s+|--\S+\s+)*(push|commit|pull|fetch|merge|rebase|reset|restore|revert|am|apply|cherry-pick|stash\s+(drop|clear|pop)|checkout\s+--|switch|branch\s+(-D|-d)|tag\s+-d)(?![\w-])`,
     String.raw`(curl|wget)\b[^\n|]*\|\s*(ba|z|fi|da)?sh\b`,
     `--no-preserve-root`,
     // Мусор, а не путь: удаление кучи прямо в корне.
     String.raw`(^|[\s;&|()])(rm|rsync)\s[^\n]*\s\/\s*(\*|\*\S*|$)`,
     // Снос без разбора: `rsync --delete` и `find -delete` не спрашивают, что убирают.
-    String.raw`--delete`,
+    '--delete',
     String.raw`(^|[\s;&|()])find\s[^\n]*\s-delete`,
     // Уносит файлы из кармана: `~/.ssh`, история шелла, конфиги.
     String.raw`(^|[\s;&|()])mv\s[^\n]*~\/(\.|Documents|Desktop|Pictures|Downloads)`,
@@ -77,7 +78,138 @@ export const DANGEROUS_COMMAND = new RegExp(
 );
 
 export function isDangerousCommand(command: string): boolean {
-  return DANGEROUS_COMMAND.test(command);
+  // Сначала разбор: он видит глагол внутри `sh -c '…'`, `eval`, цикла и
+  // развёрнутых обёрток. Регэкспы остаются для того, что разбор трогать не
+  // должен: перенаправления в `/dev/sd*`, `git push`, длинные цепочки.
+  return parsedDangerous(command) || DANGEROUS_COMMAND.test(command);
+}
+
+/** Где любая запись — потеря: системные каталоги и настройки шелла. */
+const PRECIOUS =
+  /^(\/(etc|boot|usr|bin|sbin|lib|lib64|var|sys|proc|dev|root)(\/|$)|~?\/?\.(ssh|gnupg|aws|kube|config)(\/|$))/;
+
+/**
+ * То же определение, но по разобранной строке.
+ *
+ * Зачем: регэксп по тексту угадывал слова, а здесь видны настоящие программы.
+ * Значения флагов тоже читаются: `find . -delete` — это аргумент `find`,
+ * а не отдельная команда `-delete`.
+ */
+export function parsedDangerous(command: string): boolean {
+  const { calls, unknown } = parseCommand(command);
+  // Неясное — значит может быть чем угодно. Дешевле спросить.
+  if (unknown) return true;
+  return calls.some((call) => callDangerous(call.name, call.args) || semanticDangerous(call.name, call.args));
+}
+
+/** Глаголы, у которых опасно не любое слово, а конкретное — смотрим аргументы. */
+const UNSAFE_WORDS = new Set(['dd', 'cp', 'truncate', 'tee']);
+
+/**
+ * Удаление: жертву берём из слов-путей, а не из имени глагола. `rmdir` — тоже
+ * удаление, но `dd`, `cp` и `mv` сюда не входят: у них другая цель.
+ */
+const DELETES = new Set(['rm', 'rmdir', 'shred', 'unlink']);
+
+/** Значение аргумента-пути: `--file=x` и `-fx` отдают `x`. */
+function pathValue(arg: string): string {
+  if (arg.includes('=')) return arg.slice(arg.indexOf('=') + 1);
+  return arg.replace(/^-[a-zA-Z]+/, '');
+}
+
+/**
+ * Путь не называет ничего конкретного: `*`, `build/*`, `/*`, `./`. Что удалится —
+ * решает диск, а не человек.
+ */
+function wildcardPath(path: string): boolean {
+  if (/[*?]$/.test(path)) return true;
+  return /^[/.~*]*$/.test(path);
+}
+
+/**
+ * Глагол из общего списка — тот же, что в регэкспе, но по имени программы.
+ * Флаги разбираются по смыслу: `chmod -x ./777` — не режим `777`.
+ */
+function callDangerous(name: string, args: string[]): boolean {
+  if (!name) return true;
+  if (UNSAFE_WORDS.has(name)) return true;
+  if (DELETES.has(name)) return true;
+  if (/^(sudo|doas|su|shutdown|reboot|poweroff|halt|killall|pkill|wipefs|fdisk|sfdisk|parted)$/.test(name)) {
+    return true;
+  }
+  if (/^mkfs/.test(name)) return true;
+  // git меняет репозиторий только через терминал: пушить и коммитить спрашиваем.
+  if (name === 'git') return gitDangerous(args);
+  // Снос без разбора: это аргумент `find`, а не отдельная команда `-delete`.
+  if (name === 'find' && args.some((arg) => arg === '-delete' || arg === '-exec' || arg === '-execdir')) {
+    return true;
+  }
+  if (name === 'rsync' && args.some((arg) => arg === '--delete' || arg.startsWith('--delete-'))) return true;
+  // `chmod 777 x`, `chmod a+rwx x`, `chmod o+w x`: файл открыт всем.
+  if (name === 'chmod' && args.some((arg) => !arg.startsWith('-') && openMode(arg))) return true;
+  return false;
+}
+
+/** Режим отдаёт файл всем: `777`, `666`, `a+rwx`, `o+w`. */
+function openMode(mode: string): boolean {
+  if (/^[0-7]{3,4}$/.test(mode)) return /[67]/.test(mode);
+  return /^([ugoa]*\+[rwxXst]*w|a\+[rwx]|o\+[rwx])/.test(mode) && /[rwx]/.test(mode.slice(1).replace(/^[a-z]*\+/, ''));
+}
+
+/** `git`: записи в историю и сеть спрашиваем, чтение (`status`, `diff`, `log`) — нет. */
+function gitDangerous(args: string[]): boolean {
+  const verbs = new Set([
+    'push',
+    'commit',
+    'pull',
+    'fetch',
+    'merge',
+    'rebase',
+    'reset',
+    'restore',
+    'revert',
+    'am',
+    'apply',
+    'cherry-pick',
+    'switch',
+  ]);
+  // `-c key=value` и `--no-pager` стоят до глагола.
+  let at = 0;
+  while (at < args.length && args[at]!.startsWith('-')) {
+    // `-c` съедает значение: без этого `-c` стал бы глаголом.
+    at += args[at] === '-c' || args[at] === '-C' ? 2 : 1;
+  }
+  const verb = args[at];
+  if (!verb) return false;
+  if (verb === 'clean') return cleanDangerous(args.slice(at + 1));
+  if (verbs.has(verb)) return true;
+  if (verb === 'stash' && ['drop', 'clear', 'pop'].includes(args[at + 1] ?? '')) return true;
+  if (verb === 'checkout' && args[at + 1] === '--') return true;
+  return false;
+}
+
+/**
+ * `git clean` стирает неотслеживаемое и спрашивает вопрос только с `-f`.
+ * Пробный прогон (`-n`, `--dry-run`) ничего не трогает — его не тормозим.
+ */
+function cleanDangerous(args: string[]): boolean {
+  if (args.some((arg) => arg === '-n' || arg === '--dry-run')) return false;
+  return args.some((arg) => /^-[a-z]*f/.test(arg) || arg === '--force');
+}
+
+/** Смысл цепочки: запись в драгоценный путь, маска вместо имени. */
+function semanticDangerous(name: string, args: string[]): boolean {
+  const deletes = DELETES.has(name);
+  if (!deletes && !UNSAFE_WORDS.has(name)) return false;
+  for (const arg of args) {
+    if (arg.startsWith('-')) continue;
+    const path = pathValue(arg);
+    if (!path) continue;
+    if (PRECIOUS.test(path)) return true;
+    // `rm build/*` и `rm /*`: удаление решает диск, а не человек.
+    if (deletes && wildcardPath(path)) return true;
+  }
+  return false;
 }
 
 /**
@@ -117,11 +249,7 @@ export function commandDenied(): ToolOutcome {
  * «запретил ввод», «недоступен»). Модель не понимала, отличается ли отказ от
  * отказа, и пробовала снова. Теперь и вопрос, и отказ одни на всех.
  */
-export async function confirmRun(
-  ctx: ToolContext,
-  command: string,
-  prompt = command,
-): Promise<ConfirmRunResult> {
+export async function confirmRun(ctx: ToolContext, command: string, prompt = command): Promise<ConfirmRunResult> {
   if (!ctx.confirmCommand) return { refused: noCommandBridge(), command };
   // Выданное разрешение — это уже данный ответ: спрашивать заново значит
   // показывать человеку кнопки, которые он уже нажал.
