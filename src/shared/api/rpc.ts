@@ -246,6 +246,16 @@ export interface DiagnosticsHostResult {
   items: DiagnosticItem[];
 }
 
+/**
+ * Открытые в редакторе файлы: что человек видит прямо сейчас.
+ *
+ * Раньше агент об этом не знал вовсе: приходилось спрашивать или угадывать по
+ * `read`. Путь — абсолютный, `active` — тот, что на переднем плане.
+ */
+export interface OpenFilesHostResult {
+  files: { path: string; line: number; column: number; active: boolean }[];
+}
+
 /** Аргументы `ai.openFile`: файл и место, которое нужно показать в редакторе. */
 export interface OpenFileHostParams {
   path: string;
@@ -275,6 +285,7 @@ export interface HostMethods {
   'ai.exitPlan': { params: ExitPlanHostParams; result: ExitPlanHostResult };
   /** Пометки языка живут в renderer (в редакторе), а не на диске. */
   'ai.getDiagnostics': { params: DiagnosticsHostParams; result: DiagnosticsHostResult };
+  'ai.openFiles': { params: Record<string, never>; result: OpenFilesHostResult };
   /** Показать файл в редакторе: открытие вкладки — тоже дело renderer. */
   'ai.openFile': { params: OpenFileHostParams; result: OpenFileHostResult };
 }

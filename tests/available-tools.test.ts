@@ -125,6 +125,7 @@ describe('что предлагать модели', () => {
       confirmCommand: async () => true,
       confirmBrowser: async () => true,
       getDiagnostics: async () => [],
+      openFiles: async () => ({ files: [] }),
       openFile: async () => {},
     } as never;
     const full: ToolAvailability = {

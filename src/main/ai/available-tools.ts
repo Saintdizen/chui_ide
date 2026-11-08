@@ -123,6 +123,7 @@ export function canRunTool(tool: AgentToolSpec, env: ToolAvailability): boolean 
   // Отладка: сессию ведёт main, но без окна агент не увидит, куда встал
   // отладчик, а человек — что агент запустил. Условие одно на все действия.
   if (tool.name === 'debug') return env.debug !== undefined && host !== undefined;
+  if (tool.name === 'open_files') return host?.openFiles !== undefined;
   // Поиск одним именем: действия `code` и `sessions` без своей возможности
   // откажут словами в обработчике, а текстовый и документация есть всегда.
   if (tool.name === 'web') return canUseWebSearch(env) || env.webFetchEnabled;

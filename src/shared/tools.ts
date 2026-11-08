@@ -57,6 +57,7 @@ export type AgentToolName =
   | 'project_map'
   | 'checks'
   | 'debug'
+  | 'open_files'
   | 'run_tests'
   | 'mcp'
   | 'edit'
@@ -325,6 +326,14 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     description:
       'Project map by file names: what the project is, its parts, where tests and entry points ' +
       'are. A short version is in the system prompt: call for details or when it is stale.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'open_files',
+    side: 'main',
+    description:
+      'Files open in the editor now, with cursors; → marks the active one. ' +
+      'Use before asking the user what they are looking at.',
     inputSchema: { type: 'object', properties: {} },
   },
   {

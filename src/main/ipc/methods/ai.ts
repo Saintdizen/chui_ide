@@ -166,6 +166,7 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
               .request(ctx.sender, 'ai.exitPlan', { plan, conversation }, ctx.signal)
               .then((result) => sanitizePlanExitDecision(result)),
           getDiagnostics: (path) => deps.host.request(ctx.sender, 'ai.getDiagnostics', { path }, ctx.signal),
+          openFiles: () => deps.host.request(ctx.sender, 'ai.openFiles', {}, ctx.signal),
           openFile: (path, line, column) =>
             deps.host
               .request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal)

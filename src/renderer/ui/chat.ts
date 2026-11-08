@@ -3208,6 +3208,21 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // Пометки языка живут в renderer (в редакторе), поэтому их отдаёт он.
   deps.host.handle('ai.getDiagnostics', async (params) => ({ items: deps.editors.markers(params.path) }));
 
+  // Какие файлы открыты и где стоят курсоры — знает только renderer: у main
+  // нет ни вкладок, ни текста. Агенту это нужно постоянно («что открыто?»).
+  deps.host.handle('ai.openFiles', async () => {
+    const positions = deps.editors.cursorPositions();
+    const active = deps.editors.currentPath;
+    return {
+      files: Object.entries(positions).map(([path, position]) => ({
+        path,
+        line: position.line,
+        column: position.column,
+        active: path === active,
+      })),
+    };
+  });
+
   // Показать файл в редакторе: открытие вкладки и позиция курсора — дело renderer.
   deps.host.handle('ai.openFile', async (params) => {
     await revealFile(params.path, params.line ?? 1, params.column ?? 1);

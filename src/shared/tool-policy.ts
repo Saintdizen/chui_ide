@@ -61,6 +61,9 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   // Прошлые беседы и следы прогонов: журнал только читают, проекта не касаются.
   history: { readOnly: true, plan: true, alwaysAvailable: true },
   project_map: { readOnly: true, plan: true, alwaysAvailable: true },
+  // Что открыто — такое же чтение, как карта, и нужно в каждом режиме,
+  // включая план: спрашивать «что у тебя открыто» незачем, когда видно.
+  open_files: { readOnly: true, plan: true, alwaysAvailable: true },
   read_image: { readOnly: true, plan: true, alwaysAvailable: true },
   // Подзадача другой прогон, но прав у неё те же: она сама не меняет проект.
   task: { readOnly: true, plan: true },

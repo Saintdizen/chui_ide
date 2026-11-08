@@ -19,6 +19,7 @@ import type {
   DebugScope,
   DebugVariable,
   DiagnosticsHostResult,
+  OpenFilesHostResult,
   TerminalCreateOptions,
   TerminalSession,
   ToolFileChange,
@@ -405,6 +406,8 @@ export interface ToolContext {
   ask?(question: string, options?: readonly string[]): Promise<string>;
   /** Пометки языка из редактора. */
   diagnostics?(path?: string): Promise<DiagnosticsHostResult>;
+  /** Что открыто в редакторе и где курсоры: инструмент `open_files`. */
+  openFiles?: () => Promise<OpenFilesHostResult>;
   /** Открыть файл в редакторе (renderer): действие open инструмента show. */
   openFile?(path: string, line?: number, column?: number): Promise<boolean>;
   /** Терминальные сессии (pty): нужны инструментам terminal_*. */

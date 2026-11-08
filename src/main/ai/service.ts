@@ -15,6 +15,7 @@ import {
   type ChatUsage,
   type CommitMessageResult,
   type DiagnosticsHostResult,
+  type OpenFilesHostResult,
   type InlineCompletionRequest,
   type InlineCompletionResult,
   type PlanStep,
@@ -271,6 +272,8 @@ export interface ChatHostBridge {
   exitPlan(plan: string): Promise<PlanExitDecision>;
   /** Пометки языка: они живут в renderer (в редакторе). */
   getDiagnostics(path?: string): Promise<DiagnosticsHostResult>;
+  /** Открытые вкладки и курсоры: тоже знает только renderer. */
+  openFiles(): Promise<OpenFilesHostResult>;
   /** Показать файл в редакторе на нужной позиции. */
   openFile(path: string, line?: number, column?: number): Promise<boolean>;
 }
@@ -1049,6 +1052,7 @@ export class AiService {
       toolContext.confirmBrowser = (action) => host.confirmBrowser(action);
       toolContext.ask = (question, options) => host.ask(question, options);
       toolContext.diagnostics = (path) => host.getDiagnostics(path);
+      toolContext.openFiles = () => host.openFiles();
       toolContext.openFile = (path, line, column) => host.openFile(path, line, column);
     }
 
