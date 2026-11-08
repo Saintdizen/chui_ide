@@ -3534,3 +3534,22 @@
 .tool-path:focus-visible {
   text-decoration-color: currentColor;
 }
+
+/* Команда в карточке подтверждения — правьмая: агент часто ошибается в мелочи,
+   и «разрешить как есть / запретить» заставляло ждать лишний шаг. */
+.approval-command-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_xs);
+  background: var(--element_background);
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  resize: vertical;
+}
+
+.approval-command-input:focus {
+  border-color: var(--accent_fill);
+  outline: none;
+}

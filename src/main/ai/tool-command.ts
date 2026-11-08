@@ -1,3 +1,4 @@
+import { decisionCommand } from '../../shared/agent-grants';
 import path from 'node:path';
 import { runShellCommand, type RunOptions } from './run-command';
 import type { SandboxRunner, ToolContext, ToolOutcome } from './tool-context';
@@ -39,8 +40,12 @@ export async function runTests(ctx: ToolContext, args: Record<string, unknown> =
     };
   }
 
-  if (needsConfirmation(ctx, resolved.command)) {
-    const allowed = await ctx.confirmCommand(resolved.command);
+  // Человек может поправить команду прямо в карточке подтверждения — тогда
+  // выполняем именно его текст (см. `decisionCommand`).
+  let command = resolved.command;
+  if (needsConfirmation(ctx, command)) {
+    const decision = await ctx.confirmCommand(command);
+    const allowed = typeof decision === 'boolean' ? decision : decision.allowed;
     if (!allowed) {
       return {
         ok: false,
@@ -48,6 +53,7 @@ export async function runTests(ctx: ToolContext, args: Record<string, unknown> =
         detail: 'Пользователь не разрешил запустить тесты. Не повторяй вызов — предложи другой ход.',
       };
     }
+    command = decisionCommand(decision, command);
   }
 
   const root = ctx.workspace.rootPath();
@@ -61,8 +67,8 @@ export async function runTests(ctx: ToolContext, args: Record<string, unknown> =
     ? { signal: ctx.signal, spill: (chunk) => spillStream.write(chunk) }
     : { signal: ctx.signal };
   const result = ctx.sandbox
-    ? await ctx.sandbox.run(resolved.command, root, options)
-    : await runShellCommand(resolved.command, root, options);
+    ? await ctx.sandbox.run(command, root, options)
+    : await runShellCommand(command, root, options);
   // Файл оставляем только тогда, когда вывод действительно не поместился в потолок.
   const full = spillStream?.close(result.truncated) ?? null;
   const condensed = foldPassedTests(ctx, 'run_tests', condenseOutput(result.output));
@@ -79,7 +85,7 @@ export async function runTests(ctx: ToolContext, args: Record<string, unknown> =
     ok: true,
     ...(passed ? {} : { failed: true }),
     summary: `тесты (${resolved.label}): код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
-    detail: `${commandLine(ctx, resolved.command)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
+    detail: `${commandLine(ctx, command)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
   };
 }
 

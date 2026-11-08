@@ -172,15 +172,17 @@ export async function terminalStart(ctx: ToolContext, args: Record<string, unkno
   if (refuses) return refuses;
 
   const cwd = await commandCwd(ctx, args);
-  const command = optionalString(args, 'command');
+  let command = optionalString(args, 'command');
   if (command && command.length > MAX_COMMAND_CHARS) {
     throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
   }
 
   // Обычный агент спрашивает всегда; полный доступ — только если включена страховка.
   if (command) {
-    const refusal = await confirmRun(ctx, command);
-    if (refusal) return refusal;
+    const confirmed = await confirmRun(ctx, command);
+    if (confirmed.refused) return confirmed.refused;
+    // Выполняем то, что подтвердили: человек мог поправить текст в карточке.
+    command = confirmed.command;
   }
 
   const session = await ctx.terminals.create({
@@ -219,7 +221,7 @@ export async function terminalWrite(ctx: ToolContext, args: Record<string, unkno
   const data = requireString(args, 'data');
 
   // Ввод в терминал может быть чем угодно — страховка ловит необратимое и здесь.
-  const refusal = await confirmRun(ctx, data, `[${id}] ${data.replace(/\n/g, '⏎')}`);
+  const { refused: refusal } = await confirmRun(ctx, data, `[${id}] ${data.replace(/\n/g, '⏎')}`);
   if (refusal) return refusal;
 
   ctx.terminals.write(id, data);
@@ -290,7 +292,7 @@ export function didWork(result: { code: number | null; timedOut?: boolean }, com
 export async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<string, unknown>): Promise<ToolOutcome> {
   const lifted = await liftCdPrefix(ctx, requireString(rawArgs, 'command').trim(), rawArgs);
   const args = lifted.args;
-  const command = lifted.command;
+  let command = lifted.command;
   if (command.length > MAX_COMMAND_CHARS) {
     // Не только «нельзя», но и «как надо»: замер на живом прогоне дал пять
     // потерянных шагов на heredoc, каждый — заново написанный текст. Длинная
@@ -333,8 +335,9 @@ export async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<st
   if (shortcut) return shortcut;
 
   // Обычный агент спрашивает всегда; полный доступ — только если включена страховка.
-  const refusal = await confirmRun(ctx, command);
-  if (refusal) return refusal;
+  const confirmed = await confirmRun(ctx, command);
+  if (confirmed.refused) return confirmed.refused;
+  command = confirmed.command;
 
   if (ctx.sandbox && !ctx.sandbox.available) return sandboxUnavailable(ctx.sandbox);
   // В песочнице та же команда идёт в контейнер: агент об этом не просит отдельно,
@@ -385,7 +388,7 @@ export async function terminalRunBackground(ctx: ToolContext, rawArgs: Record<st
 
   const lifted = await liftCdPrefix(ctx, requireString(rawArgs, 'command').trim(), rawArgs);
   const args = lifted.args;
-  const command = lifted.command;
+  let command = lifted.command;
   if (command.length > MAX_COMMAND_CHARS) {
     throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
   }
@@ -395,8 +398,9 @@ export async function terminalRunBackground(ctx: ToolContext, rawArgs: Record<st
 
   // Подтверждение то же, что у обычного запуска: команда есть команда, и то, что
   // она уходит в фон, ничего не смягчает.
-  const refusal = await confirmRun(ctx, command);
-  if (refusal) return refusal;
+  const confirmed = await confirmRun(ctx, command);
+  if (confirmed.refused) return confirmed.refused;
+  command = confirmed.command;
 
   // Задание — это процесс на хосте. В песочнице контейнер живёт на время команды,
   // и «фон» в нём пришлось бы держать открытым, поэтому честно отказываем.

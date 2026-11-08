@@ -62,6 +62,29 @@ export interface ConfirmCommandAnswer {
   allowed: boolean;
   /** «Больше не спрашивать» — в каком объёме. Пусто — разрешение разовое. */
   remember?: CommandGrantScope;
+  /**
+   * Правленный текст команды: человек поправил аргументы в карточке до запуска.
+   *
+   * Зачем: агент часто ошибается в мелочи (`-t` вместо `-k`, лишний флаг), и
+   * выбор между «разрешить как есть» и «запретить и ждать, пока он сам
+   * догадается» заставлял выбирать второе и тратить целый шаг. Правка — это
+   * разрешение выполнить ИМЕННО ЭТО.
+   *
+   * Пусто — выполняем то, что предложил агент.
+   */
+  command?: string;
+}
+
+/**
+ * Какую команду выполнять: правку человека, если он её сделал.
+ *
+ * Раньше правки не было вовсе, и все места звали `resolved.command`. Одно
+ * место здесь — чтобы не разошлись: где-то поправка учитывалась бы, где-то нет.
+ */
+export function decisionCommand(decision: CommandDecision, suggested: string): string {
+  if (typeof decision === 'boolean') return suggested;
+  const edited = decision.command?.trim();
+  return edited && edited.length > 0 ? edited : suggested;
 }
 
 /**

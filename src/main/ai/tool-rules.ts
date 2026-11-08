@@ -8,7 +8,13 @@
  * Вынесено из `agent-tools.ts`: это правила, а не механика инструментов, и живут
  * они дольше любого из них.
  */
-import { decisionAllowed, decisionRemember, matchesGrant, rememberedGrant } from '../../shared/agent-grants';
+import {
+  decisionAllowed,
+  decisionCommand,
+  decisionRemember,
+  matchesGrant,
+  rememberedGrant,
+} from '../../shared/agent-grants';
 import type { ToolContext, ToolOutcome } from './tool-context';
 
 /**
@@ -96,22 +102,38 @@ export function commandDenied(): ToolOutcome {
  * «запретил ввод», «недоступен»). Модель не понимала, отличается ли отказ от
  * отказа, и пробовала снова. Теперь и вопрос, и отказ одни на всех.
  */
-export async function confirmRun(ctx: ToolContext, command: string, prompt = command): Promise<ToolOutcome | null> {
-  if (!ctx.confirmCommand) return noCommandBridge();
+export async function confirmRun(
+  ctx: ToolContext,
+  command: string,
+  prompt = command,
+): Promise<ConfirmRunResult> {
+  if (!ctx.confirmCommand) return { refused: noCommandBridge(), command };
   // Выданное разрешение — это уже данный ответ: спрашивать заново значит
   // показывать человеку кнопки, которые он уже нажал.
   // Папка разрешения — корень проекта: там же идут команды, у них нет
   // своего `cwd` в контексте инструментов.
   const cwd = ctx.workspace.rootPath() ?? undefined;
-  if (matchesGrant(ctx.commandGrants, { command, cwd })) return null;
-  if (!needsConfirmation(ctx, command)) return null;
+  if (matchesGrant(ctx.commandGrants, { command, cwd })) return { refused: null, command };
+  if (!needsConfirmation(ctx, command)) return { refused: null, command };
   const answer = await ctx.confirmCommand(prompt);
-  if (!decisionAllowed(answer)) return commandDenied();
+  if (!decisionAllowed(answer)) return { refused: commandDenied(), command };
+  // Человек мог поправить команду в карточке — выполняем его текст.
+  const decided = decisionCommand(answer, command);
   // «Больше не спрашивать» — не про этот прогон: запоминаем и отдаём тому,
-  // кто держит настройки, — следующий раз сюда не придёт.
+  // кто держит настройки, — следующий раз сюда не придёт. Правку не
+  // запоминаем как разрешение: она разовая, человек поправил ЭТОТ вызов.
   const remember = decisionRemember(answer);
-  if (remember) ctx.grantCommand?.(rememberedGrant(remember, command, cwd));
-  return null;
+  if (remember) ctx.grantCommand?.(rememberedGrant(remember, decided, cwd));
+  return { refused: null, command: decided };
+}
+
+/**
+ * Итог подтверждения: отказ (его возвращают как результат инструмента) и
+ * команда, которую надо выполнить, — с правкой человека, если она была.
+ */
+export interface ConfirmRunResult {
+  readonly refused: ToolOutcome | null;
+  readonly command: string;
 }
 
 /**

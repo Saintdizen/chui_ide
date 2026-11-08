@@ -321,6 +321,8 @@ interface ApprovalRequest {
   done: string;
   /** Иконка карточки и строки итога. */
   icon: IconName;
+  /** Тело можно править до запуска (команды терминала — да, адреса — нет). */
+  editable?: boolean;
   /** Что сказала проверка модели, если она не разрешила сама. */
   review?: string;
   /**
@@ -372,7 +374,24 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
   ): Promise<ConfirmCommandAnswer> {
     const block = h('div', { class: 'approval' });
     block.appendChild(h('div', { class: 'approval-head' }, svgIcon('warning', 13), h('span', {}, request.title)));
-    block.appendChild(h('pre', { class: 'approval-command' }, request.body));
+    // Команду можно поправить ДО запуска: агент часто ошибается в мелочи
+    // (`-t` вместо `-k`), а выбор между «как есть» и «нет» заставлял тратить
+    // целый шаг на «он должен сам догадаться». Правка = «выполни именно это».
+    // Действие в браузере (`body` — адрес) не правим: это не команда.
+    const editable = request.editable === true;
+    const commandInput = editable
+      ? h('textarea', { class: 'approval-command approval-command-input', rows: '2', spellcheck: 'false' })
+      : null;
+    if (commandInput) commandInput.value = request.body;
+    block.appendChild(commandInput ?? h('pre', { class: 'approval-command' }, request.body));
+
+    /** Что выполнять: правку человека, если она есть, иначе предложенное. */
+    const decidedCommand = (): string | undefined => {
+      if (!commandInput) return undefined;
+      const edited = commandInput.value.trim();
+      // Не тронули — не передаём вовсе: пусть main выполняет своё, без копии.
+      return edited.length === 0 || edited === request.body ? undefined : edited;
+    };
     // Последствие — отдельной строкой над подсказкой: команда говорит «что», а
     // человеку решать по «что будет». Цвет несёт опасность, чтобы `rm -rf` не
     // читался как `npm test`: это единственное место, где глаз останавливается сам.
@@ -423,7 +442,13 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
       {
         class: 'btn btn-small btn-primary',
         type: 'button',
-        onClick: () => finish({ allowed: true }, 'разрешено'),
+        onClick: () => {
+          const edited = decidedCommand();
+          finish(
+            edited === undefined ? { allowed: true } : { allowed: true, command: edited },
+            edited === undefined ? 'разрешено' : 'разрешено с правкой',
+          );
+        },
       },
       'Выполнить',
     );
@@ -436,7 +461,17 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
           class: 'btn btn-small',
           type: 'button',
           title: `Больше не спрашивать: ${grant.label}`,
-          onClick: () => finish({ allowed: true, remember: grant.scope }, `разрешено навсегда: ${grant.label}`),
+          onClick: () => {
+            const edited = decidedCommand();
+            finish(
+              {
+                allowed: true,
+                remember: grant.scope,
+                ...(edited === undefined ? {} : { command: edited }),
+              },
+              `разрешено навсегда: ${grant.label}`,
+            );
+          },
         },
         grant.scope === 'command' ? 'Всегда: эта команда' : grant.scope === 'dir' ? 'Всегда: эта папка' : 'Всегда: всё',
       ),
@@ -462,6 +497,7 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
         {
           title: 'Ассистент просит выполнить команду',
           body: command,
+          editable: true,
           hint: cwd
             ? 'Команда выполнится от вашего имени. «Всегда» запоминается в настройках — там же его можно убрать.'
             : 'Команда выполнится в папке проекта от вашего имени.',
