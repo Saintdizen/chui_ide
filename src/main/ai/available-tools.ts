@@ -2,7 +2,7 @@ import type { AiWebSearchSettings } from '../../shared/api';
 import type { ChatHostBridge } from './service';
 import { WEB_ACTION_FIELDS, WEB_ACTION_TEXT, type AgentToolSpec } from '../../shared/tools';
 import { ALWAYS_AVAILABLE } from '../../shared/tool-policy';
-import type { Linter, SymbolSearch, TerminalAgent, TestRunner } from './tool-context';
+import type { DebugTools, Linter, SymbolSearch, TerminalAgent, TestRunner } from './tool-context';
 import { webSearchNeedsKey } from './web-search';
 
 /**
@@ -23,6 +23,7 @@ export interface ToolAvailability {
   host: ChatHostBridge | undefined;
   terminals: TerminalAgent | undefined;
   tests: TestRunner | undefined;
+  debug: DebugTools | undefined;
   linter: Linter | undefined;
   symbols: SymbolSearch | undefined;
   /** Есть ли браузер вовсе (его действия). */
@@ -119,6 +120,9 @@ export function canRunTool(tool: AgentToolSpec, env: ToolAvailability): boolean 
   if (tool.name === 'lsp') return env.symbols !== undefined && host?.applyEdits !== undefined;
   // Тесты выполняют код проекта: нужен и резолвер команды, и подтверждение.
   if (tool.name === 'run_tests') return env.tests !== undefined && host?.confirmCommand !== undefined;
+  // Отладка: сессию ведёт main, но без окна агент не увидит, куда встал
+  // отладчик, а человек — что агент запустил. Условие одно на все действия.
+  if (tool.name === 'debug') return env.debug !== undefined && host !== undefined;
   // Поиск одним именем: действия `code` и `sessions` без своей возможности
   // откажут словами в обработчике, а текстовый и документация есть всегда.
   if (tool.name === 'web') return canUseWebSearch(env) || env.webFetchEnabled;

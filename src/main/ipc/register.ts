@@ -72,6 +72,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
       return testCommand(root, services.resolvePython(root), target);
     },
   });
+  // Отладчик — инструмент debug. Обёртка, а не второй отладчик: агент
+  // подключается к той же сессии, что и панель (F5): второй адаптер спорил бы
+  // с первым за порт и точки останова.
+  if (deps.debug) deps.ai.attachDebug(deps.debug);
   // Внешние инструменты (MCP): список ведут серверы из настроек, а запускает их
   // этот сервис — агент получает готовые вызовы.
   if (deps.mcp) deps.ai.attachMcp(deps.mcp);

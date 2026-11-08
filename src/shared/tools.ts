@@ -56,6 +56,7 @@ export type AgentToolName =
   | 'lsp'
   | 'project_map'
   | 'checks'
+  | 'debug'
   | 'run_tests'
   | 'mcp'
   | 'edit'
@@ -325,6 +326,52 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       'Project map by file names: what the project is, its parts, where tests and entry points ' +
       'are. A short version is in the system prompt: call for details or when it is stale.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'debug',
+    side: 'main',
+    description:
+      'Debugger: the same DAP session as the debug panel. breakpoints, start, run to a stop, then ' +
+      'stack/variables/evaluate. A live session keeps a process: call stop when done.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: [
+            'status',
+            'breakpoints',
+            'start',
+            'continue',
+            'pause',
+            'stepOver',
+            'stepInto',
+            'stepOut',
+            'stop',
+            'stack',
+            'variables',
+            'evaluate',
+            'set',
+          ],
+          description:
+            'status: phase and frames. breakpoints: set on lines. start: launch a file. ' +
+            'stepOver/stepInto/stepOut: one step. stack: frames at a stop. variables: frame values. ' +
+            'evaluate: an expression. set: assign a value.',
+        },
+        path: { type: 'string', description: 'Path.' },
+        line: { type: 'number', description: 'First line. 1-based.' },
+        lines: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Breakpoints: lines instead of line.',
+        },
+        program: { type: 'string', description: 'start: the file to run.' },
+        expression: { type: 'string', description: 'evaluate/set: expression or variable name.' },
+        value: { type: 'string', description: 'set: new value.' },
+        frame: { type: 'number', description: 'Frame index from stack (0 is the top).' },
+      },
+      required: ['action'],
+    },
   },
   {
     name: 'mcp',

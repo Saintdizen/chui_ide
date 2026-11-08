@@ -64,6 +64,10 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   read_image: { readOnly: true, plan: true, alwaysAvailable: true },
   // Подзадача другой прогон, но прав у неё те же: она сама не меняет проект.
   task: { readOnly: true, plan: true },
+  // Отладчик: стек и значения только читают, но `start`/`step` запускают код
+  // проекта — значит, это не читающий инструмент, и в плане ему делать нечего.
+  // Действия, которые меняют код, объявлены ниже через `writeActions`.
+  debug: { readOnly: false, plan: false, alwaysAvailable: false },
 
   /* Символы и языковой сервер: без него эти инструменты не предлагаются. */
   // Одно имя на все запросы к серверу: ссылки, объявление и скелет файла читают

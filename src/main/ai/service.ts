@@ -138,6 +138,7 @@ import { stepOutputChars } from './output-budget';
 import { failureText } from './tool-rules';
 import type {
   BrowserTools,
+  DebugTools,
   Linter,
   McpRunner,
   SessionSearchRunner,
@@ -294,6 +295,9 @@ export class AiService {
   private linter?: Linter;
   /** Команда тестов проекта: без неё инструмент run_tests модели не предлагаем. */
   private tests?: TestRunner;
+
+  /** Отладочная сессия: общая с панелью, второй адаптер не поднимаем. */
+  private debug?: DebugTools;
   /** Внешние инструменты (MCP): нет сервиса — внешних инструментов не предлагаем. */
   private mcp?: McpRunner;
   /** Прошлые беседы проекта: без хранилища действие `sessions` не предлагаем. */
@@ -497,6 +501,15 @@ export class AiService {
    */
   attachTests(tests: TestRunner): void {
     this.tests = tests;
+  }
+
+  /**
+   * Подключить отладчик: включает инструмент `debug`. Сессия одна на проект и
+   * общая с панелью — второго адаптера не поднимаем, иначе две сессии спорили
+   * бы за порт и точки останова.
+   */
+  attachDebug(debug: DebugTools): void {
+    this.debug = debug;
   }
 
   /**
@@ -2351,6 +2364,7 @@ export class AiService {
       host,
       terminals: this.terminals,
       tests: this.tests,
+      debug: this.debug,
       linter: this.linter,
       symbols: this.symbols,
       browser: this.browser,

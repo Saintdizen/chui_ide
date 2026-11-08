@@ -214,6 +214,7 @@ describe('описания аргументов', () => {
       // главный риск (счёт с нуля vs с единицы) за 2 токена.
       'First line. 1-based.',
       'Last line, inclusive.',
+      'Breakpoints: lines instead of line.',
       `open: line. ${LINE_NUMBERING}`,
       `open, present: line. ${LINE_NUMBERING}`,
       `open, present: column. ${LINE_NUMBERING}`,

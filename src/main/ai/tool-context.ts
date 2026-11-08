@@ -11,6 +11,13 @@
 import type {
   ApplyEditsHostResult,
   BrowserZoomMode,
+  DebugAttachOptions,
+  DebugBreakpoint,
+  DebugFrame,
+  DebugLaunchOptions,
+  DebugPhase,
+  DebugScope,
+  DebugVariable,
   DiagnosticsHostResult,
   TerminalCreateOptions,
   TerminalSession,
@@ -239,6 +246,43 @@ export interface TestRunner {
   command(target?: string): Promise<{ command: string; label: string } | null>;
 }
 
+/** Точка, которую ставят: остальное (условие, журнал) — дело панели. */
+export interface DebugPointInput {
+  line: number;
+  condition?: string;
+}
+
+/**
+ * Отладочная сессия для инструмента `debug`. Это тот же `DebugService`, что
+ * стоит за панелью отладчика: агент ходит в ту же сессию, что и человек, иначе
+ * на одном проекте поднялись бы два адаптера и две программы, спорящие за порт.
+ *
+ * Методы повторяют `DebugService` один в один намеренно: подменять имена ради
+ * краткости значило бы врать о том, что происходит. Кадры и переменные — те же
+ * `DebugFrame` и `DebugVariable`, что видит панель: агенту незачем их
+ * пересобирать и незачем показывать иначе.
+ */
+export interface DebugTools {
+  status(): { phase: DebugPhase };
+  /** Запустить файл. Ошибка — не исключение, а `{ok: false, message}`. */
+  start(program: string, options?: DebugLaunchOptions): Promise<{ ok: boolean; message: string }>;
+  /** Подключиться к уже запущенному инспектору. */
+  attach(options: DebugAttachOptions): Promise<{ ok: boolean; message: string }>;
+  /** Полный список точек останова в файле: замена, а не добавление. */
+  setBreakpoints(path: string, points: readonly DebugPointInput[]): Promise<DebugBreakpoint[]>;
+  /** Кадры стека в момент останова; `[]` — сессия не стоит. */
+  stack(): DebugFrame[];
+  scopes(frameId: number): Promise<DebugScope[]>;
+  variables(reference: number): Promise<DebugVariable[]>;
+  /** Присвоить новое значение переменной по ссылке на её область. */
+  setVariable(reference: number, name: string, value: string): Promise<DebugVariable | null>;
+  evaluate(expression: string, frameId?: number): Promise<DebugVariable>;
+  resume(): Promise<void>;
+  step(kind: 'over' | 'into' | 'out'): Promise<void>;
+  pause(): Promise<void>;
+  stop(): void;
+}
+
 /**
  * Память проекта для инструмента `mind` (действия `remember` и `forget`). Хранилище живёт в main
  * (`ai/project-memory.ts`), сюда приходит готовый вызов: инструменты остаются
@@ -371,6 +415,11 @@ export interface ToolContext {
   linter?: Linter;
   /** Команда запуска тестов: нужна инструменту run_tests. */
   tests?: TestRunner;
+  /**
+   * Отладочная сессия: нужна инструменту debug. Сессия общая с панелью
+   * отладчика — второй адаптер на проект поднимать нельзя.
+   */
+  debug?: DebugTools;
   /** Прошлые беседы проекта: нужно действию `sessions` инструмента `search`. */
   sessions?: SessionSearchRunner;
   /** Память проекта: нужна инструменту mind. */
