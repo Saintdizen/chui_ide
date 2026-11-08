@@ -43,6 +43,16 @@ export interface DiffView {
    * по текущей вкладке.
    */
   openUnsaved(path: string, saved: string, edited: string): Promise<void>;
+  /**
+   * Сравнить файл с тем, что лежит в буфере обмена.
+   *
+   * Отдельный вход, а не `openUnsaved`: там справа черновик из редактора, и
+   * заголовок говорит «несохранённое». Здесь обе стороны — тексты не из файла:
+   * слева буфер, справа файл, и путать их местами нельзя (в других редакторах
+   * буфер — слева, и человек читает diff именно так). Правая сторона — файл,
+   * потому что «что будет, если вставить буфер» — это вопрос про файл.
+   */
+  openClipboard(path: string, clipboard: string, file: string): Promise<void>;
   /** Показать ленту замечаний (кнопка в шапке и команда палитры). */
   showComments(): void;
   close(): void;
@@ -606,6 +616,14 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
     async openUnsaved(path, saved, edited) {
       // `edited`, а не `draft`: `draft` — уже занятое имя черновика замечания.
       current = { path, staged: false, unsaved: { path, saved, draft: edited } };
+      open = true;
+      element.hidden = false;
+      activeThread = null;
+      draft = null;
+      await render(current);
+    },
+    async openClipboard(path, clipboard, file) {
+      current = { path, staged: false, unsaved: { path, saved: clipboard, draft: file } };
       open = true;
       element.hidden = false;
       activeThread = null;

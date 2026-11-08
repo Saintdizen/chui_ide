@@ -13,6 +13,8 @@ export interface CompareDiffView {
   openFiles(left: string, right: string): Promise<unknown>;
   /** Сверить несохранённое со сохранённым (F7). */
   openUnsaved(path: string, saved: string, edited: string): Promise<void>;
+  /** Сверить буфер обмена с файлом: слева буфер, справа файл. */
+  openClipboard(path: string, clipboard: string, file: string): Promise<void>;
 }
 
 /** Список различий двух папок. */
@@ -33,6 +35,8 @@ export interface CompareDeps {
   textOf(path: string): string | null;
   /** Текст файла на диске — «сохранённое». */
   readText(path: string): Promise<string>;
+  /** Текст из буфера обмена: сравнивают с куском, скопированным откуда-то ещё. */
+  readClipboard(): Promise<string>;
   folderCompare: CompareFolderModal;
   quickOpen: CompareQuickOpen;
 }
@@ -64,6 +68,25 @@ export function registerCompareCommands(define: DefineCommand, deps: CompareDeps
     const saved = await deps.readText(target).catch(() => null);
     if (saved === null) return;
     await diffView.openUnsaved(target, saved, draft);
+  });
+
+  /**
+   * Сверить открытый файл с тем, что лежит в буфере обмена.
+   *
+   * Зачем: пришёл кусок кода в чате или письме — хочется увидеть, что именно он
+   * изменит, ДО вставки, а не после (и не откатывать потом Ctrl+Z по кускам).
+   * Файл справа: diff читается как «что станет с файлом, если вставить буфер».
+   */
+  define({ id: 'file.compareWithClipboard', title: 'Сравнить с буфером обмена', category: 'Файл' }, async (path) => {
+    const target = typeof path === 'string' ? path : deps.currentPath();
+    if (!target) return;
+    const text = deps.textOf(target);
+    if (text === null) return;
+    const clipboard = await deps.readClipboard().catch(() => null);
+    // Пустой буфер — частый случай (скопировали файл в файловом менеджере).
+    // Молчим: пустое сравнение сказало бы «всё удалено», а это неправда.
+    if (clipboard === null || clipboard.length === 0) return;
+    await diffView.openClipboard(target, clipboard, text);
   });
 
   define({ id: 'diff.compareFiles', title: 'Сравнить два файла', category: 'Навигация' }, async (left, right) => {

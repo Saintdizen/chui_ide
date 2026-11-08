@@ -8,11 +8,18 @@ import type { DefineCommand } from '../src/renderer/core/command-args';
  * сравнение файла с самим собой.
  */
 function setup(
-  options: { picked?: string | null; current?: string | null; draft?: string | null; saved?: string } = {},
+  options: {
+    picked?: string | null;
+    current?: string | null;
+    draft?: string | null;
+    saved?: string;
+    /** Что лежит в буфере обмена: `null` — пусто или недоступно. */
+    clipboard?: string | null;
+  } = {},
 ) {
   const commands = new Map<string, (...args: unknown[]) => unknown>();
   const define: DefineCommand = (descriptor, handler) => commands.set(descriptor.id, handler);
-  const opened: { kind: 'diff' | 'folder' | 'unsaved'; left?: string; right?: string }[] = [];
+  const opened: { kind: 'diff' | 'folder' | 'unsaved' | 'clipboard'; left?: string; right?: string }[] = [];
   const unsaved: { path: string; saved: string; edited: string }[] = [];
   const picked: string[] = [];
   const deps = {
@@ -24,10 +31,18 @@ function setup(
         opened.push({ kind: 'unsaved', left: path });
         unsaved.push({ path, saved, edited });
       },
+      openClipboard: async (path: string, clipboard: string, file: string) => {
+        opened.push({ kind: 'clipboard', left: clipboard, right: file });
+        void path;
+      },
     },
     currentPath: () => options.current ?? null,
     textOf: () => (options.draft === undefined ? null : options.draft),
     readText: async () => options.saved ?? '',
+    readClipboard: async () => {
+      if (options.clipboard === undefined || options.clipboard === null) throw new Error('нет буфера');
+      return options.clipboard;
+    },
     folderCompare: {
       open: async (left: string, right: string) => {
         opened.push({ kind: 'folder', left, right });
@@ -45,13 +60,15 @@ function setup(
 }
 
 describe('registerCompareCommands', () => {
-  it('регистрирует пять команд сравнения', () => {
-    // Пятая — `file.compareWithSaved` (F7): сверка несохранённого с диском.
+  it('регистрирует шесть команд сравнения', () => {
+    // Пятая — `file.compareWithSaved` (F7): сверка несохранённого с диском,
+    // шестая — `file.compareWithClipboard`: буфер слева, файл справа.
     const { commands } = setup();
     expect([...commands.keys()].sort()).toEqual([
       'diff.compareFiles',
       'file.compareSelection',
       'file.compareWith',
+      'file.compareWithClipboard',
       'file.compareWithSaved',
       'folder.compare',
     ]);
@@ -135,6 +152,36 @@ describe('registerCompareCommands', () => {
     await commands.get('folder.compare')!(undefined, null);
     await commands.get('diff.compareFiles')!('только один', undefined);
     await commands.get('file.compareSelection')!('не массив');
+    expect(opened).toEqual([]);
+  });
+});
+
+/**
+ * Сравнение с буфером обмена: слева — буфер, справа — файл. Пустой буфер молчит:
+ * «всё удалено» на пустом сравнении — неправда, а не результат.
+ */
+describe('file.compareWithClipboard', () => {
+  it('открывает сравнение: буфер слева, файл справа', async () => {
+    const { commands, opened } = setup({ current: '/p/a.ts', draft: 'файл', clipboard: 'буфер' });
+    await commands.get('file.compareWithClipboard')!();
+    expect(opened).toEqual([{ kind: 'clipboard', left: 'буфер', right: 'файл' }]);
+  });
+
+  it('пустой буфер не открывает сравнение', async () => {
+    const { commands, opened } = setup({ current: '/p/a.ts', draft: 'файл', clipboard: '' });
+    await commands.get('file.compareWithClipboard')!();
+    expect(opened).toEqual([]);
+  });
+
+  it('нет доступа к буферу — молчит, а не падает', async () => {
+    const { commands, opened } = setup({ current: '/p/a.ts', draft: 'файл', clipboard: null });
+    await expect(commands.get('file.compareWithClipboard')!()).resolves.toBeUndefined();
+    expect(opened).toEqual([]);
+  });
+
+  it('файл не открыт — сравнивать нечего', async () => {
+    const { commands, opened } = setup({ current: null, draft: 'файл', clipboard: 'буфер' });
+    await commands.get('file.compareWithClipboard')!();
     expect(opened).toEqual([]);
   });
 });

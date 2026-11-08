@@ -4289,6 +4289,9 @@ export async function startApplication(
     // и сверить его с самим собой значило бы показать «различий нет» всегда.
     readText: async (path) =>
       (await rpc.request("workspace.readFile", { path })).text,
+    // Буфер читает окно: `navigator.clipboard` доступен только там, где есть
+    // пользовательский жест, — а команду вызвали из меню или палитры.
+    readClipboard: async () => navigator.clipboard.readText(),
   });
 
   // Поиск по проекту, TODO-пометки и замена по структуре — `core/search-commands.ts`.
