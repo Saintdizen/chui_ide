@@ -25,6 +25,9 @@ export interface ViewLayout {
   setSidebarPosition(position: SidebarPosition): void;
   setRightVisible(on: boolean): void;
   setDockVisible(on: boolean): void;
+  /** Сторона нижней панели: «снизу» или «справа» колонкой. */
+  readonly dockPosition: 'bottom' | 'right';
+  setDockPosition(position: 'bottom' | 'right'): void;
   setEditorVisible(on: boolean): void;
 }
 
@@ -124,6 +127,18 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
   define({ id: 'view.toggleSidebar', title: 'Боковая панель', category: 'Вид', keybinding: 'Ctrl+B' }, () => {
     layout.setSidebarVisible(!layout.sidebarVisible);
     syncViewButtons();
+  });
+
+  /**
+   * Сторона нижней панели: снизу или справа колонкой.
+   *
+   * Перенос не пересобирает панель, а меняет класс на корне: терминал и поиск
+   * живут в одних и тех же узлах, и перестройка съела бы их содержимое.
+   */
+  define({ id: 'view.dockPosition', title: 'Панель: снизу или справа', category: 'Вид' }, () => {
+    const next = deps.layout.dockPosition === 'right' ? 'bottom' : 'right';
+    deps.layout.setDockPosition(next);
+    showToast(next === 'right' ? 'Панель справа' : 'Панель снизу');
   });
 
   /**

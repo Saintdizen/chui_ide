@@ -409,6 +409,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
     sidebarPosition: 'left',
     dockVisible: false,
     editorVisible: true,
+    dockPosition: 'bottom',
   },
   layoutPresets: [],
   lsp: {
@@ -1325,6 +1326,7 @@ function sanitizeLayout(value: LayoutSettings): LayoutSettings {
     // на место, а не роняем весь макет.
     sidebarPosition: value.sidebarPosition === 'right' ? 'right' : 'left',
     dockVisible: flag(value.dockVisible, DEFAULT_SETTINGS.layout.dockVisible),
+    dockPosition: value.dockPosition === 'right' ? 'right' : 'bottom',
     editorVisible: flag(value.editorVisible, DEFAULT_SETTINGS.layout.editorVisible),
   };
 }

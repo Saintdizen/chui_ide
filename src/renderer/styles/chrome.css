@@ -2871,3 +2871,24 @@ textarea {
   background: var(--highlight_background);
   color: var(--text_color);
 }
+
+/* Нижняя панель справа: колонкой между редактором и правой панелью.
+   Не переносом узла в другое место, а классом на корне: терминал и поиск
+   живут в тех же узлах, и перестройка DOM съела бы их содержимое. */
+.app.is-dock-right .dock-wrap {
+  grid-column: 5;
+  grid-row: 2 / 4;
+  grid-template-rows: none;
+  grid-template-columns: 6px var(--dock-height);
+}
+
+/* Ручка при переносе встаёт вертикально — тянется вбок, а не ввысь. */
+.app.is-dock-right .dock-wrap > .splitter-dock {
+  width: 6px;
+  height: auto;
+  cursor: col-resize;
+}
+
+.app.is-dock-right .dock {
+  height: 100%;
+}

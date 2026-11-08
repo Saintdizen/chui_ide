@@ -437,6 +437,7 @@ export async function startApplication(
       rightVisible: layout.rightVisible,
       sidebarPosition: layout.sidebarPosition,
       dockVisible: layout.dockVisible,
+      dockPosition: layout.dockPosition,
       editorVisible: layout.editorVisible,
     };
     projectLayout = snapshot;
@@ -471,6 +472,7 @@ export async function startApplication(
       layout.setSidebarVisible(saved.sidebarVisible);
       layout.setRightVisible(saved.rightVisible);
       layout.setDockVisible(saved.dockVisible);
+    layout.setDockPosition(saved.dockPosition ?? 'bottom');
       layout.setEditorVisible(saved.editorVisible);
     });
   };
@@ -4060,6 +4062,7 @@ export async function startApplication(
         sidebarVisible: layout.sidebarVisible,
         rightVisible: layout.rightVisible,
         dockVisible: layout.dockVisible,
+        dockPosition: layout.dockPosition,
         sidebarPosition: layout.sidebarPosition,
         editorVisible: layout.editorVisible,
       }),

@@ -543,6 +543,14 @@ export interface LayoutSettings {
    */
   sidebarPosition: SidebarPosition;
   dockVisible: boolean;
+  /**
+   * С какой стороны нижняя панель: «снизу» или «справа» (колонкой).
+   *
+   * Не то же, что боковая панель: там слева/справа, тут — низ или право.
+   * Держим отдельной настройкой, а не одним общим положением: перенос
+   * терминала вправо и сворачивание дерева — разные мысли о раскладке.
+   */
+  dockPosition: 'bottom' | 'right';
   /** Область редактора (по центру). Скрывают, когда нужны только панели. */
   editorVisible: boolean;
 }
@@ -556,6 +564,7 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   rightVisible: false,
   sidebarPosition: 'left',
   dockVisible: false,
+  dockPosition: 'bottom',
   editorVisible: true,
 };
 
@@ -584,6 +593,7 @@ export function sanitizeLayout(value: Partial<LayoutSettings> | undefined, fallb
     // на место, а не роняем весь макет.
     sidebarPosition: source.sidebarPosition === 'right' ? 'right' : 'left',
     dockVisible: flag(source.dockVisible, fallback.dockVisible),
+    dockPosition: source.dockPosition === 'right' ? 'right' : 'bottom',
     editorVisible: flag(source.editorVisible, fallback.editorVisible),
   };
 }

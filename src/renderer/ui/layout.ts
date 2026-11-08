@@ -26,10 +26,12 @@ export interface Layout {
   readonly sidebarVisible: boolean;
   readonly rightVisible: boolean;
   readonly dockVisible: boolean;
+  readonly dockPosition: 'bottom' | 'right';
   readonly editorVisible: boolean;
   setSidebarVisible(visible: boolean): void;
   setRightVisible(visible: boolean): void;
   setDockVisible(visible: boolean): void;
+  setDockPosition(position: 'bottom' | 'right'): void;
   setEditorVisible(visible: boolean): void;
   readonly sidebarSize: number;
   readonly rightSize: number;
@@ -96,6 +98,7 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
   // его наполовину.
   let panels: PanelState = { sidebar: true, right: true, editor: true };
   let dockVisible = false;
+  let dockPosition: 'bottom' | 'right' = 'bottom';
   // Сторона, с которой стоит боковая панель. Хранится классом на корне и порядком
   // элементов сетки — так содержимое панели переезжает, не теряя состояния
   // (открытые блоки, прокрутка, фокус), и не нужно пересобирать DOM.
@@ -108,6 +111,7 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     root.classList.toggle('is-dock-hidden', !dockVisible);
     // Имя раскладки берём из чистой функции — тест проверяет её, а не строку в CSS.
     root.classList.toggle('is-sidebar-right', panelOrder(sidebarPosition) === 'sidebar-last');
+    root.classList.toggle('is-dock-right', dockPosition === 'right');
   };
 
   clear(mount);
@@ -165,6 +169,9 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     get rightVisible() {
       return panels.right;
     },
+    get dockPosition() {
+      return dockPosition;
+    },
     get dockVisible() {
       return dockVisible;
     },
@@ -182,6 +189,16 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
       // Молча, без записи в настройки — панель ведь не менялась.
       if (next.right === panels.right) return;
       panels = next;
+      apply();
+      options.onChange?.();
+    },
+    /**
+     * С какой стороны нижняя панель. Классом на корне, а не перестройкой DOM:
+     * перестройка убила бы содержимое панели (терминал, поиск) и сбросила бы
+     * прокрутку — панель та же, только стоит иначе.
+     */
+    setDockPosition(position: 'bottom' | 'right') {
+      dockPosition = position;
       apply();
       options.onChange?.();
     },
