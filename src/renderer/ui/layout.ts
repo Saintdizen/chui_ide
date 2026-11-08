@@ -208,6 +208,14 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
   mount.appendChild(root);
   apply();
 
+  // Плавающая панель привязана к пикселям окна: после изменения размера окна
+  // она могла бы оказаться за краем целиком — её нечем было бы вернуть, кроме
+  // сброса раскладки. Тот же `clampFloating`, что и при перетаскивании.
+  const onWindowResize = (): void => {
+    if (floating !== null) applyFloating();
+  };
+  window.addEventListener('resize', onWindowResize);
+
   attachSplitter(root, sidebarSplitter, {
     cssVar: '--sidebar-size',
     axis: 'x',
