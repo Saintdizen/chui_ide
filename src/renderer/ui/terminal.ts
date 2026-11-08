@@ -26,9 +26,16 @@ import {
   encodeMouse,
   encodePaste,
   isPasteStroke,
+  type KeyStroke,
 } from "../terminal/input/keys";
 import { TermView } from "../terminal/view/term-view";
 import { shortcutKey } from "../../shared/physical-key";
+import {
+  completeTerminal,
+  splitTail,
+  COMPLETION_COMMANDS,
+  type CompletionContext,
+} from "../terminal/core/command-completion";
 import { h, svgIcon } from "./dom";
 import { showPopupMenu, type PopupMenuItem } from "./popup-menu";
 import { showToast } from "./toast";
@@ -127,6 +134,14 @@ interface SessionView {
   cwd: string;
   /** Последнее применённое имя окна: чтобы не трогать DOM на каждом кадре вывода. */
   title: string;
+  /**
+   * Набранное в текущей строке, до Enter. Терминал не отдаёт это обратно: то,
+   * что отправлено в pty, вернётся только отрисованным. Поэтому веду сам —
+   * иначе Tab не на что опереться.
+   */
+  line: string;
+  /** Введённые строки этой сессии: источник флагов и частых команд для Tab. */
+  history: string[];
 }
 
 /** Размер по умолчанию, пока контейнер не разложен (панель скрыта): обычные 80×24. */
@@ -383,6 +398,8 @@ export function createTerminalPanel(deps: {
         container,
         tab,
         exited: false,
+        line: "",
+        history: [],
         renamed: null,
         // Каталог, с которым открыта: после перезапуска её открывают там же.
         cwd: session.cwd,
@@ -442,6 +459,84 @@ export function createTerminalPanel(deps: {
    * Вставить буфер обмена. Читаем его сами: терминал — не поле ввода, поэтому браузер
    * не пришлёт ни `paste`, ни готовый текст для `Ctrl+V`.
    */
+  /**
+   * Вести набранную строку самому.
+   *
+   * Терминал — не поле ввода: что ушло в pty, то возвращается только нарисованным
+   * и уже пере-рисованным оболочкой. Для Tab нужна именно сырая строка — поэтому
+   * её отражение живёт рядом на экране и правится только тем, что мы записали.
+   * Всё, что печатает сама программа (›, $(, печать истории), учтётся только
+   * по Enter — это приближение, но лучше, чем чужой текст в подсказке.
+   */
+  function trackLine(entry: SessionView, stroke: KeyStroke, data: string): void {
+    if (data === '\r' || data === '\n') {
+      // Enter — строка ушла дальше; что она вернёт, знает только pty.
+      // Сама строка ещё полезна: из неё следующий Tab возьмёт команду и флаги.
+      const typed = entry.line.trim();
+      if (typed !== '' && entry.history[entry.history.length - 1] !== typed) {
+        entry.history.push(typed);
+        // Держим последние двести: история нужна для подсказки, а не для архива.
+        if (entry.history.length > 200) entry.history.shift();
+      }
+      entry.line = '';
+      return;
+    }
+    if (data === '\t') {
+      entry.line += '\t';
+      return;
+    }
+    if (data === '\x7f' || data === '\x08') {
+      entry.line = entry.line.slice(0, -1);
+      return;
+    }
+    if (data === '\x15') {
+      // Ctrl+U — оболочка стирает строку целиком, значит и мы.
+      entry.line = '';
+      return;
+    }
+    // Сочетание с Ctrl — управляющий код: в pty уходит, в строку — нет.
+    if (stroke.ctrlKey || stroke.altKey || stroke.metaKey) return;
+    if (data.length === 1 && data.charCodeAt(0) >= 0x20) entry.line += data;
+  }
+
+  /** Имена, прошлый раз прочитанные с диска: completionContext отдаёт их без ожидания. */
+  const dirNames = new Map<string, string[]>();
+
+  /**
+   * Прочитать каталог для подсказки. `false` — читать нечего или не вышло:
+   * тогда Tab уходит в оболочку, у которой своё завершение.
+   */
+  async function fillDirCache(entry: SessionView, tail: string): Promise<boolean> {
+    // Каталог — всё до последней косой; нет косой — текущий каталог сессии.
+    const slash = tail.lastIndexOf('/');
+    const dirPart = slash < 0 ? '' : tail.slice(0, slash + 1);
+    const target = dirPart === '' ? entry.cwd : dirPart.startsWith('/') ? dirPart : `${entry.cwd}/${dirPart}`;
+    if (dirNames.has(target)) return true;
+    try {
+      const entries = await deps.rpc.request('workspace.readDir', { path: target });
+      dirNames.set(
+        target,
+        entries.map((item) => (item.kind === 'directory' ? `${item.name}/` : item.name)),
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Что известно для подсказки: история сессии, команды системы и рабочий каталог. */
+  function completionContext(entry: SessionView): CompletionContext {
+    return {
+      cwd: entry.cwd,
+      history: entry.history,
+      commands: COMPLETION_COMMANDS,
+      // Имена читаются с диска лениво: запрос асинхронный, а Tab ждать не может.
+      // Кэш заполняется прошлыми чтениями — в первый раз подсказка по файлам
+      // просто не появится, а со второго раза уже будет.
+      listDir: (path) => dirNames.get(path) ?? null,
+    };
+  }
+
   function pasteFromClipboard(entry: SessionView): void {
     void navigator.clipboard
       .readText()
@@ -526,9 +621,47 @@ export function createTerminalPanel(deps: {
         applicationCursorKeys: entry.term.applicationCursorKeys,
       });
       if (data === null) return;
+      // Tab в начале/середине строки — завершение; когда дописывать нечего — уходим
+      // в pty как обычно, иначе сломалась бы дополняемость самой оболочки.
+      if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey) {
+        const completion = completeTerminal(entry.line, completionContext(entry));
+        if (completion) {
+          event.preventDefault();
+          // Дописываем только хвост: голова строки уже на экране и у оболочки.
+          const tail = splitTail(entry.line).tail;
+          const patch = completion.value.slice(entry.line.length - tail.length);
+          entry.line = completion.value;
+          void deps.rpc
+            .request('terminal.write', { id: entry.session.id, data: patch })
+            .catch(() => undefined);
+          return;
+        }
+        // Имён нет в кэше — читаем каталог и пробуем ещё раз с тем же Tab.
+        // Так подсказка работает с первого нажатия, а не со второго.
+        event.preventDefault();
+        void fillDirCache(entry, splitTail(entry.line).tail).then((filled) => {
+          if (!filled) {
+            // Каталог не прочитался — пусть решит оболочка, у неё своё завершение.
+            void deps.rpc
+              .request("terminal.write", { id: entry.session.id, data: "\t" })
+              .catch(() => undefined);
+            return;
+          }
+          const retry = completeTerminal(entry.line, completionContext(entry));
+          if (!retry) return;
+          const retryTail = splitTail(entry.line).tail;
+          const retryPatch = retry.value.slice(entry.line.length - retryTail.length);
+          entry.line = retry.value;
+          void deps.rpc
+            .request("terminal.write", { id: entry.session.id, data: retryPatch })
+            .catch(() => undefined);
+        });
+        return;
+      }
       // Не даём браузеру обработать клавишу: `Tab`, `Ctrl+C` и стрелки в терминале —
       // не навигация по интерфейсу, а ввод в консоль.
       event.preventDefault();
+      trackLine(entry, stroke, data);
       void deps.rpc
         .request("terminal.write", { id: entry.session.id, data })
         .catch(() => undefined);

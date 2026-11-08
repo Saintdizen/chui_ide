@@ -31,18 +31,41 @@ const PYTHON_TEMPLATES: readonly PostfixTemplate[] = [
   { key: 'if', detail: 'if expr:', body: 'if $EXPR:\n    $0' },
   { key: 'not', detail: 'if not expr:', body: 'if not $EXPR:\n    $0' },
   { key: 'notnull', detail: 'if expr is not None:', body: 'if $EXPR is not None:\n    $0' },
+  { key: 'null', detail: 'if expr is None:', body: 'if $EXPR is None:\n    $0' },
+  { key: 'isnull', detail: 'if expr is None:', body: 'if $EXPR is None:\n    $0' },
+  { key: 'nn', detail: 'if expr is not None:', body: 'if $EXPR is not None:\n    $0' },
   { key: 'for', detail: 'for item in expr:', body: 'for item in $EXPR:\n    $0' },
+  { key: 'forin', detail: 'for item in expr:', body: 'for item in $EXPR:\n    $0' },
+  { key: 'while', detail: 'while expr:', body: 'while $EXPR:\n    $0' },
   { key: 'ret', detail: 'return expr', body: 'return $EXPR' },
+  { key: 'return', detail: 'return expr', body: 'return $EXPR' },
   { key: 'var', detail: 'имя = expr', body: '$0 = $EXPR' },
+  { key: 'print', detail: 'print(expr)', body: 'print($EXPR)' },
 ];
 
-/** То же для JS/TS: фигурные скобки и точка с запятой — как принято в языке. */
+/**
+ * То же для JS/TS: фигурные скобки и точка с запятой — как принято в языке.
+ *
+ * `if` без фигурных скобок добавили ради вложенных оборотов: `order.if` в
+ * строке из одного выражения — обычный способ писать охрану раньше остатка.
+ */
 const SCRIPT_TEMPLATES: readonly PostfixTemplate[] = [
   { key: 'if', detail: 'if (expr) { }', body: 'if ($EXPR) {\n  $0\n}' },
+  { key: 'not', detail: 'if (!expr) { }', body: 'if (!$EXPR) {\n  $0\n}' },
+  { key: 'null', detail: 'if (expr == null) { }', body: 'if ($EXPR == null) {\n  $0\n}' },
   { key: 'notnull', detail: 'if (expr != null) { }', body: 'if ($EXPR != null) {\n  $0\n}' },
+  { key: 'nn', detail: 'if (expr != null) { }', body: 'if ($EXPR != null) {\n  $0\n}' },
+  { key: 'while', detail: 'while (expr) { }', body: 'while ($EXPR) {\n  $0\n}' },
+  { key: 'forof', detail: 'for (const item of expr) { }', body: 'for (const $0 of $EXPR) {\n}' },
+  { key: 'forin', detail: 'for (const key in expr) { }', body: 'for (const $0 in $EXPR) {\n}' },
+  { key: 'foreach', detail: 'expr.forEach((item) => { })', body: '$EXPR.forEach(($0) => {\n  \n});' },
   { key: 'log', detail: 'console.log(expr)', body: 'console.log($EXPR);' },
   { key: 'ret', detail: 'return expr', body: 'return $EXPR;' },
+  { key: 'return', detail: 'return expr', body: 'return $EXPR;' },
   { key: 'const', detail: 'const имя = expr', body: 'const $0 = $EXPR;' },
+  { key: 'var', detail: 'const имя = expr', body: 'const $0 = $EXPR;' },
+  { key: 'let', detail: 'let имя = expr', body: 'let $0 = $EXPR;' },
+  { key: 'await', detail: 'await expr', body: 'await $EXPR' },
 ];
 
 /** Шаблоны языка. Пусто — у языка их нет, и подсказка не появляется вовсе. */
