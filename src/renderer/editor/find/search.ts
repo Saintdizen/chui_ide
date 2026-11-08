@@ -70,6 +70,13 @@ export interface FindMatch {
   readonly end: number;
   /** Номер строки с единицы — как его видит человек. */
   readonly line: number;
+  /**
+   * Группы регэкспа (1-я, 2-я, …) и текст совпадения. Пусто у обычного поиска:
+   * без `()` группировать нечего. Нужны панели для счёта по группам — по ним
+   * видно, какая часть шаблона дала столько совпадений.
+   */
+  readonly groups?: readonly (string | undefined)[];
+  readonly text?: string;
 }
 
 export interface FindResult {
@@ -228,7 +235,15 @@ export function findMatches(
       const end = offset + found.end;
       // Совпадение берём, только если оно ЦЕЛИКОМ внутри границ.
       if (start < from || end > to) continue;
-      matches.push({ start, end, line: line0 + 1 });
+      // Группы нужны счётчику: «13 совпадений, из них 9 с группой 1» — иначе
+      // по виду замены нельзя понять, почему она дала столько строк.
+      const groups = found.groups ?? [];
+      matches.push({
+        start,
+        end,
+        line: line0 + 1,
+        ...(groups.length > 0 ? { groups, text: text.slice(found.start, found.end) } : {}),
+      });
       if (matches.length >= MAX_MATCHES) return { matches, error: null, truncated: true };
     }
     // `lineText` не отдаёт перевод строки, поэтому прибавляем один знак — им и учтён.

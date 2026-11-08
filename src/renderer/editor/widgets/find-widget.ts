@@ -23,6 +23,7 @@ import { selectionEnd, selectionStart } from '../view/selection';
 import { FindState } from '../find/find-state';
 import { compileQuery, rangeOfSelection, type FindMatch } from '../find/search';
 import { replaceAll, replaceOne, type ReplaceEdit, type ReplaceSource } from '../find/replace';
+import { countByGroup, groupCountLabel } from '../find/group-count';
 import { createSearchHistory, stepHistory, type SearchHistory } from '../../core/search-history';
 
 /** Пауза перед пересчётом поиска после нажатия клавиши. */
@@ -295,6 +296,10 @@ export class FindWidget {
     this.counter.classList.remove('is-empty');
     const current = snapshot.current >= 0 ? snapshot.current + 1 : 0;
     this.counter.textContent = `${current} из ${snapshot.matches.length}${snapshot.truncated ? '+' : ''}`;
+    // Счёт по группам — подсказкой, а не второй строкой: он нужен эпизодически
+    // (пишешь замену с `$1`), а место в панели дорогое. Пусто — подсказки нет.
+    const byGroup = groupCountLabel(countByGroup(snapshot.matches), snapshot.matches.length);
+    this.counter.title = byGroup;
   }
 
   private setMessage(text: string | null): void {
