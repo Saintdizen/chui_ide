@@ -1624,7 +1624,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       const before = session.history.length;
       // «Что вошло в сводку» считаем ДО замены: после неё останется только резюме,
       // а человек хочет видеть, из чего оно получилось.
-      const facts = compactionFacts(session.history, { files: session.touched.size });
+      const forFacts = [...session.history];
       // Меняем ТОЛЬКО контекст: `transcript` (то, что человек читает) остаётся целым,
       // и после перезапуска лента соберётся из него же.
       session.history = [
@@ -1636,6 +1636,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       // служебным сообщением сразу за резюме — в конец, где кеш их и оставит.
       const kept = keptContextMessage(session.kept);
       if (kept) session.history.push(kept);
+      // Факты — теперь, когда видно и «до», и «после»: токены освободились
+      // именно на этой разнице, а не на длине истории до сжатия.
+      const facts = compactionFacts(forFacts, {
+        files: session.touched.size,
+        compacted: session.history,
+      });
       session.usage = undefined;
       // Сжатие само перестроило префикс: старое попадание в кеш больше ничего не
       // говорит, а расписание начинается заново.

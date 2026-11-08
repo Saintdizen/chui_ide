@@ -1,3 +1,4 @@
+import { estimateTextTokens } from './context-fit';
 /**
  * «Что попало в сводку»: из чего состоит сжатие беседы.
  *
@@ -9,6 +10,13 @@
 export interface CompactionFacts {
   messages: number;
   questions: number;
+  /**
+   * Токены до и после сжатия. Смысл сжатия — освободить место в окне, и без
+   * этой пары человек не знает, помогло ли оно: «40 сообщений» ничего не
+   * говорит о том, стало легче или нет.
+   */
+  tokensBefore: number;
+  tokensAfter: number;
   /** Первый и последний вопрос в свёрнутой части — по одной строке, сокращённые. */
   firstQuestion: string;
   lastQuestion: string;
@@ -20,13 +28,24 @@ export const QUESTION_EXCERPT = 60;
 
 export function compactionFacts(
   history: readonly { role: string; content: string }[],
-  options: { files?: number } = {},
+  options: { files?: number; compacted?: readonly { role: string; content: string }[] } = {},
 ): CompactionFacts {
   const asked = history.filter((message) => message.role === 'user');
   const files = options.files ?? 0;
+  const tokensBefore = history.reduce(
+    (sum, message) => sum + estimateTextTokens(message.content ?? ''),
+    0,
+  );
+  // После сжатия в истории остаются резюме и последние ходы — `history` здесь
+  // уже сжатая, поэтому считаем по ней же, а не по `before`.
+  const tokensAfter = options.compacted
+    ? options.compacted.reduce((sum, message) => sum + estimateTextTokens(message.content ?? ''), 0)
+    : tokensBefore;
   return {
     messages: history.length,
     questions: asked.length,
+    tokensBefore,
+    tokensAfter,
     firstQuestion: excerpt(asked[0]?.content),
     // Один вопрос — не повторяем его дважды: `compactionLines` это учтёт.
     lastQuestion: excerpt(asked[asked.length - 1]?.content),
@@ -53,5 +72,14 @@ export function compactionLines(facts: CompactionFacts): string[] {
     lines.push(`о чём: «${facts.firstQuestion}»`);
   }
   if (facts.files > 0) lines.push(`затронуто файлов: ${facts.files}`);
+  // Токены — только если их считали: у старого вызова их нет в фактах.
+  if (facts.tokensBefore > 0) {
+    const freed = facts.tokensBefore - facts.tokensAfter;
+    lines.push(
+      freed > 0
+        ? `токенов: ${facts.tokensBefore} → ${facts.tokensAfter} (освободилось ${freed})`
+        : `токенов: ${facts.tokensBefore} → ${facts.tokensAfter}`,
+    );
+  }
   return lines;
 }

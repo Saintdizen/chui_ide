@@ -41,6 +41,15 @@ describe('что попало в сводку', () => {
 
   it('беседа без вопросов не выдумывает строку «о чём»', () => {
     const lines = compactionLines(compactionFacts([answered('просто ответ')]));
-    expect(lines).toEqual(['сообщений: 1 · вопросов: 0']);
+    // Строка «о чём» не появляется; токены — отдельная строка и она законна.
+    expect(lines[0]).toBe('сообщений: 1 · вопросов: 0');
+    expect(lines.some((line) => line.startsWith('о чём'))).toBe(false);
+  });
+
+  it('показывает токены до и после: смысл сжатия — освободить место', () => {
+    const big = 'x'.repeat(4000);
+    const facts = compactionFacts([asked(big)], { compacted: [{ role: 'user', content: 'кратко' }] });
+    expect(facts.tokensBefore).toBeGreaterThan(facts.tokensAfter);
+    expect(compactionLines(facts).join('\n')).toContain('освободилось');
   });
 });
