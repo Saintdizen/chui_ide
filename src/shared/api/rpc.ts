@@ -1,6 +1,7 @@
 import type { CommandGrantScope } from '../agent-grants';
 import type { MenuRole } from '../app-menu';
 import type { AccountBalance } from '../balance';
+import type { EditorConfigValues } from '../editorconfig';
 import type { LspDiagnostic } from './lsp';
 import type { OfficePreview } from '../office';
 import type { ApplyResult, FileEdit, TextEdit } from '../edits';
@@ -892,6 +893,14 @@ export interface ChuiMethods {
   'lsp.prewarm': { params: { languages: string[] }; result: void };
   /** Символы проекта по запросу: классы, функции, переменные — «перейти к символу». */
   'lsp.symbols': { params: { query: string }; result: ProjectSymbol[] };
+  /**
+   * Правила `.editorconfig` для файла (см. `shared/editorconfig.ts`).
+   * Читается от папки файла вверх до корня проекта, ближний важнее.
+   */
+  'editor.editorConfig': {
+    params: { path: string };
+    result: EditorConfigValues;
+  };
   /**
    * Орфография через cSpell (см. `main/spell/server.ts`): разбор одного файла
    * словарями проекта. Встроенная проверка (`shared/spellcheck.ts`) знает два языка

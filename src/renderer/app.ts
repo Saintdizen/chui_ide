@@ -4637,6 +4637,35 @@ export async function startApplication(
   const { reloadIfOpen, revertFilesToDisk } = diskConflict;
 
   // Закрытая вкладка: путь не должен держать память о расхождении вечно.
+  // Правила `.editorconfig` — при открытии файла, по одному запросу на файл.
+  // Концы строк и отступы ставим до первой правки: если поменять их после,
+  // документ станет грязным сразу после открытия.
+  documents.onDidOpen((document) => {
+    void applyEditorConfig(document);
+  });
+
+  /** Настройки файла из `.editorconfig`. Нет правил — ничего не трогаем. */
+  const applyEditorConfig = async (document: TextDocument): Promise<void> => {
+    const rules = await rpc.request('editor.editorConfig', { path: document.path }).catch(() => null);
+    if (rules === null) return;
+    // Файл могли закрыть, пока читали правила.
+    if (documents.get(document.path) !== document) return;
+    if (rules.endOfLine === 'lf' || rules.endOfLine === 'crlf') {
+      // Внутри документа концы строк — символы (`\n` / `\r\n`), не подписи.
+      const wanted = rules.endOfLine === 'lf' ? '\n' : '\r\n';
+      // Переводим только уже открытый текст: документ ещё не правили, и
+      // `setLineEnding` пройдёт без правки в истории отмены.
+      if (document.lineEnding !== wanted) document.setLineEnding(wanted);
+    }
+    if (rules.indentStyle !== undefined || rules.indentSize !== undefined) {
+      const indent = {
+        ...(rules.indentStyle !== undefined ? { insertSpaces: rules.indentStyle === 'space' } : {}),
+        ...(rules.indentSize !== undefined ? { tabSize: rules.indentSize } : {}),
+      };
+      editors.applyOptions(indent);
+    }
+  };
+
   documents.onDidClose((document) => {
     // Режим разметки у закрытого файла больше не нужен.
     markdownPreviews.delete(document.path);

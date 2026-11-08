@@ -94,6 +94,8 @@ const NOT_MOCKED: Record<string, string[]> = {
   // Настоящий cSpell с 79 словарями живет в main: в мок его не тащить —
   // тесты проверки через cSpell держат настоящий (`tests/spell-server.test.ts`).
   'словари cSpell живут в main — в окне только пометки': ['spell.serverDiagnostics'],
+  // Правила `.editorconfig` читаются с диска: в моке диска нет.
+  'правила .editorconfig читаются с диска: в моке диска нет': ['editor.editorConfig'],
   'нужен настоящий репозиторий и клиент git — в моке их нет': [
     'git.bisectMark',
     'git.bisectReset',

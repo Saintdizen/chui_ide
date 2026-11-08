@@ -3,6 +3,7 @@ import { EMPTY_INDEX_STATUS, type InheritedResult } from '../../../shared/symbol
 import { readFile } from 'node:fs/promises';
 
 import { detectLspSources } from '../../lsp/detect';
+import { readEditorConfigFor } from '../../editorconfig-store';
 import { spellServerDiagnostics } from '../../spell/server';
 import { checkLspCommand } from '../../lsp/check';
 import { parseTrace } from '../../../shared/lsp-trace';
@@ -69,6 +70,18 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
         resolveProvider: false,
       },
   );
+  // Правила `.editorconfig` для файла: читаются от его папки вверх до корня,
+  // ближний важнее. Файла нет — пустые значения, а не ошибка.
+  router.register('editor.editorConfig', async (params) => {
+    // Без проекта правил нет: `.editorconfig` — договор о проекте, и от
+    // домашней папки человека его не берём (см. `editorconfig-store.ts`).
+    // Корня нет — `requireRoot` бросает; для правил вида это не ошибка, а «нет данных».
+    try {
+      return await readEditorConfigFor(deps.requireRoot(), params.path);
+    } catch {
+      return {};
+    }
+  });
   // Символы проекта: сервер ищет по всему проекту, а не по открытому файлу.
   router.register('lsp.symbols', (params) => deps.lsp?.projectSymbols(params.query) ?? []);
   // Орфография через cSpell (`main/spell/server.ts`): те же словари, что у проекта
