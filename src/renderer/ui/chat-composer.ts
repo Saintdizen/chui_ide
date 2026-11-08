@@ -34,6 +34,11 @@ export interface ChatComposerDeps {
   onOpenSettings(): void;
   /** Приложить контекст (скрепка — тот же список, что и «#»). */
   onContext(): void;
+  /**
+   * Быстрое вложение без меню: текущий файл, выделение, ошибки панели проблем.
+   * `kind` тот же, что в меню контекста, — панель обрабатывает их одинаково.
+   */
+  onAttachQuick?(kind: 'file' | 'selection' | 'problems'): void;
   /** Картинки из буфера вставки. */
   onPasteImages(files: File[]): void;
   /** Сменили усилие размышления. */
@@ -96,6 +101,8 @@ export interface ChatComposerView {
    * чаще набирает новое, чем правит старое, но курсор в конце — чтобы не потерять в тексте.
    */
   focusInput(): void;
+  /** Показать/скрыть быстрые кнопки прикрепления: без открытого файла нечего брать. */
+  setQuickAttach(has: { file: boolean; selection: boolean; problems: boolean }): void;
   /** Набор инструментов: хранят его настройки, композер только показывает выбор. */
   setToolPreset(preset: ToolPresetId): void;
 }
@@ -316,6 +323,37 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     svgIcon('attach', 16),
   );
 
+  /**
+   * Три частых вложения — отдельными кнопками, без меню.
+   * Через меню это всегда три шага (открыть, найти строку, выбрать), а нужно
+   * одно нажатие: чаще всего прикладывают именно текущий файл, выделение или
+   * то, что подсвечено как ошибка. Кнопки видны только когда их есть что дать:
+   * выделения нет — и кнопки нет, иначе она молча ничего не делает.
+   */
+  const quickAttach = (
+    kind: 'file' | 'selection' | 'problems',
+    title: string,
+    icon: Parameters<typeof svgIcon>[0],
+  ): HTMLButtonElement => {
+    const button = h(
+      'button',
+      {
+        class: 'icon-btn',
+        type: 'button',
+        title,
+        onClick: () => deps.onAttachQuick?.(kind),
+      },
+      svgIcon(icon, 16),
+    );
+    quickButtons.set(kind, button);
+    return button;
+  };
+
+  const quickButtons = new Map<string, HTMLButtonElement>();
+  const attachFile = quickAttach('file', 'Приложить текущий файл', 'file');
+  const attachSelection = quickAttach('selection', 'Приложить выделение', 'pencil');
+  const attachProblems = quickAttach('problems', 'Приложить ошибки панели проблем', 'warning');
+
   // Вставка из буфера: screenshot в буфере — самое частое, что прикладывают к
   // вопросу. Текст с картинкой вместе вставляется как текст: картинку берём только
   // тогда, когда она в буфере есть отдельным файлом.
@@ -431,7 +469,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     presetSelect.element,
     modelButton,
     effortField,
-    h('div', { class: 'composer-actions' }, contextButton, pauseButton, actionButton),
+    h('div', { class: 'composer-actions' }, contextButton, attachFile, attachSelection, attachProblems, pauseButton, actionButton),
   );
 
   syncMode();
@@ -452,6 +490,13 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     setModel,
     setEffort,
     setToolPreset,
+    /** Показывать ли быстрые вложения: их нет, когда прикладывать нечего. */
+    setQuickAttach: (available: { file?: boolean; selection?: boolean; problems?: boolean }) => {
+      for (const [kind, button] of quickButtons) {
+        const key = kind as 'file' | 'selection' | 'problems';
+        button.hidden = !available[key];
+      }
+    },
     focusInput,
   };
 }

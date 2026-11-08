@@ -397,6 +397,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     conversationForPause: () => (streamingSession ?? active()).uid,
     onOpenSettings: () => deps.settingsModal.open(),
     onContext: () => menu.toggleContext(),
+    // Кнопки «файл / выделение / ошибки» — тот же путь, что у меню: одно действие
+    // на вид контекста, а не второй способ приложить то же самое.
+    onAttachQuick: (kind) => void attachments.attachFrom(kind),
     onPasteImages: (files) => void attachments.attachFiles(files),
     onEffortChange: (effort) => void saveEffort(effort),
     // Набор меняется и во время беседы: следующее действие увидит новый набор.
@@ -1481,6 +1484,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     const data = sessionInfoData();
     contextRing.set(contextUsage(data));
     if (sessionInfo.visible) sessionInfo.show(data);
+    // Быстрые кнопки показываются по тому же расчёту, что и цена вида: если
+    // приложить нечего — кнопки нет. Иначе она обещала бы действие и молчала.
+    composer.setQuickAttach({
+      file: attachments.contextPrice('file') !== null,
+      selection: attachments.contextPrice('selection') !== null,
+      problems: attachments.contextPrice('problems') !== null,
+    });
   }
 
   function toggleSessionInfo(): void {
