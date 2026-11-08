@@ -3465,3 +3465,52 @@
 .chat-running-tool-drop:hover {
   color: var(--text_color);
 }
+
+/* График расхода по дням в окне телеметрии: полоска на день, высота — доля
+   от самого дорогого дня. Трек задаёт высоту, полоска растёт снизу. */
+.telemetry-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  margin: 10px 0;
+  padding: 0 2px;
+}
+
+.telemetry-chart-day {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.telemetry-chart-track {
+  display: flex;
+  align-items: flex-end;
+  height: 48px;
+  border-bottom: 1px solid var(--border_color);
+}
+
+.telemetry-chart-bar {
+  width: 100%;
+  border-radius: var(--radius_xs) var(--radius_xs) 0 0;
+  background: var(--accent_fill);
+  opacity: 0.85;
+}
+
+.telemetry-chart-day:hover .telemetry-chart-bar {
+  opacity: 1;
+}
+
+.telemetry-chart-label {
+  display: block;
+  margin-top: 2px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.telemetry-chart-note {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}

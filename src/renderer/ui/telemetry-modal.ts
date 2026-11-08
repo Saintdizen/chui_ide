@@ -1,7 +1,7 @@
 import type { AiTelemetrySnapshot } from '../../shared/api';
 import { digestLine, digestRuns } from '../../shared/run-digest';
 import { describeRecord, finishedLabel } from '../../shared/telemetry';
-import { describeSpend } from '../../shared/spend';
+import { describeDay, describeSpend, spendByDay, type SpendDay } from '../../shared/spend';
 import { formatCost } from '../../shared/usage';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
@@ -36,6 +36,52 @@ export interface TelemetryModalView {
 const VISIBLE_RECORDS = 20;
 /** Сколько бесед показать сводкой: больше — уже лента записей под ней. */
 const VISIBLE_DIGESTS = 5;
+
+/**
+ * Сколько дней показывать на графике. Неделя — обычный вопрос («как за
+ * неделю?»); месяц уже не читается полосками в узкой модалке.
+ */
+const SPEND_DAYS = 7;
+
+/**
+ * Гистограмма расхода по дням: полоска на день, высота — доля от самого
+ * дорогого дня недели. Пустой день — нулевая полоска, а не пропуск: график
+ * с дырами врёт о ритме (перерыв и «работал каждый день» выглядят одинаково).
+ */
+function spendChart(days: readonly SpendDay[]): HTMLElement {
+  const highest = Math.max(0, ...days.map((day) => day.cost ?? 0));
+  const chart = h('div', { class: 'telemetry-chart' });
+  // Все дни без цены — гистограмма ничего не показывает; говорим словами,
+  // а не рисуем семь одинаковых нулей, которые читались бы как «не тратил».
+  if (highest <= 0) {
+    chart.append(
+      h('div', { class: 'telemetry-chart-note' }, 'Расхода по дням нет: у прогонов нет цены'),
+    );
+    return chart;
+  }
+  const now = Date.now();
+  for (const day of days) {
+    const parts = day.cost === null ? 'нет цены' : `$${formatCost(day.cost)}`;
+    const bar = h('div', {
+      class: 'telemetry-chart-bar',
+      // Высота в процентах: CSS не знает наших чисел, а max-height строки
+      // держит полоску на месте. Минимум 2% — чтобы нулевой день был виден
+      // как точка, а не исчезал.
+      style: `height: ${Math.max(day.cost === null ? 0 : 2, ((day.cost ?? 0) / highest) * 100)}%`,
+    });
+    const column = h(
+      'div',
+      {
+        class: 'telemetry-chart-day',
+        title: `${describeDay(day.day, now)}: ${day.runs} прогон(ов), ${parts}`,
+      },
+      h('div', { class: 'telemetry-chart-track' }, bar),
+      h('span', { class: 'telemetry-chart-label' }, describeDay(day.day, now)),
+    );
+    chart.append(column);
+  }
+  return chart;
+}
 
 export function createTelemetryModal(deps: TelemetryModalDeps): TelemetryModalView {
   const body = h('div', { class: 'telemetry-body' });
@@ -105,6 +151,9 @@ export function createTelemetryModal(deps: TelemetryModalDeps): TelemetryModalVi
         .map((row) => `${row.model}: ${row.runs} прогон(ов)${row.cost === null ? '' : `, $${formatCost(row.cost)}`}`)
         .join(' · ');
       if (perModel) spend.append(h('div', { class: 'telemetry-spend-models' }, perModel));
+      // График по дням — под сводкой: сумма за сегодня отвечает «сколько»,
+      // а график — «как шло»: всплеск одного дня виден только рядом с соседями.
+      spend.append(spendChart(spendByDay(snapshot.records, Date.now(), { days: SPEND_DAYS })));
       if (snapshot.today.unpricedRuns > 0) {
         spend.append(
           h(

@@ -99,6 +99,55 @@ export function summarizeSpend(
   return { since, runs, usage, cost: priced ? cost : null, rows, unpricedRuns };
 }
 
+/** Расход за один день: точка графика. */
+export interface SpendDay {
+  /** Местная полночь дня, epoch мс — по ней дни идут подряд, без дыр во времени. */
+  day: number;
+  runs: number;
+  usage: ChatUsage;
+  /** `null` — у какого-то прогона дня нет цены: сумма дня была бы заниженной. */
+  cost: number | null;
+}
+
+/**
+ * Расход по дням — для графика и подписей под ним.
+ *
+ * Дни идут подряд, включая пустые: график с пропущенными днями врёт о ритме —
+ * «работал каждый день» и «был перерыв» выглядят одинаково. Пустой день это
+ * нули, а не отсутствие точки.
+ *
+ * `cost: null` у дня с непосчитанным прогоном, а не сумма части: частичная
+ * сумма дня на графике выглядит как дешёвый день, и человек делает вывод о
+ * расходе, которого не было.
+ */
+export function spendByDay(
+  records: readonly RunTelemetryRecord[],
+  at: number = Date.now(),
+  options: { days?: number } = {},
+): SpendDay[] {
+  const days = Math.max(1, Math.floor(options.days ?? 7));
+  const last = startOfDay(at);
+  const first = last - (days - 1) * DAY_MS;
+
+  const byDay = new Map<number, SpendDay>();
+  for (let index = 0; index < days; index += 1) {
+    const day = first + index * DAY_MS;
+    byDay.set(day, { day, runs: 0, usage: {}, cost: 0 });
+  }
+
+  for (const record of records) {
+    const day = startOfDay(record.at);
+    const bucket = byDay.get(day);
+    if (!bucket) continue;
+    bucket.runs += 1;
+    bucket.usage = addUsage(bucket.usage, record.trace?.usage);
+    const money = usageCost(record.trace?.usage, record.model, new Date(record.at));
+    bucket.cost = bucket.cost === null || money === null ? null : bucket.cost + money;
+  }
+
+  return [...byDay.values()].sort((left, right) => left.day - right.day);
+}
+
 /** Один день словами: «сегодня» / «вчера» / «3 ноября». */
 export function describeDay(at: number, now: number = Date.now()): string {
   const diff = Math.round((startOfDay(now) - startOfDay(at)) / DAY_MS);
