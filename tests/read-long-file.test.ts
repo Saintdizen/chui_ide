@@ -72,7 +72,8 @@ describe('read: режимы каркаса', () => {
     expect(outcome.ok).toBe(true);
     expect(detail).toContain('Каркас');
     expect(detail).toContain('1 | export function step1(input: number): number {');
-    expect(detail).toContain('2 | if (input > 0) {');
+    // Тело функции в каркас не идёт — только объявления и их вложенные методы.
+    expect(detail).not.toContain('if (input > 0)');
     expect(detail).not.toContain('return input * 2');
     expect(outcome.summary).toContain('каркас по отступам');
   });
@@ -80,13 +81,12 @@ describe('read: режимы каркаса', () => {
   it('в каркасе нет тел: строк меньше, чем в голове того же размера', async () => {
     const file = await structured();
     const tree = await runTool({ workspace }, 'read', JSON.stringify({ path: file, mode: 'indentation' }));
-    // 240 уровней по одной строке — против 720 строк исходника.
+    // 120 объявлений по одной строке — против 720 строк исходника.
     const lines = String(tree.detail).split('\n').length;
-    expect(lines).toBeLessThan(260);
+    expect(lines).toBeLessThan(140);
     expect(String(tree.detail)).not.toContain('return input * 2');
     // По умолчанию отдаётся 200 уровней из 240: хвост файла — за offset.
-    expect(String(tree.detail)).toContain('step100');
-    expect(String(tree.detail)).toContain('уровни 1–200 из 240');
+    expect(String(tree.detail)).toContain('step120');
   });
 
   it('mode=imports отдаёт только зависимости', async () => {

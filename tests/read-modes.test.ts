@@ -30,17 +30,22 @@ const TS_SAMPLE = [
 describe('дерево по отступам', () => {
   it('берёт заголовки и ветки, тела пропускает', () => {
     const tree = indentationTree(TS_SAMPLE);
-    expect(tree.text).toContain('11 | export function draw(box: Box): void {');
-    expect(tree.text).toContain('  12 | if (box.x > 0) {');
-    expect(tree.text).toContain('  14 | } else { ▸');
+    // Объявление на нулевой глубине — в каркасе; `if` внутри него — уже тело.
+    expect(tree.text).toContain('11 | export function draw(box: Box): void { ▸');
+    expect(tree.text).not.toContain('if (box.x > 0)');
     expect(tree.text).not.toContain('plot(box.x, box.y)');
     expect(tree.text).not.toContain('skip()');
   });
 
-  it('поля интерфейса не уровни: у них нет тела', () => {
-    const tree = indentationTree(['export interface Box {', '  readonly x: number;', '}']);
-    expect(tree.text).toBe('1 | export interface Box { ▸');
-    expect(tree.total).toBe(1);
+  it('объявление без тела и без продолжения в каркас не идёт', () => {
+    // Одинокая строка: тело нигде не открывается — сказать каркасу нечего.
+    const tree = indentationTree(['export interface Box {']);
+    expect(tree.total).toBe(0);
+  });
+
+  it('импорты в каркас не идут — для них режим imports', () => {
+    const tree = indentationTree(TS_SAMPLE);
+    expect(tree.text).not.toContain("import { a } from './a';");
   });
 
   it('плоский файл данных даёт пустое дерево — каркаса нет', () => {

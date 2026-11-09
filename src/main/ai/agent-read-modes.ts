@@ -17,6 +17,9 @@ export type ReadMode = (typeof READ_MODES)[number];
 export const TREE_DEFAULT_LINES = 200;
 export const TREE_MAX_LINES = 1200;
 
+/** Глубже этого уровня — уже тело, а не каркас файла. */
+const MAX_TREE_DEPTH = 2;
+
 /** Один уровень вложенности — два пробела отступа. */
 const INDENT_STEP = 2;
 
@@ -52,6 +55,42 @@ function opensBlock(trimmed: string): boolean {
  */
 function isDeclarationStart(trimmed: string): boolean {
   return /^(import|from|export|class|interface|enum|namespace|package|using|use)\b/.test(trimmed);
+}
+
+/**
+ * Строка импорта — в каркасе не нужна: зависимости дешевле спросить `imports`.
+ * В `service.ts` их 64 из 295 уровней, и они закрывают собой шапку файла.
+ */
+function isImportLine(trimmed: string): boolean {
+  return (
+    /^(import|from|require|use|using)\b/.test(trimmed) ||
+    trimmed.startsWith('#include') ||
+    trimmed.startsWith('#import')
+  );
+}
+
+/**
+ * Хвост многострочной сигнатуры — строк, начинающихся с закрывающей скобки
+ * (`) {`, `)`, `]`). Своего имени у него нет: это продолжение строки выше.
+ */
+function isSignatureTail(trimmed: string): boolean {
+  return /^[)\]]/.test(trimmed);
+}
+
+/**
+ * Уровень называет что-то имя: функцию, поле, ключ объекта (`emit(`, `x: {`,
+ * `private foo(): void {`, `class A {`). Иначе это тело — ветка, цикл, аргумент, — и
+ * в каркасе от него только шум: место тела видно по `▸`.
+ */
+function namesSomething(trimmed: string): boolean {
+  // Управляющие конструкции — тело по определению.
+  if (/^(if|for|while|switch|do|try|catch|finally|else)\b/.test(trimmed)) return false;
+  // Объявление с наследованием: `export class A extends B {`.
+  if (/^(export\s+)?(default\s+)?(abstract\s+)?(class|interface|enum)\s+[A-Za-z_$]/.test(trimmed)) {
+    return true;
+  }
+  // Имя с вызовом/типом/значением правой части: `run(): void {`, `x: {`.
+  return /[A-Za-z_$][\w$]*\s*[(<:=\[]/.test(trimmed);
 }
 
 /** Строка — продолжение предыдущей (значение, список аргументов), а не свой уровень. */
@@ -126,6 +165,11 @@ export function indentationTree(
       continue;
     }
     if (!opensBody(rows, index)) continue;
+    if (isImportLine(row.text) || isSignatureTail(row.text)) continue;
+    if (!namesSomething(row.text)) continue;
+    // Тело функции — тоже «что-то с именем» (лямбда, объект-обёртка), но это уже не
+    // каркас файла: каркас — объявления до третьего уровня включительно.
+    if (row.depth > MAX_TREE_DEPTH) continue;
     picked.push({ line: row.line, text: row.text, depth: row.depth });
   }
 
