@@ -1368,6 +1368,20 @@ export class EditorWorkspace {
     for (const path of paths) this.drawMarkers(path);
   }
 
+  /**
+   * Снять пометки владельцев у всех файлов — сервер языка упал или лежит.
+   *
+   * Пометки живут здесь, а не в сервисе: сервис их только пересылает. Когда процесс
+   * умер, присылать перестаёт он, а стереть старое некому — красное висело живым,
+   * на деле устаревшим. После рестарта диагностики придут заново.
+   */
+  clearExternalMarkers(owners: readonly string[]): void {
+    for (const owner of owners) {
+      // Подчёркивания стираются только перерисовкой тех файлов, где владелец был.
+      for (const path of this.diagnostics.clearOwner(owner)) this.drawMarkers(path);
+    }
+  }
+
   /** Раздать всем панелям объединённые пометки файла — по ним рисуются подчёркивания. */
   private drawMarkers(path: string): void {
     const merged = this.diagnostics.forPath(path);

@@ -125,6 +125,24 @@ export class DiagnosticsStore {
     this.emitter.fire();
   }
 
+  /**
+   * Снять пометки одного владельца во всех файлах.
+   *
+   * Нужно серверам языка: их пометки живут не в сервисе, а здесь. Когда сервер падает,
+   * его ошибки до сих пор висели на экране как живые, а новые не приходили — человек
+   * видел вчерашнюю правду. Отдельно от `clear(path)` потому, что файлы тут ни при чём.
+   */
+  clearOwner(owner: string): string[] {
+    const touched: string[] = [];
+    for (const [filePath, owners] of this.byPath) {
+      if (!owners.delete(owner)) continue;
+      touched.push(filePath);
+      if (owners.size === 0) this.byPath.delete(filePath);
+    }
+    if (touched.length > 0) this.emitter.fire();
+    return touched;
+  }
+
   /** Пометки файла, сгруппированные в порядке следования по документу — для перехода. */
   ordered(path?: string): DiagnosticItem[] {
     return this.markers(path);

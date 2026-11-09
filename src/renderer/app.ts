@@ -14,6 +14,7 @@ import { sanitizeEditorFontSize } from "../shared/editor-font-scale";
 import {
   lspChipFor,
   NO_LSP_STATUS,
+  type LspFailureStatus,
   type LspStatus,
 } from "../shared/lsp-status";
 import {
@@ -4595,8 +4596,25 @@ export async function startApplication(
   /** Язык, для которого состояние уже спрашивали: не дёргаем main дважды на тот же файл. */
   let lspChipLanguage: string | null = null;
 
+  /**
+   * Сервер упал — его пометки больше не про этот код.
+   *
+   * Диагностики живут в renderer (`host/diagnostics.ts`), а сервер при падении в main
+   * просто перестаёт присылать `publishDiagnostics`: старые ошибки висят на экране
+   * как живые, хотя проверить их уже некому. Владельца у проекта два — живой ответ
+   * (`lsp`) и обход карты (`lsp-project`); снимаем оба, иначе после падения сервера
+   * останутся пометки второго и счёт ошибок не сойдётся с чипом «сервер не поднялся».
+   */
+  function forgetDiagnosticsOf(failed: readonly LspFailureStatus[]): void {
+    // Пометки принадлежат владельцу, а не языку: гасим оба источника LSP разом.
+    // Сервер обычно один на проект — снимать их по одному всё равно нечем.
+    // Повтор безопасен: второй `clearOwner` ничего не найдёт и не перерисует.
+    if (failed.length > 0) editors.clearExternalMarkers(["lsp", "lsp-project"]);
+  }
+
   /** Показать чип по уже известному состоянию — без нового запроса. */
   function applyLspStatus(status: LspStatus): void {
+    forgetDiagnosticsOf(status.failed ?? []);
     lspStatus = status;
     statusBar.update({
       lsp: settings.lsp.enabled

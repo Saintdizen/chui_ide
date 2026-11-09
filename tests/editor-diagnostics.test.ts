@@ -34,6 +34,28 @@ describe('DiagnosticsStore', () => {
     expect(store.paths()).toEqual([]);
   });
 
+  it('clearOwner снимает владельца и возвращает затронутые файлы', () => {
+    const store = new DiagnosticsStore();
+    store.set('/p/a.ts', 'lsp', [diagnostic({ line: 1 })]);
+    store.set('/p/a.ts', 'imports', [diagnostic({ line: 2 })]);
+    store.set('/p/b.ts', 'lsp', [diagnostic({ line: 3 })]);
+
+    const touched = store.clearOwner('lsp');
+
+    // Только файлы, где владелец был: по ним и надо перерисовать пометки.
+    expect(touched.sort()).toEqual(['/p/a.ts', '/p/b.ts']);
+    expect(store.forPath('/p/a.ts').map((item) => item.message)).toEqual(['сообщение']);
+    expect(store.forPath('/p/b.ts')).toEqual([]);
+  });
+
+  it('clearOwner чужого владельца ничего не возвращает и не трогает пометки', () => {
+    const store = new DiagnosticsStore();
+    store.set('/p/a.ts', 'lsp', [diagnostic({ line: 1 })]);
+
+    expect(store.clearOwner('нет-такого')).toEqual([]);
+    expect(store.forPath('/p/a.ts')).toHaveLength(1);
+  });
+
   it('forPath сортирует пометки по строке и столбцу', () => {
     const store = new DiagnosticsStore();
     store.set('/p/a.ts', 'lsp', [

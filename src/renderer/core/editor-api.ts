@@ -60,6 +60,14 @@ export interface EditorApi {
   documentText(path: string): string | null;
   /** Пометки одного источника (языковой сервер, проверка импортов). */
   setExternalMarkers(path: string, owner: string, diagnostics: readonly LspDiagnostic[]): void;
+  /**
+   * Снять пометки указанных источников со всех файлов, где они есть.
+   *
+   * Нужно тому, кто знает, что источник больше не пришлёт новых показаний: языковой
+   * сервер упал и не перезапустится. Без этого старые ошибки висят на экране
+   * как живые — проверить их уже некому.
+   */
+  clearExternalMarkers(owners: readonly string[]): void;
   /** Пометки языка файла с диапазонами — контекст для быстрых исправлений. */
   lspDiagnostics(path: string): LspDiagnostic[];
   /** Где каретка в системе окна (`null` — ничего не открыто): приложение ставит там попапы. */
