@@ -9,7 +9,6 @@
  * Модуль чистый, поэтому аргументы разбираются тестами: запуск чужой команды —
  * самое опасное, что делает агент, и «вылезти» из своей позиции она не должна.
  */
-import path from 'node:path';
 
 /** Настройки песочницы. Живут в `settings.json` (`ai.sandbox`). */
 export interface AiSandboxSettings {
@@ -69,6 +68,28 @@ export function checkSandboxImage(raw: string): { ok: true; image: string } | { 
 }
 
 /**
+ * Разбор пути по-позиксовому, без `node:path`.
+ *
+ * Модуль чистый и общий: его читает и окно (тип настроек), а сборка окна не знает
+ * `node:path` — рантайма Node там нет, и тащить типы узла ради одной функции не стоит.
+ * Функция ровно по месту вызова (`normalizeSandboxWorkdir`), а не копия всего
+ * `normalize`: проверки ниже ведут себя так же.
+ */
+function normalizePosix(absolute: string): string {
+  const parts: string[] = [];
+  for (const part of absolute.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      // Выше корня не поднимаемся: `/a/../../b` — это `/b`, как у `path.posix`.
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return `/${parts.join('/')}`;
+}
+
+/**
  * Рабочий каталог внутри контейнера. Должен быть абсолютным путём и не содержать
  * `:` — иначе сломается запись монтирования `хост:контейнер`, и проект уедет не
  * туда (или `-v` прочитает часть пути как флаг). Непонятное значение заменяем
@@ -86,12 +107,12 @@ export function normalizeSandboxWorkdir(raw: string | undefined): string {
   // `.` и `/` в конце — и уводит за корень: `/../etc` становится `/etc`, то же
   // с `/w/../../../`. Сам разбор это не ловит (выход за корень — понятие
   // ФАЙЛОВОЙ СИСТЕМЫ, а не строки), поэтому проверяем и то, и другое.
-  const normalized = path.posix.normalize(absolute);
+  const normalized = normalizePosix(absolute);
   // Корень монтировать нельзя: проект накрыл бы всю файловую систему контейнера.
   if (normalized === '/' || normalized === '.' || normalized.startsWith('/../')) return DEFAULT_SANDBOX_WORKDIR;
   // Разбор добрался до корня, а исходно путь уходил выше: `/../etc` стал `/etc`
   // и выглядит безобидно. Считать, насколько глубоко влезли, — `..`, оставшийся
-  // в пути, этого не покажет: `path.posix.normalize` уже его съел.
+  // в пути, этого не покажет: нормализация уже его съела.
   let depth = 0;
   for (const part of absolute.split('/')) {
     if (part === '..') depth -= 1;

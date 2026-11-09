@@ -16,7 +16,7 @@
  * историю (`scrollback`), пока доска — основная, а не альтернативная.
  */
 
-import { cellsOf } from '../../editor/view/glyph-metrics';
+import { cellsOf } from '../../../shared/text-width';
 import { applySgr, DEFAULT_ATTR, type Attr } from './attrs';
 import { VtParser, type CsiEvent, type EscEvent, type VtEvent } from './vt-parse';
 

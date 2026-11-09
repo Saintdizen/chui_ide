@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { cellsOf, monospaceMetrics } from '../src/renderer/editor/view/glyph-metrics';
+import { cellsOf } from '../src/shared/text-width';
+import { monospaceMetrics } from '../src/renderer/editor/view/glyph-metrics';
 import { columnForX, layoutLine, lineWidth, xForColumn } from '../src/renderer/editor/view/line-layout';
 
 /** Клетка 10 px, строка 20 px, табуляция 4 столбца (шаг 40 px). */
