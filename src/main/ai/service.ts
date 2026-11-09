@@ -1624,6 +1624,11 @@ export class AiService {
         keepRecent: heavy ? STALE_KEEP_RECENT_HEAVY : STALE_KEEP_RECENT,
         ...(heavy ? { minChars: STALE_MIN_CHARS_HEAVY, batchSize: STALE_BATCH_HEAVY } : {}),
         restMinChars: STALE_MIN_CHARS_SMALL,
+        // Третья ступень — по СЧЁТЧИКУ, а не по размеру. Замер 09.11: 57%
+        // вызовов короче 900 символов и выходят из окна раньше, чем перерастут
+        // порог, — дальше они в истории до конца прогона. Порог 70 символов
+        // тут значит «любое непустое тело», а не порог размера.
+        minStaleChars: 70,
         ...(this.spillDir ? { spillDir: this.spillDir } : {}),
       });
       // Свёрнутый результат — уже не текст, а адрес: покрытие по нему станет врать.

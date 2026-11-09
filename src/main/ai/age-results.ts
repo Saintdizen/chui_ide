@@ -94,6 +94,21 @@ export interface StaleOptions {
    * (кэш 94.8%). Форма второй ступени п.80 — только теперь по размеру, а не по ходу.
    */
   restMinChars?: number;
+  /**
+   * Третья ступень — по СЧЁТЧИКУ, а не по размеру.
+   *
+   * Две ступени выше решают «свернуть или нет» по длине сообщения, и это
+   * оставляет дыру: замер 09.11 по 739 прогонам — 15 505 из 27 355 вызовов
+   * (57%) короче 900 символов. Окно старения сдвигается на 2–3 звена за шаг,
+   * поэтому мелкое звено выходит из окна в первом же проходе — до того, как
+   * перерастёт ЛЮБОЙ порог. Дальше оно сидит в истории до конца прогона.
+   *
+   * Здесь решение принимается по возрасту: первые `keepRecent` сообщений
+   * трогает по-прежнему окно, всё, что правее, живёт ещё столько проходов —
+   * и свертывается независимо от размера. Счётчик ведёт вызывающий код
+   * (в `service.ts` он уже есть — это номер шага): сама функция чистый разбор.
+   */
+  minStaleChars?: number;
 }
 
 const MIN_AGE_CHARS = 1_500;
@@ -268,9 +283,28 @@ export function ageStaleResults(messages: ChatMessage[], options: StaleOptions):
   );
   if (rest.length < batchSize) return first;
   const second = foldPicked(messages, rest, options.spillDir);
-  return {
+
+  // Третья ступень: всё, что уже вне окна, — на пометку независимо от размера.
+  // Замер 09.11: без неё 57% вызовов не стареют никогда, потому что вышли из
+  // окна мелкими. Зовётся только после удачного второго прохода — по той же
+  // причине, что и он: лишний сдвиг префикса стоит промаха кеша на каждом шаге.
+  const minStale = options.minStaleChars;
+  if (minStale === undefined) return {
     aged: first.aged + second.aged,
     freedTokens: first.freedTokens + second.freedTokens,
     file: second.file ?? first.file,
+  };
+  const done = new Set([...picked, ...rest]);
+  const stale = candidates(messages, last, minStale).filter((index) => !done.has(index));
+  if (stale.length === 0) return {
+    aged: first.aged + second.aged,
+    freedTokens: first.freedTokens + second.freedTokens,
+    file: second.file ?? first.file,
+  };
+  const third = foldPicked(messages, stale, options.spillDir);
+  return {
+    aged: first.aged + second.aged + third.aged,
+    freedTokens: first.freedTokens + second.freedTokens + third.freedTokens,
+    file: third.file ?? second.file ?? first.file,
   };
 }
