@@ -2274,6 +2274,7 @@ export class EditorHost {
     this.view.onStripContextMenu = (line) => this.onStripContextMenu(line);
     this.view.onLensClick = (line) => this.onLensClick(line);
     this.view.onLinkClick = (line, column) => this.onLinkClick(line, column);
+    this.view.onColorPick = (line, start, length, hex) => this.replaceColor(line, start, length, hex);
     this.view.onContextMenu = (event) => this.openContextMenu(event);
   }
 
@@ -2909,6 +2910,20 @@ export class EditorHost {
         if (this.path === path) void this.refreshTriggerCharacters(path, 1);
       }, 800);
     }
+  }
+
+  /**
+   * Выбор цвета в пикере: заменить участок записи на новый цвет.
+   *
+   * Идёт обычной правкой (`applyEdits`), а не прямой записью в буфер: так она
+   * попадает в отмену, подсветку и синхронизацию с сервером, как любая другая.
+   */
+  private replaceColor(line: number, start: number, length: number, hex: string): void {
+    if (length <= 0) return;
+    const buffer = this.controller.bufferRef;
+    const offset = buffer.offsetAt({ line, column: start });
+    const removed = buffer.lineText(line + 1).slice(start, start + length);
+    this.controller.applyEdits([{ start: offset, removed, inserted: hex }]);
   }
 
   /** Клик по линзе строки: исполняем команду, которую положил в неё сервер. */

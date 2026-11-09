@@ -744,7 +744,7 @@
 }
 
 /* Плашка цвета из `textDocument/documentColor`: квадрат перед записью цвета.
-   Показ, не кнопка — кликов не ловит. */
+   Раньше был показом; теперь кнопка — клик открывает пикер. */
 .own-editor-color-swatch {
   display: inline-block;
   vertical-align: middle;
@@ -752,7 +752,6 @@
   border: 1px solid var(--border_color);
   border-radius: var(--radius_2xs);
   /* Альфа в самом цвете: полупрозрачная плашка светлеет на фоне, а не врёт плотным цветом. */
-  pointer-events: none;
 }
 
 /* Плашка цвета перед значением (`#3b82f6`, `rgb(...)`): кружок в цвет самого значения.
@@ -765,7 +764,15 @@
   border: 1px solid var(--border_color);
   border-radius: var(--radius_2xs);
   box-sizing: border-box;
-  pointer-events: none;
+}
+
+/* Пикер по клику: только там, где позиция записи известна и замена возможна. */
+.own-editor-color-swatch.is-pickable {
+  cursor: pointer;
+}
+
+.own-editor-color-swatch.is-pickable:hover {
+  border-color: var(--focus_border_color);
 }
 
 /* Прозрачный цвет: под самим цветом — шахматка, иначе его не отличить от плотного.

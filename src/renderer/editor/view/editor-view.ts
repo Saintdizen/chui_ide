@@ -111,6 +111,11 @@ interface InlayItem {
 interface ColorItem {
   /** Столбец с нуля: плашка встаёт ПЕРЕД записью цвета. */
   readonly column: number;
+  /** Строка записи: по ней и столбцу пикер знает, что заменять. 0-based. */
+  readonly line: number;
+  /** Начало записи (1-based столбец) и её длина — участок замены при выборе цвета. */
+  readonly start: number;
+  readonly length: number;
   /** Цвет для `background`, уже с прозрачностью: `rgb(255 0 0 / 0.5)`. */
   readonly css: string;
   /** Подсказка при наведении: исходное значение и цвет словами. */
@@ -314,6 +319,12 @@ export class EditorView {
   onGutterContextMenu: ((line: number, event: MouseEvent) => void) | null = null;
   /** Клик по код-линзе строки: что исполнить — решает хозяин, а не представление. */
   onLensClick: ((line: number) => void) | null = null;
+
+  /**
+   * Выбрали цвет в пикере плашки: строка, столбец и длина записи (0-based).
+   * Редактор заменяет указанный участок текста записью выбранного цвета.
+   */
+  onColorPick: ((line: number, start: number, length: number, hex: string) => void) | null = null;
   /** Клик по ссылке в тексте: номер в списке ссылок файла — что делать, решает хозяин. */
   onLinkClick: ((line: number, column: number) => void) | null = null;
   /** Правый клик по самому тексту: меню собирает хозяин, представление только сообщает. */
@@ -1666,6 +1677,25 @@ export class EditorView {
   }
 
   /** Плашки цветов на этой же границе: квадрат цвета перед записью и подсказка-значение. */
+  /**
+   * Длина записи цвета в строке, начиная со столбца `start` (0-based).
+   *
+   * Сервер говорит, где значение начинается, но не где кончается. Берём до
+   * пробела, кавычки, закрывающей скобки или точки с запятой — так покрываются
+   * `#rrggbb`, `#rrggbbaa`, `rgb(...)`, `hsl(...)`, `red`. Ограничитель не входит
+   * в замену: кавычки и скобки должны остаться на месте.
+   */
+  private colorLengthAt(line: number, start: number): number {
+    const text = this.buffer.lineText(line);
+    let end = start;
+    while (end < text.length) {
+      const ch = text[end]!;
+      if (ch === ' ' || ch === '\t' || ch === '"' || ch === "'" || ch === ';' || ch === ')' || ch === ',') break;
+      end += 1;
+    }
+    return Math.max(0, end - start);
+  }
+
   private appendColorSwatches(fragment: DocumentFragment, colorsAt: Map<number, ColorItem[]>, at: number): void {
     const items = colorsAt.get(at);
     if (!items) return;
@@ -1678,8 +1708,49 @@ export class EditorView {
       span.title = item.title;
       // Цвет с прозрачностью — на шахматном фоне, иначе полупрозрачное не отличить от плотного.
       if (item.translucent) span.classList.add('is-translucent');
+      // Клик — по `mousedown`, как у линзы: иначе ввод успел бы поставить каретку
+      // в место плашки, и выделение съехало бы до открытия пикера.
+      span.classList.add('is-pickable');
+      span.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.openColorPicker(item);
+      });
       fragment.append(span);
     }
+  }
+
+
+  /**
+   * Системный пикер цвета для записи в тексте.
+   *
+   * Свой диалог не рисуем: выбор цвета — задача, где система уже сделала лучше
+   * (недавние, пипетка, ввод в разных форматах). Пикер получает текущий цвет,
+   * а на выборе отдаёт новый наружу — редактор заменяет участок.
+   */
+  private openColorPicker(item: ColorItem): void {
+    if (!this.onColorPick || item.length <= 0) return;
+    const input = document.createElement('input');
+    input.type = 'color';
+    // `input[type=color]` понимает только `#rrggbb`: альфу потеряем, но у плашки
+    // в тексте она и так есть — участок замены пишется целиком новым значением.
+    input.value = item.css.startsWith('#') ? item.css.slice(0, 7) : '#000000';
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    input.style.pointerEvents = 'none';
+    document.body.append(input);
+    const finish = (): void => {
+      input.remove();
+    };
+    input.addEventListener('change', () => {
+      this.onColorPick?.(item.line, item.start, item.length, input.value);
+      finish();
+    });
+    // Отмена (Esc) в разных браузерах приходит как `cancel` или как `change` без
+    // изменения; на всякий случай убираем за собой по `blur`.
+    input.addEventListener('cancel', finish);
+    input.addEventListener('blur', finish);
+    input.click();
   }
 
   /**
@@ -1794,8 +1865,9 @@ export class EditorView {
   /**
    * Плашки цветов из `textDocument/documentColor`: кружок перед записью цвета.
    *
-   * Место — начало записи (`#ff0000`, `rgb(...)`). Цвет можно изменить правкой текста,
-   * поэтому плашка — только ПОКАЗ, не кнопка: кликать некуда, и текст она не трогает.
+   * Место — начало записи (`#ff0000`, `rgb(...)`). Плашка — кнопка: клик открывает
+   * системный пикер и заменяет значение в тексте. Иначе приходится править вручную
+   * строку цвета, которую человек вспоминает на глаз.
    *
    * Переиспользует механизм вставок (они двигают текст вправо), но лежит в своей карте:
    * подсказки языка гаснут от правки, а цвет живёт до следующего ответа сервера.
@@ -1806,6 +1878,12 @@ export class EditorView {
       const item: ColorItem = {
         // Один символ под плашку плюс узкий зазор: дальше идёт сам текст цвета.
         column: Math.max(0, color.column - 1),
+        line: color.line,
+        start: color.column - 1,
+        // Сервер говорит, где значение начинается, но не где кончается: пикеру
+        // нужен весь участок замены. Считаем по тексту строки (`line` в DocumentColor
+        // 0-based, а `lineText` — 1-based).
+        length: this.colorLengthAt(color.line, color.column - 1),
         css: color.hex,
         title: color.alpha < 1 ? `${color.hex} (прозрачность ${color.alpha})` : color.hex,
         translucent: color.alpha < 1,
