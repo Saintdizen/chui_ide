@@ -13,6 +13,7 @@
 import { decisionCommand } from '../../shared/agent-grants';
 import { buildCandidates, buildCommand } from '../project/build';
 import { optionalString } from './tool-args';
+import { MAX_OUTPUT_CHARS } from './output-budget';
 import { clipTail, condenseOutput, foldPassedTests, spillNote, trimCommandTail } from './output-trim';
 import { runShellCommand, type RunOptions } from './run-command';
 import { createSpillStream } from './spill';
@@ -67,12 +68,12 @@ export async function runBuild(ctx: ToolContext, args: Record<string, unknown> =
   }
 
   const spillStream = ctx.spillDir ? createSpillStream(ctx.spillDir, 'run') : null;
-  const options: RunOptions = spillStream
-    ? { signal: ctx.signal, spill: (chunk) => spillStream.write(chunk) }
-    : { signal: ctx.signal };
+  const runOptions: RunOptions = spillStream
+    ? { signal: ctx.signal, headChars: MAX_OUTPUT_CHARS, spill: (chunk) => spillStream.write(chunk) }
+    : { signal: ctx.signal, headChars: MAX_OUTPUT_CHARS };
   const result = ctx.sandbox
-    ? await ctx.sandbox.run(command, root, options)
-    : await runShellCommand(command, root, options);
+    ? await ctx.sandbox.run(command, root, runOptions)
+    : await runShellCommand(command, root, runOptions);
 
   const full = spillStream?.close(result.truncated) ?? null;
   const condensed = foldPassedTests(ctx, 'run', condenseOutput(result.output));

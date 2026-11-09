@@ -34,6 +34,19 @@ describe('runProcess', () => {
     expect(result.output).toMatch(/отброшено символов: \d+/);
   });
 
+  it('подача задаёт тело головы: меньше границы — режется раньше', async () => {
+    // Сверка с замером: `terminal` собирал 24 000 символов головы, а `trimCommandTail`
+    // потом резала по 18 000 — голова была мёртвым весом. Теперь подача говорит,
+    // сколько ей реально нужно, и `run-command` не собирает лишнего.
+    const wide = await runProcess(node, ['-e', NOISY], process.cwd(), { headChars: 40_000 });
+    const narrow = await runProcess(node, ['-e', NOISY], process.cwd(), { headChars: 1_000 });
+
+    expect(wide.output.length).toBeGreaterThan(narrow.output.length);
+    expect(narrow.truncated).toBe(true);
+    // Обрезка всё равно оставляет пометку — обрывок не выдаётся за целый вывод.
+    expect(narrow.output).toMatch(/отброшено символов: \d+/);
+  });
+
   it('короткий вывод отдаётся целиком и без пометок', async () => {
     const result = await runProcess(node, ['-e', 'console.log("привет")'], process.cwd());
 

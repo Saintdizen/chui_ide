@@ -17,6 +17,7 @@ import { MAX_COMMAND_CHARS } from './tool-rules';
 import { confirmRun } from './tool-rules';
 import { commandCwd, commandLine, insideProject, liftCdPrefix, sandboxUnavailable } from './tool-command';
 import { lookupOutcome } from './agent-tools';
+import { MAX_OUTPUT_CHARS } from './output-budget';
 import { runShellCommand } from './run-command';
 import type { JobHandle, JobSnapshot } from './jobs';
 import type { RunOptions } from './run-command';
@@ -346,7 +347,17 @@ export async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<st
   // В песочнице та же команда идёт в контейнер: агент об этом не просит отдельно,
   // режим задаёт человек настройкой.
   const spillStream = ctx.spillDir ? createSpillStream(ctx.spillDir, 'terminal') : null;
-  const options: RunOptions = spillStream ? { ...runOptions, spill: (chunk) => spillStream.write(chunk) } : runOptions;
+  // Обрезку делает `trimCommandTail`, потолок её — `MAX_OUTPUT_CHARS` (18 000).
+  // Шелл держит `HEAD_CHARS`+`TAIL_CHARS` на память — даём ему ровно этот потолок,
+  // чтобы не собирать двадцать тысяч символов, которые потом выбросят.
+  // Замер 09.11: `terminal` — 1397 вызовов, 1 147 898 символов ответов.
+  const options: RunOptions = spillStream
+    ? {
+        ...runOptions,
+        headChars: MAX_OUTPUT_CHARS,
+        spill: (chunk) => spillStream.write(chunk),
+      }
+    : { ...runOptions, headChars: MAX_OUTPUT_CHARS };
   // В песочнице монтируется только корень проекта, поэтому подпапка — это `cd`
   // внутри контейнера, а не второй том.
   const result = ctx.sandbox
@@ -357,7 +368,9 @@ export async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<st
   // Установка пакетов: модели нужны итог и ошибки, а не лог дерева зависимостей.
   const install = summarizeInstall(command, result.output);
   const condensed = foldPassedTests(ctx, 'terminal', install ? install.text : condenseOutput(result.output));
-  const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'terminal', condensed);
+  // Свёрнутый текст режем и бюджета шага учитываем здесь. Раньше здесь же
+  // случался `clipTail` без учёта бюджета — вызов не тратил комнату шага.
+  const output = trimCommandTail(ctx, condensed, full);
   // Шелл-чтение вне проекта: `cat`/`head`/`sed` в `src/`/`tests/` замечает
   // `shell-read` (подсказка в service.ts), а конфиги, `/usr/share` и `.config`
   // летели целиком — 14 ответов на 25 000 тк в замере. `head` и `sed -n`

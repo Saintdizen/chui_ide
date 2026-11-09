@@ -31,14 +31,32 @@ export const MAX_TIMEOUT_MS = 30 * 60_000;
  * видно, что запустилось и с какими аргументами, в конце — итог и ошибки. При
  * обрезке только хвоста терялось именно начало, а по нему видно, что команда
  * вообще сделала.
+ *
+ * Сколько держать в памяти: было 24 000 + 36 000, но все три потребителя
+ * (`run`, `terminal`, `run_tests`) всё равно отдают результат в
+ * `trimCommandTail`, а тот режет по `MAX_OUTPUT_CHARS` (18 000 символов).
+ * Замер 09.11: один `terminal` — 1397 вызовов, 1 147 898 символов; голова
+ * собиралась только чтобы быть срезанной. Теперь `run-command` держит ровно
+ * потолок вызова, а то, что за ним, уходит в spill-файл: ссылка на него
+ * едет в ответе (`truncated` + `spillHint`). Нужно больше — потребитель
+ * просит через `headChars`.
  */
-const HEAD_CHARS = 24_000;
-const TAIL_CHARS = 36_000;
+export const HEAD_CHARS = 12_000;
+export const TAIL_CHARS = 6_000;
 
 export interface RunOptions {
   signal?: AbortSignal;
   /** Предел времени в миллисекундах; по умолчанию `DEFAULT_TIMEOUT_MS`. */
   timeoutMs?: number;
+  /**
+   * Сколько первых символов вывода держать для модели. По умолчанию `HEAD_CHARS`.
+   *
+   * Нужно тем, кто всё равно режет по символам: в `terminal` после дистилляции
+   * (`condenseOutput`/`summarizeInstall`) остаётся нечёрный сплошной половина
+   * собранного. 43% вызовов `terminal` — это `cat`/`grep`/`ls -R`, а их первая
+   * тысяча строк и есть наиболее полезная часть вывода.
+   */
+  headChars?: number;
   /**
    * Куда писать полный вывод, если он перестал помещаться в потолок.
    * Копия делается ДО обрезки: без неё отброшенную середину не достать ничем,
@@ -82,6 +100,7 @@ export function runProcess(
 
     // Голова и хвост держатся отдельно: середина не нужна, а копить весь вывод
     // (десятки мегабайт от сборки) в памяти — лишнее.
+    const headChars = options.headChars ?? HEAD_CHARS;
     let head = '';
     let tail = '';
     let total = 0;
@@ -96,7 +115,7 @@ export function runProcess(
       const text = chunk.toString('utf8');
       total += text.length;
       if (options.spill) {
-        if (!spilling && head.length + text.length > HEAD_CHARS) {
+        if (!spilling && head.length + text.length > headChars) {
           spilling = true;
           if (head.length > 0) options.spill(head);
           options.spill(text);
@@ -104,8 +123,8 @@ export function runProcess(
           options.spill(text);
         }
       }
-      if (head.length < HEAD_CHARS) {
-        const room = HEAD_CHARS - head.length;
+      if (head.length < headChars) {
+        const room = headChars - head.length;
         head += text.slice(0, room);
         const rest = text.slice(room);
         if (rest) tail = (tail + rest).slice(-TAIL_CHARS);
@@ -148,7 +167,7 @@ export function runProcess(
           code,
           signal: signalName,
           output: joinOutput(head, tail, total),
-          truncated: total > HEAD_CHARS + TAIL_CHARS,
+          truncated: total > headChars + TAIL_CHARS,
           timedOut,
         }),
       ),

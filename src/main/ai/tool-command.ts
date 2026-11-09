@@ -4,6 +4,7 @@ import { runShellCommand, type RunOptions } from './run-command';
 import type { SandboxRunner, ToolContext, ToolOutcome } from './tool-context';
 import { clipTail, condenseOutput, foldPassedTests, spillNote, trimCommandTail } from './output-trim';
 import { createSpillStream } from './spill';
+import { MAX_OUTPUT_CHARS } from './output-budget';
 import { needsConfirmation } from './tool-rules';
 import { optionalString } from './tool-args';
 import { relativePath as relativeFrom } from './agent-terminal';
@@ -63,9 +64,12 @@ export async function runTests(ctx: ToolContext, args: Record<string, unknown> =
   // Полная копия вывода: ниже остаётся только хвост, а отброшенное начало иначе
   // не достать ничем, кроме повторного запуска — а он даёт уже другой вывод.
   const spillStream = ctx.spillDir ? createSpillStream(ctx.spillDir, 'run_tests') : null;
-  const options: RunOptions = spillStream
-    ? { signal: ctx.signal, spill: (chunk) => spillStream.write(chunk) }
-    : { signal: ctx.signal };
+  const options: RunOptions = {
+    signal: ctx.signal,
+    // Голова подачи = потолок ответа: `run-command` держит ровно сколько отдаст модель.
+    headChars: MAX_OUTPUT_CHARS,
+    ...(spillStream ? { spill: (chunk: string) => spillStream.write(chunk) } : {}),
+  };
   const result = ctx.sandbox
     ? await ctx.sandbox.run(command, root, options)
     : await runShellCommand(command, root, options);
