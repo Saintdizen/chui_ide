@@ -71,7 +71,7 @@ export function callOrder(name: string, argumentsText: string): CallOrder {
   if (!isReadOnlyCall(name, argumentsText)) return 'alone';
   if (name === 'terminal' || name === 'terminalOutput' || name === 'terminalList') return 'alone';
   if (name === 'read_image' || name === 'lsp' || name === 'checks') return 'alone';
-  if (name === 'mind' || name === 'task' || name === 'ask' || name === 'skill') return 'alone';
+  if (name === 'mind' || name === 'ask' || name === 'skill') return 'alone';
   return 'group';
 }
 

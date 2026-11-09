@@ -124,8 +124,44 @@ const MIN_AGE_CHARS = 1_500;
  * Замер 09.11 (739 прогонов, 594 из них с >=5 шагами): рост prompt p50 326 токенов
  * на шаг. Профиль длинного прогона (366 прогонов >=40 шагов, по децилям прогресса):
  * 37.7к → 55.5к, рост ровный, без плато — свёртка отстаёт, а не останавливается.
+ *
+ * ПОВТОРНЫЙ замер по живому журналу `runs.jsonl`. Свежие 79 прогонов, 3 708
+ * вызовов — и на них одного офлайн-замера НЕ ХВАТИЛО, пришлось искать в коде.
+ *
+ * Число из журнала: 3 185 из 3 708 вызовов (86%) короче 900 символов. Рост
+ * prompt при этом ровный: 40.0к п50 на шаге 0 → 58.5к на шаге 56, то есть
+ * мелкое действительно не сворачивается никогда.
+ *
+ * ПЕРВАЯ ГИПОТЕЗА (STALE_BATCH) БЫЛА НЕВЕРНОЙ. Популярное объяснение —
+ * «`STALE_BATCH = 2` — полтора прохода на свёртку, окно сдвигает 2–3 звена,
+ * значит успевают только длинные» — требует, чтобы батч за проход был МЕНЬШЕ
+ * сдвига окна. Код этого не подтверждает: в `ageStaleResults` за один проход
+ * идут первая ступень (остаток батча), вторая (`rest`, батч), третья
+ * (по возрасту, без батча) — и все три делят ОДИН `lastIndex`, то есть окно
+ * сдвигается на один шаг за проход, а не на 2–3 звена. Звеньев на шаг больше
+ * одного, но батч всё ещё не меньше сдвига. Гипотезу снял, кода не тронул.
+ *
+ * ГЛАВНОЕ ОГРАНИЧЕНИЕ ЗАМЕРА: в старом формате журнала нет размера звена.
+ * `detail` обрезан `MAX_TELEMETRY_FIELD`, поэтому p50 звена в точности 2 001
+ * — это ПОТОЛОК ПОДРОБНОСТЕЙ ТЕЛЕМЕТРИИ, а не медиана истории. По этому
+ * журналу нельзя сказать «история стала мельче» — можно только «вызовы
+ * мельче». Вывод про размер истории ждёт следующего журнала.
  */
 const STALE_MIN_CHARS = 1_500;
+
+/**
+ * Третья ступень — по СЧЁТЧИКУ, а не по размеру.
+ *
+ * Две ступени выше решают «свернуть или нет» по длине сообщения, и это
+ * оставляет дыру: замер 09.11 — 15 505 из 27 355 вызовов (57%) короче 900
+ * символов. Окно старения сдвигается на 2–3 звена за шаг, поэтому мелкое
+ * звено выходит из окна в первом же проходе — до того, как перерастёт любой
+ * порог. Дальше оно сидит в истории до конца прогона.
+ *
+ * Здесь решение — по возрасту: то, что правее окна, живёт ещё проходов —
+ * и свёртывается независимо от размера. Счётчик ведёт вызывающий код.
+ */
+export const STALE_MIN_CHARS_AGE = 70;
 /**
  * Сколько кандидатов нужно, чтобы стоил проход. Два, а не один: проход пишет один
  * файл-копию, а уборка держит всего сорок (`MAX_SPILL_FILES`) — по копии на
@@ -266,45 +302,37 @@ export function ageStaleResults(messages: ChatMessage[], options: StaleOptions):
 
   const last = Math.max(0, messages.length - Math.max(0, options.keepRecent));
   const batchSize = options.batchSize ?? STALE_BATCH;
-  const picked = candidates(messages, last, options.minChars ?? STALE_MIN_CHARS);
-  if (picked.length < batchSize) return { aged: 0, freedTokens: 0, file: null };
-  const first = foldPicked(messages, picked, options.spillDir);
+  let outcome: AgeOutcome = { aged: 0, freedTokens: 0, file: null };
+  const folded = new Set<number>();
+  /** Свой проход: свернуть `candidates` и прибавить итог к общему. */
+  const pass = (minChars: number | undefined): void => {
+    if (minChars === undefined) return;
+    const picked = candidates(messages, last, minChars).filter((index) => !folded.has(index));
+    if (picked.length < batchSize) return;
+    const one = foldPicked(messages, picked, options.spillDir!);
+    for (const index of picked) folded.add(index);
+    outcome = {
+      aged: outcome.aged + one.aged,
+      freedTokens: outcome.freedTokens + one.freedTokens,
+      file: one.file ?? outcome.file,
+    };
+  };
 
-  // Остаток: звенья мельче обычного порога. Замер 09.11 — 1 960 вызовов в полосе
-  // 700–900 символов на 1 563к веса, и в окне одного шага сдвигается 2-3 звена,
-  // поэтому эти не старели НИКОГДА: и 1 500, и 900 были выше их.
-  // Второй проход только ПОСЛЕ первого: без этого каждый шаг сворачивал бы по
-  // мелочи и двигал префикс — промах кеша на каждом шаге, ровно то, от чего
-  // уходили в п.74 (кэш 94.8%).
-  const restMinChars = options.restMinChars;
-  if (first.aged === 0 || restMinChars === undefined) return first;
-  const rest = candidates(messages, last, restMinChars).filter(
-    (index) => !picked.includes(index),
-  );
-  if (rest.length < batchSize) return first;
-  const second = foldPicked(messages, rest, options.spillDir);
+  // Ступень 1 — обычный порог.
+  pass(options.minChars ?? STALE_MIN_CHARS);
+  // Вторая ступень — только после удачного первого прохода: без этого каждый шаг
+  // сворачивал бы по мелочи и двигал префикс — промах кеша на каждом шаге, ровно
+  // то, от чего уходили в п.74 (кэш 94.8%). Третья ступень от исхода первого
+  // прохода НЕ зависит (см. ниже), поэтому раннего выхода здесь нет.
+  if (outcome.aged > 0) pass(options.restMinChars);
 
-  // Третья ступень: всё, что уже вне окна, — на пометку независимо от размера.
-  // Замер 09.11: без неё 57% вызовов не стареют никогда, потому что вышли из
-  // окна мелкими. Зовётся только после удачного второго прохода — по той же
-  // причине, что и он: лишний сдвиг префикса стоит промаха кеша на каждом шаге.
-  const minStale = options.minStaleChars;
-  if (minStale === undefined) return {
-    aged: first.aged + second.aged,
-    freedTokens: first.freedTokens + second.freedTokens,
-    file: second.file ?? first.file,
-  };
-  const done = new Set([...picked, ...rest]);
-  const stale = candidates(messages, last, minStale).filter((index) => !done.has(index));
-  if (stale.length === 0) return {
-    aged: first.aged + second.aged,
-    freedTokens: first.freedTokens + second.freedTokens,
-    file: second.file ?? first.file,
-  };
-  const third = foldPicked(messages, stale, options.spillDir);
-  return {
-    aged: first.aged + second.aged + third.aged,
-    freedTokens: first.freedTokens + second.freedTokens + third.freedTokens,
-    file: third.file ?? second.file ?? first.file,
-  };
+  // Ступень 3 — по ВОЗРАСТУ, и она НЕ под цепочкой первых двух. Ошибка, которую
+  // я успел внести и поймал тестом: сперва она стояла под тем же `outcome.aged
+  // === 0`, а прогоны сплошь состоят из мелкого вывода — первого прохода нет,
+  // и третья ступень не вызывалась НИКОГДА, ровно как пороги, которые чинит.
+  // Для второй ступени цепочка верна: там речь о СДВИГЕ префикса от мелочи.
+  // Здесь решает другая защита — сообщение сверх окна сворачивается один раз,
+  // так что сдвиг всё равно одноразовый.
+  pass(options.minStaleChars);
+  return outcome;
 }

@@ -251,3 +251,52 @@ describe('свёрнутое с подсказкой не свёртываетс
     expect(messages[1]?.content).toContain('свёрнуто');
   });
 });
+
+/**
+ * Третья ступень — по СЧЁТЧИКУ возраста, а не по размеру.
+ *
+ * Дыра, из-за которой она появилась: мелкое звено выходит из окна, так и не
+ * перерастя порог, и остаётся в истории до конца прогона. Здесь проверяем
+ * ровно это: мелкое ВНЕ окна сворачивается, мелкое В окне — нет.
+ */
+function small(index: number): ChatMessage {
+  return {
+    role: 'tool',
+    toolCallId: `call-${index}`,
+    name: 'read_file',
+    content: `${index} | короткий итог`,
+  };
+}
+
+describe('свёртка по возрасту (minStaleChars)', () => {
+  it('мелкое вне окна сворачивается, хотя ни один размерный порог его не берёт', () => {
+    const messages = [small(1), small(2), small(3), long(4), long(5), long(6), ...Array.from({ length: 6 }, (_, i) => small(10 + i))];
+    const outcome = ageStaleResults(messages, {
+      keepRecent: 2,
+      minChars: 1_500,
+      restMinChars: 700,
+      minStaleChars: 70,
+      spillDir: spillDir(),
+    });
+    // Порог 70 — фикция: настоящий размер звена ~20 символов и ни один
+    // размерный порог его не берёт. Работает только счётчик возраста.
+    expect(messages[3]?.content).not.toContain('строка ');
+    expect(outcome.aged).toBeGreaterThan(0);
+  });
+
+  it('без minStaleChars мелкое не трогается — ступень включается по требованию', () => {
+    const messages = [small(1), small(2), small(3), long(4), long(5), long(6), ...Array.from({ length: 6 }, (_, i) => small(10 + i))];
+     // Ступень 1 и 2 выключены намеренно (пороги больше любой строки): мерим
+     // ровно третью ступень — без `minStaleChars` она не должна срабатывать.
+     const outcome = ageStaleResults(messages, { keepRecent: 2, minChars: 99_999, restMinChars: 99_999, spillDir: spillDir() });
+     expect(messages[0]?.content).toContain('короткий итог');
+     expect(outcome.aged).toBe(0);
+  });
+
+  it('пустое тело не сворачивается: порог 70 означает "непустое", а не "любое"', () => {
+    const empty: ChatMessage = { role: 'tool', toolCallId: 'call-0', name: 'read_file', content: '' };
+    const messages = [empty, small(2), long(4), long(5), long(6), ...Array.from({ length: 6 }, (_, i) => small(10 + i))];
+    ageStaleResults(messages, { keepRecent: 2, minChars: 1_500, restMinChars: 700, minStaleChars: 70, spillDir: spillDir() });
+    expect(messages[0]?.content).toBe('');
+  });
+});

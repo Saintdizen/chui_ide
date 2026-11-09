@@ -220,7 +220,7 @@ export interface AiSettingsPatch {
   compactOnModelSwitch?: boolean;
   /** Модель для сжатия беседы; пусто — активная модель. */
   compactModel?: string;
-  /** Модель для коротких подзадач (подсказка, коммит, тест, название); пусто — активная. */
+  /** Модель для коротких служебных задач (подсказка, коммит, тест, название); пусто — активная. */
   quickModel?: string;
   systemPrompt?: string;
   reasoningEffort?: ReasoningEffort;

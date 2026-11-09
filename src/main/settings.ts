@@ -105,7 +105,7 @@ interface StoredSettings {
     compactOnModelSwitch: boolean;
     /** Модель для сжатия беседы; не задана — активная. */
     compactModel?: string;
-    /** Модель для коротких подзадач; не задана — активная. */
+    /** Модель для коротких служебных задач; не задана — активная. */
     quickModel?: string;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
@@ -870,7 +870,7 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     if (value) target.compactModel = value;
     else delete target.compactModel;
   }
-  // Модель подзадач: пусто — снова идём активной моделью беседы.
+  // Модель служебных задач: пусто — снова идём активной моделью беседы.
   if (patch.quickModel !== undefined) {
     const value = patch.quickModel.trim();
     if (value) target.quickModel = value;
@@ -1096,7 +1096,7 @@ function loadSettings(filePath: string): StoredSettings {
       ? storedAi.compactModel.trim()
       : undefined;
 
-  // Модель подзадач: та же проверка — строка без пробелов или ничего.
+  // Модель служебных задач: та же проверка — строка без пробелов или ничего.
   ai.quickModel =
     typeof storedAi.quickModel === 'string' && storedAi.quickModel.trim() ? storedAi.quickModel.trim() : undefined;
 

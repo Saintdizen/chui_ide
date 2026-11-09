@@ -949,7 +949,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'и не займёт окно основной. Проверьте, что модель доступна у текущего провайдера.',
       ),
       field(
-        'Модель для коротких подзадач',
+        'Модель для коротких служебных задач',
         textInput(ai.quickModel ?? '', (value) => void patch({ ai: { quickModel: value } })),
       ),
       h(
@@ -982,7 +982,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         { class: 'field-hint' },
         'Пусто или 0 — без потолка. Шаги ограничивают длину, но не цену: один шаг на дорогой ' +
           'модели стоит как сотня дешёвых. Когда потолок пройден, беседа не обрывается — ' +
-          'дальше работа идёт моделью для коротких подзадач.',
+          'дальше работа идёт моделью для коротких служебных задач.',
       ),
       field('Системный промпт', prompt),
     ];

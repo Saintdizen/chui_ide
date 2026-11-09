@@ -74,9 +74,8 @@ export type AgentToolName =
   | 'file'
   | 'mind'
   | 'skill'
-  | 'task'
-  | 'browser'
-  | 'show';
+  | 'show'
+  | 'browser';
 
 export interface JsonSchemaProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
@@ -741,35 +740,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         mode: { type: 'string', description: 'zoom: in | out | fit | actual (1:1).' },
       },
       required: ['action'],
-    },
-  },
-  {
-    name: 'task',
-    side: 'main',
-    description:
-      'A subtask in its own context: it explores the project and returns a short report; ' +
-      'your conversation does not grow from its reads. Parallel: use tasks.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        description: { type: 'string', description: 'Short subtask name, shown on the card.' },
-        prompt: {
-          type: 'string',
-          description: 'What to investigate; the more concrete, the better.',
-        },
-        tasks: {
-          type: 'array',
-          description: 'Up to 4 independent subtasks. Not with prompt.',
-          items: {
-            type: 'object',
-            properties: {
-              description: { type: 'string' },
-              prompt: { type: 'string' },
-            },
-            required: ['prompt'],
-          },
-        },
-      },
     },
   },
   {

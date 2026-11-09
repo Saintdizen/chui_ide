@@ -35,7 +35,7 @@ describe('промпт агентного режима', () => {
     expect(text).toContain('содержимое — read');
   });
 
-  it('минимум не обещает памяти и подзадач', () => {
+  it('минимум не обещает памяти и чтения картинок', () => {
     const minimal = agentPrompt('minimal', { confirm: true });
     // В «Минимуме» только ядро и ведение работы: поиск есть, правок нет.
     expect(minimal).toContain('search');

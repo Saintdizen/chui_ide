@@ -38,8 +38,6 @@ import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memor
 import type { SkillLibrary } from './skills';
 import type { PatchFile } from '../../shared/patch';
 import type { ReadRange } from '../../shared/read-coverage';
-import type { SubagentResult, SubagentTask } from '../../shared/subagents';
-import type { ToolSubagent } from '../../shared/api/ai';
 import type { SessionSearchReport } from '../../shared/session-search';
 import type { FetchedPage } from '../../shared/web-fetch';
 import type { WebSearchHit } from '../../shared/web-search';
@@ -68,8 +66,6 @@ export interface ToolOutcome {
   failed?: boolean;
   /** Короткая строка для карточки в UI. */
   summary: string;
-  /** Подзадачи `task` — отдельными карточками в ленте (TASKS п.38). */
-  subagents?: ToolSubagent[];
   /** То, что уходит модели. Может быть длинным — усекается до `MAX_OUTPUT_CHARS`. */
   detail?: string;
   /**
@@ -445,13 +441,6 @@ export interface ToolContext {
   memory?: MemoryTools;
   /** Навыки проекта: каталог — в промпте, тело — инструментом skill. */
   skills?: SkillLibrary;
-  /**
-   * Подзадача (`task`): отдельный прогон со своим контекстом и только читающими
-   * инструментами. Своими руками здесь не сделать — нужен провайдер и цикл
-   * агента, и оба живут в `AiService`. Не включено — инструмент не предлагается:
-   * обещать вызов, который нечем выполнить, нельзя.
-   */
-  subagent?: (task: SubagentTask) => Promise<SubagentResult>;
   /** Картинки для модели (`read_image`): чтение и уменьшение живут в main (`ai/read-image.ts`). */
   readImage?: ReadImageRunner;
   /** Веб-поиск: подключён только при включённой настройке. */

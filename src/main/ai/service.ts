@@ -29,7 +29,7 @@ import { applyTextEdits, type FileEdit } from '../../shared/edits';
 import type { LspService } from '../lsp/lsp';
 import { readFileText } from '../git/file-text';
 import type { PatchFile } from '../../shared/patch';
-import { ageStaleResults, ageToolResults } from './age-results';
+import { STALE_MIN_CHARS_AGE, ageStaleResults, ageToolResults } from './age-results';
 import { readCalibration, saveCalibration } from './token-calibration';
 import { compressToolOutput } from '../../shared/output-compress';
 import {
@@ -134,13 +134,6 @@ import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
 import { normalizeAgentHooks } from '../../shared/agent-hooks';
 import { RunRegistry, abortOfRun } from './run-registry';
 import { runTool } from './agent-tools';
-import {
-  SUBAGENT_MAX_STEPS,
-  SUBAGENT_PROMPT,
-  SUBAGENT_TOOLS,
-  type SubagentResult,
-  type SubagentTask,
-} from '../../shared/subagents';
 import { createAgentHooks } from './agent-hooks';
 import { stepOutputChars } from './output-budget';
 import { failureText } from './tool-rules';
@@ -493,64 +486,6 @@ export class AiService {
     this.spillDir = dir;
   }
 
-
-  /**
-   * Одна подзадача: свой короткий диалог с тем же набором инструментов.
-   *
-   * Главное здесь — что она НЕ видит историю беседы: в этом весь смысл, иначе
-   * десять прочитанных файлов снова уехали бы в контекст и задача вышла бы
-   * дороже, чем без неё. Наружу — только отчёт словами.
-   *
-   * Задачи внутри одной пачки идут одновременно, но каждую копим отдельно:
-   * упавшая отдаётся причиной, остальные всё равно доносят найденное.
-   */
-  private async runSubagent(
-    task: SubagentTask,
-    base: { providerId: string; model?: string; signal: AbortSignal; windowTokens: number },
-    toolContext: ToolContext,
-  ): Promise<SubagentResult> {
-    const provider = this.createProvider(base.providerId);
-    const ai = this.settings.get().ai;
-    const model = base.model ?? ai.activeModel ?? '';
-    const messages: ChatMessage[] = [
-      { role: 'system', content: SUBAGENT_PROMPT },
-      { role: 'user', content: task.prompt },
-    ];
-    const tools = toOpenAiTools(AGENT_TOOLS.filter((tool) => SUBAGENT_TOOLS.has(tool.name)));
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let steps = 0;
-    let text = '';
-    for (let step = 0; step < SUBAGENT_MAX_STEPS; step += 1) {
-      steps += 1;
-      const done = await provider.streamChat(
-        { model, messages, tools },
-        { onDelta: () => undefined },
-        base.signal,
-      );
-      inputTokens += done.usage?.promptTokens ?? 0;
-      outputTokens += done.usage?.completionTokens ?? 0;
-      text = done.text ?? '';
-      const calls = done.toolCalls ?? [];
-      // Без вызовов работа кончена: последний ответ и есть отчёт.
-      if (calls.length === 0) break;
-      messages.push({ role: 'assistant', content: text, toolCalls: calls });
-      for (const call of calls) {
-        // Сырые аргументы: разбор и старые имена — забота `runTool`.
-        const outcome = await runTool(toolContext, call.name, call.arguments);
-        // Каждый результат — с потолком: подзадача не должна стоить как беседа.
-        const body = (outcome.ok ? outcome.detail : outcome.summary) || outcome.summary;
-        messages.push({
-          role: 'tool',
-          toolCallId: call.id,
-          content: body.length <= stepOutputChars(base.windowTokens)
-            ? body
-            : `${body.slice(0, stepOutputChars(base.windowTokens))}\n…[обрезано]`,
-        });
-      }
-    }
-    return { description: task.description, text: text.trim(), steps, inputTokens, outputTokens };
-  }
 
   /** Подключить терминалы: включает инструменты terminal_start/read/write/stop. */
   attachTerminals(terminals: TerminalAgent): void {
@@ -1093,29 +1028,6 @@ export class AiService {
     // Картинки для модели: чтение и уменьшение файлов живут в main, инструмент
     // только просит. Права не спрашиваем — это чтение внутри проекта.
     toolContext.readImage = createReadImageRunner(this.workspace);
-    // Расход подзадач копится здесь: каждая — свой прогон, и её токены — тоже
-    // деньги беседы.
-    const subagentUsage: ChatUsage = {};
-    // Подзадача: свой прогон, та же обстановка. Провайдера и окно берём текущие —
-    // подзадача должна стоить столько же, сколько шаг основного агента.
-    //
-    // Её расход — расход беседы: без этого четыре подзадачи по десять шагов
-    // выглядели бесплатными, а `spend` и потолок бюджета их не видели.
-    toolContext.subagent = async (task) => {
-      const result = await this.runSubagent(
-        task,
-        {
-          providerId: request.providerId,
-          ...(request.model ? { model: request.model } : {}),
-          signal,
-          windowTokens,
-        },
-        toolContext,
-      );
-      subagentUsage.promptTokens = (subagentUsage.promptTokens ?? 0) + (result.inputTokens ?? 0);
-      subagentUsage.completionTokens = (subagentUsage.completionTokens ?? 0) + (result.outputTokens ?? 0);
-      return result;
-    };
     // Чтение страницы по ссылке: своя настройка-разрешение, потому что это тоже
     // ход наружу. Адрес проверяется до запроса, а тело читается с потолком.
     if (settings.ai.webFetch?.enabled) {
@@ -1248,7 +1160,7 @@ export class AiService {
      * проваливаются по делу: нет такого текста, файл изменился, путь занят.
      * В замере падала каждая четвёртая правка — выключать её за это нельзя.
      */
-    const KEEP_ON_FAIL = new Set(['edit', 'file', 'terminal', 'task']);
+    const KEEP_ON_FAIL = new Set(['edit', 'file', 'terminal']);
     /** Инструменты, выпавшие за бесплодность: схема снята, имя помним для возврата. */
     const wastedAway = new Set<string>();
     const hideWasted = (name: string, outcome: { ok: boolean }): void => {
@@ -1359,9 +1271,7 @@ export class AiService {
     const trace = (): ChatRunTrace => ({
       steps: runSteps,
       toolCalls: runToolCalls,
-      // Подзадачи — это тоже расход беседы: без этой строки четыре `task` по десять
-      // шагов выглядели бесплатными и потолок бюджета их не видел.
-      usage: addUsage(runUsage, subagentUsage),
+      usage: runUsage,
       toolsTokens,
       // Какие правила проекта ушли в контекст: без этого «агент откуда-то знает
       // правило» или «а правила-то прочитались?» — вопросы без ответа в ленте.
@@ -1628,7 +1538,7 @@ export class AiService {
         // вызовов короче 900 символов и выходят из окна раньше, чем перерастут
         // порог, — дальше они в истории до конца прогона. Порог 70 символов
         // тут значит «любое непустое тело», а не порог размера.
-        minStaleChars: 70,
+        minStaleChars: STALE_MIN_CHARS_AGE,
         ...(this.spillDir ? { spillDir: this.spillDir } : {}),
       });
       // Свёрнутый результат — уже не текст, а адрес: покрытие по нему станет врать.
@@ -2200,7 +2110,6 @@ export class AiService {
           detail: outcome.detail,
           changes: outcome.changes,
           ms: callMs,
-          ...(outcome.subagents?.length ? { subagents: [...outcome.subagents] } : {}),
           // Картинка и в карточке: человек видит, что именно смотрел агент.
           ...(outcome.images?.length ? { images: outcome.images } : {}),
           // Файлы-результаты: в ленте карточка с кнопками «Открыть».
