@@ -104,6 +104,7 @@ export function canRunTool(tool: AgentToolSpec, env: ToolAvailability): boolean 
   // Git читается прямо с диска: своего окружения ему не нужно, а вне репозитория
   // инструмент откажет словами.
   if (tool.name === 'git') return true;
+  if (tool.name === 'todo') return true;
   if (tool.name === 'checks') return host?.getDiagnostics !== undefined || env.linter !== undefined;
   // Ресурсы MCP предлагаются только тогда, когда серверы их объявили, — это
   // знает лишь подключение, а проверка синхронная. Схемы добавляет

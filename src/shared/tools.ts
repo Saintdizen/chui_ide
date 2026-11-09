@@ -56,6 +56,7 @@ export type AgentToolName =
   | 'lsp'
   | 'project_map'
   | 'git'
+  | 'todo'
   | 'checks'
   | 'debug'
   | 'open_files'
@@ -325,6 +326,19 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         endLine: { type: 'number', description: `blame: last line, inclusive. ${LINE_NUMBERING}` },
         limit: { type: 'number', description: 'log: how many commits (15).' },
         maxLines: { type: 'number', description: 'diff and show: cap on patch lines (200).' },
+      },
+    },
+  },
+  {
+    name: 'todo',
+    side: 'main',
+    description: 'TODO/FIXME/HACK/XXX marks across the project, with the line they sit on.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path.' },
+        kind: { type: 'string', description: 'Only this mark: TODO, FIXME, HACK or XXX.' },
+        limit: { type: 'number', description: 'Cap on marks (60).' },
       },
     },
   },
