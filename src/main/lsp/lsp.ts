@@ -2256,7 +2256,7 @@ export class LspService {
    * сервера дождётся следующего нажатия клавиши (поиск переспрашивает на каждой букве).
    * Если карта пуста — ждём сервер как раньше: лучче подождать, чем ничего не найти.
    */
-  async projectSymbols(query: string): Promise<ProjectSymbol[]> {
+  async projectSymbols(query: string, folder?: string): Promise<ProjectSymbol[]> {
     const indexed = this.indexSource?.find(query) ?? [];
     const fromServers = this.serverSymbols(query);
     const results =
@@ -2264,7 +2264,13 @@ export class LspService {
         ? await withTimeout(fromServers, INDEX_FIRST_WAIT_MS, 'поиск символов').catch(() => [] as ProjectSymbol[])
         : await fromServers;
 
-    return mergeSymbols(results, indexed);
+    const merged = mergeSymbols(results, indexed);
+    if (!folder) return merged;
+    // Ограничение по папке — на готовых результатах: сервер ищет по всему
+    // проекту, а в монорепозитории нужны символы рядом, иначе одноимённые
+    // соседи из других пакетов забивают список.
+    const prefix = folder.replace(/\\/g, '/').replace(/\/*$/, '/');
+    return merged.filter((symbol) => symbol.path.replace(/\\/g, '/').startsWith(prefix));
   }
 
   /** Символы без локации: доспросить через `workspaceSymbol/resolve`. */

@@ -398,6 +398,25 @@ describe('didSave и наблюдение за файлами', () => {
     expect(await logOf(log)).toContain('workspaceSymbol/resolve');
   });
 
+  it('папка ограничивает список символов', async () => {
+    // В монорепозитории сервер ищет по всему проекту, и одноимённые символы из
+    // чужих пакетов забивают список. Фильтр по папке отсекает их на готовых
+    // результатах, не трогая сам запрос к серверу.
+    const { root, server } = await project('symbols');
+    const lsp = service(root, server);
+    await lsp.prewarm(['typescript']);
+    // Сначала без папки: сервер отдаёт символ по своему пути (у теста он
+    // подменёный сервер, а путь берётся из его `location.uri`).
+    const all = await lsp.projectSymbols('widget');
+    expect(all.length).toBeGreaterThan(0);
+    // Папка, которой не соответствует ни один результат, — пусто.
+    const none = await lsp.projectSymbols('widget', `${root}/other-package`);
+    expect(none).toEqual([]);
+    // Папка самого файла — символ на месте.
+    const inside = await lsp.projectSymbols('widget', root);
+    expect(inside.length).toBe(all.length);
+  });
+
   it('willSave идёт перед didSave у сервера, который его объявил', async () => {
     // Часть серверов готовит данные именно к моменту записи (переиндексация, снимок).
     // Порядок важен: `willSave` говорит «сейчас запишут», `didSave` — «уже записали».

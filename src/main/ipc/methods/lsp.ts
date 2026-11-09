@@ -83,7 +83,11 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
     }
   });
   // Символы проекта: сервер ищет по всему проекту, а не по открытому файлу.
-  router.register('lsp.symbols', (params) => deps.lsp?.projectSymbols(params.query) ?? []);
+  // `folder` — искать только внутри папки: в монорепозитории весь проект
+  // выдаёт десятки одноимённых символов из чужих пакетов.
+  router.register('lsp.symbols', (params) =>
+    deps.lsp?.projectSymbols(params.query, params.folder) ?? [],
+  );
   // Орфография через cSpell (`main/spell/server.ts`): те же словари, что у проекта
   // в CI, поэтому подчёркивания совпадают с прогоном `cspell` в сборке.
   router.register('spell.serverDiagnostics', async (params) =>

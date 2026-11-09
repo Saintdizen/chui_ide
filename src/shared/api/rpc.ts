@@ -931,7 +931,11 @@ export interface ChuiMethods {
    */
   'lsp.prewarm': { params: { languages: string[] }; result: void };
   /** Символы проекта по запросу: классы, функции, переменные — «перейти к символу». */
-  'lsp.symbols': { params: { query: string }; result: ProjectSymbol[] };
+  'lsp.symbols': {
+    /** `folder` — искать только внутри папки: в монорепозитории без неё список забит. */
+    params: { query: string; folder?: string };
+    result: ProjectSymbol[];
+  };
   /**
    * Правила `.editorconfig` для файла (см. `shared/editorconfig.ts`).
    * Читается от папки файла вверх до корня проекта, ближний важнее.
