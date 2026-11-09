@@ -24,6 +24,8 @@ function makeSession(over: Partial<ChatSession> = {}): ChatSession {
     id: 1,
     uid: 'chat_base',
     title: 'Беседа 1',
+    // Время беседы: тип требует его обязательно, раньше тест его не ставил.
+    updatedAt: 0,
     thread: null as unknown as HTMLElement,
     history,
     transcript: history,

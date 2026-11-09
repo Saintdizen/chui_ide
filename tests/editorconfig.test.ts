@@ -22,7 +22,7 @@ trim_trailing_whitespace = true`);
 
   it('indent_size важнее tab_width', () => {
     const file = parseEditorConfig('[*.py]\nindent_size = 4\ntab_width = 8');
-    expect(file.rules[0].indentSize).toBe(4);
+    expect(file.rules[0]!.indentSize).toBe(4);
   });
 
   it('tab_width работает, когда indent_size нет', () => {
@@ -37,7 +37,7 @@ trim_trailing_whitespace = true`);
   it('мусор не ломает разбор', () => {
     const file = parseEditorConfig('непонятно\n[*]\nindent_style = марсианский');
     expect(file.rules).toHaveLength(1);
-    expect(file.rules[0].indentStyle).toBeUndefined();
+    expect(file.rules[0]!.indentStyle).toBeUndefined();
   });
 });
 

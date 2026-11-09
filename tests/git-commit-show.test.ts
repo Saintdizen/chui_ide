@@ -21,7 +21,7 @@ describe('parseNumstat', () => {
 
   it('путь с табуляцией не рвётся на части', () => {
     const files = parseNumstat(['1\t1\tweird\tname.ts'], new Map());
-    expect(files[0].path).toBe('weird\tname.ts');
+    expect(files[0]!.path).toBe('weird\tname.ts');
   });
 
   it('строки статуса и пустые пропускаются', () => {
@@ -30,6 +30,6 @@ describe('parseNumstat', () => {
   });
 
   it('неизвестный статус — other, а не выдуманный «изменён»', () => {
-    expect(parseNumstat(['1\t0\tx.ts'], new Map())[0].status).toBe('other');
+    expect(parseNumstat(['1\t0\tx.ts'], new Map())[0]!.status).toBe('other');
   });
 });

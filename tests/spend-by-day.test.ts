@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { spendByDay, startOfDay } from '../src/shared/spend';
-import type { RunTelemetryRecord } from '../src/shared/api/settings';
+import type { RunTelemetryRecord } from '../src/shared/telemetry';
 
 const DAY = 24 * 60 * 60 * 1000;
 const day = (offset: number, hour = 12) => startOfDay(Date.now()) - offset * DAY + hour * 3600_000;
@@ -23,22 +23,22 @@ describe('spendByDay: расход по дням', () => {
 
   it('несколько прогонов одного дня складываются в одну точку', () => {
     const days = spendByDay([record(day(0, 9)), record(day(0, 18))], undefined, { days: 2 });
-    const today = days[days.length - 1];
+    const today = days[days.length - 1]!;
     expect(today.runs).toBe(2);
     expect(today.usage.promptTokens).toBe(2000);
   });
 
   it('известная модель даёт цену, а сумма дня считается', () => {
     const days = spendByDay([record(day(0))], undefined, { days: 1 });
-    expect(days[0].cost).not.toBeNull();
-    expect(days[0].cost!).toBeGreaterThan(0);
+    expect(days[0]!.cost).not.toBeNull();
+    expect(days[0]!.cost!).toBeGreaterThan(0);
   });
 
   it('непосчитанный прогон делает цену дня null, а не заниженной суммой', () => {
     const unknown = record(day(0), 'модель-которой-нет', { promptTokens: 10, completionTokens: 0 });
     const days = spendByDay([record(day(0)), unknown], undefined, { days: 1 });
     // Частичная сумма дня на графике выглядела бы как дешёвый день.
-    expect(days[0].cost).toBeNull();
+    expect(days[0]!.cost).toBeNull();
   });
 
   it('окно меньше одного дня не бывает', () => {

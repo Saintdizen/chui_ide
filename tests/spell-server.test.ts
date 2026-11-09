@@ -15,9 +15,9 @@ describe('орфография проекта: cSpell в main', () => {
   it('опечатка находится с позицией и сообщением', async () => {
     const found = await spellServerDiagnostics('/p/a.md', 'Это теекст', []);
     expect(found).toHaveLength(1);
-    expect(found[0].line).toBe(0);
-    expect(found[0].message).toContain('теекст');
-    expect(found[0].source).toBe('cspell');
+    expect(found[0]!.line).toBe(0);
+    expect(found[0]!.message).toContain('теекст');
+    expect(found[0]!.source).toBe('cspell');
   }, 30000);
 
   it('без своих слов опечатки видны обе', async () => {

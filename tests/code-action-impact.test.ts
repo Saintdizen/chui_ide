@@ -9,7 +9,7 @@ describe('actionImpact: что будет сделано до выбора', () 
 
   it('правка в одном месте одного файла говорит про место', () => {
     const label = actionImpact(
-      [{ path: '/p/a.ts', edits: [{ from: { line: 1, column: 0, offset: 0 }, to: { line: 1, column: 5, offset: 5 }, newText: '' }] }],
+      [{ path: '/p/a.ts', edits: [{ startLine: 1, startColumn: 0, endLine: 1, endColumn: 5, newText: '' }] }],
       '/p/a.ts',
     ).label;
     // Файл тот же — его не называем: «в этом файле» короче и точнее имени.
@@ -21,8 +21,7 @@ describe('actionImpact: что будет сделано до выбора', () 
     const edit = (path: string, n: number) => ({
       path,
       edits: Array.from({ length: n }, (_, i) => ({
-        from: { line: i, column: 0, offset: 0 },
-        to: { line: i, column: 2, offset: 2 },
+        startLine: i, startColumn: 0, endLine: i, endColumn: 2,
         newText: 'x',
       })),
     });
@@ -35,7 +34,7 @@ describe('actionImpact: что будет сделано до выбора', () 
 
   it('правка только в других файлах — это не «здесь»', () => {
     const impact = actionImpact(
-      [{ path: '/p/b.ts', edits: [{ from: { line: 0, column: 0 }, to: { line: 0, column: 1 }, newText: '' }] }],
+      [{ path: '/p/b.ts', edits: [{ startLine: 0, startColumn: 0, endLine: 0, endColumn: 1, newText: '' }] }],
       '/p/a.ts',
     );
     expect(impact.elsewhere).toBe(true);
@@ -44,7 +43,7 @@ describe('actionImpact: что будет сделано до выбора', () 
 
   it('свои файлы не считаются чужими', () => {
     const impact = actionImpact(
-      [{ path: '/p/a.ts', edits: [{ from: { line: 0, column: 0 }, to: { line: 0, column: 1 }, newText: '' }] }],
+      [{ path: '/p/a.ts', edits: [{ startLine: 0, startColumn: 0, endLine: 0, endColumn: 1, newText: '' }] }],
       '/p/a.ts',
     );
     expect(impact.elsewhere).toBe(false);
@@ -56,7 +55,7 @@ describe('actionImpact: что будет сделано до выбора', () 
       actionImpact(
         Array.from({ length: n }, (_, i) => ({
           path: `/p/${i}.ts`,
-          edits: [{ from: { line: 0, column: 0 }, to: { line: 0, column: 1 }, newText: '' }],
+          edits: [{ startLine: 0, startColumn: 0, endLine: 0, endColumn: 1, newText: '' }],
         })),
         '/p/x.ts',
       ).label;

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createChatBranchSpace } from '../src/renderer/ui/chat-branch-space';
 import { worktreePathFor } from '../src/shared/branch-space';
 import { installMiniDom } from './helpers/mini-dom';

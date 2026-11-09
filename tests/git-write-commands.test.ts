@@ -132,8 +132,8 @@ describe('registerGitWriteCommands', () => {
     const { commands } = setup(
       { undoDiscard: async (undo: string) => (undone.push(undo), '/p/a.ts') },
       {
-        showToast: (_message, _kind, options) => {
-          action = options?.action ?? null;
+        showToast: (_message: string, _kind: string, options: { undo?: boolean; action?: unknown }) => {
+          action = (options?.action as { run: () => void } | null | undefined) ?? null;
         },
         reloadIfOpen: (path: string) => void reloaded.push(path),
       },

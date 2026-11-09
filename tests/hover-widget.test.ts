@@ -99,7 +99,7 @@ describe('наведение: пауза', () => {
   // П.34: «держи Ctrl — подсказка сразу». Ждать паузу, стоя замерев, — то, за что
   // подсказку и выключают: она есть, но увидеть её надо через секунду.
   it('Ctrl над словом — карточка сразу, без паузы', () => {
-    const { widget, dom, hover } = setup();
+    const { widget, dom } = setup();
     const viewport = dom.document.querySelector('.own-editor-viewport');
     viewport.dispatchEvent({
       type: 'mousemove',

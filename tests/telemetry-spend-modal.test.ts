@@ -46,7 +46,8 @@ describe('сегодняшний расход в журнале', () => {
     const { createTelemetryModal } = await import('../src/renderer/ui/telemetry-modal');
     const modal = createTelemetryModal({
       rpc: rpc as never,
-      onError: () => undefined,
+      notify: () => undefined,
+      reveal: () => undefined,
     });
     // `open` сам ждёт ответа main и только потом рисует.
     await modal.open();

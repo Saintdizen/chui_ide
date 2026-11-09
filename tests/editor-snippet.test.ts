@@ -98,7 +98,7 @@ describe('переменные и выбор в сниппете', () => {
 
   it('двоеточие внутри варианта не ломает разбор выбора', () => {
     const result = expandSnippet('${1|http://,file:|}');
-    expect(result.choices[0].options).toEqual(['http://', 'file:']);
+    expect(result.choices[0]!.options).toEqual(['http://', 'file:']);
   });
 
   it('выбор идёт по местам вместе с обычными', () => {

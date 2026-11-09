@@ -105,7 +105,7 @@ describe('файл из вкладки находится в дереве сам
   });
 
   it('смена вкладки раскрывает папки файла', async () => {
-    const { view, openEditors, readDir, request } = setup();
+    const { view, openEditors, readDir } = setup();
     view.element; // дерево поднимается отрисовкой
     await waited(() => readDir(ROOT));
     expect(readDir(ROOT)).toBe(true);

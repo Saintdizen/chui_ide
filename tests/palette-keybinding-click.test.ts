@@ -1,5 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
-import { CommandRegistry } from '../src/renderer/core/commands';
+import { describe, expect, it } from 'vitest';
 import { keyHintLabel, keyHintPlan } from '../src/renderer/ui/palette';
 
 /**

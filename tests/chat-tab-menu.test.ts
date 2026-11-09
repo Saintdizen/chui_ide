@@ -10,7 +10,10 @@ import { chatTabMenuPlan } from '../src/renderer/ui/chat';
  * все — разное по последствию, а стояло вперемешку с выводом.
  */
 const plan = (overrides: Partial<Parameters<typeof chatTabMenuPlan>[0]> = {}) =>
-  chatTabMenuPlan({ empty: false, others: true, ...overrides });
+  chatTabMenuPlan({ empty: false, others: true, ...overrides }, {
+    exportAs: () => undefined, close: () => undefined,
+    closeOthers: () => undefined, closeAll: () => undefined,
+  });
 
 type Item = ReturnType<typeof chatTabMenuPlan>[number];
 

@@ -43,7 +43,7 @@ describe('профиль рабочего окружения', () => {
     const profile = buildProfile(settings);
     const parsed = parseProfile(JSON.stringify(profile));
     expect(parsed.ok).toBe(true);
-    expect(parsed.applied?.sort()).toEqual(['ai', 'appearance', 'editor', 'layout'].sort());
+    expect([...(parsed.applied ?? [])].sort()).toEqual(['ai', 'appearance', 'editor', 'layout'].sort());
     expect(parsed.patch).toEqual({
       editor: { fontSize: 15 },
       appearance: { theme: 'dark' },

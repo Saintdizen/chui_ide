@@ -85,6 +85,6 @@ describe('пути в ответе', () => {
       expect(hit.path.startsWith('/')).toBe(false);
       expect(hit.path).not.toContain(dir);
     }
-    expect(result.hits[0].path).toBe('docs/guide.md');
+    expect(result.hits[0]!.path).toBe('docs/guide.md');
   });
 });
