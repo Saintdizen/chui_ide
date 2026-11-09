@@ -133,13 +133,50 @@ describe('счётчик шагов', () => {
     expect(parseCounts('')).toEqual([]);
   });
 
-  it('старые записи v1 в отчёт не едут: там код «other» без формы', () => {
-    // Иначе в разделе «other по тексту» вечно висел бы «(форма не записана)»:
-    // живые 415 записей v1 ушли в v2, и старые прогоны не должны с ними мешаться.
+  it('повтор по прогону ловится даже в разных шагах и получает тот же хэш', () => {
+    // Раньше поток видимости был один на шаг, и один и тот же `read` на 5-м и
+    // 40-м шаге считался уникальным. Повторы прогона — главная догадка п.0.
+    const log = run({
+      steps: [
+        {
+          index: 1,
+          ms: 1,
+          outputTokens: 10,
+          calls: [{ id: 'a', name: 'read', args: '{"path":"src/a.ts"}', ok: true, summary: 'x'.repeat(88) }],
+        },
+        {
+          index: 2,
+          ms: 1,
+          outputTokens: 10,
+          calls: [
+            { id: 'b', name: 'read', args: '{"path":"src/a.ts"}', ok: true, summary: 'x'.repeat(88) },
+            { id: 'c', name: 'read', args: '{"path":"src/b.ts"}', ok: true, summary: 'x'.repeat(88) },
+          ],
+        },
+      ],
+    });
+    const steps = buildCountsRecord(log).steps;
+    const first = steps[0]!.calls[0]!;
+    const again = steps[1]!.calls[0]!;
+    const fresh = steps[1]!.calls[1]!;
+    expect(first.flags ?? []).not.toContain('repeat-run');
+    expect(again.flags).toContain('repeat-run');
+    expect(fresh.flags ?? []).not.toContain('repeat-run');
+    // Хэш — то, по чему повтор и виден; без него замер не воспроизвести.
+    expect(again.h).toBe(first.h);
+    expect(fresh.h).not.toBe(first.h);
+    expect(first.h).toMatch(/^[0-9a-f]{8}$/u);
+  });
+
+  it('старые записи v1 и v2 в отчёт не едут, а новая строка читается', () => {
+    // v3 добавила флаг `repeat-run` и хэш аргументов: считая по старым записям,
+    // отчёт показал бы нуль повторов там, где их просто не записывали.
     const line = formatCountsLine(buildCountsRecord(run()));
-    const old = line.replace(/"version":2/u, '"version":1');
-    expect(parseCounts(old)).toEqual([]);
     expect(parseCounts(line)).toHaveLength(1);
+    expect(parseCounts(line.replace(/"version":3/u, '"version":2'))).toEqual([]);
+    expect(parseCounts(line.replace(/"version":3/u, '"version":1'))).toEqual([]);
+    // Новое поле — не повод терять запись: вызовы на месте, chars на месте.
+    expect(parseCounts(line)[0]!.steps[0]!.calls[0]!).toHaveProperty('chars');
   });
 
   it('считает отказом вызов с ok: true, но failed: true', () => {

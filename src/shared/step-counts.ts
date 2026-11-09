@@ -23,7 +23,10 @@ import { callOverlaps, repeatedCallIndexes, type CallOverlapKind } from './call-
 /** Версия формата: разбор не должен молча читать чужую раскладку полей. */
 // 2 — у отказа с кодом `other` на месте кода стоит форма (`unknown`). В записях v1
 // там стоял сам код `other`, а формы не было: отчёт старых прогонов не держим.
-export const STEP_COUNTS_VERSION = 2;
+// 3 — у вызова появился отпечаток аргументов `h` и пометка `repeat-run` (повтор
+// через шаги). Без отпечатка повторы `run` между шагами не измерялись: в записи
+// был только `name`, и «повтор» пришлось бы считать по имени инструмента.
+export const STEP_COUNTS_VERSION = 3;
 
 /**
  * Пометки о форме вызова. Считаются по аргументам, но текст аргументов в запись
@@ -39,7 +42,9 @@ export type CallFlag =
   /** `read` сразу нескольких файлов (`paths`): дешевле по шагам, дороже по символам. */
   | 'paths'
   /** Вызов с теми же именем и аргументами уже был в этом шаге. */
-  | 'repeat';
+  | 'repeat'
+  /** Вызов с теми же именем и аргументами уже был В ПРОГОНЕ (не в этом шаге). */
+  | 'repeat-run';
 
 export interface RunCountCall {
   name: string;
@@ -50,6 +55,13 @@ export interface RunCountCall {
   /** Пометка сервиса о необычном вызове («повтор», «пропущено») — наша, не модели. */
   note?: string;
   flags?: CallFlag[];
+  /**
+   * Отпечаток аргументов: имя инструмента + стабильный JSON аргументов.
+   * Текста аргументов в записи нет — цены ради хранится 32-битный FNV-хеш
+   * (8 hex). Без него повтор `run` через шаги не измерить вовсе: в записи v1/v2
+   * оставались только `name`, и «повтор» считался бы по одному имени.
+   */
+  h?: string;
   /** Код причины отказа — только наша пометка, без текста аргументов. */
   reason?: CallFailureReason;
   /**
@@ -145,7 +157,8 @@ export type CallFailureReason =
 
 /** Собрать счётчик прогона. Текстов модели в записи не остаётся — только числа. */
 export function buildCountsRecord(run: ChatRunLog, input: CountsInput = {}): RunCountsRecord {
-  const steps = run.steps.map(countStep);
+  const seen = new Set<string>();
+  const steps = run.steps.map((step) => countStep(step, seen));
   const usage = run.trace?.usage ?? {};
   return {
     version: STEP_COUNTS_VERSION,
@@ -179,10 +192,10 @@ export function buildCountsRecord(run: ChatRunLog, input: CountsInput = {}): Run
   };
 }
 
-function countStep(step: RunStepLog): RunCountStep {
+function countStep(step: RunStepLog, seen: Set<string>): RunCountStep {
   const callLike = step.calls.map((call) => ({ name: call.name, arguments: call.args }));
   const repeated = new Set(repeatedCallIndexes(callLike));
-  const calls = step.calls.map((call, index) => countCall(call, repeated.has(index)));
+  const calls = step.calls.map((call, index) => countCall(call, repeated.has(index), seen));
   const overlaps = callOverlaps(callLike).map(({ a, b, kind }) => ({ a, b, kind }));
   const usage = step.usage;
   return {
@@ -206,9 +219,19 @@ function countStep(step: RunStepLog): RunCountStep {
   };
 }
 
-function countCall(call: RunCallLog, repeated: boolean): RunCountCall {
+function countCall(call: RunCallLog, repeated: boolean, seen: Set<string>): RunCountCall {
   const chars = (call.detail?.length ?? 0) + (call.summary?.length ?? 0);
-  const flags = [...callFlags(call.name, call.args), ...(repeated ? (['repeat'] as const) : [])];
+  const h = callHash(call.name, call.args);
+  // Повтор по прогону — тот же отпечаток уже встречался в ДРУГОМ шаге. Внутри
+  // шага это `repeat` (его ловит repeatedCallIndexes), между шагами до v3 не
+  // ловилось никак: в записи не было ни аргументов, ни их отпечатка.
+  const again = h !== '' && seen.has(h);
+  if (h !== '') seen.add(h);
+  const flags = [
+    ...callFlags(call.name, call.args),
+    ...(repeated ? (['repeat'] as const) : []),
+    ...(again && !repeated ? (['repeat-run'] as const) : []),
+  ];
   // `failed` — тоже отказ: тест упал или команда вернула ненулевой код. Без него
   // отчёт по шагам считал такие вызовы успешными и отказы «тихо очищались».
   const reason = call.ok === false ? callFailureReason(call) : call.failed ? 'exit' : undefined;
@@ -234,6 +257,7 @@ function countCall(call: RunCallLog, repeated: boolean): RunCountCall {
     name: call.name,
     ok: call.ok !== false && !call.failed,
     chars,
+    ...(h ? { h } : {}),
     ...(call.ms !== undefined ? { ms: call.ms } : {}),
     ...(call.note ? { note: call.note } : {}),
     ...(shown ? { reason: shown } : {}),
@@ -372,6 +396,33 @@ const SHELL_READ = /\b(cat|head|tail|sed|grep|rg|awk|less|more|find|ls|tree|wc|n
  * Форма вызова по аргументам. Разбор намеренно необязательный: испорченные
  * аргументы — это тоже данные (отказ формы), но пометок у них нет.
  */
+/**
+ * Отпечаток вызова: FNV-1a (32 бита) по `имя` + `\u0000` + стабильному JSON аргументов.
+ * Криптостойкость не нужна — нужен короткий ключ, по которому видно «тот же вызов».
+ * Пустые аргументы отпечатка не дают: у вызова без аргументов повтора не бывает.
+ */
+export function callHash(name: string, argsJson: string): string {
+  const args = parseArgs(argsJson);
+  if (!args) return '';
+  const text = `${name}\u0000${stableJson(args)}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+/** JSON с отсортированными ключами: `{"b":1,"a":2}` и `{"a":2,"b":1}` — один вызов. */
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? '';
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;
+}
+
 export function callFlags(name: string, argsJson: string): CallFlag[] {
   const args = parseArgs(argsJson);
   if (!args) return [];
