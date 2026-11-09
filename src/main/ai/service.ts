@@ -117,6 +117,7 @@ import {
 } from '../../shared/chat-budget';
 import { pricingAt } from '../../shared/providers';
 import { repairToolPairs } from '../../shared/chat-sanitize';
+import { cutMarkup, heldTail, stripCallMarkup } from '../../shared/call-markup';
 import { ProjectMemory } from './project-memory';
 import { RunControls, type RunEntry } from './run-controls';
 import { WorkspaceContext } from './workspace-context';
@@ -1285,6 +1286,8 @@ export class AiService {
     // поэтому в следующем вопросе модель помнит, что успела прочитать.
     const produced: ChatMessage[] = [];
     let text = '';
+    /** Сколько символов текста уже ушло в окно: поток шлёт только прирост. */
+    let lastEmitted = 0;
     let reasoning = '';
     let usage: ChatUsage | undefined;
     let finishReason: string | undefined;
@@ -1445,6 +1448,11 @@ export class AiService {
 
     for (let step = 0; step < steps; step += 1) {
       if (signal.aborted) break;
+      // Каждый шаг — свой ответ модели: накопленный текст начинается заново,
+      // и смещение «что уже показано» вместе с ним. Иначе второй шаг молчал бы:
+      // его текст короче накопленного за первый.
+      text = '';
+      lastEmitted = 0;
       // Пауза — только здесь: посередине шага не встаём, иначе оборвём вызов
       // инструмента или модель на полуслове. Стоп проверяется снова: пока стояли,
       // человек мог нажать «стоп» вместо «продолжить».
@@ -1576,8 +1584,19 @@ export class AiService {
         calibrationKey: `${request.providerId}::${request.model}`,
         onDelta: (delta) => {
           text += delta;
-          stepLog.text = ((stepLog.text ?? '') + delta).slice(0, 20_000);
-          emit(ChatStreamEvent.Delta, { text: delta });
+          // В «Вопросе» модели не передаются инструменты, но не всякая модель
+          // это принимает и пишет вызов текстом. Чистим накопленный текст, а не
+          // кусок: разметка приходит по 2–3 символа, и в одном куске её не видно.
+          // Хвост, из которого ещё может вырасти вызов, придерживаем до развязки:
+          // иначе пара полноширинных черт успела бы мелькнуть в ответе.
+          const visible = useTools ? text : cutMarkup(text);
+          const safe = visible.length - heldTail(visible);
+          if (safe > lastEmitted) {
+            const fresh = visible.slice(lastEmitted, safe);
+            lastEmitted = safe;
+            stepLog.text = ((stepLog.text ?? '') + fresh).slice(0, 20_000);
+            emit(ChatStreamEvent.Delta, { text: fresh });
+          }
         },
         onReasoning: (delta) => {
           reasoning += delta;
@@ -1623,7 +1642,11 @@ export class AiService {
       const calls = done.toolCalls ?? [];
       runToolCalls += calls.length;
       if (calls.length === 0) {
-        const answer: ChatMessage = { role: 'assistant', content: done.text };
+        // В «Вопросе» в историю едет вычищенный текст, а не сырой ответ модели:
+        // иначе служебная разметка возвращается к модели следующим же запросом и
+        // учит её повторять. С тем же фильтром, что и в потоке.
+        const clean = useTools ? done.text : stripCallMarkup(done.text);
+        const answer: ChatMessage = { role: 'assistant', content: clean };
         produced.push(answer);
         // Цель открыта, а ход кончился без инструментов: модель решила, что
         // закончила. Цель — это условие окончания, а не пожелание, поэтому
@@ -1651,7 +1674,10 @@ export class AiService {
         }
         commitStep();
         return {
-          text,
+          // Ещё раз, по итоговому тексту: поток чистил куски по мере накопления,
+          // а здесь тот же ответ уходит в окно и в файл беседы — там он должен
+          // быть чистым при любом порядке доставки.
+          text: useTools ? text : stripCallMarkup(text),
           finishReason,
           usage,
           trace: trace(),
