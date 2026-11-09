@@ -88,6 +88,9 @@ describe('счётчик шагов', () => {
     expect(callFlags('terminal', '{"command":"grep -n foo src/a.ts"}')).toEqual(['shell-read']);
     expect(callFlags('read', '{"path":"src/a.ts"}')).toEqual(['whole-read']);
     expect(callFlags('read', '{"path":"src/a.ts","startLine":10,"endLine":20}')).toEqual([]);
+    // Замер 09.11: read целиком — 59 000 тк на 65 ответов. Флаг есть с самого
+    // начала, но им никто не пользовался: теперь на нём подсказка про диапазон.
+    expect(callFlags('read', '{"path":"a.ts"}')).toContain('whole-read');
     expect(callFlags('read', '{"paths":["a","b"]}')).toEqual(['paths']);
     // Испорченные аргументы — тоже данные: пометок у них нет, но и падения тоже.
     expect(callFlags('read', '{"path":')).toEqual([]);

@@ -555,7 +555,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'terminal',
     side: 'main',
-    description: 'Run a command and get its output in one call. Project tests are run_tests, not here.',
+    description:
+      'Run a command and get its output in one call. Project tests are run_tests, not here. ' +
+      'To read a project file use read (ranges, no repeats); to find text use search; to find files by name use list. ' +
+      '`cat`/`head`/`sed` in a shell return the whole file and pay for it on every call.',
     inputSchema: {
       type: 'object',
       properties: {

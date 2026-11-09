@@ -1441,6 +1441,9 @@ export class AiService {
      */
     let singleReads = 0;
     let pathsHinted = false;
+    // Замер 09.11: 65 ответов read целиком, 59 000 тк — без единого диапазона.
+    let wholeReads = 0;
+    let wholeHinted = false;
     // Шаги последнего плана и тронутые правками файлы: нужны отчёту об упоре в лимит.
     // Живут вне цикла: на последнем шаге тело уже не выполнится, а отчёт нужен.
     let planSteps: { text: string; status: string }[] = [];
@@ -2168,11 +2171,19 @@ export class AiService {
         // Очередь одиночных чтений вместо пачки: считаем подряд и один раз на прогон
         // говорим, что было дешевле. Пачку (`paths`) уже увидели — молчим.
         if (call.name === 'read' || call.name === 'read_file') {
-          if (callFlags(call.name, call.arguments).includes('paths')) {
+          const flags = callFlags(call.name, call.arguments);
+          if (flags.includes('paths')) {
             singleReads = 0;
             pathsHinted = true;
-          } else singleReads += 1;
+            wholeReads = 0;
+          } else {
+            singleReads += 1;
+            if (flags.includes('whole-read')) wholeReads += 1;
+            else wholeReads = 0;
+          }
         }
+        const wholeHint = !wholeHinted && wholeReads === 2 ? '\n(целиком 2 раза — у read есть startLine/endLine: меньше текста, тот же файл)' : '';
+        if (wholeHint) wholeHinted = true;
         const pathsNote =
           !pathsHinted && singleReads === 3
             ? '\n(несколько файлов — read с paths одним вызовом: это шаг, а не три)'
@@ -2192,7 +2203,7 @@ export class AiService {
           name: call.name,
           // Единая точка сжатия для всех инструментов: в контекст модели уходит
           // текст без оформления, а человек в карточке (событие выше) видит полный.
-          content: (compressOutput ? compressToolOutput(result) : result) + widenedNote + shellReadNote + pathsNote,
+          content: (compressOutput ? compressToolOutput(result) : result) + widenedNote + shellReadNote + pathsNote + wholeHint,
         };
         countOutput(toolMessage.content ?? '');
         messages.push(toolMessage);

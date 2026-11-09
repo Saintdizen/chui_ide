@@ -97,9 +97,13 @@ export function clipTail(ctx: ToolContext, kind: string, text: string, limit = M
   const dropped = text.length - room;
   const file = spill(ctx, kind, text);
   spendRoom(ctx, room);
+  // Пути для продолжения: без них модель повторяет вызов целиком, чтобы добрать
+  // хвост (замер 09.11: push у 4 ответов на несколько тысяч токенов).
+  const keep = text.slice(dropped);
+  const startLine = text.slice(0, dropped).split('\n').length;
   const note = file ? `, ${spillHint(file)}` : '';
   const spent = ctx.stepBudget !== undefined && ctx.stepBudget.left <= 0 ? ' — бюджет вывода на шаг исчерпан' : '';
-  return `… (отброшено символов в начале: ${dropped}${note}${spent})\n${text.slice(dropped)}`;
+  return `… (отброшено символов в начале: ${dropped} — это строки 1–${startLine - 1}${note}${spent})\n${keep}`;
 }
 
 /**

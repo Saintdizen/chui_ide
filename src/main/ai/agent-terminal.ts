@@ -358,6 +358,11 @@ export async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<st
   const install = summarizeInstall(command, result.output);
   const condensed = foldPassedTests(ctx, 'terminal', install ? install.text : condenseOutput(result.output));
   const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'terminal', condensed);
+  // Шелл-чтение вне проекта: `cat`/`head`/`sed` в `src/`/`tests/` замечает
+  // `shell-read` (подсказка в service.ts), а конфиги, `/usr/share` и `.config`
+  // летели целиком — 14 ответов на 25 000 тк в замере. `head` и `sed -n`
+  // оставляем в покое: это уже диапазон.
+  const shellWhole = shellWholeFile(command, result.output);
   const notes: string[] = [];
   if (result.timedOut) notes.push('превышено время выполнения');
   // Пустой код без причины агент читает как сбой связи: «код выхода —» в трёх
@@ -369,9 +374,23 @@ export async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<st
     ok: true,
     ...(result.code === 0 && !result.timedOut ? {} : { failed: true }),
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
-    detail: `${commandLine(ctx, command, cwd.relative)}\n${output.length ? output : '(пустой вывод)'}${install && !full ? `\n… (скрыто строк установки: ${install.hidden})` : ''}${spillNote(full)}`,
+    detail: `${commandLine(ctx, command, cwd.relative)}\n${output.length ? output : '(пустой вывод)'}${install && !full ? `\n… (скрыто строк установки: ${install.hidden})` : ''}${shellWhole}${spillNote(full)}`,
     ...(didWork(result, command) ? { applied: true } : {}),
   };
+}
+
+/**
+ * Порог, после которого shell-вывод считается «файлом целиком». 120 строк = потолок
+ * `read` без диапазона (`LONG_FILE_HEAD_LINES`), то есть всё, что выше, дешевле
+ * прочитать через `read`.
+ */
+const WHOLE_SHELL_ROWS = 120;
+
+function shellWholeFile(command: string, output: string): string {
+  if (!/\b(cat|sed)\b/.test(command) || /\bhead\b|\btail\b|sed\s+-n/.test(command)) return '';
+  const lines = output.split('\n').length;
+  if (lines < WHOLE_SHELL_ROWS) return '';
+  return `\n(вывод целиком: ${lines} строк ≈${Math.ceil(output.length / 3.5)} тк; тот же файл дешевле — read с startLine/endLine)`;
 }
 
 /* ── долгие команды: задания ─────────────────────────────────────────────── */
