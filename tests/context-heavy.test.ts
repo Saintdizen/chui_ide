@@ -91,6 +91,35 @@ describe('порог тяжёлого контекста', () => {
     expect(contextPriceNote(200_000, 3, 50)).toContain('3 шагов');
   });
 
+  it('подпись о цене не обгоняет сокращение истории', () => {
+    // Замер 09.11 по `carried` в runs*.jsonl: на шаге 0 подпись объявляла
+    // 258.8k «в каждом шаге», а после свёртки ехало 20.3k — обещание было
+    // правдой ровно один шаг, хвост завышался в 12 раз. Дефект был в ПОРЯДКЕ
+    // в service.ts: подпись и `carried` считались до trimMessagesToFit и
+    // ageStaleResults. Тест сторожит порядок, а не формулу: он показывает,
+    // что два веса дают РАЗНУЮ подпись, и путать их нельзя.
+    // Пары ход-результат: `tool` без своего вызова границей не считается —
+    // не порвать протокол можно только на `user`, поэтому тяжёлый груз
+    // кладём в сами вопросы, как в жизни (файл в вопросе человека).
+    const raw = Array.from({ length: 30 }, (_, i) => ({
+      role: 'user' as const,
+      content: `вопрос ${i} ` + 'строка ввода '.repeat(400),
+    }));
+    const rawWeight = estimateMessagesTokens(raw);
+    const { messages: kept, dropped } = trimMessagesToFit(raw, {
+      limitTokens: HEAVY_CONTEXT_TOKENS,
+    });
+    const sentWeight = estimateMessagesTokens(kept);
+
+    expect(rawWeight).toBeGreaterThan(HEAVY_CONTEXT_TOKENS);
+    expect(dropped).toBeGreaterThan(0);
+    expect(sentWeight).toBeLessThan(rawWeight / 2);
+    // Та же формула на сырье и на отправляемом — разные обещания.
+    expect(contextPriceNote(rawWeight, 10, PRICE_PLAN_STEPS)).not.toBe(
+      contextPriceNote(sentWeight, 10, PRICE_PLAN_STEPS),
+    );
+  });
+
   it('тяжёлые настройки сворачивают больше обычных', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'heavy-'));
     const normal = Array.from({ length: 8 }, (_, i) => result(i));

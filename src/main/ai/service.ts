@@ -1484,7 +1484,9 @@ export class AiService {
       // на каждом шаге до конца прогона. Без цифры в журнале окупаемость
       // сокращений (п.7) считается только по `usage.prompt` — а он есть не у
       // всякого провайдера и включает кеш, т.е. про настоящую цену врёт.
-      stepLog.carried = contextTokens;
+      //
+      // Записывается НЕ тут, а после свёртки (ниже, `sentTokens`): здесь 258.8k —
+      // это вес истории ДО сокращений, а модель получит 20.3k.
       // Прогон чаще всего кончается раньше потолка (медиана 38 шагов при
       // потолке 500): цифра «ещё N шагов» должна говорить про реальный остаток,
       // иначе она врёт про сотни шагов, которых не будет. Берём минимум из
@@ -1501,14 +1503,10 @@ export class AiService {
       // Цена шага. Модель видит историю, но не её вес: каждый шаг несёт весь
       // контекст заново. Замер 09.11: медиана прогона 38 шагов и 8832 тк на
       // первом — одна лишняя тысяча в контексте платится тридцать раз.
-      // Строка вставляется только когда меняется САМА (шаг на 5k), иначе она
-      // сбивала бы кеш префикса на каждом шаге — то, от чего уходили в п.74.
-      const priceAt = Math.floor(contextTokens / 5000) * 5000;
-      if (priceAt !== lastPriceAt) {
-        lastPriceAt = priceAt;
-        const priceNote = contextPriceNote(contextTokens, stepsLeft, priceSteps);
-        if (priceNote) messages.push({ role: 'system', content: priceNote });
-      }
+      //
+      // Ставится ПОСЛЕ сокращений (ниже, 15xx): замер по `carried` показал,
+      // что на шаге 0 подпись объявляла 258.8k, а ехало после свёртки 20.3k.
+      // «258.8k в каждом шаге» было правдой ровно один шаг из пятидесяти.
       // Сокращаем посреди прогона, но не на каждом шаге: разрыв кеша стоит
       // дорого, и пока впереди мало шагов, он не окупится (`midRunTrimDue`).
       // Скажем модели числом, что изменилось: без цифры «что-то сократил»
@@ -1561,6 +1559,20 @@ export class AiService {
       });
       // Свёрнутый результат — уже не текст, а адрес: покрытие по нему станет врать.
       if (aged.aged > 0) pruneReads(coveredReads, liveSources(messages));
+      // Цена контекста — только теперь: `messages` — ровно то, что уйдёт
+      // провайдеру. Выше считался ВЕС ИСТОРИИ (258.8k), а едет после свёртки
+      // 20.3k: подпись «в каждом шаге» была правдой ровно один шаг.
+      // Строка меняется только на шаг 5k, иначе сбивала бы кеш префикса.
+      {
+        const sentTokens = estimateMessagesTokens(messages) + toolsTokens;
+        stepLog.carried = sentTokens;
+        const priceAt = Math.floor(sentTokens / 5000) * 5000;
+        if (priceAt !== lastPriceAt) {
+          lastPriceAt = priceAt;
+          const priceNote = contextPriceNote(sentTokens, stepsLeft, priceSteps);
+          if (priceNote) messages.push({ role: 'system', content: priceNote });
+        }
+      }
       const done = await this.streamStep(provider, {
         model: workModel,
         messages,
