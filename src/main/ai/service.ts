@@ -114,6 +114,7 @@ import {
   contextTrimmedMessage,
   HEAVY_CONTEXT_TOKENS,
   midRunTrimDue,
+  PRICE_PLAN_STEPS,
   stepCost,
 } from '../../shared/chat-budget';
 import { pricingAt } from '../../shared/providers';
@@ -1479,7 +1480,12 @@ export class AiService {
       // Окно модели говорит, сколько влезет, но не сколько это стоит: контекст
       // едет в каждом шаге прогона.
       const contextTokens = estimateMessagesTokens(messages) + toolsTokens;
-      const stepsLeft = Math.max(0, steps - runSteps);
+      // Прогон чаще всего кончается раньше потолка (медиана 38 шагов при
+      // потолке 500): цифра «ещё N шагов» должна говорить про реальный остаток,
+      // иначе она врёт про сотни шагов, которых не будет. Берём минимум из
+      // плана прогона и потолка — это и есть допустимый рост (PRICE_PLAN_STEPS).
+      const runPlan = Math.min(steps, PRICE_PLAN_STEPS);
+      const stepsLeft = Math.max(0, runPlan - runSteps);
       // Цена шага. Модель видит историю, но не её вес: каждый шаг несёт весь
       // контекст заново. Замер 09.11: медиана прогона 38 шагов и 8832 тк на
       // первом — одна лишняя тысяча в контексте платится тридцать раз.
