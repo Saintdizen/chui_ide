@@ -233,6 +233,10 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     title: 'Перейти к строке (Ctrl+G)',
     onClick: (event: Event) => deps.runCommand('editor.gotoLine', event.currentTarget as HTMLElement),
   });
+  // Редкие чипы живут свёрнутыми в «…» (см. `sparseItem` ниже): EOL, кодировка,
+  // отступы, невидимые символы и read-only меняются раз в правку, а место в
+  // строке занимали каждый день.
+  //
   // Конец строк переключается существующей командой; какой сейчас — решает
   // состояние, поэтому клик зовёт ту, которая НЕ текущая.
   const eolItem = h('button', {
@@ -374,6 +378,38 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   // Статус ассистента (одна кнопка «Информация о сессии»: значок режима, кольцо
   // контекста, искра) приходит из чата и встаёт последним — в правом углу полосы.
   const chatSlot = h('div', { class: 'status-chat' });
+  // «…» — ящик для редкого. Пять чипов (EOL, кодировка, отступы, невидимые
+  // символы, read-only) меняются раз в правку, но место в полосе держали каждый
+  // день. Свёрнуты в одну кнопку, а раскрытые стоят на своих местах: ничего не
+  // пропало, просто не кричит. Кнопка одна и не растёт: сколько бы чипов ни
+  // добавилось, ширина строки от этого не шевелится.
+  const sparseSlot = h('span', { class: 'status-sparse-slot', hidden: true });
+  const sparseItem = h(
+    'button',
+    {
+      class: 'status-item status-sparse',
+      type: 'button',
+      title: 'Ещё состояние файла: концы строк, кодировка, отступы',
+      'aria-label': 'Ещё состояние файла',
+      'aria-expanded': 'false',
+      // Клик раскрывает редкие чипы рядом с кнопкой, а не открывает меню: у EOL,
+      // отступов и кодировки свои попапы, и второй слой меню над ними не нужен.
+      onClick: () => toggleSparse(),
+    },
+    '…',
+  );
+
+  /** Раскрыть или свернуть редкие чипы. */
+  function toggleSparse(): void {
+    const open = sparseSlot.hidden;
+    sparseSlot.hidden = !open;
+    sparseItem.setAttribute('aria-expanded', String(open));
+  }
+
+  // Редкие чипы живут в слоте с самого начала: показать их — это снять `hidden`
+  // с обёртки, а не собирать дом заново. Раскрытые стоят на своих местах.
+  sparseSlot.append(eolItem, whitespaceItem, encodingItem, indentItem, readOnlyItem);
+
   const element = h(
     'div',
     // Полоса — это набор действий одной строкой. Без роли читалка видела набор кнопок
@@ -393,13 +429,10 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       problemsItem,
       versionItem,
       positionItem,
-      eolItem,
-      whitespaceItem,
-      encodingItem,
-      indentItem,
-      readOnlyItem,
       languageItem,
       lspItem,
+      sparseItem,
+      sparseSlot,
       // Окружение — прямо перед кнопкой «Информация о сессии»: так она стоит
       // крайней справа, а чип интерпретатора — слева от неё.
       envItem,
@@ -438,7 +471,9 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
             : 'Показаны все невидимые символы. Скрыть';
       whitespaceItem.setAttribute('aria-label', `${whitespaceItem.title}`);
     }
-    indentItem.textContent = state.useTabs ? `таб ${state.tabSize}` : `${state.tabSize} пробела`;
+    // Буква вместо слова: «2 пробела» против «2 с» — пять символов на каждое
+    // нажатие, а смысл несёт подсказка (`aria-label` ниже говорит словами).
+    indentItem.textContent = state.useTabs ? `таб ${state.tabSize}` : `${state.tabSize} с`;
     indentItem.setAttribute(
       'aria-label',
       state.useTabs
@@ -451,7 +486,9 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     lspItem.hidden = lsp === null;
     lspItem.classList.toggle('is-failed', Boolean(lsp?.failed));
     if (lsp) {
-      lspLabel.textContent = lsp.failed ? `${lsp.label}: нет сервера` : lsp.label;
+      // В полосе — только имя сервера. Слово «нет сервера» было длиннее самого
+      // имени и повторяло цвет `is-failed`; подробности ждут в подсказке.
+      lspLabel.textContent = lsp.label;
       lspItem.title = lsp.failed
         ? `Языковой сервер для «${lsp.language}» не поднялся: ${lsp.failed}`
         : `Языковой сервер: ${lsp.label} (${lsp.origin ? lspOriginLabel(lsp.origin) : 'источник неизвестен'})`;
@@ -492,14 +529,22 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     const formatter = state.formatter;
     formatterItem.hidden = formatter === null;
     if (formatter) {
-      formatterItem.textContent = `⛭ ${formatter.name}${formatter.off ? ' (выкл)' : ''}`;
+      // «(выкл)» ушло в подсказку: у чипа с форматтером есть цвет `is-off`,
+      // а слово занимало в полосе место дороже, чем давало.
+      formatterItem.textContent = `\u269b ${formatter.name}`;
+      formatterItem.title = formatter.off
+        ? `Профиль форматирования ${formatter.name} — выключен для этого файла. Клик: вкл/выкл`
+        : `Профиль форматирования ${formatter.name}. Клик: вкл/выкл для этого файла`;
       formatterItem.classList.toggle('is-off', formatter.off);
     }
 
     const lenses = state.lenses;
     lensItem.hidden = lenses === null;
     if (lenses) {
-      lensItem.textContent = lenses.on ? '❯ линзы' : '❯ линзы (выкл)';
+      // Выключенное состояние видно цветом: слово в скобках забирало ровно
+      // столько же места, сколько сам чип.
+      lensItem.textContent = '\u276f линзы';
+      lensItem.title = lenses.on ? 'Код-линзы показаны. Клик: скрыть' : 'Код-линзы скрыты. Клик: показать';
       lensItem.classList.toggle('is-off', !lenses.on);
     }
 

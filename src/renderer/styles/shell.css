@@ -69,6 +69,24 @@ button.status-item:focus-visible {
   color: var(--text_color_tertiary);
 }
 
+/* Редкие чипы: свёрнуты в кнопку «…». Раскрытые идут обычным потоком группы
+   и занимают место справа от самого чипа — ничего не прыгает в раскладке. */
+.status-sparse-slot {
+  display: contents;
+}
+
+/* Кнопка-развёртка не шире одного символа: она есть, но не спорит за место с
+   тем, что меняется часто. */
+.status-sparse {
+  min-width: 1.2em;
+  text-align: center;
+  letter-spacing: 0.05em;
+}
+
+.status-sparse[aria-expanded='true'] {
+  color: var(--text_color);
+}
+
 /* Прогресс языкового сервера: вертушка и подпись. Крутится, пока сервер занят, —
    так долгая индексация или поиск видно, и работа не выглядит зависанием. */
 .status-progress {

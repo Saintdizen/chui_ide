@@ -73,3 +73,39 @@ describe('статусная строка: клавиатура и читалк�
     expect(position?.getAttribute('aria-label')).toBe('Строка 12, столбец 3');
   });
 });
+
+/**
+ * Редкие чипы свёрнуты: EOL, отступы, невидимые символы, кодировка и read-only
+ * меняются раз в правку, а место занимали всегда. В полосе они по-прежнему
+ * есть — их раскрывает «…», и раскрытие не теряет ни чипа, ни действия.
+ */
+describe('статусная строка: свёрнутые редкие чипы', () => {
+  it('кнопка-развёртка есть, имя у неё словами, состояние объявлено', () => {
+    const root = bar();
+    const sparse = root.querySelector('.status-sparse');
+    expect(sparse).toBeTruthy();
+    expect(nameOf(sparse!)).toMatch(/\s/);
+    expect(sparse!.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('редкие чипы спрятаны, но не выброшены', () => {
+    const root = bar();
+    const slot = root.querySelector('.status-sparse-slot');
+    expect(slot).toBeTruthy();
+    expect((slot as HTMLElement).hidden).toBe(true);
+    // Содержимое осталось на месте: EOL, кодировка, отступы.
+    expect(slot!.querySelectorAll('.status-item').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('клик раскрывает и сворачивает обратно', () => {
+    const root = bar();
+    const sparse = root.querySelector('.status-sparse') as HTMLElement;
+    const slot = root.querySelector('.status-sparse-slot') as HTMLElement;
+    sparse.click();
+    expect(slot.hidden).toBe(false);
+    expect(sparse.getAttribute('aria-expanded')).toBe('true');
+    sparse.click();
+    expect(slot.hidden).toBe(true);
+    expect(sparse.getAttribute('aria-expanded')).toBe('false');
+  });
+});
