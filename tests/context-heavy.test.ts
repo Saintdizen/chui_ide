@@ -7,7 +7,7 @@ import type { ChatMessage } from '../src/shared/api';
 import { estimateMessagesTokens, trimMessagesToFit } from '../src/shared/context-fit';
 import {
   HEAVY_CONTEXT_TOKENS,
-  PRICE_STEPS_CAP,
+  PRICE_PLAN_STEPS,
   cacheBreakPaybackSteps,
   contextHeavyMessage,
   contextPriceNote,
@@ -67,15 +67,17 @@ describe('порог тяжёлого контекста', () => {
     expect(contextPriceNote(5000)).toContain('5k');
   });
 
-  it('цена хвоста считается по плану прогона, а не по потолку шагов', () => {
-    // 490 шагов — не план, а потолок: прогон кончится раньше, а строка
-    // «ещё 6630k» уже не правда. Хвост режется потолком PRICE_STEPS_CAP.
-    const long = contextPriceNote(14_400, 490);
-    expect(long).toContain('14.4k');
-    expect(long).toContain(`За оставшиеся ${PRICE_STEPS_CAP} шагов`);
-    expect(long).not.toContain('490');
+  it('цена хвоста не считается по потолку шагов', () => {
+    // Прогон живёт десятки шагов, а `steps` — потолок планировщика (500).
+    // Строка «ещё 200056k» на 500 шагах не расход, а выдумка: хвост молчит.
+    const long = contextPriceNote(400_100, 500);
+    expect(long).toContain('400.1k');
+    expect(long).not.toContain('как минимум');
+    expect(long).not.toContain('500');
     // В пределах плана хвост честный и остаётся.
     expect(contextPriceNote(14_400, 30)).toContain('432k');
+    // Шаг плана — уже хвост, предупреждаем: граница включительная.
+    expect(contextPriceNote(14_400, PRICE_PLAN_STEPS)).toContain('720k');
   });
 
   it('тяжёлые настройки сворачивают больше обычных', () => {
