@@ -808,6 +808,11 @@ function supersedePlan(args: string): string {
  *
  * Меняем сразу после шага и по ссылке, как тела правок (см. `condenseAppliedCalls`):
  * сжатие задним числом двигало бы середину префикса и сбивало кеш.
+ *
+ * `plan` живёт на дороге к каждому шагу и меняется по нескольку раз за прогон:
+ * посмотреть все прошлые версии — невосстановимая потеря, а не экономия. Сворачиваем
+ * только то, что действительно заменено — у чего появилась более новая версия в
+ * истории (см. `condenseHistoryCalls` берёт `keepId` последнего вызова).
  */
 export function condenseSupersededPlans(message: ChatMessage, keepId: string): ChatMessage {
   if (message.role !== 'assistant' || !message.toolCalls?.length) return message;
@@ -820,4 +825,34 @@ export function condenseSupersededPlans(message: ChatMessage, keepId: string): C
     return { ...call, arguments: args };
   });
   return changed ? { ...message, toolCalls } : message;
+}
+
+/**
+ * Та же свёртка тел правок, но по всей истории разом.
+ *
+ * `condenseAppliedCalls` трогает одно сообщение — и его надо звать на каждый
+ * ход. Иначе тело правки со второго хода и старше остаётся в контексте
+ * целиком, и плоское 79% вызовов `edit` (замер 09.11: 3.3 М символов)
+ * уезжает в каждом следующем запросе. Здесь проход по всем сообщениям
+ * с одной свёрткой, чтобы вызывающему не считать индексы.
+ *
+ * Идемпотентно: уже свёрнутое (`isCondensedArguments`) возвращается как есть,
+ * поэтому повторный вызов на следующем шаге не двигает префикс — кеш цел.
+ * Возвращает число изменённых сообщений, а не копию массива: правим на месте.
+ */
+export function condenseHistoryCalls(
+  messages: ChatMessage[],
+  appliedIds: ReadonlySet<string>,
+): number {
+  if (appliedIds.size === 0) return 0;
+  let changed = 0;
+  for (let index = 0; index < messages.length; index += 1) {
+    const current = messages[index];
+    if (!current) continue;
+    const next = condenseAppliedCalls(current, appliedIds);
+    if (next === current) continue;
+    messages[index] = next;
+    changed += 1;
+  }
+  return changed;
 }

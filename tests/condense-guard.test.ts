@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { ApplyEditsHostResult } from '../src/shared/api';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
-import { condenseAppliedCalls, condenseCallArguments, findCondenseMarker, isCondenseMarker } from '../src/shared/context-fit';
+import { condenseAppliedCalls, condenseCallArguments, condenseHistoryCalls, findCondenseMarker, isCondenseMarker } from '../src/shared/context-fit';
 
 const MARKER = '[применено: 57 стр. — текст в файле]';
 // Собираем в рантайме: в исходнике такая строка выглядит как порча, и статический
@@ -224,5 +224,48 @@ describe('сжатие аргументов не трогает команды',
     const item = args.edits[0];
     expect(isCondenseMarker(item.contents)).toBe(true);
     expect(item.path).toBe('/tmp/x.ts');
+  });
+});
+
+describe('свёртка всей истории: старые ходы больше не платят за тело правки', () => {
+  const call = (id: string, body: string) => ({
+    id,
+    name: 'apply_patch',
+    arguments: JSON.stringify({ patches: [{ path: `${id}.ts`, patches: [{ oldText: 'a', newText: body }] }] }),
+  });
+
+  it('сворачивает все прошлые ходы и возвращает число изменённых сообщений', () => {
+    const body = 'x'.repeat(600);
+    const messages = [
+      { role: 'assistant' as const, content: '', toolCalls: [call('a', body)] },
+      { role: 'tool' as const, content: 'ok', toolCallId: 'a' },
+      { role: 'assistant' as const, content: '', toolCalls: [call('b', body)] },
+      { role: 'tool' as const, content: 'ok', toolCallId: 'b' },
+      { role: 'assistant' as const, content: '', toolCalls: [call('c', body)] },
+    ];
+    const applied = new Set(['a', 'b']);
+    expect(condenseHistoryCalls(messages, applied)).toBe(2);
+    const size = (m: (typeof messages)[number]) => JSON.stringify(m.toolCalls ?? []).length;
+    // Оба старых хода сжаты, свежий (c) не тронут — на нём агент ещё работает.
+    expect(size(messages[0]!)).toBeLessThan(200);
+    expect(size(messages[2]!)).toBeLessThan(200);
+    expect(size(messages[4]!)).toBeGreaterThan(600);
+    expect(findCondenseMarker(JSON.parse(messages[0]!.toolCalls![0]!.arguments))).not.toBeNull();
+  });
+
+  it('повторный проход ничего не меняет: префикс запроса стабилен, кеш провайдера цел', () => {
+    const body = 'y'.repeat(600);
+    const messages = [{ role: 'assistant' as const, content: '', toolCalls: [call('a', body)] }];
+    expect(condenseHistoryCalls(messages, new Set(['a']))).toBe(1);
+    const first = JSON.stringify(messages[0]);
+    expect(condenseHistoryCalls(messages, new Set(['a']))).toBe(0);
+    expect(JSON.stringify(messages[0])).toBe(first);
+  });
+
+  it('без применённых правок ничего не трогает', () => {
+    const messages = [{ role: 'assistant' as const, content: '', toolCalls: [call('a', 'z'.repeat(600))] }];
+    const before = JSON.stringify(messages[0]);
+    expect(condenseHistoryCalls(messages, new Set())).toBe(0);
+    expect(JSON.stringify(messages[0])).toBe(before);
   });
 });

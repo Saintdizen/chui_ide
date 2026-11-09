@@ -54,7 +54,7 @@ import { PLAN_MODE_TOOLS, isReadOnlyCall, isCacheableReadCall, isWriteCall } fro
 import { canonicalCall } from '../../shared/tool-aliases';
 import { canRunTool, canUseWebSearch, narrowToolSpec, type ToolAvailability } from './available-tools';
 import {
-  condenseAppliedCalls,
+  condenseHistoryCalls,
   condenseSupersededPlans,
   answerReserve,
   estimateMessagesTokens,
@@ -2271,15 +2271,13 @@ export class AiService {
         for (const change of outcome.changes ?? []) touched.add(change.path);
       }
 
-      // Меняем только сообщение, которое уходит провайдеру: в `produced` (его
+      // Меняем только сообщения, которые уходят провайдеру: в `produced` (его
       // видит человек, и оно ложится в файл беседы) остаётся исходный текст.
-      // Делаем это сразу после шага, а не перед отправкой: аргументы прошлых
-      // ходов — часть префикса запроса, а префикс кеширует провайдер. Сжали один
-      // раз — и дальше префикс стабилен, кеш не слетает на каждом шаге.
-      if (appliedCalls.size > 0) {
-        const at = messages.lastIndexOf(assistant);
-        if (at >= 0) messages[at] = condenseAppliedCalls(assistant, appliedCalls);
-      }
+      // Проход по ВСЕЙ истории, а не по последнему сообщению: тело правки со
+      // второго хода и старше иначе едет целиком в каждом следующем запросе.
+      // Сразу после шага — аргументы прошлых ходов часть префикса, а префикс
+      // кеширует провайдер; сжали раз, и дальше префикс стабилен.
+      if (appliedCalls.size > 0) condenseHistoryCalls(messages, appliedCalls);
 
       // План в истории — только актуальный: `update_plan` присылает список целиком,
       // поэтому прежние версии — повтор того же текста, и он едет в каждом шаге.
