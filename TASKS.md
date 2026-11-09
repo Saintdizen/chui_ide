@@ -69,5 +69,3 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
     с ранжированием.
 67. Замер экономии: сводка токенов на сессию (вход/выход/кэш) в UI,
     чтобы каждый пункт экономии проверялся числом.
-
-## VII. Донабор по Cursor / Xcode / Neovim

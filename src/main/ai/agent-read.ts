@@ -7,6 +7,14 @@ import { spillHint } from './spill';
 import { estimateTextTokens } from '../../shared/context-fit';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { requireString } from './tool-args';
+import {
+  importsBlock,
+  indentationTree,
+  readModeArg,
+  treeMaxLines,
+  treeOffset,
+  type ReadMode,
+} from './agent-read-modes';
 import { MAX_READ_FILES, readDispatch } from './agent-lookup';
 import { relative } from './agent-terminal';
 import type { ToolContext, ToolOutcome } from './tool-context';
@@ -208,6 +216,12 @@ export async function readFile(ctx: ToolContext, args: Record<string, unknown>):
   // Отдать 60 000 символов начала длинного файла — это ~15 000 токенов вслепую:
   // конец всё равно не виден, а модель просит диапазоны наугад.
   if (startLine === undefined && endLine === undefined) {
+    // Режимы `indentation`/`imports`: каркас вместо головы. Явный режим работает и
+    // на коротком файле — модель попросила не текст, а структуру.
+    const mode = readModeArg(args);
+    if (mode !== 'lines' && (total > WHOLE_FILE_MAX_LINES || !isAbsent(args.mode))) {
+      return await readByMode(ctx, { mode, args, rel, target, allLines, total, stamp });
+    }
     if (total > WHOLE_FILE_MAX_LINES) {
       const prefix = readPrefix(ctx, allLines.slice(0, LONG_FILE_HEAD_LINES), 1);
       const outline = await fileOutlineText(ctx, target, content.text);
@@ -335,6 +349,91 @@ const MAX_READ_FILES_TOTAL_CHARS = MAX_OUTPUT_CHARS;
  * первого файла: остальное дешевле взять `read` с диапазоном по номеру строки.
  */
 const READ_FILES_PER_FILE_CHARS = 6_000;
+/**
+ * Длинный файл в режиме `indentation` или `imports`: каркас вместо головы.
+ *
+ * Голова в 120 строк называет файл, но о структуре молчит — и модель идёт просить
+ * диапазоны наугад. Дерево по отступам отвечает на «из чего он состоит» вдвое
+ * короче головы и не зависит от языкового сервера: отступы есть везде, где есть
+ * форматирование.
+ */
+async function readByMode(
+  ctx: ToolContext,
+  request: {
+    mode: ReadMode;
+    args: Record<string, unknown>;
+    rel: string;
+    target: string;
+    allLines: readonly string[];
+    total: number;
+    stamp: string;
+  },
+): Promise<ToolOutcome> {
+  const { mode, args, rel, allLines, total } = request;
+
+  if (mode === 'imports') {
+    const block = importsBlock(allLines);
+    if (block.count === 0) {
+      return {
+        ok: true,
+        summary: `${rel}: импортов нет`,
+        detail: `В ${rel} нет ни одной строки импорта. Оглавление — lsp, action: outline.`,
+      };
+    }
+    return {
+      ok: true,
+      summary: `${rel}: импорты, ${block.count} строк из ${total}`,
+      detail:
+        `Импорты ${rel} (строк в файле ${total}):\n` +
+        `${block.text}\n` +
+        'Дальше — read с startLine/endLine по нужному месту.',
+    };
+  }
+
+  const offset = treeOffset(args) ?? 1;
+  const tree = indentationTree(allLines, { maxLines: treeMaxLines(args), offset });
+
+  // Дерево пустое: файл из одних листьев (данные, плоский список). Каркаса нет —
+  // предлагать нечего, отдаём голову, как без режима.
+  if (tree.total === 0) return await readHead(ctx, request);
+
+  const shown =
+    tree.shown < tree.total
+      ? `уровни ${offset}–${offset - 1 + tree.shown} из ${tree.total}`
+      : `все уровни: ${tree.total}`;
+  return {
+    ok: true,
+    summary: `${rel}: каркас по отступам, ${tree.shown} строк из ${total}`,
+    detail:
+      `Каркас ${rel} по отступам (строк в файле ${total}, ${shown}). ` +
+      'Стрелка ▸ — у строки есть тело, которое в каркас не вошло.\n' +
+      `${tree.text}\n` +
+      'Тело — read с startLine/endLine, объявления по языковому серверу — lsp, action: outline.',
+  };
+}
+
+/** Голова длинного файла с оглавлением — то же, что `read` без режима. */
+async function readHead(
+  ctx: ToolContext,
+  request: { rel: string; target: string; allLines: readonly string[]; total: number; stamp: string },
+): Promise<ToolOutcome> {
+  const { rel, target, allLines, total, stamp } = request;
+  const prefix = readPrefix(ctx, allLines.slice(0, LONG_FILE_HEAD_LINES), 1);
+  const outline = await fileOutlineText(ctx, target, allLines.join('\n'));
+  const tail =
+    `… (файл длинный: строк всего ${total}, показаны первые ${prefix.last}). ` +
+    `Дальше — read с startLine с ${prefix.last + 1}` +
+    (outline ? `.\nОглавление:\n${outline}` : '.');
+  return {
+    ok: true,
+    summary: `${rel}: первые ${prefix.last} строк из ${total}`,
+    detail: `${prefix.text}\n${tail}`,
+    ...(prefix.last >= 1
+      ? { read: { path: target, from: 1, to: prefix.last, stamp, eof: prefix.last >= total } }
+      : {}),
+  };
+}
+
 
 /**
  * Пакетное чтение: 2–5 файлов за один шаг. Каждый файл получает те же номера

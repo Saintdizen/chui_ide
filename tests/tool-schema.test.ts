@@ -222,6 +222,9 @@ describe('описания аргументов', () => {
       `open: column. ${LINE_NUMBERING}`,
       `definition: usage line. ${LINE_NUMBERING}`,
       `definition: column. ${LINE_NUMBERING}`,
+      // Режим каркаса `read` (п.61): сколько строк дерева отдать и с какой начать.
+      'For `indentation`: how many lines of the tree to print.',
+      'For `indentation`: the tree row to start from. 1-based.',
     ]);
 
     const notes = AGENT_TOOLS.flatMap((tool) =>

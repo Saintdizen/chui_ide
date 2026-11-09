@@ -46,6 +46,83 @@ const symbols: SymbolSearch = {
 
 const read = (ctx: ToolContext) => runTool(ctx, 'read', JSON.stringify({ path: big }));
 
+describe('read: режимы каркаса', () => {
+  /** Файл с настоящей структурой: объявления, ветки, тела. */
+  async function structured(): Promise<string> {
+    const file = path.join(dir, 'tree.ts');
+    const rows: string[] = [];
+    for (let index = 1; index <= 120; index += 1) {
+      rows.push(
+        `export function step${index}(input: number): number {`,
+        '  if (input > 0) {',
+        '    return input * 2;',
+        '  }',
+        '  return 0;',
+        '}',
+      );
+    }
+    await fs.writeFile(file, rows.join('\n'), 'utf8');
+    return file;
+  }
+
+  it('mode=indentation отдаёт каркас без тел', async () => {
+    const file = await structured();
+    const outcome = await runTool({ workspace }, 'read', JSON.stringify({ path: file, mode: 'indentation' }));
+    const detail = String(outcome.detail ?? '');
+    expect(outcome.ok).toBe(true);
+    expect(detail).toContain('Каркас');
+    expect(detail).toContain('1 | export function step1(input: number): number {');
+    expect(detail).toContain('2 | if (input > 0) {');
+    expect(detail).not.toContain('return input * 2');
+    expect(outcome.summary).toContain('каркас по отступам');
+  });
+
+  it('в каркасе нет тел: строк меньше, чем в голове того же размера', async () => {
+    const file = await structured();
+    const tree = await runTool({ workspace }, 'read', JSON.stringify({ path: file, mode: 'indentation' }));
+    // 240 уровней по одной строке — против 720 строк исходника.
+    const lines = String(tree.detail).split('\n').length;
+    expect(lines).toBeLessThan(260);
+    expect(String(tree.detail)).not.toContain('return input * 2');
+    // По умолчанию отдаётся 200 уровней из 240: хвост файла — за offset.
+    expect(String(tree.detail)).toContain('step100');
+    expect(String(tree.detail)).toContain('уровни 1–200 из 240');
+  });
+
+  it('mode=imports отдаёт только зависимости', async () => {
+    const file = path.join(dir, 'deps.ts');
+    await fs.writeFile(
+      file,
+      ["import { a } from './a';", "import { b } from './b';", 'export const x = a + b;'].join('\n'),
+      'utf8',
+    );
+    const outcome = await runTool({ workspace }, 'read', JSON.stringify({ path: file, mode: 'imports' }));
+    expect(String(outcome.detail)).toContain("import { a } from './a';");
+    expect(String(outcome.detail)).not.toContain('export const x');
+  });
+
+  it('reжим применяется и к короткому файлу, если просили явно', async () => {
+    const file = path.join(dir, 'only-imports.ts');
+    await fs.writeFile(file, ["import { c } from './c';", 'export const y = c;'].join('\n'), 'utf8');
+    const outcome = await runTool({ workspace }, 'read', JSON.stringify({ path: file, mode: 'imports' }));
+    expect(String(outcome.detail)).toContain("import { c } from './c';");
+    expect(String(outcome.detail)).not.toContain('export const y');
+  });
+
+  it('опечатка в mode — отказ с подсказкой, а не тихий lines', async () => {
+    const file = await structured();
+    const outcome = await runTool({ workspace }, 'read', JSON.stringify({ path: file, mode: 'indent' }));
+    expect(outcome.ok).toBe(false);
+    expect(String(outcome.summary) + String(outcome.detail)).toMatch(/indentation/);
+  });
+
+  it('без mode длинный файл по-прежнему читается головой', async () => {
+    const file = await structured();
+    const outcome = await runTool({ workspace }, 'read', JSON.stringify({ path: file }));
+    expect(String(outcome.detail)).toContain('первые 120');
+  });
+});
+
 describe('read длинного файла', () => {
   it('отдаёт голову, а не первые 60 000 символов', async () => {
     const outcome = await read({ workspace });

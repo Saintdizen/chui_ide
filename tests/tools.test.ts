@@ -65,7 +65,17 @@ describe('read', () => {
     const tool = byName.get('read')!;
     expect(tool.side).toBe('main');
     expect(tool.inputSchema.required).toBeUndefined();
-    expect(Object.keys(tool.inputSchema.properties)).toEqual(['path', 'paths', 'startLine', 'endLine', 'force']);
+    // `mode`/`maxLines`/`offset` — каркас длинного файла (дерево по отступам).
+    expect(Object.keys(tool.inputSchema.properties)).toEqual([
+      'path',
+      'paths',
+      'startLine',
+      'endLine',
+      'mode',
+      'maxLines',
+      'offset',
+      'force',
+    ]);
     expect(tool.inputSchema.properties.paths?.type).toBe('array');
     expect(tool.inputSchema.properties.paths?.items?.type).toBe('string');
   });

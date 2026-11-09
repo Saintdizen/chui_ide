@@ -157,7 +157,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Read a file — whole, a line range (`startLine`/`endLine`) or several at once (`paths`, 2-5: one step instead of one call each). ' +
-      'Prefer a range around the spot. ' +
+      'Prefer a range around the spot. Long files: `mode` picks the whole file, indentation tree or imports map instead of the head. ' +
       'Output numbers are addresses for `startLine`/`endLine`, not file text: do not copy them into edit anchors.',
     inputSchema: {
       type: 'object',
@@ -175,6 +175,20 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         endLine: {
           type: 'number',
           description: 'Last line, inclusive.',
+        },
+        mode: {
+          type: 'string',
+          enum: ['lines', 'indentation', 'imports'],
+          description:
+            'Long file without a range: `lines` head (default), `indentation` tree keeping line numbers, `imports` only the import block.',
+        },
+        maxLines: {
+          type: 'number',
+          description: 'For `indentation`: how many lines of the tree to print.',
+        },
+        offset: {
+          type: 'number',
+          description: 'For `indentation`: the tree row to start from. 1-based.',
         },
         force: {
           type: 'boolean',
