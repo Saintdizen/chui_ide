@@ -138,11 +138,28 @@ function plural(count: number, one: string, few: string, many: string): string {
 /** Одна строка сводки: сколько прогонов, сколько ушло и что сломалось. */
 export function digestLine(digest: RunDigest): string {
   const parts = [plural(digest.runs, 'прогон', 'прогона', 'прогонов')];
+  const total = digest.tokens.prompt + digest.tokens.completion;
   if (digest.usageKnown) {
-    parts.push(`токенов ${digest.tokens.prompt + digest.tokens.completion}`);
+    parts.push(`токенов ${total}`);
+    // Из чего сложились токены: вход модели почти целиком — история беседы,
+    // и кэш показывает, сколько её не пришлось считать заново. Это не
+    // «экономия инструментов», а честная цена контекста.
+    if (digest.tokens.cached > 0) {
+      parts.push(`из них из кэша ${share(digest.tokens.cached, total)}`);
+    }
   }
-  if (digest.steps > 0) parts.push(plural(digest.steps, 'шаг', 'шага', 'шагов'));
+  if (digest.steps > 0) {
+    parts.push(plural(digest.steps, 'шаг', 'шага', 'шагов'));
+    // Токены на шаг — то, по чему видно, дорого ли обходится беседа: рост при
+    // том же числе шагов значит «контекст распух».
+    if (digest.usageKnown) parts.push(`${Math.round(total / digest.steps)} на шаг`);
+  }
   const failures = digest.failures.reduce((sum, item) => sum + item.count, 0);
   if (failures > 0) parts.push(plural(failures, 'сбой', 'сбоя', 'сбоев'));
   return parts.join(' · ');
+}
+
+/** Доля в процентах: `37%`. Ноль в знаменателе — не делим, а молчим. */
+function share(part: number, whole: number): string {
+  return whole === 0 ? '0%' : `${Math.round((part / whole) * 100)}%`;
 }

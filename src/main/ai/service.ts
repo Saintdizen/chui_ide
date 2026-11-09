@@ -68,7 +68,8 @@ import type { CommitPromptParts } from '../../shared/commit-message';
 import type { TestPromptParts } from '../../shared/test-generation';
 import type { ChatTitleParts } from '../../shared/chat-title';
 import { sandboxNote } from '../../shared/sandbox';
-import { forgetSearchCache } from './agent-search';
+import { forgetSearchCache, searchCacheStats } from './agent-search';
+import { savingsSummary, type SavingsSummary } from './savings';
 import { RepeatTracker } from './repeat-tracker';
 import {
   confirmFile,
@@ -334,6 +335,21 @@ export class AiService {
   /** Метрика экономии среза: сколько ответов свернули и сколько символов не отдали. */
   repeatStats(): { collapsed: number; savedChars: number } {
     return this.repeats.stats();
+  }
+
+  /**
+   * Сводка экономии по всем механизмам среза: кэш поиска и повторы ответов.
+   *
+   * Режимы `read` и дерево `list` экономию считают в момент ответа, но их
+   * счётчик живёт там же, где ответ, — здесь только то, что сервис видит сам.
+   */
+  savingsSummary(): SavingsSummary {
+    const cache = searchCacheStats();
+    const repeats = this.repeats.stats();
+    return savingsSummary([
+      { name: 'searchCache', chars: cache.savedChars, times: cache.hits },
+      { name: 'repeats', chars: repeats.savedChars, times: repeats.collapsed },
+    ]);
   }
 
   /** Отладочная сессия: общая с панелью, второй адаптер не поднимаем. */

@@ -130,6 +130,23 @@ describe('digestLine', () => {
     expect(line).toContain('1540');
   });
 
+  it('показывает, сколько входа взято из кэша провайдера', () => {
+    const [digest] = digestRuns([
+      record({
+        trace: {
+          steps: 2,
+          toolCalls: 1,
+          usage: { promptTokens: 8000, completionTokens: 200, cachedTokens: 4000 },
+        },
+      } as never),
+    ]);
+    const line = digestLine(digest!);
+    expect(line).toContain('из кэша');
+    expect(line).toContain('49%');
+    // Токены на шаг: 8200 / 2 — по ним видно, дорого ли идёт беседа.
+    expect(line).toContain('4100 на шаг');
+  });
+
   it('без токенов не выдумывает нули', () => {
     const [digest] = digestRuns([record({ trace: { steps: 1, toolCalls: 0, usage: {} } })]);
     expect(digestLine(digest!)).not.toContain('токен');

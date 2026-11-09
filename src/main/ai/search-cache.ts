@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { estimateTextTokens } from '../../shared/context-fit';
 
 /**
  * Кэш ответов поиска по содержимому: ключ запроса и версии файлов, где он нашёлся.
@@ -47,6 +48,11 @@ export interface SearchCacheStats {
   readonly misses: number;
   /** Сколько символов ответов не пришлось считать заново. */
   readonly savedChars: number;
+}
+
+/** То же в токенах: символы модель не считает, она платит за токены. */
+export function inTokens(stats: SearchCacheStats): SearchCacheStats & { savedTokens: number } {
+  return { ...stats, savedTokens: estimateTextTokens('x'.repeat(stats.savedChars)) };
 }
 
 /** Потолок записей: кэш — не архив, ему хватает нескольких десятков ответов. */
