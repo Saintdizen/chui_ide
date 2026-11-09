@@ -1557,3 +1557,105 @@
   border-radius: var(--radius_2xs);
   pointer-events: none;
 }
+
+/* Панель иерархии вызовов: дерево, которое раскрывается по клику.
+   Один уровень — в попапе; здесь нужна цепочка, поэтому вложенность
+   показывается отступом, а не отдельными окнами. */
+.call-tree-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.call-tree-title {
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.call-tree-dir {
+  padding: 2px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color_secondary);
+  font: inherit;
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+.call-tree-dir.is-active {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.call-tree-list {
+  padding: 6px 0;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.call-tree-root {
+  padding: 4px 10px;
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.call-tree-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 10px 2px 0;
+}
+
+.call-tree-row:hover {
+  background: var(--element_background_hover);
+}
+
+.call-tree-toggle {
+  width: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text_color_tertiary);
+  cursor: pointer;
+}
+
+.call-tree-name {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text_color);
+  font: inherit;
+  cursor: pointer;
+}
+
+.call-tree-name:hover {
+  text-decoration: underline;
+}
+
+.call-tree-detail {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Путь — справа: он подсказка, а не главное в строке. */
+.call-tree-path {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+}
+
+.call-tree-empty,
+.call-tree-loading {
+  padding: 4px 10px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.call-tree-status {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}

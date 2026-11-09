@@ -3,6 +3,8 @@ import { createSymbolPickers, type SymbolPickersDeps } from '../src/renderer/cor
 import { installMiniDom } from './helpers/mini-dom';
 
 const shown = vi.hoisted(() => vi.fn());
+// Иерархия вызовов теперь панелью, а не попапом: проверяем факт её открытия.
+const hierarchy = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => vi.fn());
 vi.mock('../src/renderer/ui/popup-menu', () => ({
   showPopupMenu: shown,
@@ -10,6 +12,7 @@ vi.mock('../src/renderer/ui/popup-menu', () => ({
   isPopupOpen: () => false,
 }));
 vi.mock('../src/renderer/ui/toast', () => ({ showToast: toast }));
+vi.mock('../src/renderer/ui/call-hierarchy-panel', () => ({ showCallHierarchy: hierarchy }));
 
 /** Заглушка, отвечающая на любой вызов и любой запрос свойства. */
 // biome-ignore lint/suspicious/noExplicitAny: заглушка отвечает на любой запрос
@@ -50,6 +53,7 @@ describe('symbol-pickers', () => {
   beforeEach(() => {
     shown.mockClear();
     toast.mockClear();
+    hierarchy.mockClear();
   });
 
   it('регистрирует все команды списков', () => {
@@ -77,10 +81,11 @@ describe('symbol-pickers', () => {
     await vi.waitFor(() => expect(rebuild).toHaveBeenCalledTimes(1));
   });
 
-  it('вызов без символа под курсором не бросает и не открывает список', async () => {
-    const handlers = register();
+  it('без открытого файла говорит об этом и панель не открывает', async () => {
+    const handlers = register({ editors: stub({ currentPath: null }) as never });
     await handlers.get('editor.callers')!();
-    expect(shown).not.toHaveBeenCalled();
+    expect(hierarchy).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalled();
   });
 });
 
@@ -158,8 +163,10 @@ describe('команды иерархии исполняются', () => {
     const built = build({ request: async () => null });
 
     built.commands.get('editor.callees')?.();
+    // Панель открывается сразу: она сама спросит сервер и покажет «не опознал
+    // символ», а не оставляет человека с пустым тостом.
     return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
-      expect(toast).toHaveBeenCalledWith(expect.stringContaining('языковой сервер'), 'error');
+      expect(hierarchy).toHaveBeenCalled();
     });
   });
 
@@ -181,7 +188,8 @@ describe('команды иерархии исполняются', () => {
 
     built.commands.get('editor.callers')?.();
     return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
-      expect(toast).toHaveBeenCalledWith('Никто не вызывает run');
+      // Панель открыта: пустоту списка она покажет сама, отдельной строкой.
+      expect(hierarchy).toHaveBeenCalled();
       expect(shown).not.toHaveBeenCalled();
     });
   });

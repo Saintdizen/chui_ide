@@ -1,7 +1,7 @@
 import { classMembers } from '../editor/complete/member-access';
 import { declarationOf, enclosingClassAt, overrideSnippet, paramsOf } from '../editor/complete/override';
 import { toOffset } from '../../shared/edits';
-import { fetchCallHierarchy, type CallDirection } from './call-hierarchy';
+import { showCallHierarchy } from '../ui/call-hierarchy-panel';
 import { fetchTypeHierarchy, type TypeDirection } from './type-hierarchy';
 import type { DefineCommand } from './command-args';
 import type { EditorWorkspace } from '../editor/host/editor-workspace';
@@ -55,52 +55,38 @@ export function createSymbolPickers(deps: SymbolPickersDeps) {
   }
 
   /**
-   * Иерархия вызовов символа: кто его вызывает или кого вызывает он. Показываем
-   * списком — тем же попапом, что и прочие переходы.
+   * Иерархия вызовов символа: кто его вызывает или кого вызывает он.
+   *
+   * Открываем ПАНЕЛЬ с деревом, а не попап: попап показывает один шаг, а
+   * вопрос обычно глубже — «откуда вообще идёт вызов». В панели узлы
+   * раскрываются по клику, и цепочка видна целиком.
    */
-  const openCallHierarchy = async (direction: CallDirection): Promise<void> => {
+  const openCallHierarchy = (direction: 'incoming' | 'outgoing'): void => {
     const path = editors.currentPath;
     if (!path) {
       showToast('Откройте файл', 'error');
       return;
     }
-    const position = editors.cursor();
-    const result = await fetchCallHierarchy(rpc, path, position, direction).catch(() => null);
-    if (!result) {
-      showToast('Сервер символов не отвечает: нужен языковой сервер для этого языка', 'error');
-      return;
-    }
-    if (result.calls.length === 0) {
-      showToast(
-        direction === 'incoming'
-          ? `Никто не вызывает ${result.symbol.name}`
-          : `${result.symbol.name} ничего не вызывает`,
-      );
-      return;
-    }
-
-    const rect = layout.editorHost.getBoundingClientRect();
-    const heading = direction === 'incoming' ? `Вызывают ${result.symbol.name}` : `${result.symbol.name} вызывает`;
-    showPopupMenu(
-      result.calls.map((target) => ({
-        label: target.name,
-        hint: `${workspace.relative(target.path)}:${target.line}`,
-        onSelect: () => void openPath(target.path).then(() => editors.reveal(target.path, target.line, target.column)),
-      })),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
+    showCallHierarchy(
+      {
+        rpc,
+        open: (target, line, column) => {
+          void openPath(target).then(() => editors.reveal(target, line, column));
+        },
+      },
+      path,
+      editors.cursor(),
+      direction,
     );
-    showToast(`${heading}: ${result.calls.length}`);
   };
 
   define(
     { id: 'editor.callers', title: 'Кто вызывает символ', category: 'Навигация' },
-    () => void openCallHierarchy('incoming'),
+    () => openCallHierarchy('incoming'),
   );
   define(
     { id: 'editor.callees', title: 'Кого вызывает символ', category: 'Навигация' },
-    () => void openCallHierarchy('outgoing'),
+    () => openCallHierarchy('outgoing'),
   );
 
   /**
