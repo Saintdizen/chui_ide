@@ -7,6 +7,7 @@ import type { ChatMessage } from '../src/shared/api';
 import { estimateMessagesTokens, trimMessagesToFit } from '../src/shared/context-fit';
 import {
   HEAVY_CONTEXT_TOKENS,
+  PRICE_STEPS_CAP,
   cacheBreakPaybackSteps,
   contextHeavyMessage,
   contextPriceNote,
@@ -64,6 +65,17 @@ describe('порог тяжёлого контекста', () => {
     expect(contextPriceNote(0, 5)).toBe('');
     // Без счёта шагов — только текущий вес.
     expect(contextPriceNote(5000)).toContain('5k');
+  });
+
+  it('цена хвоста считается по плану прогона, а не по потолку шагов', () => {
+    // 490 шагов — не план, а потолок: прогон кончится раньше, а строка
+    // «ещё 6630k» уже не правда. Хвост режется потолком PRICE_STEPS_CAP.
+    const long = contextPriceNote(14_400, 490);
+    expect(long).toContain('14.4k');
+    expect(long).toContain(`За оставшиеся ${PRICE_STEPS_CAP} шагов`);
+    expect(long).not.toContain('490');
+    // В пределах плана хвост честный и остаётся.
+    expect(contextPriceNote(14_400, 30)).toContain('432k');
   });
 
   it('тяжёлые настройки сворачивают больше обычных', () => {
