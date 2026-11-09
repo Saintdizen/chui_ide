@@ -7,7 +7,12 @@ type Run = (...args: unknown[]) => unknown;
 
 function setup(opts: { active?: { path: string } | null } = {}) {
   const commands = new Map<string, Run>();
-  const define: DefineCommand = (descriptor, handler) => commands.set(descriptor.id, handler);
+  /** Ключи команд: по ним проверяются сочетания — обработчик их не хранит. */
+  const keys = new Map<string, string | undefined>();
+  const define: DefineCommand = (descriptor, handler) => {
+    commands.set(descriptor.id, handler);
+    keys.set(descriptor.id, descriptor.keybinding);
+  };
   const log: string[] = [];
   const toasts: string[] = [];
   let uiScale = 1;
@@ -69,6 +74,7 @@ function setup(opts: { active?: { path: string } | null } = {}) {
     dock: {
       visible: true,
       activeId: 'problems',
+      tabIds: ['problems', 'terminal', 'tests'],
       height: 0,
       setHeight: (height: number) => log.push(`height:${height}`),
       show: (id: string) => log.push(`show:${id}`),
@@ -121,6 +127,7 @@ function setup(opts: { active?: { path: string } | null } = {}) {
   registerViewCommands(define, deps);
   return {
     commands,
+    keys,
     log,
     toasts,
     visible,
@@ -295,5 +302,36 @@ describe('registerViewCommands', () => {
     expect(f.log).toEqual(['split', 'sync']);
     run(f, 'view.splitEditorGrid');
     expect(f.log).toEqual(['split', 'sync', 'grid', 'sync']);
+  });
+});
+
+describe('панели по номерам', () => {
+  it('Ctrl+Alt+N открывает N-ю вкладку дока', () => {
+    const f = setup();
+    expect(f.keys.get('view.panel2')).toBe('Ctrl+Alt+2');
+    run(f, 'view.panel2');
+    expect(f.log).toContain('show:terminal');
+  });
+
+  it('первая и последняя существующая тоже открываются', () => {
+    const f = setup();
+    run(f, 'view.panel1');
+    run(f, 'view.panel3');
+    expect(f.log).toContain('show:problems');
+    expect(f.log).toContain('show:tests');
+  });
+
+  it('номера, которых нет, говорят об этом, а не глотают нажатие', () => {
+    const f = setup();
+    run(f, 'view.panel7');
+    expect(f.toasts.join(' ')).toContain('Панелей меньше 7');
+    expect(f.log.some((line) => line.startsWith('show:'))).toBe(false);
+  });
+
+  it('панель скрыта — сочетание её показывает', () => {
+    const f = setup();
+    f.visible.dock = false;
+    run(f, 'view.panel2');
+    expect(f.log).toContain('show:terminal');
   });
 });

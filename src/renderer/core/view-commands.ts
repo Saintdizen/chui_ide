@@ -127,6 +127,35 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
     deps.openGitManager(deps.statusBar.gitAnchor);
   });
 
+  /**
+   * Панели по номерам: `Ctrl+Alt+1..9` открывает N-ю вкладку дока.
+   *
+   * Номера не пишем на самих вкладках — они бы теснили заголовки, а панелей до
+   * десятка. Порядок совпадает с тем, что видит человек (`dock.tabIds`), и это
+   * единственное обещание: «третья» — третья слева. Панель скрыта — открываем:
+   * сочетание вызывают, чтобы увидеть, а не чтобы проверить, что её нет.
+   */
+  for (let index = 1; index <= 9; index += 1) {
+    define(
+      {
+        id: `view.panel${index}`,
+        title: `Панель ${index}`,
+        category: 'Вид',
+        keybinding: `Ctrl+Alt+${index}`,
+      },
+      () => {
+        const id = dock.tabIds[index - 1];
+        if (!id) {
+          // Панели с таким номером нет — говорим об этом, а не глотаем нажатие.
+          showToast(`Панелей меньше ${index}`);
+          return;
+        }
+        dock.show(id);
+        syncViewButtons();
+      },
+    );
+  }
+
   define({ id: 'view.toggleSidebar', title: 'Боковая панель', category: 'Вид', keybinding: 'Ctrl+B' }, () => {
     layout.setSidebarVisible(!layout.sidebarVisible);
     syncViewButtons();

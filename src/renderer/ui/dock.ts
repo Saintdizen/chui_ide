@@ -29,6 +29,14 @@ export interface DockView {
   refreshBadges(): void;
   readonly visible: boolean;
   readonly activeId: string | null;
+  /**
+   * Вкладки в порядке появления у левого края — те, что перебирают `Ctrl+Alt+1..9`.
+   *
+   * Порядок именно тот, что видит человек: номера на вкладках не пишем (они
+   * теснят заголовки), а обещать «девятая вкладка» можно только по порядку,
+   * который совпадает с клавиатурой.
+   */
+  readonly tabIds: readonly string[];
   /** Где была панель до дзена: по этому месту она и вернётся. */
   readonly height: number;
   setHeight(height: number): void;
@@ -196,6 +204,10 @@ export function createDock(): DockView {
     },
     get activeId() {
       return activeId;
+    },
+    get tabIds() {
+      // Порядок кнопок в шапке: `buttons` — `Map`, вставляет в порядке появления.
+      return [...buttons.keys()];
     },
     get height() {
       return stash ?? 0;
