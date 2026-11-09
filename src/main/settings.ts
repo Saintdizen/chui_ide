@@ -355,8 +355,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
     recentWindowHours: 24,
     // Игнорируемое приглушаем: это подсказка, а не запрет — файл остаётся виден.
     dimIgnored: true,
-    // Привычное поведение: двойной клик открывает, одинарный — выделяет.
-    openOnSingleClick: false,
+     // Привычное поведение: двойной клик открывает, одинарный — выделяет.
     // Файл из вкладки находим в дереве сами: иначе его ищут глазами.
     revealActiveFile: true,
     confirmDelete: true,

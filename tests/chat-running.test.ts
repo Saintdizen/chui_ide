@@ -30,7 +30,7 @@ describe('строка полосы', () => {
 
   it('длинный список укорачивается, но не молчит о хвосте', () => {
     expect(runningLabel(snapshot(['terminal', 'read', 'edit', 'search', 'web']))).toBe(
-      'terminal, read, edit и ещё 2 · 12 с',
+      'terminal +4 · 12 с',
     );
   });
 });
@@ -76,6 +76,11 @@ describe('полоса «что ещё идёт»', () => {
   });
 });
 
+/** Раскрыть список: в строке всегда виден один инструмент, остальные — по клику. */
+function expand(view: { element: HTMLElement }): void {
+  (view.element.querySelector('.chat-running-chip') as unknown as { click(): void }).click();
+}
+
 /**
  * Снять один вызов, не гася прогон: зависший терминал — обычная беда, а
  * прекращать из-за него весь ответ — терять остальную работу.
@@ -91,6 +96,7 @@ describe('снятие одного инструмента', () => {
 
     view.refresh();
     await vi.waitFor(() => expect(view.element.hidden).toBe(false));
+    expand(view);
 
     const drop = view.element.querySelectorAll('.chat-running-tool-drop')[0] as HTMLElement;
     drop.click();
@@ -105,14 +111,32 @@ describe('снятие одного инструмента', () => {
     });
     view.refresh();
     await vi.waitFor(() => expect(view.element.hidden).toBe(false));
+    expand(view);
     expect(view.element.querySelectorAll('.chat-running-tool-drop')).toHaveLength(3);
   });
 
   it('без обработчика кнопка есть, но не падает', async () => {
-    const view = createChatRunning({ snapshot: async () => snapshot(['terminal']), abort: () => undefined });
+    const view = createChatRunning({
+      snapshot: async () => snapshot(['terminal', 'read']),
+      abort: () => undefined,
+    });
     view.refresh();
     await vi.waitFor(() => expect(view.element.hidden).toBe(false));
+    expand(view);
     const drop = view.element.querySelector('.chat-running-tool-drop') as HTMLElement;
     expect(() => drop.click()).not.toThrow();
+  });
+
+  it('список сначала свёрнут, а один инструмент и не раскрывается', async () => {
+    const view = createChatRunning({
+      snapshot: async () => snapshot(['terminal']),
+      abort: () => undefined,
+    });
+    view.refresh();
+    await vi.waitFor(() => expect(view.element.hidden).toBe(false));
+
+    const chip = view.element.querySelector('.chat-running-chip') as HTMLButtonElement;
+    expect((view.element.querySelector('.chat-running-tools') as HTMLElement).hidden).toBe(true);
+    expect(chip.disabled).toBe(true);
   });
 });

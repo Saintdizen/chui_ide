@@ -121,12 +121,16 @@ describe('папка дерева говорит, раскрыта ли она',
     // отрисовку: без `aria-activedescendant` читалка не знает, какая строка
     // текущая, — и роль `tree` опять превращается в обещание без содержания.
     expect(EXPLORER).toMatch(/'aria-activedescendant': ''/);
-    expect(EXPLORER).toMatch(/setAttribute\('aria-activedescendant', selectedIndex < 0 \? '' : treeRowId\(selectedIndex\)\)/);
+    expect(EXPLORER).toMatch(/setAttribute\('aria-activedescendant', active < 0 \? '' : treeRowId\(active\)\)/);
     // Имя строки — от её места в наборе: индекс берётся у тех строк, что попали
     // в набор, а место в наборе считается по всему набору, не по окну.
     expect(EXPLORER).toMatch(/index === undefined \? \{\} : \{ id: treeRowId\(index\) \}/);
     // Строка, которой уже нет (свернули, отфильтровали), не называется.
     expect(EXPLORER).toMatch(/flatRows\.findIndex\(rowIsPath\(selected\)\)/);
+    // Место активной строки не ищется на каждой прокрутке: `renderWindow` зовётся
+    // на каждый кадр колеса, а `findIndex` по 26 000 строк там — лишняя работа.
+    // Индекс с мемо: пересчёт только по смене набора или выделения.
+    expect(EXPLORER).toMatch(/if \(indexCache === flatRows && indexCacheSelected === selected\) return indexCacheValue;/);
   });
 
   it('`Ctrl+Enter` на файле открывает в соседнюю панель', () => {

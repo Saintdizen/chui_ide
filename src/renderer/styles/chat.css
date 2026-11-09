@@ -2919,6 +2919,28 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Чип: в строке живёт одно имя, остальные — по клику. Без рамки, чтобы в
+   статус-баре не читался как кнопка рядом с системными значками. */
+.chat-running-chip {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-running-chip:disabled {
+  cursor: default;
+}
+
+.chat-running-chip-open .chat-running-label {
+  color: var(--text_color);
+}
+
 .chat-running-stop {
   border: none;
   background: none;
@@ -3442,12 +3464,21 @@
 
 /* Список инструментов прогона: кто именно идёт, и крестик у каждого — снять
    один вызов, не гася остальной ответ. */
+/* Раскрытый список идёт ВТОРОЙ строкой под чипом, а не в ряд с ним:
+   статус-бар низкий, и горизонтальный ряд расширял бы его вправо до чужих
+   значков. */
+.chat-running {
+   flex-wrap: wrap;
+   row-gap: 2px;
+ }
+
 .chat-running-tools {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-left: 8px;
-}
+   display: flex;
+   flex-wrap: wrap;
+   gap: 4px;
+   margin-left: 0;
+   width: 100%;
+ }
 
 .chat-running-tool {
   display: inline-flex;

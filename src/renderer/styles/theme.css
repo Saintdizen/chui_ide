@@ -314,6 +314,13 @@
   --git_conflicted: #ff9230;
 
   --focus_ring_color: var(--blue_prime_background);
+  /* Полоса прокрутки: дорожка прозрачная, бегунок — серый, светлее на hover и active.
+     Ровно те же значения лежат в `core/theme.ts` (`chrome.scrollbar/scrollbarHover/
+     scrollbarActive`) для тем из файла — менять в обоих местах. */
+  --scrollbar_thumb: #4a4a4d;
+  --scrollbar_thumb_hover: #6a6a6e;
+  --scrollbar_thumb_active: #8a8a90;
+  --scrollbar_track: transparent;
   /* Ссылка и цветной текст — тот же синий акцент, но на ступень светлее: ровно
      #0091ff текстом на попапе (#2d2d30) даёт 4.25:1, а AA требует 4.5. Разница
      в семь единиц зелёного глазом не видна, а контраст проходит. */

@@ -1929,10 +1929,6 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Поведение'),
-      switchRow('Открывать файл одним кликом', explorer.openOnSingleClick, (value) =>
-        apply({ openOnSingleClick: value }),
-      ),
-      h('div', { class: 'field-hint' }, 'Выключено: одинарный клик выделяет, двойной открывает.'),
       switchRow('Показывать активный файл в дереве', explorer.revealActiveFile, (value) =>
         apply({ revealActiveFile: value }),
       ),

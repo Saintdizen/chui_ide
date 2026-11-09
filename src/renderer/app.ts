@@ -179,7 +179,6 @@ import { createEmptyState } from "./ui/empty-state";
 import { createImageView } from "./ui/image-view";
 import { createBrowserView } from "./ui/browser-view";
 import { createExplorer } from "./ui/explorer";
-import { createOpenEditorsBlock } from "./ui/open-editors-block";
 import { createArtifactsBlock } from "./ui/artifacts-block";
 import { createRunArtifacts } from "./core/artifacts";
 import { mountProjectSelect } from "./ui/project-select";
@@ -1251,11 +1250,8 @@ export async function startApplication(
       if (!editors.isSplit) editors.splitEditor();
     },
   });
-  // Список открытых файлов над деревом: по нему видно, что открыто и что не сохранено,
-  // не глядя на полосу вкладок наверху. Как в VS Code — первым в боковой панели.
-  layout.sidebarBody.appendChild(
-    createOpenEditorsBlock({ openEditors, documents, commands }).element,
-  );
+  // Список открытых файлов живёт в полосе вкладок самого редактора — второй,
+  // дублирующий список в боковой панели убран: один файл давал две записи.
   // Артефакты прогона — рядом с редактором, а не только в ленте чата.
   layout.sidebarBody.appendChild(
     createArtifactsBlock({ artifacts: runArtifacts, commands }).element,
@@ -3036,6 +3032,7 @@ export async function startApplication(
     // Документ Office — не текст, а zip с XML: в буфере редактора оказался бы бинарь.
     // Заглушка нужна вкладке, дереву и статусбару, а содержимое рисует свой экран.
     if (isOfficePath(path)) {
+      // Документ-заглушка: текста в нём нет и быть не должно (см. `binaryDocument`).
       const document = edits.binaryDocument(path);
       openEditors.open(document, options);
       explorer.reveal(path);
@@ -3053,6 +3050,9 @@ export async function startApplication(
       return;
     }
     const document = await edits.ensureDocument(path);
+    // Оба вызова обязательны и не дублируют друг друга: `openEditors.open` ведёт реестр
+    // вкладок и ставит активный путь (от него зависит показ — см. `applySurfaces`),
+    // а `editors.open` показывает текст в панели.
     openEditors.open(document, options);
     editors.open(document);
     explorer.reveal(path);

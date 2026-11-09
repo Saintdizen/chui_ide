@@ -755,6 +755,39 @@ function fileURLToPathSafe(uri: string): string | null {
   }
 }
 
+/** Потолок на тело текста в журнале трассировки. */
+const TRACE_TEXT_LIMIT = 2000;
+
+/**
+ * Урезать длинные строки в теле сообщения ПЕРЕД записью в журнал.
+ *
+ * Зачем: `textDocument/didOpen` тащит весь файл целиком. Журнал одного
+ * часа работы по проекту на 1700 файлов вырос до 3.8 ГБ, и каждое открытие
+ * файла дописывало в него ещё немного. Урезаем только то, что пишем мы —
+ * сервер получает сообщение полностью и целым.
+ */
+function shrinkTraceText(message: unknown): unknown {
+  const walk = (value: unknown, depth: number): unknown => {
+    if (typeof value === 'string') {
+      return value.length > TRACE_TEXT_LIMIT
+        ? `${value.slice(0, TRACE_TEXT_LIMIT)}… [ещё ${value.length - TRACE_TEXT_LIMIT} симв]`
+        : value;
+    }
+    if (depth > 6 || value === null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map((item) => walk(item, depth + 1));
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = walk(item, depth + 1);
+    }
+    return out;
+  };
+  try {
+    return walk(message, 0);
+  } catch {
+    return message;
+  }
+}
+
 /**
  * Пересчёт колонки одной диагностики из кодировки сервера в наши `utf-16`.
  * Строка — из `latestText` (открыт) или с диска; не прочли — как есть.
@@ -2006,7 +2039,7 @@ export class LspService {
     if (!file) return;
     // Подпись сервера — часть строки: в журнале живут все серверы сразу, и без
     // неё две одинаковые строки от python и go неразличимы.
-    const line = `${JSON.stringify({ at: new Date().toISOString(), direction, server, message })}\n`;
+    const line = `${JSON.stringify({ at: new Date().toISOString(), direction, server, message: shrinkTraceText(message) })}\n`;
     // Пишем не дожидаясь: журнал не должен задерживать сам обмен.
     void appendFile(file, line, 'utf8').catch(() => undefined);
   }
@@ -2027,6 +2060,26 @@ export class LspService {
     const runtime = await this.runtimeFor(language, this.rootForPath(path));
     if (!runtime) return null;
     await runtime.initialized.catch(() => undefined);
+    // Документ должен быть УЖЕ открыт в этом сервере. `didOpen` шлёт `open`, но
+    // он идёт от renderer отдельным запросом: к моменту подсказки его может ещё не
+    // быть, а после перезапуска сервера — и не будет вовсе (`openedIn` пуст).
+    // Сервер на запрос по неоткрытому документу отвечает ошибкой
+    // «File not opened in the editor» (tsserver) и подсказок не даёт. Поэтому
+    // открываем сами — текстом, который уже знаем (`latestText`).
+    if (this.openedIn.get(path) !== runtime) {
+      const text = this.latestText.get(path);
+      if (text === undefined) return null;
+      this.openedIn.set(path, runtime);
+      runtime.versions.set(path, 1);
+      runtime.connection.notify('textDocument/didOpen', {
+        textDocument: {
+          uri: pathToFileURL(path).toString(),
+          languageId: this.languageOfPath.get(path) ?? language,
+          version: 1,
+          text,
+        },
+      });
+    }
     // Ключ отмены — «этот файл, этот вид запроса»: свежий вытесняет устаревший.
     const cancelKey = CANCELLABLE_METHODS.has(method) ? `${path}\u0000${method}` : undefined;
     try {

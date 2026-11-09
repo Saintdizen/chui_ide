@@ -2275,9 +2275,13 @@ export class AiService {
     // Отмена (например, пока пользователь решал судьбу правок) — это не
     // «лимит шагов»: возвращаем то, что успели, без лишней приписки.
     if (signal.aborted) {
-      produced.push({ role: 'assistant', content: text });
+      // Тот же `stripCallMarkup`, что и в штатных ветках (`:1639`, `:1691`):
+      // отмена почти всегда приходит посреди стрима, и обрывок разметки вызова
+      // иначе останется в ветке беседы как реплика модели.
+      const stoppedText = stripCallMarkup(text);
+      produced.push({ role: 'assistant', content: stoppedText });
       return {
-        text,
+        text: stoppedText,
         finishReason,
         usage,
         trace: trace(),

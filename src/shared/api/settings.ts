@@ -376,8 +376,6 @@ export interface ExplorerSettings {
   recentWindowHours: number;
   /** Приглушать игнорируемые git файлы и папки: их видно, но они не мешают. */
   dimIgnored: boolean;
-  /** Открывать файл одним кликом (иначе — двойным). */
-  openOnSingleClick: boolean;
   /**
    * Уводить дерево к файлу, который стал активным в редакторе: переключили вкладку —
    * дерево само раскрыло его папки и прокрутило к строке. Выключено — дерево стоит на месте.
@@ -445,7 +443,6 @@ export interface ExplorerRootOverride {
   folderChangeDot?: boolean;
   recentChanges?: boolean;
   dimIgnored?: boolean;
-  openOnSingleClick?: boolean;
   confirmDelete?: boolean;
   exclude?: string[];
   fileNesting?: boolean;

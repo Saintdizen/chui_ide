@@ -40,8 +40,11 @@ export interface ChatRunningView {
   dispose(): void;
 }
 
-/** Сколько имён влезает в строку: длинный список не поместится. */
-const MAX_NAMES = 3;
+/**
+ * Сколько имён видно в строке всегда. Остальные — по клику: полоса живёт
+ * в статус-баре, где каждый символ отнимает место у настоящего статуса.
+ */
+const MAX_NAMES = 1;
 
 /** Возраст словами: «12 с», «1 мин 20 с». */
 export function runningAge(ms: number): string {
@@ -57,7 +60,7 @@ export function runningLabel(snapshot: RunningSnapshot | null): string {
   if (!snapshot || snapshot.tools.length === 0) return '';
   const names = snapshot.tools.flatMap((entry) => entry.names);
   const head = names.slice(0, MAX_NAMES).join(', ');
-  const tail = names.length > MAX_NAMES ? ` и ещё ${names.length - MAX_NAMES}` : '';
+  const tail = names.length > MAX_NAMES ? ` +${names.length - MAX_NAMES}` : '';
   const oldest = Math.max(...snapshot.tools.map((entry) => entry.runningMs));
   return `${head}${tail} · ${runningAge(oldest)}`;
 }
@@ -75,20 +78,45 @@ export function createChatRunning(deps: ChatRunningDeps): ChatRunningView {
       'aria-label': 'Остановить идущие инструменты',
       onclick: () => deps.abort(),
     },
-    'остановить',
+    'стоп',
   );
   // Список поимённо: сводка «идёт 2 · 40 с» не говорит, что именно висит, а
-  // гасить хочется конкретное. Отдельной строкой на каждый инструмент.
+  // гасить хочется конкретное. Скрыт по умолчанию: полоса живёт в статус-баре,
+  // и раскрытый список отнимал бы место у статуса постоянно, а не по нужде.
   const perTool = h('div', { class: 'chat-running-tools' });
-  const element = h('div', { class: 'chat-running' }, label, perTool, stopButton);
+  perTool.hidden = true;
+  // Чип целиком раскрывает список. Кликается только когда инструментов больше
+  // одного — при одном имя уже видно в строке, раскрывать нечего.
+  const chip = h(
+    'button',
+    {
+      class: 'chat-running-chip',
+      type: 'button',
+      title: 'Что ещё идёт',
+      'aria-label': 'Показать идущие инструменты',
+      'aria-expanded': 'false',
+      onclick: () => setExpanded(!expanded),
+    },
+    label,
+  );
+  const element = h('div', { class: 'chat-running' }, chip, stopButton, perTool);
   element.hidden = true;
+
+  let disposed = false;
+  /** Пока идёт запрос, второй не начинается: опрос не должен плодить их пачкой. */
+  let inFlight = false;
 
   /** Последний снимок и момент, когда он пришёл: от него считается возраст. */
   let latest: { snapshot: RunningSnapshot; at: number } | null = null;
   let timer: number | null = null;
-  let disposed = false;
-  /** Пока идёт запрос, второй не начинается: опрос не должен плодить их пачкой. */
-  let inFlight = false;
+  let expanded = false;
+
+  function setExpanded(on: boolean): void {
+    expanded = on;
+    chip.setAttribute('aria-expanded', on ? 'true' : 'false');
+    chip.classList.toggle('chat-running-chip-open', on);
+    if (latest) paintTools(latest.snapshot);
+  }
 
   function paint(): void {
     if (!latest) {
@@ -105,6 +133,17 @@ export function createChatRunning(deps: ChatRunningDeps): ChatRunningView {
     const text = runningLabel(grown);
     element.hidden = text === '';
     if (text) label.textContent = text;
+    // Раскрывать нечего — не оставляем пустого чипа-обманки.
+    const count = grown.tools.reduce((sum, entry) => sum + entry.names.length, 0);
+    chip.disabled = count <= 1;
+    if (count <= 1 && expanded) setExpanded(false);
+    // В строке видно только MAX_NAMES имён: если есть скрытые — говорим числом,
+    // что они есть, иначе строка молчит о работе, которую не показала.
+    if (count > MAX_NAMES) {
+      chip.title = `${count} инструментов идёт — нажмите, чтобы раскрыть`;
+    } else {
+      chip.title = 'Что ещё идёт';
+    }
     paintTools(snapshot);
   }
 
@@ -118,6 +157,13 @@ export function createChatRunning(deps: ChatRunningDeps): ChatRunningView {
     const entries = snapshot.tools.flatMap((run) =>
       run.names.map((name) => ({ callId: run.callId, name })),
     );
+    // Список скрыт — не строим вовсе. Иначе на каждый опрос (раз в секунду)
+    // создавались бы узлы, которые никто не видит.
+    if (!expanded || entries.length === 0) {
+      perTool.hidden = true;
+      shownKey = '';
+      return;
+    }
     const key = entries.map((entry) => `${entry.callId}:${entry.name}`).join('|');
     if (key === shownKey) return;
     shownKey = key;
@@ -141,7 +187,7 @@ export function createChatRunning(deps: ChatRunningDeps): ChatRunningView {
         ),
       ),
     );
-    perTool.hidden = entries.length === 0;
+    perTool.hidden = false;
   }
 
   function refresh(): void {
@@ -173,6 +219,8 @@ export function createChatRunning(deps: ChatRunningDeps): ChatRunningView {
       window.clearInterval(timer);
       timer = null;
       latest = null;
+      // Работа кончилась — раскрытый список превратился бы в память о ней.
+      setExpanded(false);
       paint();
     }
   }

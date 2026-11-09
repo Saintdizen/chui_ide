@@ -445,6 +445,11 @@ export function themeCssVariables(): Record<string, string> {
     '--git_added': cssHex(chrome.added),
     '--git_modified': cssHex(chrome.modified),
     '--git_deleted': cssHex(chrome.deleted),
+    // Бегунок полосы прокрутки. Без этих строк тема из файла давала системные
+    // скроллбары Chromium: цвета в ролях были, а до CSS не доезжали.
+    '--scrollbar_thumb': cssHex(chrome.scrollbar),
+    '--scrollbar_thumb_hover': cssHex(chrome.scrollbarHover),
+    '--scrollbar_thumb_active': cssHex(chrome.scrollbarActive),
   };
 }
 

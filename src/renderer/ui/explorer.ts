@@ -185,8 +185,7 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   folderChangeDot: true,
   recentChanges: true,
   recentWindowHours: 24,
-  dimIgnored: true,
-  openOnSingleClick: false,
+   dimIgnored: true,
   // Автораскрытие — включено: так ведёт себя Zed, и без него файл из вкладки
   // приходится искать глазами по всему дереву.
   revealActiveFile: true,
@@ -1570,26 +1569,29 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       return row;
     }
 
+    // Порядок событий у двойного клика — `click`, `click`, `dblclick`.
+    // Поэтому НИ ОДИН из обработчиков ниже не имеет права пересоздавать строку:
+    // `render()` (host.replaceChildren) уничтожил бы узел, по которому кликнули,
+    // и второй `click` ушёл бы в пустоту, а `dblclick` не родился бы вовсе —
+    // он требует, чтобы оба клика пришлись по одному узлу.
+    // Значит: выделение — только классами (узел жив), раскрытие и открытие —
+    // только по `dblclick` (там уже всё равно, что строка сменится).
     row.addEventListener('click', (event) => {
       // Ctrl/Cmd — точечно (добавить или снять), Shift — диапазон от якоря,
       // обычный клик — одна строка. Порядок строк — тот, что сейчас на экране.
       const mode: TreeClickMode = event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single';
       selection = clickSelection(selection, visibleNow, entry.path, mode);
       selected = selection.anchor;
-      // Перерисовка ниже уничтожит строку вместе с фокусом, а он нужен, чтобы
-      // работали F2 и Del. Просим вернуть фокус дереву ровно один раз — на
-      // ближайшей отрисовке, а не на каждой (иначе фокус выдёргивался бы из
-      // редактора при любом обновлении дерева).
-      refocusTreeOnce = true;
-      // Папка раскрывается всегда одним кликом (так работает стрелка),
-      // а файл — по настройке: двойным кликом или одинарным.
-      // Одиночный клик открывает файл «на посмотреть» (вкладку-предпросмотр):
-      // навигация по дереву не должна плодить вкладки. Двойной — «насовсем».
-      if (isDirectory || options.openOnSingleClick) void onClick(entry, !isDirectory && options.openOnSingleClick);
-      else render();
+      paintSelection();
     });
     row.addEventListener('dblclick', () => {
-      if (!isDirectory) void onClick(entry, false);
+      // Двойной клик — действие: файл открывается (всегда новой вкладкой),
+      // папка раскрывается или закрывается. Перерисовка здесь безопасна:
+      // двойной клик уже состоялся. Фокус уводит сам file.open, поэтому дереву
+      // его не возвращаем — `refocusTreeOnce` гасим, чтобы его не выдернуло
+      // случайной перерисовкой позже.
+      refocusTreeOnce = false;
+      void onClick(entry, false);
     });
     row.addEventListener('contextmenu', (event) => openMenu(entry, event));
     // Перетаскивание: путь уходит и в буфер (панель ассистента приложит его
@@ -2205,22 +2207,26 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     (row: FlatRow): boolean =>
       row.kind === 'entry' && row.entry.path === path;
 
+  // Набор строк поменялся — заново считаем всё, что от него зависит: таблицу мест
+  // для читалки и место активной строки. Обе величины нужны `renderWindow`, но
+  // меняются только вместе с набором, а не с прокруткой: считать их в `renderWindow`
+  // значило бы перебирать все 26 000 строк на каждый кадр колеса.
+
+
   const renderWindow = (): void => {
     const host = rowsHost;
     const scroller = treeEl;
     if (!host || !scroller) return;
-    // Таблицу мест считаем ЗДЕСЬ: строки рисуются из `flatRows`, и место строки
-    // в наборе зависит от всего набора, а не от окна (`renderWindow` рисует лишь
-    // видимую часть).
-    ariaPlaces = ariaTable();
 
     const total = flatRows.length;
     const viewport = scroller.clientHeight;
 
     // Текущая строка меняется вместе с набором: назвать читалке строку, которой
     // уже нет (её свернули или отфильтровали), — хуже, чем не назвать никакой.
-    const selectedIndex = selected === null ? -1 : flatRows.findIndex(rowIsPath(selected));
-    scroller.setAttribute('aria-activedescendant', selectedIndex < 0 ? '' : treeRowId(selectedIndex));
+    // Индекс берём готовым: его ставит `reindexRows` вместе с набором.
+    // `indexOfSelected` мемоизирован: прокрутка набор не меняет и цена — чтение поля.
+    const active = indexOfSelected();
+    scroller.setAttribute('aria-activedescendant', active < 0 ? '' : treeRowId(active));
 
     const paintRange = (first: number, last: number, stride: number): void => {
       const fragment = document.createDocumentFragment();
@@ -2246,8 +2252,17 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     }
 
     const stride = rowStride > 0 ? rowStride : 24;
-    // Начало списка внутри прокрутки: над ним — отступ дерева и закреплённые строки.
-    const scrolled = Math.max(0, scroller.scrollTop - host.offsetTop);
+    // `padding-top` у `.tree` — место над крошками. `scrollTop` считает прокрутку от
+    // края содержимого, `clientHeight` — от края рамки, поэтому высоту отступа надо знать,
+    // чтобы верхняя распорка `gap` совпадала с реально уехавшим текстом.
+    const treePaddingTop = parseFloat(getComputedStyle(scroller).paddingTop) || 0;
+    // Насколько список заехал под верх окна. Верх базы — НЕ верх `host`: `host`
+    // (`.tree-rows`) стоит в потоке ПОД липкими крошками, и разница с ним вычитала их
+    // высоту — на прокрутке это давало короткую верхнюю распорку и недостроенные строки
+    // (та самая пустая полоса, которая не убиралась никаким CSS). База — верх содержимого
+    // `.tree` (без его `padding-top`). `scrollTop` надёжнее `offsetTop`: тот отсчитывается
+    // от ближайшего позиционированного предка и подмешивал смещение всей панели.
+    const scrolled = Math.max(0, scroller.scrollTop - treePaddingTop);
     const window = computeWindow(total, scrolled, viewport, stride);
     paintRange(window.first, window.last, stride);
     renderCrumbs(window.first);
@@ -2427,10 +2442,32 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    * файлов, случившиеся за это время, применяются следующим проходом после
    * завершения ввода. Сами рисующие вызовы идут через `paint`.
    */
+  /**
+   * Перекраска выделения БЕЗ пересоздания строк.
+   *
+   * Нужна именно такая, а не `render()`: двойной клик — это `click`, `click`,
+   * `dblclick`, и перерисовка на клике убила бы узел, по которому кликнули, —
+   * тогда `dblclick` не родился бы вовсе (ему нужен один и тот же узел дважды).
+   * Поэтому выделение рисуем классами на живых строках: `dataset.path` есть
+   * у каждой, по нему и находим.
+   */
+  const paintSelection = (): void => {
+    const paths = new Set(selection.paths);
+    for (const row of element.querySelectorAll<HTMLElement>('.tree-row[data-path]')) {
+      const path = row.dataset.path ?? '';
+      const isIn = paths.has(path);
+      row.classList.toggle('is-selected', isIn);
+      row.classList.toggle('is-anchor', isIn && path === selection.anchor);
+      row.setAttribute('aria-selected', isIn ? 'true' : 'false');
+    }
+  };
+
   const render = (): void => {
     if (inlineEdit) return;
     paint();
   };
+
+
 
   const paint = (): void => {
     clear(element);
@@ -2492,6 +2529,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             // Перерисовываем только список: заголовок и закреплённые строки от
             // запроса не зависят, а их пересборка на каждый символ заметна.
             flatRows = buildFlat(info);
+            reindexRows();
             visibleNow = [];
             for (const row of flatRows) {
               if (row.kind === 'entry' && !row.deleted) visibleNow.push(row.entry.path);
@@ -2613,9 +2651,20 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     tree.addEventListener('focusout', onFocusChange);
     // Прокрутили — рисуем другое окно строк. Полную перерисовку не делаем: иначе
     // на каждой прокрутке пересобирались бы заголовок панели и закреплённые строки.
+    //
+    // Сам рисовать в обработчике нельзя: колесо и трекпад шлют события чаще кадра
+    // (легко 60–120 в секунду), а `renderWindow` тянет раскладку и пересоздаёт
+    // ВСЁ окно строк через `replaceChildren`. Браузер не успевал отдать кадр —
+    // прокрутка шла рывками. Сводим к одному рисованию на кадр: десяток событий
+    // подряд схлопывается в одну отрисовку, и она берёт СВЕЖИЙ `scrollTop`.
+    let scrollFrame = 0;
     tree.addEventListener('scroll', () => {
       savedScroll = tree.scrollTop;
-      renderWindow();
+      if (scrollFrame) return;
+      scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = 0;
+        renderWindow();
+      });
       deps.onScrollChange?.();
     });
     // Высоту панели меняют окно, нижний док и переключатели панелей — а окно строк
@@ -2665,6 +2714,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
     // Плоский список видимых строк: по нему считаем окно и обходим выделение.
     flatRows = buildFlat(info);
+    reindexRows();
     // `paint` пересоздаёт строки, а `renderWindow` рисует только при смене
     // диапазона в `visibleNow`. При перерисовке без пересборки дерева (фокус,
     // пометки git) строки уже новые, а `visibleNow` помнит старые — и окно не
@@ -2785,6 +2835,23 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       ),
     );
   let ariaPlaces = new Map<string, AriaPosition>();
+  // Место активной строки в `flatRows`. Считается лениво и с мемо: `renderWindow`
+  // зовётся на каждый кадр прокрутки, а набор при прокрутке не меняется — линейный
+  // поиск по 26 000 строк на каждое движение колеса был лишней работой.
+  let indexCache: FlatRow[] | null = null;
+  let indexCacheSelected: string | null = null;
+  let indexCacheValue = -1;
+  const reindexRows = (): void => {
+    ariaPlaces = ariaTable();
+    indexCache = null;
+  };
+  const indexOfSelected = (): number => {
+    if (indexCache === flatRows && indexCacheSelected === selected) return indexCacheValue;
+    indexCacheValue = selected === null ? -1 : flatRows.findIndex(rowIsPath(selected));
+    indexCache = flatRows;
+    indexCacheSelected = selected;
+    return indexCacheValue;
+  };
   const ariaPlace = (path: string): AriaPosition => ariaPlaces.get(path) ?? { level: 1, posInSet: 1, setSize: 1 };
 
   /**

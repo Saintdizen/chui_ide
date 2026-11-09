@@ -30,7 +30,6 @@ const BASE: ExplorerSettings = {
   recentChanges: true,
   recentWindowHours: 24,
   dimIgnored: true,
-  openOnSingleClick: false,
   confirmDelete: true,
   exclude: [],
   fileNesting: false,
