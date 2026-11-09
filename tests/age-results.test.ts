@@ -131,6 +131,35 @@ describe('свёртка по возрасту', () => {
     const messages = [long(1), long(2), long(3)];
     expect(ageStaleResults(messages, { keepRecent: 0 }).aged).toBe(0);
   });
+
+  it('короткое звено стареет только , если обычный порог уже сработал', async () => {
+    const { ageStaleResults } = await import('../src/main/ai/age-results');
+    // Замер 09.11: 5 138 из 7 378 ответов read >= 1500 симв, но в окне одного
+    // шага сдвигается 2–3 звена по 500–1500 — и они не старели никогда.
+    const short = (index: number): ChatMessage => ({
+      role: 'tool',
+      toolCallId: `call-${index}`,
+      name: 'read_file',
+      content: Array.from({ length: 60 }, (_, line) => `строка ${index}-${line}`).join('\n'),
+    });
+    const onlyShort = [short(1), short(2), short(3), short(4)];
+    // Без срабатывания обычного порога второй проход молчит: иначе каждый шаг
+    // сворачивал бы по мелочи и двигал бы префикс — промах кеша на каждом шаге.
+    const nothing = ageStaleResults(onlyShort, { keepRecent: 1, spillDir: spillDir() });
+    expect(nothing.aged).toBe(0);
+
+    const mixed = [long(1), long(2), short(3), short(4), long(5)];
+    const outcome = ageStaleResults(mixed, {
+      keepRecent: 1,
+      spillDir: spillDir(),
+      minChars: 1_500,
+      restMinChars: 400,
+      batchSize: 1,
+    });
+    // Два длинных — первый проход; короткие подхватывает остаток.
+    expect(outcome.aged).toBeGreaterThanOrEqual(3);
+    expect(mixed[mixed.length - 1]?.content).toContain('строка 5-0');
+  });
 });
 
 describe('картинки в истории', () => {

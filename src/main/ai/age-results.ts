@@ -80,6 +80,19 @@ export interface StaleOptions {
    * инструментов сбоку, здесь проверяется только `STALE_RESULT_PREFIX`.
    */
   compactAfter?: number;
+  /**
+   * Второй, более низкий порог размера — только после удачного первого прохода.
+   *
+   * Замер 09.11 по журналу: `read` — 48% веса ответов в длинных прогонах
+   * (15.0 М симв), и 70% вызовов в нулевой-первую тысячи символов. Одиночный
+   * порог 1 500 их не трогал НИ РАЗУ: окно старения сдвигается на два-три звена
+   * за шаг, и звено мельче порога уезжает дальше нетронутым навсегда.
+   *
+   * Срабатывает только если первый проход что-то свернул: иначе каждый шаг
+   * сворачивал бы по мелочи и двигал префикс — ровно то, от чего уходили в п.74
+   * (кэш 94.8%). Форма второй ступени п.80 — только теперь по размеру, а не по ходу.
+   */
+  restMinChars?: number;
 }
 
 const MIN_AGE_CHARS = 1_500;
@@ -231,7 +244,26 @@ export function ageStaleResults(messages: ChatMessage[], options: StaleOptions):
   if (!options.spillDir) return { aged: 0, freedTokens: 0, file: null };
 
   const last = Math.max(0, messages.length - Math.max(0, options.keepRecent));
+  const batchSize = options.batchSize ?? STALE_BATCH;
   const picked = candidates(messages, last, options.minChars ?? STALE_MIN_CHARS);
-  if (picked.length < (options.batchSize ?? STALE_BATCH)) return { aged: 0, freedTokens: 0, file: null };
-  return foldPicked(messages, picked, options.spillDir);
+  if (picked.length < batchSize) return { aged: 0, freedTokens: 0, file: null };
+  const first = foldPicked(messages, picked, options.spillDir);
+
+  // Остаток: звенья мельче обычного порога. Замер 09.11 — 5 138 из 7 378 ответов
+  // `read` длиннее 1500, но в окне одного шага сдвигается 2-3 звена по 500-1500,
+  // и эти не старели никогда. Второй проход только ПОСЛЕ первого: без этого
+  // каждый шаг сворачивал бы по мелочи и двигал префикс — промах кеша на каждом
+  // шаге, ровно то, от чего уходили в п.74 (кэш 94.8%).
+  const restMinChars = options.restMinChars;
+  if (first.aged === 0 || restMinChars === undefined) return first;
+  const rest = candidates(messages, last, restMinChars).filter(
+    (index) => !picked.includes(index),
+  );
+  if (rest.length < batchSize) return first;
+  const second = foldPicked(messages, rest, options.spillDir);
+  return {
+    aged: first.aged + second.aged,
+    freedTokens: first.freedTokens + second.freedTokens,
+    file: second.file ?? first.file,
+  };
 }
