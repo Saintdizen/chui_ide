@@ -77,6 +77,24 @@ describe('счётчик шагов', () => {
     expect(formatCountsLine(record)).not.toContain('xxxx');
   });
 
+  it('целые чтения считаются за прогон: подсказка доходит, даже если между ними другие вызовы', () => {
+    // Замер 09.11: целые чтения шли 65 раз в 47 прогонах и почти никогда подряд.
+    // Счётчик «подряд» обнулялся на первом жe выводе инструмента — подсказка молчала.
+    const whole = '{"path":"src/a.ts"}';
+    const range = '{"path":"src/a.ts","startLine":1,"endLine":5}';
+    const flags = [whole, range, whole, whole, range].map((args) => callFlags('read', args));
+    const ever = flags.filter((f) => f.includes('whole-read')).length;
+    expect(ever).toBe(3);
+    // Подряд — только пара на концах, после диапазона счёт сбрасывается.
+    let streak = 0;
+    const streaks: number[] = [];
+    for (const f of flags) {
+      streak = f.includes('whole-read') ? streak + 1 : 0;
+      streaks.push(streak);
+    }
+    expect(streaks).toEqual([1, 0, 1, 2, 0]);
+  });
+
   it('считает цену вызова в символах, а шага — в токенах провайдера', () => {
     const record = buildCountsRecord(run());
     const [first, second] = record.steps;

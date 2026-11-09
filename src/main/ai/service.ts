@@ -1453,6 +1453,7 @@ export class AiService {
     let singleReads = 0;
     let pathsHinted = false;
     // Замер 09.11: 65 ответов read целиком, 59 000 тк — без единого диапазона.
+    let wholeEver = 0;
     let wholeReads = 0;
     let wholeHinted = false;
     // Шаги последнего плана и тронутые правками файлы: нужны отчёту об упоре в лимит.
@@ -2202,12 +2203,25 @@ export class AiService {
             wholeReads = 0;
           } else {
             singleReads += 1;
-            if (flags.includes('whole-read')) wholeReads += 1;
-            else wholeReads = 0;
+            if (flags.includes('whole-read')) {
+              wholeReads += 1;
+              wholeEver += 1;
+            } else {
+              wholeReads = 0;
+            }
           }
         }
         const wholeHint = !wholeHinted && wholeReads === 2 ? '\n(целиком 2 раза — у read есть startLine/endLine: меньше текста, тот же файл)' : '';
         if (wholeHint) wholeHinted = true;
+        // Счётчик `wholeReads` считает только чтения ПОДРЯД и обнуляется любым другим
+        // вызовом. 65 ответов из замера — не подряд: подсказка молчала весь прогон.
+        // `wholeEver` — тот же признак, но за прогон целиком; говорит на третьем.
+        const wholeTotal = wholeEver;
+        const wholeLate =
+          !wholeHinted && wholeTotal >= 2
+            ? '\n(чтения целиком за прогон 2 и более — у read есть startLine/endLine: меньше текста, тот же файл)'
+            : '';
+        if (wholeLate) wholeHinted = true;
         const pathsNote =
           !pathsHinted && singleReads === 3
             ? '\n(несколько файлов — read с paths одним вызовом: это шаг, а не три)'
@@ -2227,7 +2241,7 @@ export class AiService {
           name: call.name,
           // Единая точка сжатия для всех инструментов: в контекст модели уходит
           // текст без оформления, а человек в карточке (событие выше) видит полный.
-          content: (compressOutput ? compressToolOutput(result) : result) + widenedNote + shellReadNote + pathsNote + wholeHint,
+          content: (compressOutput ? compressToolOutput(result) : result) + widenedNote + shellReadNote + pathsNote + wholeHint + wholeLate,
         };
         countOutput(toolMessage.content ?? '');
         messages.push(toolMessage);
