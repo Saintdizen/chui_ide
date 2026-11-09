@@ -83,6 +83,12 @@ export interface RunCountStep {
   hiddenCalls?: number;
   note?: string;
   usage?: { prompt: number; cached: number; output: number; cacheCreation: number };
+  /**
+   * Цена контекста, которая ехала В КАЖДОМ последующем шаге (кэш + свежий промпт).
+   * Нужна, чтобы мерить сокращение по счёту, а не по символам ответов:
+   * один убранный из истории символ экономит свои токены на КАЖДОМ следующем шаге.
+   */
+  carried?: number;
   calls: RunCountCall[];
   /** Смысловые пересечения соседних вызовов шага, без текста аргументов. */
   overlaps?: { a: number; b: number; kind: CallOverlapKind }[];
@@ -215,6 +221,7 @@ function countStep(step: RunStepLog, seen: Set<string>): RunCountStep {
           },
         }
       : {}),
+    ...(step.carried !== undefined ? { carried: step.carried } : {}),
     calls,
   };
 }
