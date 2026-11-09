@@ -117,14 +117,24 @@ export const PRICE_PLAN_STEPS = 50;
  * а контекст едет в каждом. Без этой цифры модель не может решить, что дешевле:
  * ещё один `read` целиком или уточняющий `search`.
  */
-export function contextPriceNote(tokens: number, steps = 0): string {
+export function contextPriceNote(tokens: number, steps = 0, planSteps = 0): string {
   if (tokens <= 0) return '';
 
   const k = (tokens / 1000).toFixed(1).replace('.0', '');
-  // `steps` — остаток прогона (service.ts передаёт runPlan - runSteps), а не
+  // `steps` — остаток прогона (service.ts читает runPlan - runSteps), а не
   // потолок шагов: потолок означает «сколько шагов может быть», и умножать на
   // него цену шага — значит обещать трату, которой не будет.
-  const total = ` За оставшиеся ${steps} шагов — ещё как минимум ${Math.round((tokens * steps) / 1000)}k.`;
+  //
+  // Замер 09.11 (п.11): на шагах за `PRICE_PLAN_STEPS` остаток обнулялся и
+  // подпись пропадала, хотя прогон шёл дальше — хвост не предупреждался вовсе.
+  // Теперь при нулевом остатке печатаем вес шага без суммы («За 0 шагов»
+  // читалось как сбой), а `planSteps` — план прогона, чтобы caller мог сам
+  // решить, брать ли остаток по плану или по факту шага.
+  if (steps <= 0) {
+    return `Цена контекста: ${k}k токенов едет в каждом шаге до конца прогона.`;
+  }
+  const left = planSteps > 0 && steps > planSteps ? planSteps : steps;
+  const total = ` За оставшиеся ${left} шагов — ещё как минимум ${Math.round((tokens * left) / 1000)}k.`;
   return `Цена контекста: ${k}k токенов едет в каждом шаге до конца прогона.${total}`;
 }
 

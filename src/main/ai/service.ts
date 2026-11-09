@@ -1489,8 +1489,15 @@ export class AiService {
       // потолке 500): цифра «ещё N шагов» должна говорить про реальный остаток,
       // иначе она врёт про сотни шагов, которых не будет. Берём минимум из
       // плана прогона и потолка — это и есть допустимый рост (PRICE_PLAN_STEPS).
-      const runPlan = Math.min(steps, PRICE_PLAN_STEPS);
+      //
+      // Замер п.11: `min(steps, 50)` отрезал хвост прогонов длиннее 50 шагов —
+      // там `stepsLeft` был 0 и подпись о цене пропадала вовсе, хотя шаги шли.
+      // Потолок планировщика (`steps`) хвост не отрезает — он и есть настоящий
+      // предел; `PRICE_PLAN_STEPS` оставляем лишь как бюджет на предупреждение
+      // о ПОЛНОЙ сумме хвоста, а не как границу остатка.
+      const runPlan = steps;
       const stepsLeft = Math.max(0, runPlan - runSteps);
+      const priceSteps = Math.min(stepsLeft, PRICE_PLAN_STEPS);
       // Цена шага. Модель видит историю, но не её вес: каждый шаг несёт весь
       // контекст заново. Замер 09.11: медиана прогона 38 шагов и 8832 тк на
       // первом — одна лишняя тысяча в контексте платится тридцать раз.
@@ -1499,7 +1506,7 @@ export class AiService {
       const priceAt = Math.floor(contextTokens / 5000) * 5000;
       if (priceAt !== lastPriceAt) {
         lastPriceAt = priceAt;
-        const priceNote = contextPriceNote(contextTokens, stepsLeft);
+        const priceNote = contextPriceNote(contextTokens, stepsLeft, priceSteps);
         if (priceNote) messages.push({ role: 'system', content: priceNote });
       }
       // Сокращаем посреди прогона, но не на каждом шаге: разрыв кеша стоит

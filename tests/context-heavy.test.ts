@@ -79,6 +79,18 @@ describe('порог тяжёлого контекста', () => {
     expect(contextPriceNote(14_400, PRICE_PLAN_STEPS)).toContain('14.4k');
   });
 
+  it('хвост длинного прогона не пропадает и не перепланируется', () => {
+    // Замер п.11: на прогоне в 60 шагов `min(steps, 50)` обнулял остаток
+    // с 50-го шага — подпись молчала при живых шагах. Теперь остаток берётся
+    // по потолку прогона, а `planSteps` только ограничивает ОБЕЩАННУЮ сумму.
+    const tail = contextPriceNote(200_000, 10, 5);
+    expect(tail).toContain('200k');
+    expect(tail).toContain('5 шагов');
+    expect(tail).toContain('1000k');
+    // Остаток меньше бюджета — считаем по факту, а не по бюджету.
+    expect(contextPriceNote(200_000, 3, 50)).toContain('3 шагов');
+  });
+
   it('тяжёлые настройки сворачивают больше обычных', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'heavy-'));
     const normal = Array.from({ length: 8 }, (_, i) => result(i));
