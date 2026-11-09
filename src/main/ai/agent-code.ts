@@ -8,6 +8,7 @@ import { digestHits, formatCodeSearch, rankSymbols } from '../../shared/code-sea
 import type { SearchSymbol } from '../../shared/code-search';
 import { formatDocsAnswer } from '../../shared/docs-index';
 import { optionalInteger, requireString } from './tool-args';
+import { rankSnippets, snippetOf } from './snippets';
 import { relative, relativePath } from './agent-terminal';
 import type { ToolContext, ToolOutcome } from './tool-context';
 import {
@@ -98,6 +99,12 @@ export async function codebaseSearch(ctx: ToolContext, args: Record<string, unkn
     MAX_CODE_FILES,
   );
 
+  // `snippets: true` — тела найденных объявлений под задачу (п.66): ответ
+  // называет не только места, но и код, чтобы не ходить за ним отдельным `read`.
+  if (args.snippets === true) {
+    return await snippetsAnswer(ctx, { query, found, hits, limit, isRegex });
+  }
+
   const shaped = formatCodeSearch({
     query,
     // Пути — как во всех инструментах: относительно рабочей папки, иначе модель
@@ -116,6 +123,111 @@ export async function codebaseSearch(ctx: ToolContext, args: Record<string, unkn
   });
 
   return { ok: true, summary: shaped.summary, detail: shaped.detail };
+}
+
+/**
+ * Тела объявлений, отранжированные под задачу.
+ *
+ * Читаем только те файлы, что попали в кандидаты, и по одному разу: у тридцати
+ * найденных символов бывает пять файлов. Файл не прочитать — не беда, его
+ * кандидаты просто выпадают.
+ */
+async function snippetsAnswer(
+  ctx: ToolContext,
+  params: {
+    query: string;
+    found: readonly SearchSymbol[];
+    hits: { hits: readonly { path: string; line: number; text: string }[] };
+    limit: number;
+    isRegex: boolean;
+  },
+): Promise<ToolOutcome> {
+  const { query, found } = params;
+  const root = ctx.workspace.rootPath();
+  // Без языкового сервера объявлений нет, но совпадения в тексте есть — и
+  // каждое такое место и есть «фрагмент под задачу». Годится и без сервера.
+  const candidates0 =
+    found.length > 0
+      ? found.map((symbol) => ({ symbol, fromText: false }))
+      : params.hits.hits.map((hit) => ({
+          fromText: true,
+          symbol: {
+            name: query,
+            kind: 'match',
+            container: null,
+            path: hit.path,
+            line: hit.line,
+            column: 0,
+          } satisfies SearchSymbol,
+        }));
+  if (candidates0.length === 0) {
+    return {
+      ok: true,
+      summary: `фрагменты: ничего по «${query}»`,
+      detail:
+        `Ни объявлений, ни совпадений в тексте по «${query}» нет. ` +
+        'Проверь написание: search без action, имена файлов — list с depth.',
+    };
+  }
+
+  // Объявления группируем по файлу: один `readFile` на файл, а не на символ.
+  const byFile = new Map<string, SearchSymbol[]>();
+  for (const { symbol } of candidates0) {
+    const list = byFile.get(symbol.path) ?? [];
+    list.push(symbol);
+    byFile.set(symbol.path, list);
+  }
+
+  const candidates: { symbol: SearchSymbol; text: string }[] = [];
+  for (const [file, symbols] of byFile) {
+    let lines: string[];
+    try {
+      // Путь ответа относительный, а `readFile` ждёт абсолютный. Корня нет
+      // (папка ещё не открыта) — путь и так полный.
+      const absolute = !root || file.startsWith('/') ? file : `${root}/${file}`;
+      lines = (await ctx.workspace.readFile(absolute)).text.split('\n');
+    } catch {
+      continue;
+    }
+    const sorted = [...symbols].sort((a, b) => a.line - b.line);
+    for (let index = 0; index < sorted.length; index += 1) {
+      const symbol = sorted[index]!;
+      candidates.push({ symbol, text: snippetOf(lines, symbol, sorted[index + 1]) });
+    }
+  }
+
+  const picked = rankSnippets(candidates, query, params.limit);
+  if (picked.length === 0) {
+    return {
+      ok: true,
+      summary: `фрагменты: файлы по «${query}» не прочитать`,
+      detail: 'Объявления нашлись, но их файлы не открылись. Смотри пути через search.',
+    };
+  }
+
+  const body = picked
+    .map((snippet) => {
+      const path = relativePath(snippet.symbol.path, root ?? null);
+      return (
+        `${path}:${snippet.symbol.line} — ${snippet.symbol.kind} ${snippet.symbol.name}` +
+        ` (${snippet.why}, ранг ${snippet.score})\n` +
+        snippet.text
+      );
+    })
+    .join('\n\n');
+
+  return {
+    ok: true,
+    summary: `фрагменты по «${query}»: ${picked.length} из ${candidates.length}`,
+    detail:
+      `Фрагменты под задачу — от лучшего к худшему. ` +
+      (found.length > 0
+        ? `Объявлений от сервера ${found.length}, `
+        : 'Языкового сервера нет — искал по тексту, ') +
+      `тел собрано ${candidates.length}.\n\n` +
+      body +
+      '\nПолное объявление — read с startLine/endLine по номеру строки.',
+  };
 }
 
 /**

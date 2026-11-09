@@ -84,7 +84,17 @@ describe('read', () => {
 describe('search', () => {
   it('принимает регистр, режим «только файлы», контекст и предел выдачи', () => {
     const props = byName.get('search')!.inputSchema.properties;
-    expect(Object.keys(props)).toEqual(['action', 'query', 'flags', 'glob', 'path', 'context', 'limit']);
+    // `snippets` — тела найденных объявлений под задачу (п.66).
+    expect(Object.keys(props)).toEqual([
+      'action',
+      'query',
+      'flags',
+      'glob',
+      'path',
+      'context',
+      'limit',
+      'snippets',
+    ]);
     expect(byName.get('search')!.inputSchema.required).toEqual(['query']);
     // Контекст — как -A/-B у grep: без него результат остаётся одной строкой.
     expect(props.context?.type).toBe('number');

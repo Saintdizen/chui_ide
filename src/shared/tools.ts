@@ -214,7 +214,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           enum: ['text', 'code', 'docs'],
           // Смысл действий — здесь же, рядом с enum: в шапке он дублировался
           // и стоил токенов в каждом запросе.
-          description: 'text: path, line, match; code: declarations; docs: documentation.',
+          description:
+            'text: path, line, match; code: declarations; docs: documentation. ' +
+            'code + snippets: bodies of those declarations, ranked for the task.',
         },
         query: { type: 'string', description: 'Pattern.' },
         // Три флага строкой: каждый булев флаг стоил каркаса схемы (≈9 ток),
@@ -233,6 +235,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description: 'Lines around (0-5).',
         },
         limit: { type: 'number', description: 'Cap on hits.' },
+        snippets: { type: 'boolean', description: 'With code: return declaration bodies.' },
       },
       required: ['query'],
     },
