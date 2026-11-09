@@ -1479,7 +1479,7 @@ export class AiService {
 
       // Окно модели говорит, сколько влезет, но не сколько это стоит: контекст
       // едет в каждом шаге прогона.
-      const contextTokens = estimateMessagesTokens(messages) + toolsTokens;
+      let contextTokens = estimateMessagesTokens(messages) + toolsTokens;
       // Замер «сколько едет в каждом шаге» (п.2): модель платит этот вес заново
       // на каждом шаге до конца прогона. Без цифры в журнале окупаемость
       // сокращений (п.7) считается только по `usage.prompt` — а он есть не у
@@ -1518,6 +1518,12 @@ export class AiService {
       })
         ? trimHistory()
         : 0;
+      // Свёртка только что выбросила из истории часть веса — но `contextTokens`
+      // выше посчитан ДО неё. Замер 09.11: на шаге 0 подпись смотрела на 193951 тк,
+      // а ехало 17902 — в 10.8 раза меньше (медиана по 15 прогонам в runs*.jsonl).
+      // Пересчитываем сразу после сокращения: всё, что ниже (heavy-сообщение,
+      // подпись о цене, `carried`) должно говорить о том, что уйдёт провайдеру.
+      if (trimmedNow > 0) contextTokens = estimateMessagesTokens(messages) + toolsTokens;
       const heavy = contextTokens > HEAVY_CONTEXT_TOKENS;
       if (heavy && !contextDeclared) {
         contextDeclared = true;
