@@ -1,5 +1,6 @@
 import type { AccountBalance } from '../balance';
 import type { CommandGrant, EditGrant } from '../agent-grants';
+import type { ActionClass, RunModeRule } from '../permissions';
 import type { ToolPresetId } from '../tool-presets';
 import type { McpServerConfig } from '../mcp';
 import type { AgentHookConfig } from '../agent-hooks';
@@ -237,6 +238,11 @@ export interface AiSettingsPatch {
   approvalReview?: boolean;
   /** Модель для проверки команд; пусто — активная модель беседы. */
   reviewModel?: string;
+  /**
+   * Режимы исполнения по классу действия: `allow` не спрашивает, `deny` не
+   * пускает, `inherit` — как решает доступ. Пусто — всё как было.
+   */
+  runModes?: Partial<Record<ActionClass, RunModeRule>>;
   /** Сжимать ли вывод инструментов перед отправкой модели. */
   compressOutput?: boolean;
   /** Набор инструментов по умолчанию (см. `shared/tool-presets.ts`). */

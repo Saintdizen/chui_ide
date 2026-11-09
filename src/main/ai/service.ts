@@ -975,6 +975,7 @@ export class AiService {
       allowAll: flags.allowAll,
       confirmDangerous: settings.ai.confirmDangerous === true,
       commandGrants: normalizeGrants(settings.ai.commandGrants),
+      runModes: settings.ai.runModes,
     };
     // Сжатие вывода — только для контекста модели: человек в карточке инструмента
     // видит текст как он есть (см. `compressToolOutput`).

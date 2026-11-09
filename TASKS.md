@@ -70,6 +70,3 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
     чтобы каждый пункт экономии проверялся числом.
 
 ## VII. Донабор по Cursor / Xcode / Neovim
-
-74. Режимы исполнения как у Cursor run-modes (allow/deny по типу
-    действия) — настройка поверх текущего подтверждения опасных команд.

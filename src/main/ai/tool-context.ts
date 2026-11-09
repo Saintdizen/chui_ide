@@ -27,6 +27,7 @@ import type {
 } from '../../shared/api';
 import type { BrowserSnapshot } from '../../shared/browser';
 import type { CommandDecision, CommandGrant } from '../../shared/agent-grants';
+import type { ActionClass, RunModeRule } from '../../shared/permissions';
 import type { SearchSymbol } from '../../shared/code-search';
 import type { FileEdit } from '../../shared/edits';
 import type { LintOutcome } from '../../shared/lint';
@@ -400,6 +401,11 @@ export interface ToolContext {
   confirmCommand?(command: string): Promise<CommandDecision>;
   /** Разрешения, выданные ранее кнопками карточки (из настроек). */
   commandGrants?: readonly CommandGrant[];
+  /**
+   * Режимы исполнения по классу действия (run-modes): `deny` — инструмент не запускается,
+   * `allow` — не спрашиваем там, где иначе бы спросили. `inherit` — как подсказывает право доступа.
+   */
+  runModes?: Partial<Record<ActionClass, RunModeRule>>;
   /** Человек нажал «больше не спрашивать»: запомнить и больше не спрашивать. */
   grantCommand?(grant: CommandGrant): void;
   /**

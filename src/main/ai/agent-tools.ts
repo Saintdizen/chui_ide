@@ -9,6 +9,7 @@
 
 import { confirmFile, coveredRequest, uncoverFiles } from '../../shared/read-coverage';
 import { isMcpToolName } from '../../shared/mcp';
+import { actionClassOf, runModeDenied, type RunModes } from '../../shared/permissions';
 import { taskRun } from './agent-task';
 import { parseToolArguments } from '../../shared/tools';
 import {
@@ -216,6 +217,20 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       detail:
         'Пометка вроде `[применено: N стр. — текст в файле]` — это место, где раньше было тело правки. ' +
         'Она не текст файла: склеенная с правкой строка оставит в файле мусор. Перечитай файл и пришли правку заново.',
+    };
+  }
+
+  // Режим исполнения — раньше всего остального: если класс действия запрещён,
+  // незачем разбирать аргументы и спрашивать подтверждение. Режим `ask` здесь
+  // ничего не решает: спрашивают подтвержения как раньше — `ask` это их и есть.
+  if (runModeDenied(ctx.runModes as RunModes | undefined, actionClassOf(name))) {
+    return {
+      ok: false,
+      summary: `Режим исполнения запрещает такие действия: ${actionClassOf(name)}`,
+      detail:
+        'Это ограничение настройки человека, а не ошибка вызова: не повторяй инструмент и не обходи его другим ' +
+        'способом (командой в `run`, скриптом, `terminal_*`). Скажи человеку, что осталось ' +
+        'сделать руками, и жди ответа.',
     };
   }
 

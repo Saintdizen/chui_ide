@@ -12,6 +12,7 @@ import type { ThemeFile } from '../theme-file';
 import type { McpServerConfig } from '../mcp';
 import type { AgentHookConfig } from '../agent-hooks';
 import type { CommandGrant, EditGrant } from '../agent-grants';
+import type { ActionClass, RunModeRule } from '../permissions';
 import type { AutomationConfig } from '../automations';
 import type { AiSandboxSettings } from '../sandbox';
 import type { WhitespaceMode } from '../whitespace';
@@ -138,6 +139,11 @@ export interface AiSettings {
    * Отдельная нужна потому, что здесь достаточно дешёвой.
    */
   reviewModel?: string;
+  /**
+   * Режимы исполнения по классу действия: read, write, command, network.
+   * Пусто — всё по правам доступа, как раньше. См. `shared/permissions.ts`.
+   */
+  runModes?: Partial<Record<ActionClass, RunModeRule>>;
   /**
    * Сжимать вывод инструментов перед отправкой модели: убрать прогресс-бары,
    * служебные последовательности терминала, повторы одинаковых строк и простыни

@@ -29,6 +29,7 @@ import { parseFsAddress, formatFsAddress } from '../shared/fs-address';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { normalizeAgentHooks, type AgentHookConfig } from '../shared/agent-hooks';
 import { type CommandGrant, type EditGrant, normalizeEditGrants, normalizeGrants } from '../shared/agent-grants';
+import { DEFAULT_RUN_MODES, type RunModes, sanitizeRunModes } from '../shared/permissions';
 import { normalizeAutomations, type AutomationConfig } from '../shared/automations';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { normalizeSnippets } from '../shared/snippets';
@@ -116,6 +117,8 @@ interface StoredSettings {
     toolPreset: ToolPresetId;
     /** Страховка полного доступа: спрашивать перед необратимыми командами. */
     confirmDangerous: boolean;
+    /** Политика по классу действия: allow/ask/deny на класс. Пусто — по правам доступа. */
+    runModes: RunModes;
     /** Разрешения, выданные карточкой подтверждения: команда / папка / всё. */
     commandGrants: CommandGrant[];
     /** Разрешения на правку без вопроса: файл целиком или вся папка. */
@@ -230,6 +233,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // (sudo, rm, git push --force) спрашиваем, пока человек сам не отключит
     // страховку. Лишний вопрос дешевле одного пропущенного `rm -rf`.
     confirmDangerous: true,
+    // Режимы исполнения не заданы: работают права доступа, как раньше. Явные
+    // `allow` там, где стояло «спросить», — это снятие ревью без единого клика.
+    runModes: DEFAULT_RUN_MODES,
     // Выданные разрешения переживают перезапуск — иначе «больше не спрашивать»
     // значило бы «до закрытия окна». Список виден в настройках.
     commandGrants: [],
@@ -518,6 +524,7 @@ export class SettingsStore {
         maxAutopilotSteps: ai.maxAutopilotSteps,
         toolPreset: sanitizeToolPreset(ai.toolPreset),
         confirmDangerous: ai.confirmDangerous,
+        runModes: sanitizeRunModes(ai.runModes),
         commandGrants: normalizeGrants(ai.commandGrants),
         editGrants: normalizeEditGrants(ai.editGrants),
         approvalReview: ai.approvalReview === true,
@@ -877,6 +884,10 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     target.maxAutopilotSteps = clampSteps(patch.maxAutopilotSteps, target.maxAutopilotSteps);
   }
   if (patch.confirmDangerous !== undefined) target.confirmDangerous = patch.confirmDangerous === true;
+  if (patch.runModes !== undefined) {
+    // Частичный патч: класс, которого нет в настройке, остаётся как был.
+    target.runModes = sanitizeRunModes({ ...target.runModes, ...patch.runModes });
+  }
   if (patch.commandGrants !== undefined) target.commandGrants = normalizeGrants(patch.commandGrants);
   if (patch.editGrants !== undefined) target.editGrants = normalizeEditGrants(patch.editGrants);
   if (patch.approvalReview !== undefined) target.approvalReview = patch.approvalReview === true;
@@ -1094,6 +1105,8 @@ function loadSettings(filePath: string): StoredSettings {
   ai.maxAutopilotSteps = clampSteps(storedAi.maxAutopilotSteps, DEFAULT_SETTINGS.ai.maxAutopilotSteps);
   // Флаг могли записать чем угодно: оставляем строго булево значение.
   ai.confirmDangerous = ai.confirmDangerous === true;
+  // Непонятное правило — `inherit`, а не `allow`: см. `sanitizeRunModes`.
+  ai.runModes = sanitizeRunModes(ai.runModes);
   ai.approvalReview = ai.approvalReview === true;
   // Модель проверки: строка без пробелов или ничего (тогда проверяет активная).
   ai.reviewModel =

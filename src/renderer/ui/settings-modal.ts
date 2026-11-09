@@ -51,6 +51,7 @@ function presetOf(provider: AiProviderView): ProviderPreset {
   };
 }
 import { AUTO_SAVE_LABELS, AUTO_SAVE_MODES, normalizeAutoSaveMode } from '../../shared/auto-save';
+import type { ActionClass, RunModeRule } from '../../shared/permissions';
 import { parseFieldNumber, type FieldNumber } from './number-field';
 import { CURSOR_STYLES, CURSOR_STYLE_LABELS, MAX_LINE_HEIGHT, normalizeCursorStyle } from '../../shared/cursor-style';
 import { serializeThemeFile } from '../../shared/theme-file';
@@ -81,6 +82,14 @@ import { type Child, append, clear, h, svgIcon } from './dom';
 import { createModal } from './modal';
 import { createSelect } from './select';
 import { showToast } from './toast';
+
+/** Подписи классов для «Режимов исполнения»: человек читает про действия, а не коды. */
+const RUN_CLASS_LABELS: Readonly<Record<ActionClass, string>> = {
+  read: 'Чтение',
+  write: 'Запись и правки',
+  command: 'Команды в терминале',
+  network: 'Сеть и браузер',
+};
 
 export interface SettingsModalDeps {
   rpc: RpcClient;
@@ -354,6 +363,25 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     );
   }
 
+  /** Строка «подпись — выпадающий список»: для настроек с тремя-четырьмя значениями. */
+  function selectRow(
+    label: string,
+    options: ReadonlyArray<readonly [string, string]>,
+    value: string,
+    onChange: (next: string) => void,
+  ): HTMLElement {
+    return h(
+      'div',
+      { class: 'field field-between' },
+      h('span', {}, label),
+      selectInput(
+        options.map(([optionValue, optionLabel]) => ({ value: optionValue, label: optionLabel })),
+        value,
+        onChange,
+      ),
+    );
+  }
+
   /** Селект приложения: системный `<select>` не подчиняется ни палитре, ни плотности. */
   function selectInput(
     options: ReadonlyArray<{ value: string; label: string }>,
@@ -607,6 +635,31 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           '(удаление, запись на диск, sudo, git push --force). Выключите, если хотите совсем без вопросов — ' +
           'тогда команды исполняются молча. На отдельные безобидные команды подсказка может сработать зря — ' +
           'страховка склонна спросить лишний раз.',
+      ),
+      h('div', { class: 'settings-divider' }),
+      h('div', { class: 'field-label' }, 'Режимы исполнения'),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Политика по классу действия, поверх пресета. «Как обычно» — решает право доступа; ' +
+          '«Не спрашивать» и «Запретить» перебивают его в обе стороны. Запрет сильнее всего: ' +
+          'даже полный доступ не выполнит такой инструмент.',
+      ),
+      ...(Object.keys(RUN_CLASS_LABELS) as ActionClass[]).map((action) =>
+        selectRow(
+          RUN_CLASS_LABELS[action],
+          [
+            ['inherit', 'Как обычно'],
+            ['allow', 'Не спрашивать'],
+            ['ask', 'Спрашивать'],
+            ['deny', 'Запретить'],
+          ] as ReadonlyArray<readonly [string, string]>,
+          ai.runModes?.[action] ?? 'inherit',
+          (value) =>
+            void patch({
+              ai: { runModes: { ...(ai.runModes ?? {}), [action]: value as RunModeRule } },
+            }),
+        ),
       ),
       ...(grantRows.length > 0
         ? [
