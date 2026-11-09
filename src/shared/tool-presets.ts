@@ -52,7 +52,8 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     id: 'read',
     label: 'Чтение',
     // Прошлые беседы — тоже чтение, только журнала, а не проекта.
-    names: ['read_image', 'mcp', 'lsp', 'history'],
+    // `git` — тоже чтение: status/diff/log/blame/show, без записи в историю.
+    names: ['read_image', 'mcp', 'lsp', 'history', 'git'],
   },
   {
     id: 'edit',
@@ -171,6 +172,7 @@ function fullSetTokens(): number {
  */
 export const ROSTER_TOOLS: readonly string[] = [
   // Не редкие, а простые: вызов у них короткий и угадывается по имени.
+  'git',
   'checks',
   // Отладка — редко, но по делу: сессия живёт минуты, а схема стоила бы
   // 339 токенов в каждом запросе. Действия названы строкой ростера,

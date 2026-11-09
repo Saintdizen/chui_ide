@@ -101,6 +101,9 @@ export function canRunTool(tool: AgentToolSpec, env: ToolAvailability): boolean 
   if (tool.name.startsWith('terminal')) return env.terminals !== undefined || host?.confirmCommand !== undefined;
   // Проверки: у действий разные возможности (пометки даёт окно, линтер — main),
   // поэтому условие одно на оба, как у браузера и терминала.
+  // Git читается прямо с диска: своего окружения ему не нужно, а вне репозитория
+  // инструмент откажет словами.
+  if (tool.name === 'git') return true;
   if (tool.name === 'checks') return host?.getDiagnostics !== undefined || env.linter !== undefined;
   // Ресурсы MCP предлагаются только тогда, когда серверы их объявили, — это
   // знает лишь подключение, а проверка синхронная. Схемы добавляет

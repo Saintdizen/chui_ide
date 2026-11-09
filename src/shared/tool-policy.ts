@@ -89,6 +89,8 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
    */
   web: { plan: true, readOnlyActions: ['fetch'] },
 
+  // git — только чтение: пишущие операции остаются за `terminal` с подтверждением.
+  git: { readOnly: true, plan: true },
   checks: { readOnly: true, plan: true },
   mcp: { plan: true },
 

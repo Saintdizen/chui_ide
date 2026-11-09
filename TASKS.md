@@ -39,7 +39,5 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
 
 ## VI. Инструменты агента и экономия
 
-57. `git` (status/diff/blame/log, откат файла) вместо работы через
-    `terminal`.
 59. `todo` по коду (todo-panel.ts есть, в наборе агента нет).
 60. `venv`/`pyenv`: venv-lookup.ts есть — решить, нужен ли в наборе.

@@ -55,6 +55,7 @@ export type AgentToolName =
   | 'read_image'
   | 'lsp'
   | 'project_map'
+  | 'git'
   | 'checks'
   | 'debug'
   | 'open_files'
@@ -302,6 +303,29 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
       required: ['action'],
+    },
+  },
+  {
+    name: 'git',
+    side: 'main',
+    description:
+      'Read-only git: status, diff, log, blame, show. Writing to history stays in terminal.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['status', 'diff', 'log', 'blame', 'show'],
+          description: 'status (default): branch and changed files; diff: what changed.',
+        },
+        path: { type: 'string', description: 'Path.' },
+        ref: { type: 'string', description: 'show: commit, branch or HEAD~1 (default HEAD).' },
+        staged: { type: 'boolean', description: 'diff: the index instead of the worktree.' },
+        startLine: { type: 'number', description: `blame: first line. ${LINE_NUMBERING}` },
+        endLine: { type: 'number', description: `blame: last line, inclusive. ${LINE_NUMBERING}` },
+        limit: { type: 'number', description: 'log: how many commits (15).' },
+        maxLines: { type: 'number', description: 'diff and show: cap on patch lines (200).' },
+      },
     },
   },
   {

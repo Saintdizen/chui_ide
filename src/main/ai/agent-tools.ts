@@ -43,6 +43,7 @@ import { showAction, unknownTool } from './agent-show';
 import type { LookupCall } from './agent-lookup';
 import type { ToolContext, ToolOutcome } from './tool-context';
 import { checksAction } from './agent-checks';
+import { gitAction } from './agent-git';
 import { debugAction } from './agent-debug';
 import { openFiles } from './agent-open-files';
 import { runBuild } from './agent-run';
@@ -491,6 +492,8 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await readImage(ctx, args);
       case 'lsp':
         return await lspAction(ctx, args);
+      case 'git':
+        return await gitAction(ctx, args);
       case 'checks':
         return await checksAction(ctx, args);
       case 'run_tests':
