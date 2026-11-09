@@ -49,8 +49,18 @@ export type CallFlag =
 export interface RunCountCall {
   name: string;
   ok: boolean;
-  /** Сколько символов занял результат вызова (summary + detail). */
+  /** Сколько символов занял результат вызова (summary + полный detail, ДО обрезки). */
   chars: number;
+  /**
+   * Сколько из `chars` реально легло в журнал \u2014 только когда потолок записи
+   * (clampRunText) что-то съел. Отсутствие поля = записали всё; тогда `chars`
+   * и есть то, что видит журнал, и отдельного числа не нужно.
+   *
+   * Зачем: без пары «сколько было / сколько записали» нельзя отличить
+   * урезанный журнал от урезанного ответа. Модель получает полный ответ, поэтом
+   * разница \u2014 цена записи, а не потеря контекста.
+   */
+  charsLogged?: number;
   ms?: number;
   /** Пометка сервиса о необычном вызове («повтор», «пропущено») — наша, не модели. */
   note?: string;
@@ -240,7 +250,15 @@ function countStep(step: RunStepLog, seen: Set<string>): RunCountStep {
 }
 
 function countCall(call: RunCallLog, repeated: boolean, seen: Set<string>): RunCountCall {
-  const chars = (call.detail?.length ?? 0) + (call.summary?.length ?? 0);
+  // `chars` — ФАКТИЧЕСКИЙ размер ответа, а не то, что осталось после обрезки
+  // в трассу (`clampRunText`, MAX_RUN_FIELD=4000). Модель получает полный
+  // ответ, поэтому цена вызова для контекста — именно полный размер. До
+  // поля `detailChars` (v4) посчитать это было нечем: журнал показывал
+  // потолок записи, и доля «сколько не доехало» была невидима.
+  const full = call.detailChars ?? call.detail?.length ?? 0;
+  const chars = full + (call.summary?.length ?? 0);
+  // Что реально осталось в записи — для честного «потолок съел N%».
+  const logged = (call.detail?.length ?? 0) + (call.summary?.length ?? 0);
   const h = callHash(call.name, call.args);
   // Повтор по прогону — тот же отпечаток уже встречался в ДРУГОМ шаге. Внутри
   // шага это `repeat` (его ловит repeatedCallIndexes), между шагами до v3 не
@@ -277,6 +295,9 @@ function countCall(call: RunCallLog, repeated: boolean, seen: Set<string>): RunC
     name: call.name,
     ok: call.ok !== false && !call.failed,
     chars,
+    // Пишем только при расхождении: поле нужно ровно там, где потолок записи
+    // что-то съел, и не должно раздувать журнал в обычных коротких ответах.
+    ...(logged !== chars ? { charsLogged: logged } : {}),
     ...(h ? { h } : {}),
     ...(call.ms !== undefined ? { ms: call.ms } : {}),
     ...(call.note ? { note: call.note } : {}),

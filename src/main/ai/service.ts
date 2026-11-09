@@ -2160,7 +2160,7 @@ export class AiService {
           ok: outcome.ok,
           ...(outcome.failed ? { failed: true } : {}),
           summary: clampRunText(outcome.summary, 400),
-          ...(outcome.detail ? { detail: clampRunText(outcome.detail) } : {}),
+          ...(outcome.detail ? { detail: clampRunText(outcome.detail), detailChars: outcome.detail.length } : {}),
           ms: callMs,
           startedAt,
           ...(repeated ? { note: 'повтор: не исполнялся' } : covered ? { note: 'диапазон уже прочитан' } : {}),

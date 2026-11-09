@@ -446,4 +446,29 @@ describe('счётчик шагов', () => {
     expect(record.steps[1]!.carried).toBeUndefined();
     expect(record.trace.carriedTotal).toBe(5_000);
   });
+
+  it('пишет полный размер результата, когда журнал его обрезал', () => {
+    // Замер 42 (09.11): `chars` считался по УЖЕ обрезанному clampRunText(4000)
+    // detail, поэтому по журналу нельзя было понять, сколько не доехало до
+    // модели. Модель получает полный результат — обрезка только на записи.
+    const log = run();
+    log.steps[0]!.calls = [
+      {
+        id: 'a',
+        name: 'read',
+        args: '{}',
+        ok: true,
+        summary: 'src/main/ai/service.ts',
+        detail: 'x'.repeat(4_000),
+        detailChars: 120_000,
+      },
+      { id: 'b', name: 'read', args: '{}', ok: true, summary: 'кратко', detail: 'цел' },
+    ];
+    const calls = buildCountsRecord(log).steps[0]!.calls;
+    // Обрезанный вызов: chars — факт до обрезки, charsLogged — что записано.
+    expect(calls[0]!.chars).toBe(120_000 + 'src/main/ai/service.ts'.length);
+    expect(calls[0]!.charsLogged).toBe(4_000 + 'src/main/ai/service.ts'.length);
+    // Целый вызов: обрезки не было, лишнего поля нет.
+    expect(calls[1]!.charsLogged).toBeUndefined();
+  });
 });
