@@ -54,17 +54,6 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
     `terminal`.
 59. `todo` по коду (todo-panel.ts есть, в наборе агента нет).
 60. `venv`/`pyenv`: venv-lookup.ts есть — решить, нужен ли в наборе.
-61. Экономия: режимы `read` как у JetBrains `read_file` — `lines` (есть),
-    `indentation` (дерево по отступам), `maxLines`, `offsets`, карта
-    импортов. Сейчас есть только path/paths/startLine/endLine/force.
-62. Экономия: `smart`-режим `search_file`: при совпадении с именем файла
-    отдать файл целиком одним вызовом вместо списка.
-63. Экономия: `list_directory_tree(depth, maxLines)` с ограничением
-    глубины — у нас `list` не знает глубины.
-64. Экономия: кэш `read`/`search` по mtime+размеру с метрикой попаданий
-    (age-results.ts — базис).
-65. Экономия: сворачивание повторов до «без изменений» сквозным
-    счётчиком (output-trim.ts — базис).
 66. Экономия: подбор фрагментов контекста по задаче через code-index
     с ранжированием.
 67. Замер экономии: сводка токенов на сессию (вход/выход/кэш) в UI,
