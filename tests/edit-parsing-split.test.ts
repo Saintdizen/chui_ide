@@ -112,6 +112,19 @@ describe('разбор правок отдельно от инструменто
     expect(message).toContain('у правки это поле зовётся `newText`');
   });
 
+  it('отказ newText называет, ЧТО пришло вместо строки', () => {
+    // Замер 09.11: 80 таких отказов, подсказки-алиаса не было ни у одного
+    // (значение — объект без `contents`/`text`), повтор удался 11 раз, 51 упал снова.
+    let message = '';
+    try {
+      parseEdits([{ path: '/proj/a.ts', edits: [{ newText: { startLine: 3, contents: 'x' } }] }]);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('а пришло объектом');
+    expect(message).toContain('Поля: startLine, contents');
+  });
+
   it('путь вокруг массива замен: адрес берётся сверху', () => {
     // Замер 30.10: 3 отказа `edit` из 16 — файл назван вокруг массива, а в
     // заменах пути нет: `{path, edits: [{startLine, newText}]}`. Отказывать

@@ -253,7 +253,20 @@ function parseEditItem(value: unknown, fileIndex: number, editIndex: number): Ed
     // Не угадываем — называем имя вслух, чтобы второй вызов прошёл.
     const alias = (['contents', 'content', 'text'] as const).find((key) => typeof raw[key] === 'string');
     const hint = alias ? ` Похоже, запись целиком лежит в \`${alias}\`: у правки это поле зовётся \`newText\`.` : '';
-    throw new Error(`${where}.newText: нужна строка.${hint}`);
+    // Замер 09.11: 80 отказов с этим текстом, у всех поле-алиас НЕ строка или его нет
+    // вовсе — подсказка молчала, и 51 повтор упал так же. Называем вслух, что
+    // пришло вместо строки: без этого второй вызов неоткуда улучшить.
+    const v = raw.newText as unknown;
+    const shape =
+      v === null ? 'пустое значение null'
+      : Array.isArray(v) ? `массив из ${v.length}`
+      : typeof v === 'object' ? 'объектом'
+      : typeof v;
+    const fields =
+      typeof v === 'object' && v !== null && !Array.isArray(v)
+        ? ` Поля: ${Object.keys(v as Record<string, unknown>).join(', ') || '—'}.`
+        : '';
+    throw new Error(`${where}.newText: нужна строка, а пришло ${shape}.${fields}${hint}`);
   }
 
   const oldText = raw.oldText;

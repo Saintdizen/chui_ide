@@ -71,7 +71,10 @@ describe('пометка сжатия в аргументе: отказ вмес
       const r = await runTool(ctx, 'create_file', JSON.stringify({ path: target, contents: MARKER }));
       expect(r.ok).toBe(false);
       expect(r.summary).toContain('contents');
-      expect(r.summary).toContain('Повтори вызов');
+      // Замер: 204 отказа из 522 (39%) — повтор вызова шлёт ту же пометку, потому что
+      // самого текста в истории уже нет. Отказ обязан назвать, ОТКУДА взять текст.
+      expect(r.summary).toContain('свёрнут в истории');
+      expect(r.detail).toContain('startLine');
       // Главное: на диске ничего не появилось.
       expect(existsSync(target)).toBe(false);
     } finally {
