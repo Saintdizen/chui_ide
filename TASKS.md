@@ -94,19 +94,16 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
 
 ## V. LSP и подсказки (44-53)
 
-44. Call/type hierarchy: в main/lsp есть, в UI не задействовано — панель.
-45. Document highlights: запрос есть (4 файла) — проверить UI.
-46. Semantic tokens: 1 файл — проверить, используется ли в подсветке;
-    если нет, подключить.
-47. Selection range: есть (10 файлов) — сверить поведение расширения.
-48. Inlay hints: вынести в настройки по языку целиком.
-49. Linked editing: одно упоминание — довести до переименования пары
-    тегов.
-50. Document color: LSP есть — пикер цвета в редакторе.
-51. Workspace symbol: ограничение по папке и задержка на больших
-    проектах.
-52. Code actions: «исправить всё» и группировка quickfix/refactor/source.
-53. Форматирование: format-on-save по проекту и диапазонное.
+44. ~~Call hierarchy: панель с деревом~~ — готово. Type hierarchy попапом.
+45. ~~Document highlights~~ — готово: подсветка вхождений, не задействования нет.
+46. ~~Semantic tokens~~ — готово: подключено к подсветке с паузой и видимым диапазоном.
+47. ~~Selection range~~ — готово: expandSelection через selectionRanges.
+48. ~~Inlay hints по языку~~ — готово: `shared/lsp-visibility.ts`.
+49. ~~Linked editing~~ — готово: правка зеркалится в парный тег.
+50. ~~Document color~~ — готово: клик по плашке открывает пикер.
+51. ~~Workspace symbol по папке~~ — готово: параметр `folder` в `lsp.symbols`.
+52. ~~Code actions~~ — готово: группировка по видам, команда «Исправить всё».
+53. ~~Форматирование~~ — готово: format-on-save из настроек проекта, `format.selection`.
 
 ## VI. Инструменты агента и экономия (54-57, 59-67)
 
