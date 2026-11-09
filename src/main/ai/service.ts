@@ -68,6 +68,7 @@ import type { CommitPromptParts } from '../../shared/commit-message';
 import type { TestPromptParts } from '../../shared/test-generation';
 import type { ChatTitleParts } from '../../shared/chat-title';
 import { sandboxNote } from '../../shared/sandbox';
+import { forgetSearchCache } from './agent-search';
 import {
   confirmFile,
   coveredRequest,
@@ -1993,6 +1994,7 @@ export class AiService {
             if (cacheable) executed.set(key, outcome);
           } else {
             forgetChangedFiles({ executed, coveredReads }, call.name, call.arguments, outcome.changes);
+            forgetSearchCache(outcome.changes);
           }
           if (outcome.ok) {
             didNewWork = true;
@@ -2031,6 +2033,7 @@ export class AiService {
             // назвать нельзя (команда, массовая замена по маске), куски помечаются
             // сомнительными и сверяются с диском при следующем чтении (`versionOf`).
             forgetChangedFiles({ executed, coveredReads }, call.name, call.arguments, outcome.changes);
+            forgetSearchCache(outcome.changes);
           }
           didNewWork = true;
           didWork = true;

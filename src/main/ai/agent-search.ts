@@ -29,6 +29,7 @@ import type { SessionSearchReport } from '../../shared/session-search';
 import { DEFAULT_FILES_ONLY_PATHS } from './tool-rules';
 import { listDir } from './agent-list';
 import { readOne } from './agent-read';
+import { SearchCache, fileVersions, treeStamp, type SearchCacheStats } from './search-cache';
 import { codebaseSearch, searchDocs } from './agent-code';
 import { unknownAction } from './agent-present';
 
@@ -243,7 +244,10 @@ interface SearchRequest {
 }
 
 /** Один заход: исполнение и оформление. `empty` — ни одного совпадения. */
-async function runSearch(ctx: ToolContext, request: SearchRequest): Promise<{ outcome: ToolOutcome; empty: boolean }> {
+async function runSearch(
+  ctx: ToolContext,
+  request: SearchRequest,
+): Promise<{ outcome: ToolOutcome; empty: boolean; files: readonly string[] }> {
   const { workspace } = ctx;
   const { query, isRegex, caseSensitive, filesOnly, glob, scope, context, limit, fileLimit } = request;
   const result = await workspace.search(
@@ -282,6 +286,8 @@ async function runSearch(ctx: ToolContext, request: SearchRequest): Promise<{ ou
         : '';
     return {
       empty: unique.length === 0,
+      // `filesOnly` тоже зависит от файлов: их список и есть ответ.
+      files: unique,
       outcome: {
         ok: true,
         summary: `совпадения в файлах: ${unique.length}${result.truncated || rest > 0 ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
@@ -313,6 +319,7 @@ async function runSearch(ctx: ToolContext, request: SearchRequest): Promise<{ ou
 
   return {
     empty: limited.hits.length === 0,
+    files: [...new Set(limited.hits.map((hit) => hit.path))],
     outcome: {
       ok: true,
       summary: `${limited.hits.length} совпадений${notes.length ? ` (${notes.join(', ')})` : ''} · просканировано файлов: ${result.scanned}`,
@@ -323,6 +330,114 @@ async function runSearch(ctx: ToolContext, request: SearchRequest): Promise<{ ou
       matches: result.hits.length,
     },
   };
+}
+
+/**
+ * Запомнить ответ поиска: ключ — запрос, отметка проекта и версии найденных файлов.
+ *
+ * Версии берём сразу после поиска, а не при первом попадании: ключ должен
+ * соответствовать тому тексту, по которому искали.
+ */
+async function rememberSearch(
+  ctx: ToolContext,
+  request: SearchRequest,
+  flags: { isRegex: boolean; caseSensitive: boolean },
+  run: { files: readonly string[]; outcome: ToolOutcome },
+): Promise<void> {
+  // Абсолютные пути ответа — в версии, а в ключ идут пути проекта: так ответ
+  // не зависит от того, откуда открыт проект.
+  const files = [...run.files];
+  const versions = await fileVersions(files);
+  searchCache.set(
+    {
+      call: cacheCallName(request),
+      query: cacheQuery(request, flags),
+      limit: request.filesOnly ? request.fileLimit : request.limit,
+      tree: await treeStamp(ctx.workspace.rootPath()),
+      files,
+      versions,
+    },
+    run.outcome,
+    (run.outcome.summary?.length ?? 0) + (run.outcome.detail?.length ?? 0),
+  );
+}
+
+/** Кэш поиска один на процесс: ответ зависит от файлов, а не от беседы. */
+const searchCache = new SearchCache();
+
+/** Метрика кэша — для замеров и для `show`, когда спросят «что сэкономили». */
+export function searchCacheStats(): SearchCacheStats {
+  return searchCache.stats();
+}
+
+/** Правка файла сбрасывает ответы, где он был; правка в корне — все. */
+export function forgetSearchFile(path: string): void {
+  searchCache.forgetFile(path);
+}
+
+export function forgetSearchTree(): void {
+  searchCache.forgetTree();
+}
+
+/**
+ * Правка файла через `edit`/`write`: ответы, где он был, больше не верны.
+ *
+ * Версия файла (`mtime`) сбросила бы и сама — но `mtime` у быстрой записи может
+ * совпасть, а ответ поиска — нет. Прямое забывание дешевле, чем раз в жизни
+ * отдать модели совпадения по старому тексту.
+ */
+export function forgetSearchCache(changes: readonly { path: string }[] | undefined): void {
+  for (const change of changes ?? []) searchCache.forgetFile(change.path);
+}
+
+/**
+ * Ответ из кэша, если файлы не менялись.
+ *
+ * Сначала пробуем по версиям файлов прошлого ответа — это дёшево (несколько
+ * `stat`). Не сошлось — `search` идёт своим чередом. Файлы берём из самого
+ * ответа: их список и есть его зависимость.
+ */
+async function readSearchCache(
+  ctx: ToolContext,
+  request: SearchRequest,
+  flags: { isRegex: boolean; caseSensitive: boolean },
+): Promise<ToolOutcome | undefined> {
+  const limit = request.filesOnly ? request.fileLimit : request.limit;
+  const base = {
+    call: cacheCallName(request),
+    query: cacheQuery(request, flags),
+    limit,
+    tree: await treeStamp(ctx.workspace.rootPath()),
+    files: [] as string[],
+    versions: [] as string[],
+  };
+  const files = searchCache.filesOf(base);
+  const remembered = searchCache.versionsOf(base);
+  if (!files || !remembered) return undefined;
+  // Версии сверяем сами: файл мог поменяться, а папка — нет.
+  const now = await fileVersions(files);
+  if (now.join('|') !== remembered.join('|')) {
+    searchCache.forgetFile(files[0] ?? '');
+    return undefined;
+  }
+  const hit = searchCache.get({ ...base, files, versions: remembered });
+  return hit ? (hit as ToolOutcome) : undefined;
+}
+
+/** Чем запрос отличается в ключе: так `agent-read` и `agent-read\\.ts` не смешиваются. */
+function cacheQuery(request: SearchRequest, flags: { isRegex: boolean; caseSensitive: boolean }): string {
+  return JSON.stringify({
+    q: request.query,
+    re: flags.isRegex,
+    cs: flags.caseSensitive,
+    glob: request.glob ?? '',
+    path: request.scope ?? '',
+    context: request.context,
+  });
+}
+
+function cacheCallName(request: SearchRequest): string {
+  return request.filesOnly ? 'search:files' : request.countOnly ? 'search:count' : 'search';
 }
 
 /**
@@ -395,8 +510,14 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     if (named) return named;
   }
 
+  const cached = await readSearchCache(ctx, request, { isRegex, caseSensitive });
+  if (cached) return cached;
+
   const first = await runSearch(ctx, request);
-  if (!first.empty) return first.outcome;
+  if (!first.empty) {
+    await rememberSearch(ctx, request, { isRegex, caseSensitive }, first);
+    return first.outcome;
+  }
 
   // Пусто — не повод тратить шаг на «попробую иначе»: пробуем сами (см. `searchFallbacks`).
   const tried: string[] = [];
