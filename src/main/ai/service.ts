@@ -110,6 +110,7 @@ import {
   budgetMessage,
   budgetVerdict,
   contextHeavyMessage,
+  contextPriceNote,
   contextTrimmedMessage,
   HEAVY_CONTEXT_TOKENS,
   midRunTrimDue,
@@ -1300,6 +1301,12 @@ export class AiService {
     let budgetDeclared = false;
     /** О тяжёлом контексте сказано: повторять на каждом шаге незачем. */
     let contextDeclared = false;
+    /**
+     * Округлённый вес контекста на прошлом шаге. Строку про цену вставляем только
+     * когда меняется само число (шаг на 5k): новый `system`-блок перед историей
+     * сбивал бы кеш префикса на каждом шаге — то, от чего уходили в п.74.
+     */
+    let lastPriceAt = -1;
     let runSteps = 0;
     let runToolCalls = 0;
     /**
@@ -1537,8 +1544,21 @@ export class AiService {
       // едет в каждом шаге прогона.
       const contextTokens = estimateMessagesTokens(messages) + toolsTokens;
       const stepsLeft = Math.max(0, steps - runSteps);
+      // Цена шага. Модель видит историю, но не её вес: каждый шаг несёт весь
+      // контекст заново. Замер 09.11: медиана прогона 38 шагов и 8832 тк на
+      // первом — одна лишняя тысяча в контексте платится тридцать раз.
+      // Строка вставляется только когда меняется САМА (шаг на 5k), иначе она
+      // сбивала бы кеш префикса на каждом шаге — то, от чего уходили в п.74.
+      const priceAt = Math.floor(contextTokens / 5000) * 5000;
+      if (priceAt !== lastPriceAt) {
+        lastPriceAt = priceAt;
+        const priceNote = contextPriceNote(contextTokens, stepsLeft);
+        if (priceNote) messages.push({ role: 'system', content: priceNote });
+      }
       // Сокращаем посреди прогона, но не на каждом шаге: разрыв кеша стоит
       // дорого, и пока впереди мало шагов, он не окупится (`midRunTrimDue`).
+      // Скажем модели числом, что изменилось: без цифры «что-то сократил»
+      // звучит как сбой и заставляет перечитывать старое.
       const trimmedNow = midRunTrimDue({
         tokens: contextTokens,
         stepsLeft,

@@ -9,6 +9,7 @@ import {
   HEAVY_CONTEXT_TOKENS,
   cacheBreakPaybackSteps,
   contextHeavyMessage,
+  contextPriceNote,
   contextTrimmedMessage,
   midRunTrimDue,
 } from '../src/shared/chat-budget';
@@ -37,16 +38,32 @@ function result(index: number): ChatMessage {
 }
 
 describe('порог тяжёлого контекста', () => {
-  it('ниже окна модели и выше состава схем', () => {
-    expect(HEAVY_CONTEXT_TOKENS).toBe(80_000);
-    expect(HEAVY_CONTEXT_TOKENS).toBeLessThan(200_000);
+  it('выбран по замеру, а не по окну модели', () => {
+    // Замер 09.11 по 722 прогонам: старый порог 80 000 не достигался ни разу
+    // (пик 68 702, медиана пика 12 949) — предупреждение и сокращение истории
+    // молчали весь срок жизни журнала. 20 000 выбирает 95 прогонов (13%).
+    expect(HEAVY_CONTEXT_TOKENS).toBe(20_000);
+    // Выше состава схем (1594 тк) — иначе срабатывало бы на каждом прогоне.
     expect(HEAVY_CONTEXT_TOKENS).toBeGreaterThan(10_000);
+    expect(HEAVY_CONTEXT_TOKENS).toBeLessThan(200_000);
   });
 
   it('текст называет объём в тысячах токенов', () => {
     const text = contextHeavyMessage(212_000);
     expect(text).toContain('212k');
     expect(text.length).toBeGreaterThan(40);
+  });
+
+  it('цена контекста названа числом и окупаемостью', () => {
+    const text = contextPriceNote(12_400, 30);
+    expect(text).toContain('12.4k');
+    // Хвост прогона: та же история поедет ещё тридцать раз.
+    expect(text).toContain('30');
+    expect(text).toContain('372k');
+    // Пустой контекст — молчим, а не пишем «0k».
+    expect(contextPriceNote(0, 5)).toBe('');
+    // Без счёта шагов — только текущий вес.
+    expect(contextPriceNote(5000)).toContain('5k');
   });
 
   it('тяжёлые настройки сворачивают больше обычных', () => {
