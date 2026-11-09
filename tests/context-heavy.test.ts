@@ -67,20 +67,16 @@ describe('порог тяжёлого контекста', () => {
     expect(contextPriceNote(5000)).toContain('5k');
   });
 
-  it('цена хвоста не считается по потолку шагов', () => {
-    // Прогон живёт десятки шагов, а `steps` — потолок планировщика (500).
-    // Строка «ещё 200056k» на 500 шагах не расход, а выдумка: хвост молчит.
-    const long = contextPriceNote(400_100, 500);
-    expect(long).toContain('400.1k');
-    expect(long).not.toContain('как минимум');
-    expect(long).not.toContain('500');
-    // В пределах плана хвост честный и остаётся.
-    expect(contextPriceNote(14_400, 30)).toContain('432k');
-    // Сам потолок плана хвостом НЕ считается: ровно это число приходит сюда
-    // из service.ts как `runPlan` (потолок шагов, а не остаток прогона).
-    const cap = contextPriceNote(14_400, PRICE_PLAN_STEPS);
-    expect(cap).toContain('14.4k');
-    expect(cap).not.toContain('как минимум');
+  it('хвост считается по остатку шагов, а не по потолку', () => {
+    // `steps` — остаток прогона. Строка про «ещё 245645k» рождалась, когда
+    // в функцию клали потолок шагов (500) вместо runPlan - runSteps.
+    const text = contextPriceNote(400_100, 3);
+    expect(text).toContain('400.1k');
+    expect(text).toContain('3 шагов');
+    expect(text).toContain('1200k');
+    // Потолок шагов в остаток не попадает по построению — сам зовущий его
+    // вычитает; функция обязана честно считать то, что дали.
+    expect(contextPriceNote(14_400, PRICE_PLAN_STEPS)).toContain('14.4k');
   });
 
   it('тяжёлые настройки сворачивают больше обычных', () => {
