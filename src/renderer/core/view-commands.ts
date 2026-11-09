@@ -37,6 +37,13 @@ export interface ViewLayout {
 export interface ViewDock {
   readonly visible: boolean;
   readonly activeId: string | null;
+  /**
+   * Вкладки в порядке кнопок в шапке — те, что перебирают `Ctrl+Alt+1..9`.
+   *
+   * Порядок именно тот, что видит человек: номера на вкладках не пишем (они
+   * теснят заголовки), а обещать «третья» можно только по этому порядку.
+   */
+  readonly tabIds: readonly string[];
   /** Место, которое панель держала до дзена: ноль — не помнит. */
   readonly height: number;
   /** Запомнить место панели; ноль — забыть. */
