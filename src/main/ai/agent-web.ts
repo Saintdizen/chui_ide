@@ -8,7 +8,7 @@ import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
 import { formatMcpResources } from '../../shared/mcp';
 import { missingForAction, optionalInteger, optionalString, requireString } from './tool-args';
 import type { ToolContext, ToolOutcome } from './tool-context';
-import { MAX_FETCH_CHARS, DEFAULT_WEB_RESULTS, MAX_WEB_RESULTS } from './agent-limits';
+import { MAX_FETCH_CHARS, DEFAULT_FETCH_CHARS, DEFAULT_WEB_RESULTS, MAX_WEB_RESULTS } from './agent-limits';
 import { formatWebResults } from '../../shared/web-search';
 import { describeValue } from '../../shared/tool-args';
 import type { McpResourceInfo, McpToolInfo } from '../../shared/mcp';
@@ -114,7 +114,11 @@ async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promis
 
   const url = requireString(args, 'url');
   const requested = optionalInteger(args, 'maxChars');
-  const maxChars = requested === undefined ? undefined : Math.min(Math.max(requested, 1000), MAX_FETCH_CHARS);
+  // Умолчание — не `undefined`: без него страница качается целиком и режется
+  // УЖЕ ПОСЛЕ, в `output-budget` (потолок web — 8 000, замер 09.11: отказ на
+  // 9054 симв. при потолке 8000 — деньги потрачены, пользы нет). Берём ровно
+  // столько, сколько доедет до модели.
+  const maxChars = Math.min(Math.max(requested ?? DEFAULT_FETCH_CHARS, 1000), MAX_FETCH_CHARS);
 
   try {
     const page = await ctx.webFetch.fetch(url, {

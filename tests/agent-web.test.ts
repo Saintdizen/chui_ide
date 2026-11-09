@@ -209,6 +209,17 @@ describe('web: fetch', () => {
     expect(spy.mock.calls[0]?.[1]).toMatchObject({ maxChars: 1000 });
   });
 
+  // Замер 09.11: без maxChars страница качалась ЦЕЛИКОМ (до 60k), платилась и
+  // затем обрезалась до 8000 общим потолком: в runs был отказ на 9054 симв.
+  // при потолке 8000 — ПОСЛЕ получения текста. Ставим умолчание равным тому,
+  // что реально доедет до модели.
+  it('без maxChars качает не больше, чем доедет до модели', async () => {
+    const context = ctx({ page: page() });
+    const spy = context.webFetch!.fetch as unknown as ReturnType<typeof vi.fn>;
+    await webAction(context, { action: 'fetch', url: 'https://a' });
+    expect(spy.mock.calls[0]?.[1]).toMatchObject({ maxChars: 8_000 });
+  });
+
   it('не открывшаяся страница советует другой источник', async () => {
     const outcome = await webAction(ctx({ fetchError: new Error('404') }), {
       action: 'fetch',
