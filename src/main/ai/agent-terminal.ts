@@ -380,17 +380,25 @@ export async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<st
 }
 
 /**
- * Порог, после которого shell-вывод считается «файлом целиком». 120 строк = потолок
- * `read` без диапазона (`LONG_FILE_HEAD_LINES`), то есть всё, что выше, дешевле
- * прочитать через `read`.
+ * Порог, после которого shell-вывод стоит отметить как объёмный.
+ *
+ * Первым был 120 строк («потолок read без диапазона») — замер 09.11 показал,
+ * что shell-ответов длиннее 120 строк в журнале НОЛЬ из 58: правка срабатывала
+ * никогда. Реальные размеры: медиана ~10 строк, самый большой 42 при 845 тк.
+ * То, что дорого в shell, — не строки, а символы: длинная строка (JSON, одна
+ * лента minified) даёт те же деньги при 5 строках. Поэтому порог — токены,
+ * и он ниже: тот же замер дал 9 вызовов из 58 выше 500 тк (165–845 тк)
+ * и сотни коротких — порог ловит именно дорогие, не всю подряд.
  */
-const WHOLE_SHELL_ROWS = 120;
+const WHOLE_SHELL_TOKENS = 500;
 
 function shellWholeFile(command: string, output: string): string {
-  if (!/\b(cat|sed)\b/.test(command) || /\bhead\b|\btail\b|sed\s+-n/.test(command)) return '';
+  const tokens = Math.ceil(output.length / 3.5);
+  if (tokens < WHOLE_SHELL_TOKENS) return '';
   const lines = output.split('\n').length;
-  if (lines < WHOLE_SHELL_ROWS) return '';
-  return `\n(вывод целиком: ${lines} строк ≈${Math.ceil(output.length / 3.5)} тк; тот же файл дешевле — read с startLine/endLine)`;
+  // `sed -n` и `head`/`tail` уже взяли диапазон — им советовать нечего.
+  if (/\bhead\b|\btail\b|sed\s+-n/.test(command)) return '';
+  return `\n(вывод целиком: ${lines} строк ≈${tokens} тк; тот же файл дешевле — read с startLine/endLine)`;
 }
 
 /* ── долгие команды: задания ─────────────────────────────────────────────── */
