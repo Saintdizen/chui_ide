@@ -115,6 +115,13 @@ export interface RunCountsRecord {
     cached: number;
     output: number;
     cacheCreation: number;
+    /**
+     * Цена прогона по контексту: сумма `carried` по всем шагам.
+     *
+     * В trace.prompt попадает только ПОСЛЕДНИЙ запрос, а окно растёт с каждым
+     * шагом. Без суммы прогон на 40 шагов выглядит втрое дешевле, чем стоил.
+     */
+    carriedTotal?: number;
   };
   steps: RunCountStep[];
   /**
@@ -184,6 +191,12 @@ export function buildCountsRecord(run: ChatRunLog, input: CountsInput = {}): Run
       cached: usage.cachedTokens ?? 0,
       output: usage.completionTokens ?? 0,
       cacheCreation: usage.cacheCreationTokens ?? 0,
+      ...(() => {
+        const carriedSteps = steps.filter((s) => typeof s.carried === "number");
+        return carriedSteps.length > 0
+          ? { carriedTotal: carriedSteps.reduce((sum, s) => sum + (s.carried ?? 0), 0) }
+          : {};
+      })(),
     },
     steps,
     ...(input.savings && input.savings.parts.length > 0

@@ -418,4 +418,32 @@ describe('счётчик шагов', () => {
     expect(record.steps[0]!.calls[3]!.flags).toContain('repeat');
     expect(record.steps[0]!.calls[0]!.flags ?? []).not.toContain('repeat');
   });
+
+  it('carried едет из шага в запись, а carriedTotal суммирует прогон', () => {
+    const base = run();
+    const log: ChatRunLog = {
+      ...base,
+      steps: [
+        { ...base.steps[0]!, carried: 9_000 },
+        { ...base.steps[1]!, carried: 14_000 },
+      ],
+    };
+    const record = buildCountsRecord(log, { conversation: 'uid' });
+    //цена контекста этого шага
+    expect(record.steps[0]!.carried).toBe(9_000);
+    expect(record.steps[1]!.carried).toBe(14_000);
+    //сумма, иначе 40-шаговый прогон выглядит как один шаг
+    expect(record.trace.carriedTotal).toBe(23_000);
+  });
+
+  it('шаг без carried не выдумывает ноль и не ломает сумму', () => {
+    const base = run();
+    const log: ChatRunLog = {
+      ...base,
+      steps: [{ ...base.steps[0]!, carried: 5_000 }, base.steps[1]!],
+    };
+    const record = buildCountsRecord(log, { conversation: 'uid' });
+    expect(record.steps[1]!.carried).toBeUndefined();
+    expect(record.trace.carriedTotal).toBe(5_000);
+  });
 });
