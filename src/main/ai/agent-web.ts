@@ -4,7 +4,7 @@
  * сайтом, поэтому общего с поиском по проекту только формы аргументов.
  */
 
-import { formatFetchedPage } from '../../shared/web-fetch';
+import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
 import { formatMcpResources } from '../../shared/mcp';
 import { missingForAction, optionalInteger, optionalString, requireString } from './tool-args';
 import type { ToolContext, ToolOutcome } from './tool-context';
@@ -122,6 +122,11 @@ async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promis
       maxChars,
     });
     const shaped = formatFetchedPage(page);
+    // `saveTo`: страница целиком — в файл проекта, а модели — адрес и размеры.
+    // Страница на 400 КБ в контексте не нужна ни целиком, ни обрезком: дальше
+    // работают с файлом — search по нему, read диапазоном.
+    const saveTo = optionalString(args, 'saveTo');
+    if (saveTo) return await savePageToFile(ctx, page, saveTo, shaped);
     return { ok: true, summary: shaped.summary, detail: shaped.detail };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -134,6 +139,59 @@ async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promis
         'его скачивают терминалом.',
     };
   }
+}
+
+/**
+ * Страница — в файл проекта, а не в контекст.
+ *
+ * Зачем: длинный документ (спецификация, лог, README чужого проекта) в ответе
+ * `fetch` — это обрезанный текст, по которому дальше всё равно не поработать:
+ * ни поискать, ни прочитать с середины. Файл в проекте решает это одним
+ * движением: `search` по нему, `read` диапазоном, и в контекст попадает только
+ * то, что нужно.
+ *
+ * Пишем ровно тот текст, что собрал `fetch` (он уже вырезал разметку), но при
+ * `saveTo` не режем по `maxChars`: смысл в полноте. Размер называем честно —
+ * и сколько символов, и сколько строк.
+ */
+async function savePageToFile(
+  ctx: ToolContext,
+  page: FetchedPage,
+  saveTo: string,
+  shaped: { summary: string; detail: string },
+): Promise<ToolOutcome> {
+  const text = page.text;
+  // Пустая страница — не повод создать пустой файл: об этом лучше сказать.
+  if (text.trim().length === 0) {
+    return {
+      ok: true,
+      summary: `${page.finalUrl}: пусто, файл не создан`,
+      detail: `${shaped.summary}\nСтраница без текста — сохранять нечего.`,
+    };
+  }
+  try {
+    // Путь модели — проект-относительный, а `writeFile` проверяет от корня.
+    const root = ctx.workspace.rootPath();
+    const absolute = !root || saveTo.startsWith('/') ? saveTo : `${root}/${saveTo}`;
+    await ctx.workspace.writeFile(absolute, text);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      summary: `Не записалось в ${saveTo}: ${reason}`,
+      detail: 'Путь не пишется: проверь, что он внутри проекта и папка существует.',
+    };
+  }
+  const lines = text.split('\n').length;
+  return {
+    ok: true,
+    summary: `${page.title || page.finalUrl}: сохранено в ${saveTo} (${lines} строк)`,
+    detail:
+      `Страница ${page.finalUrl} (${page.status}, ${page.contentType}) сохранена в ${saveTo}: ` +
+      `${text.length} символов, ${lines} строк.\n` +
+      'В контекст текст не отдаю — он в файле. Дальше: search по нему для нужного места, ' +
+      'read с startLine/endLine, чтобы прочитать с середины.',
+  };
 }
 
 export async function webAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {

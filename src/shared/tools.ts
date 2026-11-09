@@ -509,6 +509,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         limit: { type: 'number', description: 'search: how many.' },
         url: { type: 'string', description: 'fetch: page address.' },
         maxChars: { type: 'number', description: 'fetch: text characters (8 000; max 60 000).' },
+        saveTo: { type: 'string', description: 'fetch: write the page to this project file.' },
       },
       required: ['action'],
     },

@@ -39,17 +39,6 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
 
 ## VI. Инструменты агента и экономия
 
-54. `glob`: сверить наш набор (list/read/search/history/read_image/lsp/
-    checks/run_tests/project_map/mcp/edit/web/terminal/terminalOpen/
-    terminalOutput/terminalWrite/terminalStop/terminalList/file/skill/
-    mind/browser/task/show) с Zed (16: diagnostics, fetch, find_path,
-    grep, list_directory, read_file, search_web, copy_path,
-    create_directory, delete_path, edit_file, move_path, write_file,
-    terminal, skill, spawn_agent) и JetBrains MCP. Чего не хватает —
-    добавить.
-55. `diagnostics` отдельным именем: проверить, что `checks` покрывает
-    файл/папку/проект так же, как Zed.
-56. `fetch` с сохранением страницы в файл и учётом размера.
 57. `git` (status/diff/blame/log, откат файла) вместо работы через
     `terminal`.
 59. `todo` по коду (todo-panel.ts есть, в наборе агента нет).

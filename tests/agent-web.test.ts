@@ -1,4 +1,8 @@
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { WorkspaceService } from '../src/main/workspace/workspace';
 import { mcpAction, runExternalTool, webAction } from '../src/main/ai/agent-web';
 import { runTool } from '../src/main/ai/agent-tools';
 import type { ToolContext } from '../src/main/ai/tool-context';
@@ -371,5 +375,58 @@ describe('маршрутизация диспетчера', () => {
     const outcome = await runTool(ctx({ hits: [hit] }), 'web', JSON.stringify({ action: 'search', query: 'x' }));
     expect(outcome.ok).toBe(true);
     expect(outcome.summary).toContain('результатов');
+  });
+});
+
+describe('web: fetch со сохранением в файл (п.56)', () => {
+  /** Контекст с рабочей папкой: `writeFile` пишет по-настоящему. */
+  async function saving(fileText = 'строка 1\nстрока 2\nстрока 3'): Promise<{
+    context: ToolContext;
+    read: (name: string) => Promise<string>;
+    dir: string;
+  }> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-web-save-'));
+    const workspace = new WorkspaceService(() => undefined);
+    await workspace.open(dir);
+    const base = ctx({ page: page({ text: fileText, totalChars: fileText.length }) });
+    return {
+      context: { ...base, workspace, root: dir } as unknown as ToolContext,
+      read: async (name: string) => fs.readFile(path.join(dir, name), 'utf8'),
+      dir,
+    };
+  }
+
+  it('страница пишется в файл, а текст в контекст не идёт', async () => {
+    const { context, read } = await saving();
+    const outcome = await webAction(context, {
+      action: 'fetch',
+      url: 'https://example.com/a',
+      saveTo: 'docs/page.txt',
+    });
+    expect(outcome.ok).toBe(true);
+    expect(String(outcome.summary)).toContain('docs/page.txt');
+    expect(String(outcome.summary)).toContain('3 строк');
+    // Текста страницы в ответе нет — только путь и размеры.
+    expect(String(outcome.detail)).not.toContain('строка 2');
+    expect(String(outcome.detail)).toContain('search по нему');
+    expect(await read('docs/page.txt')).toContain('строка 2');
+  });
+
+  it('пустая страница файла не создаёт', async () => {
+    const { context, dir } = await saving('   ');
+    const outcome = await webAction(context, {
+      action: 'fetch',
+      url: 'https://example.com/a',
+      saveTo: 'docs/empty.txt',
+    });
+    expect(outcome.ok).toBe(true);
+    expect(String(outcome.summary)).toContain('пусто');
+    await expect(fs.stat(path.join(dir, 'docs/empty.txt'))).rejects.toThrow();
+  });
+
+  it('без saveTo — прежний ответ с текстом', async () => {
+    const { context } = await saving();
+    const outcome = await webAction(context, { action: 'fetch', url: 'https://example.com/a' });
+    expect(String(outcome.detail)).toContain('строка 2');
   });
 });
