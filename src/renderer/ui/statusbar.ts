@@ -50,10 +50,6 @@ export interface StatusState {
   /** Режим невидимых: `none` / `trailing` / `all`. `null` — не текст, чип скрыт. */
   whitespace: WhitespaceMode | null;
   encoding: string;
-  /** Ветка или null, если репозитория нет. */
-  branch: string | null;
-  /** Сколько файлов с правками: показывает виджет ветки. */
-  changes: number;
   /** Ключ вида проекта (`python`, `node`, …): выбирает, какой попап открыть. */
   projectKindId: string | null;
   /** Пометки в открытых файлах: числа ошибок и предупреждений для виджета проблем. */
@@ -104,11 +100,6 @@ export interface StatusState {
 export interface StatusBarView {
   element: HTMLElement;
   /**
-   * Кнопка ветки git в полосе: к ней привязывается поповер менеджера git — и по клику,
-   * и командой «Показать изменения», когда вкладки в нижней панели больше нет.
-   */
-  readonly gitAnchor: HTMLElement;
-  /**
    * Куда монтируется статус ассистента: режим работы и заполнение контекста.
    * Композер отдаёт сюда свою строку статуса, чтобы она жила в общей полосе окна,
    * а не занимала высоту панели чата.
@@ -124,8 +115,6 @@ export interface StatusBarView {
 }
 
 export interface StatusBarDeps {
-  /** Открыть менеджер git у указанной кнопки — так работает кнопка ветки. */
-  openGitManager(anchor: HTMLElement): void;
   /** Открыть попап Python-окружения у кнопки окружения. */
   openPythonEnv(anchor: HTMLElement): void;
   /** Открыть попап Node-окружения у кнопки окружения. */
@@ -167,7 +156,7 @@ export type StatusChoiceKind = 'encoding' | 'indent' | 'language';
 
 /** Русское склонение по числу: 1 ошибка, 2 ошибки, 5 ошибок. */
 /**
- * Статусбар: слева путь к активному файлу и ветка git,
+ * Статусбар: слева путь к активному файлу,
  * справа «строка:столбец», перевод строки, кодировка, отступ, окружение и язык.
  * Полоса плоская, без «острова» — на фоне приложения.
  */
@@ -183,8 +172,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     eol: null,
     whitespace: null,
     encoding: 'UTF-8',
-    branch: null,
-    changes: 0,
     projectKindId: null,
     env: null,
     lsp: null,
@@ -211,19 +198,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   });
   /** Слот под крошки: путь к файлу рисует `ui/breadcrumbs.ts`. */
   const fileSlot = h('div', { class: 'status-breadcrumbs' });
-  const gitItem = h(
-    'button',
-    {
-      class: 'status-item status-git',
-      type: 'button',
-      title: 'Менеджер git',
-      onClick: (event: Event) => deps.openGitManager(event.currentTarget as HTMLElement),
-    },
-    svgIcon('branch', 12),
-  );
-  // Подпись ветки — обычным текстом полосы: своего шрифта у неё нет.
-  const gitLabel = h('span', {});
-  gitItem.appendChild(gitLabel);
   // Слоты с действием — кнопки, без действия — текст. Так полоса не обещает
   // клика там, где его нет: кодировку пока менять нечем (команды нет), и слот
   // честно остаётся подписью.
@@ -416,7 +390,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     // в общем потоке страницы и не говорила, что это *всё* управление окном после
     // редактора. `aria-label` даёт им общее имя, а `aria-keyshortcuts` внизу — клавиши.
     { class: 'statusbar', role: 'toolbar', 'aria-label': 'Состояние и действия окна' },
-    h('div', { class: 'status-group', role: 'presentation' }, gitItem, fileSlot),
+    h('div', { class: 'status-group', role: 'presentation' }, fileSlot),
     h(
       'div',
       { class: 'status-group', role: 'presentation' },
@@ -595,18 +569,12 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     problemsItem.title = problems.title;
     // Сводка проблем цифрами без слов не читается — имя берём у того же виджета.
     problemsItem.setAttribute('aria-label', `Проблемы: ${problems.title}`);
-    gitItem.hidden = state.branch === null;
-    gitLabel.textContent = state.branch ? `${state.branch}${state.changes > 0 ? `  ±${state.changes}` : ''}` : '';
-    gitItem.title = state.branch
-      ? `Ветка ${state.branch}${state.changes > 0 ? `, файлов с правками: ${state.changes}` : ', изменений нет'}`
-      : '';
   };
 
   render();
 
   return {
     element,
-    gitAnchor: gitItem,
     chatSlot,
     fileSlot,
     update(patch) {

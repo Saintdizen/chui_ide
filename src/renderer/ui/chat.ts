@@ -63,7 +63,7 @@ import {
 } from './chat-checkpoints';
 import { MAX_RUN_ARTIFACTS, type RunArtifacts } from '../core/artifacts';
 import { createToolFeed, type ToolCardView } from './chat-tools';
-import { createRunFold, nextFoldIcon, nextFoldLabel } from './run-fold';
+import { createRunFold } from './run-fold';
 import { runEndReport, type RunEndFile, type RunEndHow, type RunEndReport } from './run-end';
 import { createMarkdownRenderer } from './chat-markdown';
 import { createChatComposer } from './chat-composer';
@@ -1036,9 +1036,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     else planPanel.hide();
     renderTabs();
     syncSessionInfo();
-    // Раскрытие ленты своё у каждой беседы: подпись кнопки без этого осталась бы
-    // от прошлой вкладки и обещала бы не то действие.
-    syncFoldButton(next);
+
 
     // Занятость общая: прогон в окне один, поэтому и поле одно на все вкладки.
     input.disabled = busy;
@@ -2125,37 +2123,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   });
 
   const element = h('div', { class: 'chat' }, tabs.element, tabs.searchBar, body, findBar.element, footer);
-  /*
-    Кнопка «свернуть всё» живёт в ряду настроек беседы: раскрытие ленты — такое
-    же свойство беседы, как режим и модель, и своя у каждой вкладки. Стоит
-    перед рядом действий, чтобы не спорить с «отправить» у правого края.
-  */
-  const foldButton = h('button', {
-    class: 'composer-fold',
-    type: 'button',
-    onClick: () => {
-      const session = active();
-      session.fold?.cycle();
-      syncFoldButton(session);
-    },
-  });
-  composer.settingsBar.prepend(foldButton);
-
-  /** Подпись и значок кнопки — всегда про ДЕЙСТВИЕ следующего нажатия. */
-  function syncFoldButton(session: ChatSession): void {
-    const mode = session.fold?.mode() ?? 'auto';
-    foldButton.replaceChildren(svgIcon(nextFoldIcon(mode), 14));
-    const label = nextFoldLabel(mode);
-    foldButton.title = label;
-    foldButton.setAttribute('aria-label', label);
-    foldButton.setAttribute('aria-pressed', String(mode !== 'auto'));
-  }
-  // Панель собирается ДО первой беседы: восстановление и «новая беседа» создают
-  // её позже, а `active()` на пустом списке отдаёт undefined. Без сессии подписи
-  // ещё не про что — её поставит `activate()` (чат собирается без падения).
-  const initial = sessions[0];
-  if (initial) syncFoldButton(initial);
-
   /**
    * `Ctrl+F` — поиск по ленте открытой беседы.
    *

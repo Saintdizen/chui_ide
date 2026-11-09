@@ -61,22 +61,24 @@ export function mountProjectSelect(deps: ProjectSelectDeps): {
   element: HTMLElement;
   sync(root: string | null): void;
 } {
-  const element = h('span', { class: 'project-slot' });
   let current: SelectView | null = null;
 
   const sync = (root: string | null): void => {
     if (!current) {
       current = createProjectSelect(deps, root);
-      element.appendChild(current.element);
       return;
     }
     const next = createProjectSelect(deps, root);
-    // Подменяем узел на месте: обёртка держит раскладку шапки, а селект меняется
-    // целиком — у него своя кнопка, свой список и своя подписка на недавние.
+    // Подменяем узел на месте: селект меняется целиком — у него своя кнопка,
+    // свой список и своя подписка на недавние, — а место в шапке остаётся его.
+    // Обёртки нет: кнопка селекта лежит в topbar-left напрямую, иначе лишний
+    // span тянул бы раскладку и перехватывал ширину у соседей.
     current.element.replaceWith(next.element);
     current = next;
   };
 
   sync(deps.workspace.root ?? null);
-  return { element, sync };
+  // Создаём до первого sync, чтобы вернуть готовый узел: обёртка больше не нужна.
+  current ??= createProjectSelect(deps, deps.workspace.root ?? null);
+  return { element: current.element, sync };
 }

@@ -91,6 +91,23 @@ describe('порог тяжёлого контекста', () => {
     expect(contextPriceNote(200_000, 3, 50)).toContain('3 шагов');
   });
 
+  it('подпись не обещает больше потолка плана', () => {
+    // Было «ещё как минимум N k» — слово «минимум» переворачивало смысл:
+    // planSteps — это верхняя граница обещания, а не нижняя.
+    const planned = contextPriceNote(200_000, 300, PRICE_PLAN_STEPS);
+    expect(planned).not.toContain('как минимум');
+    expect(planned).toContain('В пределах');
+    expect(planned).toContain(`${PRICE_PLAN_STEPS} шагов`);
+    expect(planned).toContain(`${(200 * PRICE_PLAN_STEPS)}k`);
+    // Факт короче плана — считаем по факту.
+    const short = contextPriceNote(200_000, 3, PRICE_PLAN_STEPS);
+    expect(short).not.toContain('как минимум');
+    expect(short).toContain('3 шагов');
+    // Остаток неизвестен — только вес шага, без «до конца прогона».
+    const noTail = contextPriceNote(200_000, 0, PRICE_PLAN_STEPS);
+    expect(noTail).toBe('Цена контекста: 200k токенов едет в каждом шаге.');
+  });
+
   it('подпись о цене не обгоняет сокращение истории', () => {
     // Замер 09.11 по `carried` в runs*.jsonl: на шаге 0 подпись объявляла
     // 258.8k «в каждом шаге», а после свёртки ехало 20.3k — обещание было

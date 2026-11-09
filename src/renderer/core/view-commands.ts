@@ -93,7 +93,7 @@ export interface ViewCommandDeps {
     setZen(on: boolean): void;
   };
   openEditors: { readonly active: { readonly path: string } | null };
-  statusBar: { readonly gitAnchor: HTMLElement | null };
+  statusBar: { readonly gitButton: HTMLElement | null };
   openGitManager(anchor: HTMLElement | null): void;
   isMarkdownPath(path: string): boolean;
   toggleMarkdownPreview(path: string): void;
@@ -129,9 +129,9 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
   });
 
   // Вкладки «Изменения» в нижней панели больше нет: полный менеджер git открывается
-  // поповером от кнопки ветки в статусбаре.
+  // поповером от кнопки ветки в шапке окна.
   define({ id: 'view.showChanges', title: 'Показать изменения', category: 'Вид', keybinding: 'Ctrl+Shift+G' }, () => {
-    deps.openGitManager(deps.statusBar.gitAnchor);
+    deps.openGitManager(deps.statusBar.gitButton);
   });
 
   /**

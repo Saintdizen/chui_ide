@@ -316,7 +316,6 @@ export async function startApplication(
   // поэтому решение о видимости живёт в своей модели (`core/panel-layout`).
   const panelAuto = new AutoPanelLayout();
   const statusBar = createStatusBar({
-    openGitManager: (anchor) => openGitManager(anchor),
     // Линзы для файла: переключаем список «языков без линз» в настройках.
     toggleLenses: () => {
       const path = editors.currentPath;
@@ -2899,31 +2898,42 @@ export async function startApplication(
   // стартового окна. Проводник этот селект больше не рисует.
   const projectSlot = mountProjectSelect({ rpc, workspace });
   layout.topBarLeft.appendChild(projectSlot.element);
-  // Слева — действия над содержимым: сохранить, поиск, страница рядом с кодом.
-  addTopButton(
-    layout.topBarLeft,
-    "save",
-    "save",
-    "Сохранить всё (Ctrl+Alt+S)",
-    "file.saveAll",
+  // Ветка git — рядом с проектом: она часть его состояния. Кнопка же служит якорем
+  // поповера менеджера git (Ctrl+Shift+G), поэтому живёт в шапке, а не в полосе.
+  const gitButton = h(
+    "button",
+    {
+      class: "select status-git",
+      type: "button",
+      hidden: true,
+      title: "Менеджер git (Ctrl+Shift+G)",
+      onclick: () => openGitManager(gitButton),
+    },
+    // Ветка — не «просто подпись»: перед ней иконка ветки, как у кнопок
+    // действия. Класс `topbar-icon` держит иконку в ряду и красит её
+    // отдельно от шеврона (`.status-git > svg` ниже — только шеврон).
+    h("span", { class: "topbar-icon" }, svgIcon("branch", 12)),
+    h("span", { class: "status-git-label" }),
+    h("span", { class: "status-git-changes" }),
+    // Шеврон — как у `.select` в этой же шапке: кнопка открывает список, и
+    // форма должна обещать то же, что соседний селектор проекта.
+    svgIcon("chevronDown", 12),
   );
-  addTopButton(
-    layout.topBarLeft,
-    "search",
-    "search",
-    "Поиск по проекту (Ctrl+Shift+F)",
-    "search.project",
-  );
-  // Встроенный браузер: страница вкладкой рядом с кодом. Своим разделителем — это
-  // не раскладка окна, а ещё один способ открыть содержимое рядом с редактором.
-  layout.topBarLeft.appendChild(h("span", { class: "topbar-sep" }));
-  addTopButton(
-    layout.topBarLeft,
-    "browser",
-    "globe",
-    "Открыть страницу (Ctrl+Shift+B)",
-    "browser.open",
-  );
+  layout.topBarLeft.appendChild(gitButton);
+  const syncGitButton = () => {
+    const branch = git.branch;
+    gitButton.hidden = branch === null;
+    if (branch === null) return;
+    /* Имя и счётчик — разные узлы: имя режется многоточием, счётчик всегда цел.
+       Раньше оба писались в первый span, и «±N» уезжало вместе с обрезкой. */
+    const label = gitButton.querySelector<HTMLElement>(".status-git-label")!;
+    const changes = gitButton.querySelector<HTMLElement>(".status-git-changes")!;
+    label.textContent = branch;
+    changes.textContent = git.changeCount > 0 ? `±${git.changeCount}` : "";
+    changes.hidden = git.changeCount === 0;
+  };
+  git.onDidChange(() => syncGitButton());
+  syncGitButton();
 
   // Центр шапки отдан главному: кнопке запуска, а когда запускать нечего — имени
   // открытого файла (см. syncRunControl). Одно сменяет другое, пустоты не бывает.
@@ -4091,7 +4101,7 @@ export async function startApplication(
     },
     editors,
     openEditors,
-    statusBar,
+    statusBar: { gitButton },
     openGitManager,
     isMarkdownPath,
     toggleMarkdownPreview,
@@ -4322,7 +4332,7 @@ export async function startApplication(
       setMessage: (message) => sourceControl.setMessage(message),
       // Панель изменений теперь в поповере у кнопки ветки: уже открытый не переключаем (toggle бы закрыл).
       revealComposer: () => {
-        if (!gitManagerPopover?.isOpen) openGitManager(statusBar.gitAnchor);
+        if (!gitManagerPopover?.isOpen) openGitManager(gitButton);
       },
     },
     view: {
@@ -4674,7 +4684,6 @@ export async function startApplication(
         lspEnabled: settings.lsp.enabled,
       },
       lspChip: lspChipFor(language, lspStatus),
-      git: { branch: git.branch, changeCount: git.changeCount },
       projectKind: projectScan?.kind ?? null,
       problems: problemsStatus(),
       vim: settings.editor.vimMode ? editors.vimMode() : null,

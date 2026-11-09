@@ -409,6 +409,62 @@ textarea {
   min-width: 0;
 }
 
+/* Переключатели проекта и ветки стоят плотнее остальных кнопок шапки: между
+   ними один `gap`, а не два — иначе рамки соседних кнопок читаются как одна
+   разорванная группа. Внутри `topbar-left` разделяет 2 px, а здесь нужно 6:
+   соседние кнопки-иконки шире и без рамки, им воздух важнее. */
+.topbar-left > .project-select + .status-git {
+  margin-left: 4px;
+}
+
+/* Оба переключателя в левой части шапки — одна фигура: кнопка выбора проекта
+   и кнопка ветки git. Всё, что делает их одной фигурой, задано здесь и только
+   здесь: `height` фиксирует строку (от неё же считается `--topbar_height`),
+   `padding`, `gap` и `line-height: 1` — общие, чтобы высота текста не зависела
+   от выносных линий шрифта. Раньше каждый описывал геометрию сам, и кнопки
+   разъезжались по высоте при любой правке одной из сторон.
+
+   Ширина — `width: max-content` на обоих: кнопка по своему содержимому, а не по
+   строке. Раньше селект проекта брал `width: 100%` от `.select` и тянулся на
+   всю шапку, пока git-кнопка была компактной — отсюда разные ширины в ряду.
+   `min-width: 0` + `max-width`: длинное имя сжимается и обрезается многоточием
+   (`.select-value`), а не распирает ряд. */
+.status-git,
+.project-select {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  min-width: 0;
+  max-width: 240px;
+  height: var(--topbar_control_size);
+  padding: 0 6px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Шеврон: прижат вправо, не сжимается, третичный цвет; на наведении — как текст.
+   Правило одно на обе кнопки — вид стрелки у них разным быть не должен. */
+.status-git > svg,
+.project-select > svg {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+}
+
+.status-git:hover,
+.project-select:hover:not(.is-disabled) {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.status-git:hover > svg,
+.project-select:hover:not(.is-disabled) > svg {
+  color: var(--text_color);
+}
+
 /* Разделитель в шапке: отделяет действия над содержимым (сохранить, поиск)
    от переключателей раскладки (панели, разделение редактора). */
 .topbar-sep {
@@ -1324,6 +1380,7 @@ textarea {
 .icon-btn,
 .select,
 .field-input,
+.status-git,
 .window-btn {
   transition:
     background var(--motion_fast) var(--motion_ease),
@@ -1462,12 +1519,14 @@ textarea {
 }
 
 /* Поле — углубление на своей панели, поэтому заливка относительная, а не готовый цвет.
-   Та же геометрия у выпадающего списка: снаружи он кнопка, но выглядеть должен полем. */
+   Та же геометрия у выпадающего списка: снаружи он кнопка, но выглядеть должен полем.
+   Ширина — по содержимому: поле не растягивает родитель, а само подстраивается
+   под текст. Места, где нужно заполнить строку, задают ширину точечно
+   (`.field-row .field-input`, `.prompt-field .field-input`, тулбары). */
 .field-input,
 .select {
-  width: 100%;
-  min-height: var(--control_height);
-  padding: var(--control_padding_sm) 8px;
+  width: max-content;
+  padding: 3px 6px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_sm);
   background: var(--sunken_background);
@@ -2239,32 +2298,30 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
-/* Селект проекта — в шапке окна, рядом с меню. Ширину не отбирает у действий:
-   его доля ограничена, а имя именем и остаётся — длинный путь живёт в подсказке
-   и в раскрытом списке. Обёртка нужна, чтобы подмена селекта при смене проекта
-   не трогала раскладку шапки. */
-.project-slot {
-  display: flex;
-  min-width: 0;
-  max-width: 240px;
-  margin-left: 2px;
+/* Иконка ветки в кнопке git: слева от подписи, не сжимается, третичный цвет.
+   Селектор `.status-git > svg` выше красит шеврон (`margin-left: auto`), эта же
+   иконка — первая в ряду, и прижимать её вправо нельзя. Поэтому она взята по
+   собственному классу `topbar-icon` и явно перебивает наследованное поведение. */
+.status-git > .topbar-icon {
+  flex: 0 0 auto;
+  margin-left: 0;
+  color: var(--text_color_tertiary);
 }
 
-.project-select {
-  flex: 0 1 auto;
-  width: max-content;
+.status-git:hover > .topbar-icon {
+  color: var(--text_color);
+}
+
+/* Длинное имя проекта и длинная ветка обрезаются на одном правиле: селект
+   проекта берёт многоточие у `.select-value`, git-подписи даём то же самое.
+   Без `min-width: 0` текст внутри flex-кнопки не сжимается и выдавливает шеврон,
+   без `max-width: 100%` — вылезает из кнопки, обрезанной по `max-width` ряда. */
+.status-git-label,
+.project-select .select-value {
   min-width: 0;
   max-width: 100%;
-  /* Высота — как у кнопок шапки: имя проекта стоит в одном ряду с ними. */
-  min-height: var(--topbar_control_size);
-  padding: 0 6px;
-  font-size: var(--font_small_size);
-}
-
-.project-select .select-value {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Фильтр — обычное поле приложения (`.field-input`): та же рамка, та же заливка,

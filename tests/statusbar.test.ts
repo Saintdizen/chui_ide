@@ -18,7 +18,6 @@ installMiniDom();
 function bar() {
   const noop = vi.fn();
   const view = createStatusBar({
-    openGitManager: noop,
     openPythonEnv: noop,
     openNodeEnv: noop,
     openProblems: noop,

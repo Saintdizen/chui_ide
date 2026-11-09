@@ -26,7 +26,6 @@ async function mount(): Promise<{ bar: import('../src/renderer/ui/statusbar').St
   const { createStatusBar } = (await import('../src/renderer/ui/statusbar')) as Module;
   const noop = () => {};
   const bar = createStatusBar({
-    openGitManager: noop,
     openPythonEnv: noop,
     openNodeEnv: noop,
     openProblems: noop,

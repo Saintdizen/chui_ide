@@ -6,7 +6,6 @@
 .statusbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space_xl);
   height: 100%;
   padding: 0 var(--space_lg);
@@ -14,11 +13,26 @@
   font-size: var(--font_labels_size);
 }
 
+/* Правая группа чипов всегда держится правого края, а промежуток забирает
+   растущая левая группа: space-between при пустой левой половине разрывал
+   полосу посередине — пустое место повисало между названием и чипами. */
+.statusbar > .status-group:last-child {
+  margin-left: auto;
+}
+
 .status-group {
   display: flex;
   align-items: center;
   gap: 14px;
   min-width: 0;
+}
+
+/* Якорь поповера менеджера git: нулевой и невидимый — ветку показывает шапка,
+   а попапу нужна лишь точка в полосе, чтобы встать над ней. */
+.status-git-anchor {
+  position: relative;
+  width: 0;
+  height: 0;
 }
 
 /* Слот статус-бара под статус ассистента (приходит из композера). Он —

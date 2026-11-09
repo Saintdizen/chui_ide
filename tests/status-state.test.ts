@@ -27,7 +27,6 @@ function inputs(over: Partial<StatusInputs> = {}): StatusInputs {
     languageIndent: { tabSize: 4, insertSpaces: true },
     settings: { tabSize: 2, insertSpaces: true, lspEnabled: true },
     lspChip: { text: 'Pyright', title: 'Python', tone: 'ok' } as never,
-    git: { branch: 'main', changeCount: 2 },
     projectKind: { id: 'python', source: 'scan' },
     problems: { errors: 1, warnings: 2 },
     vim: null,

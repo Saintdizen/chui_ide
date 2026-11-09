@@ -49,7 +49,6 @@ export interface StatusInputs {
   };
   /** Чип языкового сервера — уже собранный, либо null. */
   lspChip: LspChip | null;
-  git: { branch: string | null; changeCount: number };
   /** Вид проекта; `none` — не опознан, чип вида не показываем. */
   projectKind: { id: string; source: string } | null;
   problems: { errors: number; warnings: number };
@@ -68,8 +67,6 @@ export interface StatusPatch {
   useTabs: boolean;
   /** Подпись концов строк: `LF` или `CRLF`. `null` — не текст, показывать нечего. */
   eol: string | null;
-  branch: string | null;
-  changes: number;
   projectKindId: string | null;
   problems: { errors: number; warnings: number };
   env: string | null;
@@ -116,8 +113,6 @@ export function statusPatch(inputs: StatusInputs): StatusPatch {
     useTabs: indent ? !indent.insertSpaces : !inputs.settings.insertSpaces,
     // Формат файла, а не модели: человек ждёт увидеть, что файл windows-овский.
     eol: inputs.eol === null ? null : lineEndingLabel(inputs.eol),
-    branch: inputs.git.branch,
-    changes: inputs.git.changeCount,
     projectKindId: inputs.projectKind && inputs.projectKind.source !== 'none' ? inputs.projectKind.id : null,
     problems: inputs.problems,
     // Виджет окружения говорит на языке проекта: у Node — версия и менеджер,

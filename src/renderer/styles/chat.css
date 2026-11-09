@@ -2514,24 +2514,42 @@
   padding: 2px 0 4px 18px;
 }
 
-/* Блок — одна правка против HEAD: строки, счётчик и действие в строку. */
+/* Блок — одна правка против HEAD: строки, счётчик и действия в строку.
+   Переполнения здесь не бывает по замыслу — строку держим одной линией. */
 .changes-hunk {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
   font-family: var(--font_mono);
   font-size: var(--font_small_size);
 }
 
+/* Подпись — единственное, что в строке уступает место: кнопки текстовые и не
+   жмутся вовсе, поэтому при узкой панели диапазон строк уходит в многоточие.
+   Полные координаты не теряются — они в title подписи. */
 .changes-hunk-label {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
   color: var(--text_color_secondary);
   white-space: nowrap;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 
+/* Действий у блока до четырёх, все текстовые: поджимаем их поля и запрещаем
+   перенос внутри, иначе «Откатить файл» ломает высоту строки. Место в узкой
+   панели уступает подпись, а не кнопки — они не должны обрезаться.
+   Первую кнопку отодвигаем от подписи, остальные держатся за ней вплотную. */
 .changes-hunk .btn {
   flex: 0 0 auto;
+  padding: 2px 6px;
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+}
+
+.changes-hunk .btn:first-of-type {
   margin-left: auto;
 }
 
@@ -2696,31 +2714,6 @@
   gap: 2px;
   row-gap: 6px;
   min-width: 0;
-}
-
-/* «Свернуть всё» — рядом с режимами беседы, того же роста, что и они.
-   Гаснет в обычном виде: в нём кнопка ничего не обещает сверх задуманного. */
-.composer-fold {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius_xs);
-  background: none;
-  color: var(--text_color_tertiary);
-  cursor: pointer;
-}
-
-.composer-fold:hover {
-  color: var(--text_color);
-  background: var(--element_background_hover);
-}
-
-.composer-fold[aria-pressed="true"] {
-  color: var(--text_color_secondary);
 }
 
 .composer-actions {
@@ -2967,11 +2960,11 @@
   color: var(--text_color);
 }
 
-.branch-space-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
+/* Подпись ветки и кнопка «В отдельной ветке» скрыты: место под полем ввода
+   занимают только действия задачи. Состояние ветки показывает шапка. */
+.branch-space-label,
+.branch-space > .branch-space-action:first-of-type {
+  display: none;
 }
 
 .branch-space-action {

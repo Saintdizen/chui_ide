@@ -110,11 +110,9 @@ import {
   budgetMessage,
   budgetVerdict,
   contextHeavyMessage,
-  contextPriceNote,
   contextTrimmedMessage,
   HEAVY_CONTEXT_TOKENS,
   midRunTrimDue,
-  PRICE_PLAN_STEPS,
   stepCost,
 } from '../../shared/chat-budget';
 import { pricingAt } from '../../shared/providers';
@@ -1235,12 +1233,6 @@ export class AiService {
     let budgetDeclared = false;
     /** О тяжёлом контексте сказано: повторять на каждом шаге незачем. */
     let contextDeclared = false;
-    /**
-     * Округлённый вес контекста на прошлом шаге. Строку про цену вставляем только
-     * когда меняется само число (шаг на 5k): новый `system`-блок перед историей
-     * сбивал бы кеш префикса на каждом шаге — то, от чего уходили в п.74.
-     */
-    let lastPriceAt = -1;
     let runSteps = 0;
     let runToolCalls = 0;
     /**
@@ -1499,7 +1491,6 @@ export class AiService {
       // о ПОЛНОЙ сумме хвоста, а не как границу остатка.
       const runPlan = steps;
       const stepsLeft = Math.max(0, runPlan - runSteps);
-      const priceSteps = Math.min(stepsLeft, PRICE_PLAN_STEPS);
       // Цена шага. Модель видит историю, но не её вес: каждый шаг несёт весь
       // контекст заново. Замер 09.11: медиана прогона 38 шагов и 8832 тк на
       // первом — одна лишняя тысяча в контексте платится тридцать раз.
@@ -1569,16 +1560,7 @@ export class AiService {
       // провайдеру. Выше считался ВЕС ИСТОРИИ (258.8k), а едет после свёртки
       // 20.3k: подпись «в каждом шаге» была правдой ровно один шаг.
       // Строка меняется только на шаг 5k, иначе сбивала бы кеш префикса.
-      {
-        const sentTokens = estimateMessagesTokens(messages) + toolsTokens;
-        stepLog.carried = sentTokens;
-        const priceAt = Math.floor(sentTokens / 5000) * 5000;
-        if (priceAt !== lastPriceAt) {
-          lastPriceAt = priceAt;
-          const priceNote = contextPriceNote(sentTokens, stepsLeft, priceSteps);
-          if (priceNote) messages.push({ role: 'system', content: priceNote });
-        }
-      }
+      stepLog.carried = estimateMessagesTokens(messages) + toolsTokens;
       const done = await this.streamStep(provider, {
         model: workModel,
         messages,
