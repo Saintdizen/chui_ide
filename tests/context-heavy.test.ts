@@ -76,8 +76,11 @@ describe('порог тяжёлого контекста', () => {
     expect(long).not.toContain('500');
     // В пределах плана хвост честный и остаётся.
     expect(contextPriceNote(14_400, 30)).toContain('432k');
-    // Шаг плана — уже хвост, предупреждаем: граница включительная.
-    expect(contextPriceNote(14_400, PRICE_PLAN_STEPS)).toContain('720k');
+    // Сам потолок плана хвостом НЕ считается: ровно это число приходит сюда
+    // из service.ts как `runPlan` (потолок шагов, а не остаток прогона).
+    const cap = contextPriceNote(14_400, PRICE_PLAN_STEPS);
+    expect(cap).toContain('14.4k');
+    expect(cap).not.toContain('как минимум');
   });
 
   it('тяжёлые настройки сворачивают больше обычных', () => {

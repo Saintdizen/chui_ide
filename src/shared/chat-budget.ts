@@ -121,12 +121,14 @@ export function contextPriceNote(tokens: number, steps = 0): string {
   if (tokens <= 0) return '';
 
   const k = (tokens / 1000).toFixed(1).replace('.0', '');
-  // Хвост считается только по плану. Шагов выше PRICE_PLAN_STEPS не бывает
-  // (это потолок, а не план) — значит, умножать не на что.
-  const planned = steps > 0 && steps <= PRICE_PLAN_STEPS;
-  const total = planned
-    ? ` За оставшиеся ${steps} шагов — ещё как минимум ${Math.round((tokens * steps) / 1000)}k.`
-    : '';
+  // Хвост считается только по плану — но и внутри плана `steps` означает
+  // РАЗНЫЕ вещи у двух зовущих: chat-budget получил остаток прогона,
+  // service.ts передаёт потолок шагов (`runPlan`). Пока зовущие не свёрнуты
+  // к одному смыслу, хвост не печатается вовсе: врать числом дороже молчания.
+  const total =
+    steps > 0 && steps < PRICE_PLAN_STEPS
+      ? ` За оставшиеся ${steps} шагов — ещё как минимум ${Math.round((tokens * steps) / 1000)}k.`
+      : '';
   return `Цена контекста: ${k}k токенов едет в каждом шаге.${total}`;
 }
 
