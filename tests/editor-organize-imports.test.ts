@@ -44,10 +44,11 @@ describe('LspFeatures.organizeImports', () => {
 
     const call = calls[0]!;
     expect(call.method).toBe('textDocument/codeAction');
-    // Диапазон — с начала и до конца документа (конец 1-based переведён в 0-based).
+    // Диапазон — весь файл: `only`-запрос по документу не зависит от того, где
+    // стоит курсор, и конец документа считает сам сервер.
     expect((call.params as { range: unknown }).range).toEqual({
       start: { line: 0, character: 0 },
-      end: { line: 29, character: 0 },
+      end: { line: 100000, character: 0 },
     });
     expect((call.params as { context: { only: string[] } }).context.only).toEqual(['source.organizeImports']);
   });

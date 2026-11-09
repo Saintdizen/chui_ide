@@ -170,6 +170,32 @@ export function createEditorFixes(deps: EditorFixesDeps) {
   };
 
   /**
+   * «Исправить всё»: применить все правки, которые сервер сам умеет внести.
+   *
+   * Отличается от исправления по курсору тем, что собирает всё на файл разом, и
+   * от `codeActionsOnSave` — тем, что делается по требованию, а не молча при
+   * каждом сохранении. Виды перечисляем поимённо: одни серверы объявляют
+   * `source.fixAll`, другие — только `source.fixAll.eslint`/`ts`.
+   */
+  const runFixAll = async (path: string): Promise<void> => {
+    const actions = await lsp.sourceActions(path, [
+      'source.fixAll',
+      'source.fixAll.eslint',
+      'source.fixAll.ts',
+      'source.organizeImports',
+    ]);
+    const usable = actions.filter((item) => item.edits);
+    if (usable.length === 0) {
+      showToast('Сервер не предложил исправлений на весь файл');
+      return;
+    }
+    // По порядку: более поздняя правка могла опираться на предыдущую, и
+    // перемешанный порядок дал бы правки по съехавшим смещениям.
+    for (const action of usable) await applyCodeAction(path, action);
+    showToast(`Исправлено до конца: ${usable.length} правок`);
+  };
+
+  /**
    * Извлечение и «разворачивание» (inline) — рефакторинги, которые умеет только языковой
    * сервер. Просим у него действие нужного вида и применяем выбранное: извлечение — по
    * выделению, разворачивание — по символу под кареткой.
@@ -261,6 +287,7 @@ export function createEditorFixes(deps: EditorFixesDeps) {
     spellingQuickFixes,
     runCodeActions,
     applyCodeAction,
+    runFixAll,
     runOrganizeImports,
     runRefactor,
     runRefactorMenu,

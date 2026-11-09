@@ -398,17 +398,12 @@ export class LspFeatures {
    * моста нет, конец передаёт вызывающий. Контекст сужен до этого вида действия, чтобы
    * сервер не отвечал прочими правками.
    */
-  async organizeImports(path: string, end: { line: number; column: number }): Promise<CodeActionItem[]> {
-    const result = await this.request(path, 'textDocument/codeAction', {
-      textDocument: { uri: pathToUri(path) },
-      range: {
-        start: { line: 0, character: 0 },
-        end: { line: Math.max(0, end.line - 1), character: Math.max(0, end.column - 1) },
-      },
-      context: { diagnostics: [], only: ['source.organizeImports'], triggerKind: 1 },
-    });
-    return toCodeActions(result, uriToPath);
+  async organizeImports(path: string, _end: { line: number; column: number }): Promise<CodeActionItem[]> {
+    // `end` остаётся в подписи ради совместимости вызова; диапазон sourceActions
+    // берёт весь файл сам, так что конец документа ей не нужен.
+    return this.sourceActions(path, ['source.organizeImports']);
   }
+
 
   /**
    * Рефакторинг выделения или символа под кареткой: извлечение («вынести в переменную»)

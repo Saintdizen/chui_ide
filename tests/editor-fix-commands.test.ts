@@ -12,6 +12,7 @@ function setup(path: string | null = '/p/a.ts') {
   const deps = {
     currentPath: () => path,
     fixes: {
+      runFixAll: (target: string) => log.push(`fixall:${target}`),
       runOrganizeImports: (target: string) => log.push(`organize:${target}`),
       runRefactorMenu: (target: string) => log.push(`menu:${target}`),
       runRefactor: (target: string, action: string) => log.push(`refactor:${action}:${target}`),
@@ -25,9 +26,10 @@ function setup(path: string | null = '/p/a.ts') {
 const run = (f: ReturnType<typeof setup>, id: string) => f.commands.get(id)!();
 
 describe('registerEditorFixCommands', () => {
-  it('регистрирует четыре исправления', () => {
+  it('регистрирует пять исправлений', () => {
     expect([...setup().commands.keys()].sort()).toEqual([
       'editor.extractSymbol',
+      'editor.fixAll',
       'editor.inlineSymbol',
       'editor.organizeImports',
       'editor.refactor',
@@ -38,16 +40,23 @@ describe('registerEditorFixCommands', () => {
     const f = setup(null);
     for (const id of f.commands.keys()) run(f, id);
     expect(f.log).toEqual([]);
-    expect(f.toasts).toHaveLength(4);
+    expect(f.toasts).toHaveLength(5);
     expect(f.toasts[0]).toBe('Нет открытого файла');
   });
 
   it('каждая команда зовёт свой вход сервиса с текущим путём', () => {
     const f = setup('/p/b.ts');
+    run(f, 'editor.fixAll');
     run(f, 'editor.organizeImports');
     run(f, 'editor.refactor');
     run(f, 'editor.extractSymbol');
     run(f, 'editor.inlineSymbol');
-    expect(f.log).toEqual(['organize:/p/b.ts', 'menu:/p/b.ts', 'refactor:extract:/p/b.ts', 'refactor:inline:/p/b.ts']);
+    expect(f.log).toEqual([
+      'fixall:/p/b.ts',
+      'organize:/p/b.ts',
+      'menu:/p/b.ts',
+      'refactor:extract:/p/b.ts',
+      'refactor:inline:/p/b.ts',
+    ]);
   });
 });

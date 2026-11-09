@@ -4,6 +4,8 @@ import type { DefineCommand } from './command-args';
 /** Что модулю нужно от сервиса исправлений — три входа, не весь объект. */
 export interface EditorFixActions {
   runOrganizeImports(path: string): Promise<void> | void;
+  /** `source.fixAll` по всему файлу — разом, по требованию. */
+  runFixAll(path: string): Promise<void> | void;
   runRefactorMenu(path: string): Promise<void> | void;
   runRefactor(path: string, action: 'extract' | 'inline'): Promise<void> | void;
 }
@@ -34,6 +36,19 @@ export function registerEditorFixCommands(define: DefineCommand, deps: EditorFix
     }
     run(path);
   };
+
+  // «Исправить всё» — не вместо сохранения, а по требованию: при сохранении
+  // правки идут молча, а тут человек видит, что именно сервер исправил.
+  define(
+    {
+      id: 'editor.fixAll',
+      title: 'Исправить всё',
+      category: 'Редактор',
+      keybinding: 'Ctrl+Shift+Alt+F',
+      keywords: ['fix', 'fixall', 'исправить', 'быстрое исправление'],
+    },
+    withPath((path) => void fixes.runFixAll(path)),
+  );
 
   define(
     {
