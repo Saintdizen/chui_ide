@@ -69,6 +69,7 @@ import type { TestPromptParts } from '../../shared/test-generation';
 import type { ChatTitleParts } from '../../shared/chat-title';
 import { sandboxNote } from '../../shared/sandbox';
 import { forgetSearchCache } from './agent-search';
+import { RepeatTracker } from './repeat-tracker';
 import {
   confirmFile,
   coveredRequest,
@@ -287,6 +288,28 @@ export interface ChatHostBridge {
  * тот исполняется (read-only в main, правки — в renderer) и результат
  * возвращается в диалог, пока модель не ответит текстом.
  */
+/**
+ * Свернуть повтор ответа: та же связка инструмент + аргументы дала тот же текст.
+ *
+ * Ключ учитывает аргументы, потому что `search` по двум разным словам законно
+ * даёт похожие ответы, а `run_tests` дважды подряд — один и тот же. Правки
+ * (`edit`/`write`) сбрасывают счётчик: после них «ничего не изменилось» — ложь.
+ */
+function collapseRepeat(
+  tracker: RepeatTracker,
+  name: string,
+  args: string,
+  outcome: ToolOutcome,
+): ToolOutcome {
+  // Ответы-отказы не сворачиваем: их мало и каждое объясняет свою ошибку.
+  if (outcome.ok === false) return outcome;
+  const key = `${name}\u0000${args}`;
+  const text = `${outcome.summary}\u0000${outcome.detail ?? ''}`;
+  const note = tracker.note(key, text, outcome.summary);
+  if (!note) return outcome;
+  return { ok: true, summary: `${name}: без изменений`, detail: note };
+}
+
 export class AiService {
   /**
    * Короткие запросы к модели (подсказка, коммит, тест, название, второе мнение
@@ -305,6 +328,13 @@ export class AiService {
   private linter?: Linter;
   /** Команда тестов проекта: без неё инструмент run_tests модели не предлагаем. */
   private tests?: TestRunner;
+  /** Счётчик повторов ответов между шагами (п.65): третий подряд — в пометку. */
+  private readonly repeats = new RepeatTracker();
+
+  /** Метрика экономии среза: сколько ответов свернули и сколько символов не отдали. */
+  repeatStats(): { collapsed: number; savedChars: number } {
+    return this.repeats.stats();
+  }
 
   /** Отладочная сессия: общая с панелью, второй адаптер не поднимаем. */
   private debug?: DebugTools;
@@ -1348,6 +1378,9 @@ export class AiService {
     // не исполняется дважды, а если шаг целиком состоит из повторов — цикл
     // останавливается. Правка/команда сбрасывает кэш: состояние могло измениться.
     const executed = new Map<string, ToolOutcome>();
+    // Счётчик повторов ответов между шагами — живёт на сервисе, а не на прогоне:
+    // «то же, что и в прошлый раз» держится и через границу беседы.
+    const repeats = this.repeats;
     let stallSteps = 0;
 
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
@@ -1995,6 +2028,9 @@ export class AiService {
           } else {
             forgetChangedFiles({ executed, coveredReads }, call.name, call.arguments, outcome.changes);
             forgetSearchCache(outcome.changes);
+            // Правка меняет то, что покажут следующие вызовы: «как в прошлый раз»
+            // после неё — утверждение о другом файле.
+            for (const change of outcome.changes ?? []) repeats.forget(change.path);
           }
           if (outcome.ok) {
             didNewWork = true;
@@ -2034,10 +2070,16 @@ export class AiService {
             // сомнительными и сверяются с диском при следующем чтении (`versionOf`).
             forgetChangedFiles({ executed, coveredReads }, call.name, call.arguments, outcome.changes);
             forgetSearchCache(outcome.changes);
+            // Правка меняет то, что покажут следующие вызовы: «как в прошлый раз»
+            // после неё — утверждение о другом файле.
+            for (const change of outcome.changes ?? []) repeats.forget(change.path);
           }
           didNewWork = true;
           didWork = true;
         }
+        // Один и тот же ответ третий раз подряд — сворачиваем: модели сообщают
+        // «ничего не изменилось», а не те же тысячи символов ещё раз.
+        outcome = collapseRepeat(repeats, call.name, call.arguments, outcome);
         if (callId) this.running.toolFinish(callId, call.name);
         // Бесплодные подряд: три провала — схема уезжает из набора до конца
         // прогона. Счёт идёт по факту, а не по обещаниям инструмента.
