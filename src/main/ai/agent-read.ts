@@ -49,7 +49,7 @@ const LONG_FILE_HEAD_LINES = 120;
  * таблицей имён и аргументов и сюда больше не растёт. `readDispatch` в
  * `agent-lookup.ts` разбирает только форму аргументов — это знание осталось там.
  */
-async function readOne(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+export async function readOne(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (Array.isArray(args.paths)) return await readFiles(ctx, args);
   if (isAbsent(args.path)) {
     return {

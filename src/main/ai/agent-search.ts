@@ -28,6 +28,7 @@ import type { SearchHit } from '../../shared/api';
 import type { SessionSearchReport } from '../../shared/session-search';
 import { DEFAULT_FILES_ONLY_PATHS } from './tool-rules';
 import { listDir } from './agent-list';
+import { readOne } from './agent-read';
 import { codebaseSearch, searchDocs } from './agent-code';
 import { unknownAction } from './agent-present';
 
@@ -324,6 +325,31 @@ async function runSearch(ctx: ToolContext, request: SearchRequest): Promise<{ ou
   };
 }
 
+/**
+ * Запрос совпал с именем файла — отдаём файл, а не совпадения в тексте.
+ *
+ * Один вызов вместо двух: модель просит `search` «agent-read.ts», получает каркас
+ * файла с номерами строк, и следующий шаг у неё — уже `read` с диапазоном. Пусто,
+ * если совпадений ноль или несколько: тогда имя неоднозначно и решает обычный поиск.
+ */
+async function findByFileName(ctx: ToolContext, query: string): Promise<ToolOutcome | undefined> {
+  // `findFiles` отдаёт пути проекта, а `readOne` открывает файл по абсолютному
+  // (проверка выхода из папки считает от корня) — склеиваем корень сами.
+  const root = ctx.workspace.rootPath();
+  if (!root) return undefined;
+  const files = await ctx.workspace.findFiles('**/*', MAX_FIND_FILES);
+  const found = pickFileByQuery(files, query);
+  if (!found) return undefined;
+  const absolute = found.startsWith('/') ? found : `${root}/${found}`;
+  const file = await readOne(ctx, { path: absolute, mode: 'indentation' }).catch(() => undefined);
+  if (!file || file.ok === false) return undefined;
+  return {
+    ...file,
+    summary: `${found}: файл по запросу «${query}» — ${file.summary}`,
+    detail: `Запрос «${query}» совпал с именем файла — отдаю его целиком.\n${file.detail ?? ''}`,
+  };
+}
+
 async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const workspace = ctx.workspace;
   const query = requireString(args, 'query');
@@ -360,6 +386,14 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     fileLimit,
     countOnly: optionalBoolean(args, 'countOnly') ?? false,
   };
+
+  // Запрос = имя файла? Поиск текста по слову `agent-read.ts` вернёт пару строк из
+  // документации, а модели нужен файл. Отдаём файл целиком каркасом `read` (п.61)
+  // и называем это в ответе — не угадываем молча.
+  if (!filesOnly && !request.countOnly && looksLikeFileName(query)) {
+    const named = await findByFileName(ctx, query);
+    if (named) return named;
+  }
 
   const first = await runSearch(ctx, request);
   if (!first.empty) return first.outcome;
@@ -539,4 +573,40 @@ export async function sessionTrace(ctx: ToolContext, args: Record<string, unknow
   }
   const text = await ctx.sessions.trace(uid);
   return { ok: true, summary: 'след прогона беседы', detail: text };
+}
+
+/**
+ * Запрос выглядит как имя файла: `agent-read.ts`, `service`, `tools.ts`. Такой
+ * запрос почти всегда значит «покажи этот файл», а не «найди слово в тексте».
+ */
+export function looksLikeFileName(query: string): boolean {
+  const value = query.trim();
+  if (!value || value.length > 120) return false;
+  // Пробелы, кавычки, символы регулярки — это текст, а не имя.
+  if (/[\s^$*+?()[\]{}|]/.test(value)) return false;
+  return /^[\w@./-]+$/.test(value);
+}
+
+/**
+ * Путь файла, если запрос — его имя целиком или без расширения.
+ *
+ * Сравниваем по имени без каталога: `agent-read.ts` на дереве проекта ровно один,
+ * а префикс каталога модель и так назовёт. Если расширение есть в запросе — важнее
+ * оно: `tools.ts` не должен тянуть `tools.test.ts`.
+ */
+export function pickFileByQuery(files: readonly string[], query: string): string | undefined {
+  const wanted = query.trim().toLowerCase();
+  const withExt = /\.\w+$/.test(wanted);
+  const base = wanted.split('/').pop() ?? wanted;
+  const exact = files.filter((file) => {
+    const name = (file.split('/').pop() ?? file).toLowerCase();
+    // Без расширения в запросе `util` подходит и к `util.test.ts`: сравниваем
+    // основу. Отсюда и правило «одно совпадение» — иначе выбор был бы угадыванием.
+    if (withExt) return name === base;
+    // Без расширения в запросе основа — всё до ПЕРВОЙ точки: `util.test.ts` тоже
+    // начинается на `util`, и такой запрос неоднозначен (`util` и `util.test`).
+    return name.split('.')[0] === base;
+  });
+  // Одно совпадение — берём. Несколько — не угадываем: пусть ищет текст.
+  return exact.length === 1 ? exact[0] : undefined;
 }
