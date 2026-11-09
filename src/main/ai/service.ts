@@ -1392,9 +1392,13 @@ export class AiService {
         })
         .catch(() => undefined);
       // Счётчик шагов — без согласия: в нём нет ни инструкций, ни ответов.
+      // Сводка экономии едет туда же: без неё механизм мог срабатывать вхолостую,
+      // и узнать об этом было неоткуда — отчёт видел только тест.
+      const savings = this.savingsSummary();
       void this.telemetry
         ?.recordCounts(log, {
           ...(request.conversationUid ? { conversation: request.conversationUid } : {}),
+          savings,
         })
         .catch(() => undefined);
       return log;

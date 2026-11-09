@@ -65,6 +65,18 @@ describe('счётчик шагов', () => {
     expect(record.steps[1]!.hiddenCalls).toBe(3);
   });
 
+  it('кладёт сводку экономии в запись — без неё регресс не виден тому, кто считает', () => {
+    const bare = buildCountsRecord(run());
+    expect(bare.savings).toBeUndefined();
+
+    const record = buildCountsRecord(run(), {
+      savings: { chars: 4_000, tokens: 1_000, parts: [{ name: 'search-cache', chars: 4_000, times: 2 }] },
+    });
+    expect(record.savings).toEqual({ chars: 4_000, tokens: 1_000, parts: [{ name: 'search-cache', chars: 4_000, times: 2 }] });
+    // Запись остаётся без содержания: только имя механизма и числа.
+    expect(formatCountsLine(record)).not.toContain('xxxx');
+  });
+
   it('считает цену вызова в символах, а шага — в токенах провайдера', () => {
     const record = buildCountsRecord(run());
     const [first, second] = record.steps;

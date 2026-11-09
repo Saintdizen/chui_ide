@@ -99,12 +99,22 @@ export interface RunCountsRecord {
     cacheCreation: number;
   };
   steps: RunCountStep[];
+  /**
+   * Сводка экономии на конец прогона.
+   *
+   * Зачем в записи: замерами 09.11 два порога экономии оказались мёртвым кодом и
+   * жили так незаметно — сводку видел только тест. Готовые числа механизмов в
+   * `counts.jsonl` делают регресс видимым в том же файле, по которому считают.
+   */
+  savings?: { chars: number; tokens: number; parts: { name: string; chars: number; times: number }[] };
 }
 
 export interface CountsInput {
   /** Момент записи; в проверках подставляется фиксированный. */
   at?: number;
   conversation?: string;
+  /** Сводка экономии — готовое число сервиса, не пересчёт по шагам. */
+  savings?: { chars: number; tokens: number; parts: readonly { name: string; chars: number; times: number }[] };
 }
 
 /** Код причины отказа: наши короткие пометки, а не текст модели. */
@@ -157,6 +167,15 @@ export function buildCountsRecord(run: ChatRunLog, input: CountsInput = {}): Run
       cacheCreation: usage.cacheCreationTokens ?? 0,
     },
     steps,
+    ...(input.savings && input.savings.parts.length > 0
+      ? {
+          savings: {
+            chars: input.savings.chars,
+            tokens: input.savings.tokens,
+            parts: input.savings.parts.map((part) => ({ name: part.name, chars: part.chars, times: part.times })),
+          },
+        }
+      : {}),
   };
 }
 
