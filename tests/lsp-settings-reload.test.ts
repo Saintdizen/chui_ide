@@ -78,6 +78,7 @@ function makeService(root: string, argsOf: () => string[], enabledOf: () => bool
         ],
       }) as never,
     () => {},
+    () => {},
     () => null,
     async () => ({}),
     async () => [],

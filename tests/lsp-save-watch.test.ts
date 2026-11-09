@@ -37,6 +37,7 @@ function service(root: string, server: FakeServer): LspService {
     () => root,
     () => ({ enabled: true, servers: [server] }) as never,
     () => {},
+    () => {},
     () => null,
     async () => ({}),
     async () => [],

@@ -93,6 +93,7 @@ describe('extraFolders сервера', () => {
           ],
         }) as never,
       () => {},
+      () => {},
       () => null,
       async () => ({}),
       async () => [],

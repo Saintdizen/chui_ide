@@ -5,6 +5,13 @@
     // что и нужно electron для main и preload.
     "module": "node18",
     "moduleResolution": "node16",
+    // cspell-lib — чистый ESM: в его `exports` только условие `import`, без
+    // `types`. Под node16 tsc ищет типы в режиме CJS, не находит сборку под
+    // `require` и молча отдаёт ПУСТОЙ namespace — отсюда ошибки «has no exported
+    // member» на именах, которые в пакете есть. Рантайм при этом работает: пакет
+    // грузится через `await import()`. customConditions добавляет к поиску типов
+    // условие `import`, ничего не меняя в выводе.
+    "customConditions": ["import"],
     "lib": ["ES2022"],
     "types": ["node"],
     "rootDir": "src",

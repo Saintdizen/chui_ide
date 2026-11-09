@@ -97,6 +97,7 @@ function serviceWith(root: string, script: string, marker: string): LspService {
         ],
       }) as never,
     () => {},
+    () => {},
     () => null,
     async () => ({}),
     async () => [],

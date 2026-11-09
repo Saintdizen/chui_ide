@@ -116,8 +116,8 @@ describe('пометки проекта одним запросом', () => {
       () => null,
       async () => ({}),
       async () => [],
-      async () => null,
       undefined as never,
+      async () => null,
     );
     services.push(lsp);
     lsp.collectDiagnostics((p, list) => got.push({ path: p, count: list.length }));

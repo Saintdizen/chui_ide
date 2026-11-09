@@ -2,22 +2,33 @@
 // `import` в `exports`), а main собирается в CommonJS под electron. Статический импорт
 // tsc отверг бы на разрешении модулей; `await import()` им же переписывается в
 // нативный ESM-загрузчик и работает в CJS-сборке (проверено на выходе tsc).
+//
+// По той же причине типы берутся ЧЕРЕЗ `import()`, а не `import type ... from`:
+// в `exports` пакета нет условия `types`, и под `require` модуль не резолвится
+// совсем — tsc на такое отвечает TS2305 «has no exported member» с выдуманным
+// именем типа, хотя экспорт есть. Через `import()` видно настоящие имена.
 
 import type { LspDiagnostic } from '../../shared/api/lsp';
-import type { SpellIssueLike as SpellIssue } from 'cspell-lib';
+
+/** Одна находка cSpell — как её объявляет сам пакет. */
+type SpellIssue = import('cspell-lib', { with: { 'resolution-mode': 'import' } }).ValidationIssue;
 
 /** Что нам нужно от настроек cSpell: свои слова сверху словарей пакета. */
+type Cspell = typeof import('cspell-lib', { with: { 'resolution-mode': 'import' } });
 type CSpellUserSettings = Record<string, unknown> & { words?: string[] };
 
-async function loadCspell(): Promise<typeof import('cspell-lib')> {
+async function loadCspell(): Promise<Cspell> {
   return import('cspell-lib');
 }
 
 /** Настройки cSpell по умолчанию (словари из `@cspell/cspell-bundled-dicts`). Один раз. */
 let settingsOnce: Promise<CSpellUserSettings> | null = null;
 
-async function baseSettings(cspell: typeof import('cspell-lib')): Promise<CSpellUserSettings> {
-  settingsOnce ??= cspell.getDefaultBundledSettingsAsync() as Promise<CSpellUserSettings>;
+async function baseSettings(cspell: Cspell): Promise<CSpellUserSettings> {
+  // `getDefaultBundledSettingsAsync` возвращает CSpellSettingsInternal, а он не
+  // пересекается с нашим простым словарём. Приведение через unknown — по делу:
+  // нам нужны только слова и прочие поля, которые ищет сам cSpell.
+  settingsOnce ??= cspell.getDefaultBundledSettingsAsync() as unknown as Promise<CSpellUserSettings>;
   return settingsOnce;
 }
 
@@ -53,8 +64,10 @@ export async function spellServerDiagnostics(
     // Свои слова проекта — первыми: они про этот код, а не про мир вообще.
     words: [...words, ...(base.words ?? [])],
   };
-  const document = cspell.createTextDocument({ uri: `file://${path}`, content: text });
-  const result = await cspell.spellCheckDocument(document, {}, settings);
+  // cspell-lib 10.4 принимает простой документ ({ uri, text }), а не TextDocument
+  // из модели LSP: createTextDocument отдаёт объект с методами, который
+  // `spellCheckDocument` больше не ждёт. Текст у нас уже есть — отдаём как есть.
+  const result = await cspell.spellCheckDocument({ uri: `file://${path}`, text }, {}, settings);
   return (result.issues ?? []).map((issue) => toDiagnostic(issue, text));
 }
 

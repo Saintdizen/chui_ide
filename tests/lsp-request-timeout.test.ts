@@ -71,6 +71,7 @@ describe('зависший сервер не держит запрос', () => {
           servers: [{ language: 'python', command: process.execPath, args: [script], enabled: true, label: 'глухой' }],
         }) as never,
       () => {},
+      () => {},
       () => null,
       async () => ({}),
       async () => [],

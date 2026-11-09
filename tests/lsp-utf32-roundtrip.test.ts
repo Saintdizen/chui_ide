@@ -67,6 +67,7 @@ describe('positionEncoding utf-32: колонки в обе стороны', () 
           servers: [{ language: 'typescript', command: process.execPath, args: [script, log, uri], enabled: true }],
         }) as never,
       () => {},
+      () => {},
       () => null,
       async () => ({}),
       async () => [],
