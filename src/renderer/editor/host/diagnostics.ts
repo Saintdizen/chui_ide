@@ -57,11 +57,16 @@ export class DiagnosticsStore {
   /**
    * Список пометок для наружу (`get_diagnostics`): с путём и источником. Без пути —
    * по всем файлам, что и делает инструмент агента.
+   *
+   * `under` — папка: пометки её файлов и всех вложенных. Это же и «весь проект», когда
+   * папка — корень; агенту обе формы приходят под видом `path` с флагом папки.
    */
-  markers(path?: string): DiagnosticItem[] {
+  markers(path?: string, under?: string): DiagnosticItem[] {
+    const prefix = under ? (under.endsWith('/') ? under : `${under}/`) : null;
     const items: DiagnosticItem[] = [];
     for (const [filePath, owners] of this.byPath) {
       if (path && filePath !== path) continue;
+      if (prefix && !filePath.startsWith(prefix)) continue;
       for (const list of owners.values()) {
         for (const item of list) {
           items.push({

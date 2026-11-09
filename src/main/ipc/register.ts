@@ -1,3 +1,4 @@
+import { BrowserWindow } from 'electron';
 import { PushTopic } from '../../shared/api';
 import { lintProject } from '../project/lint';
 import { testCommand } from '../project/tests';
@@ -55,6 +56,20 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Языковой сервер умеет искать по символам («перейти к символу») — это и есть
   // инструмент search (action code). Нет сервера — действие ищет только текстом.
   if (deps.lsp) deps.ai.attachSymbols(deps.lsp);
+  // Форматирование файла — то же соединение: сервер знает, умеет ли он
+  // `textDocument/formatting`. Текст открытого файла спросим у renderer.
+  if (deps.lsp) {
+    const lsp = deps.lsp;
+    deps.ai.attachLsp(lsp);
+    deps.ai.attachDocumentText(async (path) => {
+      // Несохранённый текст знает только окно. Окно берём то, что есть: запрос
+      // пришёл от человека, который в нём и работает; нет окна — читаем с диска.
+      const target = BrowserWindow.getAllWindows()[0];
+      if (!target || target.isDestroyed()) return null;
+      const open = await deps.host.request(target.webContents, 'ai.documentText', { path }).catch(() => null);
+      return open?.text ?? null;
+    });
+  }
   // Линтер проекта — действие lint инструмента checks. Движок и запуск живут в main
   // (`project/lint.ts`); корень и интерпретатор Python разрешает это окно, где
   // они уже собраны. Без подключения инструмент модели не предлагается.

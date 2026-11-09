@@ -238,13 +238,24 @@ export interface DiagnosticItem {
   source: string;
 }
 
-/** Аргументы `ai.getDiagnostics`: без пути — по всем открытым файлам. */
+/** Аргументы `ai.getDiagnostics`: без путей — по всем открытым файлам. */
 export interface DiagnosticsHostParams {
   path?: string;
+  /** Папка: пометки её файлов и всех вложенных. */
+  folder?: string;
 }
 
 export interface DiagnosticsHostResult {
   items: DiagnosticItem[];
+}
+
+/** Аргументы `ai.documentText`: путь открытого файла. */
+export interface DocumentTextHostParams {
+  path: string;
+}
+
+export interface DocumentTextHostResult {
+  text: string | null;
 }
 
 /**
@@ -289,6 +300,11 @@ export interface HostMethods {
   'ai.openFiles': { params: Record<string, never>; result: OpenFilesHostResult };
   /** Показать файл в редакторе: открытие вкладки — тоже дело renderer. */
   'ai.openFile': { params: OpenFileHostParams; result: OpenFileHostResult };
+  /**
+   * Текст открытого документа: несохранённые правки есть только у renderer.
+   * `text: null` — файл не открыт или двоичный.
+   */
+  'ai.documentText': { params: DocumentTextHostParams; result: DocumentTextHostResult };
 }
 
 export type HostMethodName = keyof HostMethods;

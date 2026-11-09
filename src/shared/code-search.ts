@@ -141,6 +141,8 @@ export interface CodeSearchResult {
   truncated: boolean;
   /** Работает ли языковой сервер: без него ищем только текстом. */
   symbolsAvailable: boolean;
+  /** Запрос — регулярка: объявлений не искали, вхождения — с учётом шаблона. */
+  regex?: boolean;
 }
 
 /** Строка символа: путь, строка, вид и имя — по ней сразу видно место объявления. */
@@ -159,6 +161,9 @@ export function formatFileDigest(file: FileDigest): string {
  * Ответ инструмента: две части — где объявлено и где встречается. Если символов
  * не нашлось, честно говорим об этом: иначе модель решит, что в проекте нет
  * такого имени, хотя символ мог быть лишь упомянут в тексте.
+ *
+ * `regex` — запрос был регулярным: объявлений тогда не ищем (сервер такого не знает),
+ * и говорить «не нашлось» нельзя — там и не искали.
  */
 export function formatCodeSearch(result: CodeSearchResult): { summary: string; detail: string } {
   const { symbols, files } = result;
@@ -166,6 +171,8 @@ export function formatCodeSearch(result: CodeSearchResult): { summary: string; d
 
   if (symbols.length > 0) {
     parts.push('Где объявлено:', ...symbols.map(formatSymbol));
+  } else if (result.regex) {
+    parts.push('Объявлений по регулярке не ищут — только вхождения в тексте.');
   } else if (result.symbolsAvailable) {
     parts.push('Объявлений с таким именем не нашлось.');
   } else {

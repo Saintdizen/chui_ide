@@ -397,6 +397,9 @@ export async function fileAction(ctx: ToolContext, args: Record<string, unknown>
     };
   if (action === 'move') return await moveFile(ctx.workspace, args);
   if (action === 'delete') return await deleteFile(ctx.workspace, args);
+  if (action === 'copy') return await copyPath(ctx.workspace, args);
+  if (action === 'mkdir') return await makeDirectory(ctx.workspace, args);
+  if (action === 'format') return await formatFile(ctx, args);
   // `replace` тоже снят: его заменял `search` + `edit`. Не документированное действие
   // в приёмнике — второй способ делать то же самое; остаются только имена файлов.
   if (action === 'replace')
@@ -408,7 +411,7 @@ export async function fileAction(ctx: ToolContext, args: Record<string, unknown>
         'правь их `edit {edits: [{path, edits: [{oldText, newText}]}]}`. Файл целиком — ' +
         'тот же `edit` без `oldText`. file оставлен для move и delete.',
     };
-  return unknownAction(action, 'file: move, delete.');
+  return unknownAction(action, 'file: move, copy, mkdir, delete, format.');
 }
 
 /**
@@ -594,6 +597,58 @@ export async function moveFile(workspace: WorkspaceService, args: Record<string,
   };
 }
 
+/** Копия файла или папки. Целевой путь не должен существовать — как и у переноса. */
+export async function copyPath(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const from = requireString(args, 'from');
+  const to = requireString(args, 'to');
+  const copied = await workspace.copy(from, to);
+  const root = workspace.rootPath();
+  return {
+    ok: true,
+    summary: `${relative(from, root)} → ${relative(copied, root)}`,
+    detail: `Скопировано: ${from} → ${copied}.`,
+    changes: [{ path: copied, kind: 'created' }],
+  };
+}
+
+/** Папка: у `create_dir` путь в `path`, создаётся со всеми недостающими родителями. */
+export async function makeDirectory(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const target = requireString(args, 'path');
+  const made = await workspace.createDir(target);
+  const root = workspace.rootPath();
+  return {
+    ok: true,
+    summary: relative(made, root),
+    detail: `Папка создана: ${made}.`,
+    changes: [{ path: made, kind: 'created' }],
+  };
+}
+
+/**
+ * Форматирование файла сервером языка — без записи на диск.
+ *
+ * Отдаём готовый текст, а не записываем сами: модель видит разницу и решает,
+ * нужно ли оно вообще. Запись — уже `edit`, и она проходит обычное ревью.
+ */
+export async function formatFile(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const target = requireString(args, 'path');
+  if (!ctx.formatFile) {
+    return { ok: false, summary: 'Языковой сервер не подключён: форматировать нечем' };
+  }
+  const formatted = await ctx.formatFile(target);
+  if (formatted === null) {
+    return { ok: false, summary: 'Сервер не умеет форматировать этот файл' };
+  }
+  if (formatted === '') return { ok: true, summary: 'Файл уже отформатирован', detail: '' };
+  const root = ctx.workspace.rootPath();
+  return {
+    ok: true,
+    summary: `${relative(target, root)}: отформатирован`,
+    detail: formatted,
+    changes: [{ path: target, kind: 'modified' }],
+  };
+}
+
 /**
 
  * Обязательные поля каждого действия `file`. Их называет не только разбор, но и
@@ -610,6 +665,12 @@ const FILE_ARGS: Record<string, readonly string[]> = {
   delete: ['path'],
 
   replace: ['query', 'replacement'],
+
+  format: ['path'],
+  // Два способа создать файл — создать папку под него и записать текст — раньше
+
+  // собирали через терминал: `mkdir` без подтверждения, `cp` тоже. Имена свои.
+  mkdir: ['path'],
 };
 
 /**

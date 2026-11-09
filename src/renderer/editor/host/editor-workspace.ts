@@ -1375,8 +1375,16 @@ export class EditorWorkspace {
   }
 
   /** Список пометок для наружу (`get_diagnostics`): с путём и источником. */
-  markers(path?: string): DiagnosticItem[] {
-    return this.diagnostics.markers(path);
+  markers(path?: string, under?: string): DiagnosticItem[] {
+    return this.diagnostics.markers(path, under);
+  }
+
+  /**
+   * Текст документа, как его видит человек: несохранённый — из буфера, а не с диска.
+   * `null` — файл не открыт (тогда читают с диска).
+   */
+  documentText(path: string): string | null {
+    return this.registry.get(path)?.text ?? null;
   }
 
   /** Сколько ошибок и предупреждений — для статус-бара. */

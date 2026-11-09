@@ -147,4 +147,25 @@ describe('checks: diagnostics', () => {
     // Диалог сам сужает набор по файлу; здесь проверяем, что отчёт не переименовывает чужой путь.
     expect(outcome.detail).toBeDefined();
   });
+
+  it('folder сужает отбор на стороне редактора, project берёт всё', async () => {
+    // Папку отбирает renderer (там пометки): сюда она идёт как второй аргумент.
+    const seen: Array<[string | undefined, string | undefined]> = [];
+    const folderCtx = {
+      workspace: { rootPath: () => '/проект', stat: async () => ({}) },
+      diagnostics: async (path?: string, folder?: string) => {
+        seen.push([path, folder]);
+        return { items: [item()] };
+      },
+    } as unknown as ToolContext;
+
+    await checksAction(folderCtx, { action: 'diagnostics', folder: '/проект/src' });
+    // `problems` — весь проект: папка не передаётся, путь — корень проекта.
+    await checksAction(folderCtx, { action: 'problems' });
+
+    expect(seen).toEqual([
+      [undefined, '/проект/src'],
+      [undefined, '/проект'],
+    ]);
+  });
 });

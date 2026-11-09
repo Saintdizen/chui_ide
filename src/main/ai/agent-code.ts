@@ -59,12 +59,15 @@ export async function fileOutline(ctx: ToolContext, args: Record<string, unknown
 
 export async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const query = requireString(args, 'query');
+  const isRegex = args.regex === true || args.isRegex === true;
   const limit = Math.min(optionalInteger(args, 'limit') ?? DEFAULT_CODE_SYMBOLS, DEFAULT_CODE_SYMBOLS);
   const root = ctx.workspace.rootPath();
 
+  // По регулярке`workspace/symbol` не ищет: сервер принимает имя. Объявления
+  // отбирает сам поиск по тексту — заявки к серверу нет.
   let found: readonly SearchSymbol[] = [];
   let symbolsAvailable = false;
-  if (ctx.symbols) {
+  if (ctx.symbols && !isRegex) {
     try {
       found = await ctx.symbols.projectSymbols(query);
       symbolsAvailable = true;
@@ -75,12 +78,12 @@ export async function codebaseSearch(ctx: ToolContext, args: Record<string, unkn
   }
 
   // Запрос словами («read file») текстом не найти: ищем по спрессованной форме —
-  // так он совпадёт с `readFile`. Регистр `search` учитывает сам.
-  const compact = query.replace(/\s+/g, '');
+  // так он совпадёт с `readFile`. Регулярку не трогаем: в ней пробелы значимы.
+  const compact = isRegex ? query : query.replace(/\s+/g, '');
   const hits = await ctx.workspace.search(
     {
       query: compact,
-      isRegex: false,
+      isRegex,
       caseSensitive: false,
       maxResults: MAX_SEARCH_HITS,
     },
@@ -109,6 +112,7 @@ export async function codebaseSearch(ctx: ToolContext, args: Record<string, unkn
     scanned: hits.scanned,
     truncated: hits.truncated || found.length > limit,
     symbolsAvailable,
+    regex: isRegex,
   });
 
   return { ok: true, summary: shaped.summary, detail: shaped.detail };

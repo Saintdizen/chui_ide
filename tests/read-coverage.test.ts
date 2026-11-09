@@ -248,6 +248,10 @@ describe('touchedPaths', () => {
         }),
       ) ?? new Set();
     expect([...moved].sort()).toEqual(['/proj/new.ts', '/proj/old.ts']);
+    // Копия читает исходник и меняет копию: забыть надо оба.
+    const copied =
+      touchedPaths('file', JSON.stringify({ action: 'copy', from: '/proj/a.ts', to: '/proj/b.ts' })) ?? new Set();
+    expect([...copied].sort()).toEqual(['/proj/a.ts', '/proj/b.ts']);
   });
 
   it('пути из результата тоже считаются (создание и перенос)', () => {

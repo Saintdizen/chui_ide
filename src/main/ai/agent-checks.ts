@@ -42,11 +42,13 @@ export async function checksAction(ctx: ToolContext, args: Record<string, unknow
   const action = requireString(args, 'action').trim();
   switch (action) {
     case 'diagnostics':
-      return await diagnostics(ctx, args);
+      return await diagnostics(ctx, args, false);
+    case 'problems':
+      return await diagnostics(ctx, args, true);
     case 'lint':
       return await runLinter(ctx, args);
     default:
-      return unknownAction(action, 'checks: diagnostics, lint.');
+      return unknownAction(action, 'checks: diagnostics, problems, lint.');
   }
 }
 
@@ -56,8 +58,18 @@ export async function checksAction(ctx: ToolContext, args: Record<string, unknow
 
 const MAX_DIAGNOSTICS = 60;
 
-/** Пометки языка собирает renderer: они живут в редакторе, а не на диске. */
-export async function diagnostics(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+/**
+ * `diagnostics` — пометки файла или папки (проекта при `project: true`).
+ *
+ * `whole` — режим `problems`: без аргументов берём ВЕСЬ проект. Иначе `diagnostics`
+ * без пути отдавал пометки всех файлов, где они есть, но человек и модель читали
+ * это как «файл не указан — значит текущий»; проект по умолчанию — из-за того же.
+ */
+export async function diagnostics(
+  ctx: ToolContext,
+  args: Record<string, unknown>,
+  whole = false,
+): Promise<ToolOutcome> {
   if (!ctx.diagnostics) {
     return {
       ok: false,
@@ -66,7 +78,9 @@ export async function diagnostics(ctx: ToolContext, args: Record<string, unknown
   }
 
   const target = optionalString(args, 'path');
-  const result = await ctx.diagnostics(target);
+  // `folder` — папка, `project` — весь проект: одно и то же поле хоста, разное удобство.
+  const folder = optionalString(args, 'folder') ?? (args.project === true || whole ? ctx.workspace.rootPath() ?? undefined : undefined);
+  const result = await ctx.diagnostics(target, folder);
   const items = result.items.slice(0, MAX_DIAGNOSTICS);
 
   if (result.items.length === 0) {

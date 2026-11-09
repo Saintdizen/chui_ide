@@ -25,7 +25,9 @@ import {
   type ChatTitleResult,
 } from '../../shared/api';
 import { type CommandGrant, type ConfirmCommandAnswer, normalizeGrants } from '../../shared/agent-grants';
-import type { FileEdit } from '../../shared/edits';
+import { applyTextEdits, type FileEdit } from '../../shared/edits';
+import type { LspService } from '../lsp/lsp';
+import { readFileText } from '../git/file-text';
 import type { PatchFile } from '../../shared/patch';
 import { ageStaleResults, ageToolResults } from './age-results';
 import { readCalibration, saveCalibration } from './token-calibration';
@@ -271,7 +273,7 @@ export interface ChatHostBridge {
    */
   exitPlan(plan: string): Promise<PlanExitDecision>;
   /** Пометки языка: они живут в renderer (в редакторе). */
-  getDiagnostics(path?: string): Promise<DiagnosticsHostResult>;
+  getDiagnostics(path?: string, folder?: string): Promise<DiagnosticsHostResult>;
   /** Открытые вкладки и курсоры: тоже знает только renderer. */
   openFiles(): Promise<OpenFilesHostResult>;
   /** Показать файл в редакторе на нужной позиции. */
@@ -294,6 +296,10 @@ export class AiService {
   private terminals?: TerminalAgent;
   /** Поиск символов проекта: без него search (action code) ищет только текстом. */
   private symbols?: SymbolSearch;
+  /** Серверы языков: нужны действию `format` инструмента `file`. */
+  private lsp?: Pick<LspService, 'formatDocument'>;
+  /** Открытые документы: несохранённый текст, который сервер ещё не видел. */
+  private documentText?: (path: string) => Promise<string | null>;
   /** Линтер проекта: без него действие lint инструмента checks модели не предлагаем. */
   private linter?: Linter;
   /** Команда тестов проекта: без неё инструмент run_tests модели не предлагаем. */
@@ -488,6 +494,22 @@ export class AiService {
    */
   attachSymbols(symbols: SymbolSearch): void {
     this.symbols = symbols;
+  }
+
+  /**
+   * Подключить серверы языков: включает действие `format` инструмента `file`.
+   * Без него действие отвечает `null` — «форматировать нечем», а не молчит.
+   */
+  attachLsp(lsp: Pick<LspService, 'formatDocument'>): void {
+    this.lsp = lsp;
+  }
+
+  /**
+   * Подключить чтение открытых документов (renderer): форматирование должно видеть
+   * текст из редактора, а не с диска — иначе несохранённая строка съедет.
+   */
+  attachDocumentText(read: (path: string) => Promise<string | null>): void {
+    this.documentText = read;
   }
 
   /**
@@ -961,6 +983,26 @@ export class AiService {
     if (this.symbols) toolContext.symbols = this.symbols;
     if (this.linter) toolContext.linter = this.linter;
     if (this.tests) toolContext.tests = this.tests;
+    // Форматирование файла: LSP знает, где стоит сервер и умеет ли он
+    // `textDocument/formatting`. `null` — сервера нет или он такого не умеет, и
+    // действие говорит об этом прямо вместо пустого «готово».
+    const lsp = this.lsp;
+    toolContext.formatFile = async (path) => {
+      if (!lsp) return null;
+      const open = (await this.documentText?.(path)) ?? null;
+      let text = open ?? '';
+      if (open === null) {
+        try {
+          text = await readFileText(path);
+        } catch {
+          return null;
+        }
+      }
+      if (!text) return null;
+      const edits = await lsp.formatDocument(path);
+      if (edits.length === 0) return '';
+      return applyTextEdits(text, edits);
+    };
     if (this.sessions) toolContext.sessions = this.sessions;
     toolContext.memory = {
       remember: (text, scope) => this.memory.remember(this.workspace.rootPath(), text, scope),
@@ -1051,7 +1093,7 @@ export class AiService {
       toolContext.grantCommand = (grant) => host.rememberCommandGrant(grant);
       toolContext.confirmBrowser = (action) => host.confirmBrowser(action);
       toolContext.ask = (question, options) => host.ask(question, options);
-      toolContext.diagnostics = (path) => host.getDiagnostics(path);
+      toolContext.diagnostics = (path, folder) => host.getDiagnostics(path, folder);
       toolContext.openFiles = () => host.openFiles();
       toolContext.openFile = (path, line, column) => host.openFile(path, line, column);
     }

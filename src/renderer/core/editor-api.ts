@@ -54,8 +54,10 @@ export interface EditorApi {
   insertAtCursor(text: string): boolean;
   /** Файл активной панели (`null` — панель пуста). */
   readonly currentPath: string | null;
-  /** Список пометок языка — их видит агент (`get_diagnostics`). */
-  markers(path?: string): DiagnosticItem[];
+  /** Список пометок языка — их видит агент (`get_diagnostics`); `under` — папка. */
+  markers(path?: string, under?: string): DiagnosticItem[];
+  /** Текст открытого документа (несохранённый — из буфера); `null` — файл не открыт. */
+  documentText(path: string): string | null;
   /** Пометки одного источника (языковой сервер, проверка импортов). */
   setExternalMarkers(path: string, owner: string, diagnostics: readonly LspDiagnostic[]): void;
   /** Пометки языка файла с диапазонами — контекст для быстрых исправлений. */

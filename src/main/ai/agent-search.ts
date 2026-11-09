@@ -97,6 +97,7 @@ function searchFlags(args: Record<string, unknown>): Record<string, unknown> {
   return {
     ...rest,
     isRegex: set.has('r'),
+    regex: set.has('r'),
     caseSensitive: set.has('c'),
     filesOnly: set.has('n'),
     // `k` — «сколько»: как `grep -c`, отдаёт число совпадений одной строкой.

@@ -407,12 +407,19 @@ export interface ToolContext {
    * вопрос остался без ответа: прогон прервали или нажали «Отменить».
    */
   ask?(question: string, options?: readonly string[]): Promise<string>;
-  /** Пометки языка из редактора. */
-  diagnostics?(path?: string): Promise<DiagnosticsHostResult>;
+  /** Текст открытого документа: несохранённый — первым, с диска — вторым. */
+  documentText?(path: string): Promise<string | null>;
+  /** Пометки языка из редактора: путь — файл, `folder` — папка (её файлы и вложенные). */
+  diagnostics?(path?: string, folder?: string): Promise<DiagnosticsHostResult>;
   /** Что открыто в редакторе и где курсоры: инструмент `open_files`. */
   openFiles?: () => Promise<OpenFilesHostResult>;
   /** Открыть файл в редакторе (renderer): действие open инструмента show. */
   openFile?(path: string, line?: number, column?: number): Promise<boolean>;
+  /**
+   * Отформатировать файл языковым сервером: действие `format` инструмента `file`.
+   * Возвращает новый текст (целиком), `null` — форматировать нечем.
+   */
+  formatFile?(path: string): Promise<string | null>;
   /** Терминальные сессии (pty): нужны инструментам terminal_*. */
   terminals?: TerminalAgent;
   /** Символы проекта и скелет файла (языковой сервер): lsp (action references|definition|outline). */

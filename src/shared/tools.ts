@@ -202,7 +202,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         // а все вместе — 28 токенов в каждом запросе.
         flags: {
           type: 'string',
-          description: 'Any of: r regex, c case-sensitive, n names, k count (default: substring).',
+          description: 'Any of: r regex (code: in the name too), c case-sensitive, n names, k count.',
         },
         glob: { type: 'string', description: 'Mask.' },
         path: {
@@ -285,20 +285,26 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'checks',
     side: 'renderer',
-    description: 'Project checks, no writes. Both take path to narrow to one file or folder.',
+    description: 'Project checks, no writes. path narrows to one file or folder.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['diagnostics', 'lint'],
+          enum: ['diagnostics', 'problems', 'lint'],
           description:
             'diagnostics: errors and warnings the editor knows (call before fixing code); ' +
+            'problems: the same for the WHOLE project at once, no file open needed — ' +
+            'use it after a change that spans files; ' +
             'lint: the project linter (ruff, eslint, biome) — findings by file, line, rule.',
         },
         path: {
           type: 'string',
-          description: 'One file or folder (diagnostics: open files; lint: whole project).',
+          description: 'One file (diagnostics: only that file, even closed).',
+        },
+        folder: {
+          type: 'string',
+          description: 'A folder: its files and nested ones, closed ones too. Lint ignores it.',
         },
       },
       required: ['action'],
@@ -559,19 +565,21 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'file',
     side: 'main',
     description:
-      'Files and folders inside the workspace: move, delete. A whole new file is edit ({path, contents}); ' +
-      'changing many files at once is search + edit.',
+      'Files and folders inside the workspace: move, copy, mkdir, delete, format. A whole new file is edit ' +
+        '({path, contents}); changing many files at once is search + edit.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['move', 'delete'],
-          description: 'move: from, to; delete: to trash, no undo.',
+          enum: ['move', 'copy', 'mkdir', 'delete', 'format'],
+          description:
+            'move/copy: from, to; mkdir: path; delete: to trash, no undo; ' +
+            'format: path — returns the formatted text, does not write it.',
         },
         path: { type: 'string', description: 'Path.' },
-        from: { type: 'string', description: 'move: source.' },
-        to: { type: 'string', description: 'move: target.' },
+        from: { type: 'string', description: 'move/copy: source.' },
+        to: { type: 'string', description: 'move/copy: target.' },
       },
       // `create` и `replace` сняты со схемы: `create` дублировал запись целиком у
       // `edit` (та же `contents`, тот же `createFile`), `replace` — пакетную правку

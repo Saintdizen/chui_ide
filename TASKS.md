@@ -71,15 +71,5 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
 
 ## VII. Донабор по Cursor / Xcode / Neovim
 
-58. `symbols`: поиск по имени и по регулярке (JetBrains `search_symbol`,
-    `search_regex`; Neovim `workspace/symbol`). code-index есть
-    (symbols/store.ts, workspace/code-index.ts), инструмента нет.
-70. `format`: переформатировать файл без сохранения (JetBrains
-    `reformat_file`). Сейчас `checks` не правит.
-71. `problems`: все пометки проекта сразу, не только текущий файл (JetBrains
-    `get_file_problems`, `lint_files`) — сейчас только `checks`.
-73. `move`/`copy_path`/`create_directory` (Zed, JetBrains
-    `create_new_file`): создание и перенос отдельными именами, чтобы не
-    собирать команды через `terminal`.
 74. Режимы исполнения как у Cursor run-modes (allow/deny по типу
     действия) — настройка поверх текущего подтверждения опасных команд.

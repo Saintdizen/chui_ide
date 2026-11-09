@@ -146,13 +146,14 @@ describe('edit', () => {
 });
 
 describe('file', () => {
-  it('в схеме только структура: перенос и удаление', () => {
+  it('в схеме только структура: имена и операции без содержимого', () => {
     // `create` ушёл к `edit` (там уже есть `{path, contents}`) — дубль снят:
-    // модель больше не выбирает между двумя записями файла целиком.
+    // модель больше не выбирает между двумя записями файла целиком. Осталось то,
+    // чего нет нигде: перенос, копия, папка, удаление, форматирование.
     const tool = byName.get('file')!;
     expect(tool.side).toBe('main');
     expect(tool.inputSchema.required).toEqual(['action']);
-    expect(tool.inputSchema.properties.action?.enum).toEqual(['move', 'delete']);
+    expect(tool.inputSchema.properties.action?.enum).toEqual(['move', 'copy', 'mkdir', 'delete', 'format']);
     expect(tool.inputSchema.properties.contents).toBeUndefined();
   });
 });

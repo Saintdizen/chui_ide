@@ -3273,8 +3273,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // что правка по позициям: ревью, undo и панель изменений работают как обычно.
   deps.host.handle('ai.applyPatches', async (params) => applyAgentPatches(params));
 
-  // Пометки языка живут в renderer (в редакторе), поэтому их отдаёт он.
-  deps.host.handle('ai.getDiagnostics', async (params) => ({ items: deps.editors.markers(params.path) }));
+  // Пометки языка живут в renderer (в редакторе), поэтому их отдаёт он. `folder` —
+  // папка: пометки её файлов и вложенных, в том числе закрытых (они всё равно в хранилище).
+  deps.host.handle('ai.getDiagnostics', async (params) => ({
+    items: deps.editors.markers(params.path, params.folder),
+  }));
+
+  // Несохранённый текст: форматировать надо то, что человек видит, а не что на диске.
+  deps.host.handle('ai.documentText', async (params) => ({ text: deps.editors.documentText(params.path) }));
 
   // Какие файлы открыты и где стоят курсоры — знает только renderer: у main
   // нет ни вкладок, ни текста. Агенту это нужно постоянно («что открыто?»).
