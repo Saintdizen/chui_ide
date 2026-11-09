@@ -18,6 +18,8 @@ import { runShellCommand, type RunOptions } from './run-command';
 import { createSpillStream } from './spill';
 import { ECHO_COMMAND_CHARS, needsConfirmation } from './tool-rules';
 import { commandLine } from './tool-command';
+import path from 'node:path';
+import { findPrimaryVenvSync } from '../python/environments';
 import type { ToolContext, ToolOutcome } from './tool-context';
 
 export async function runBuild(ctx: ToolContext, args: Record<string, unknown> = {}): Promise<ToolOutcome> {
@@ -82,12 +84,35 @@ export async function runBuild(ctx: ToolContext, args: Record<string, unknown> =
   ].filter(Boolean);
   const passed = result.code === 0 && !result.timedOut;
 
+  // Виртуальное окружение Python: без единой команды модель не знает, что оно
+  // есть, и запускает `python`, который берёт системный пакет вместо
+  // установленного в проект. Строка стоит ~20 токенов и появляется только там,
+  // где окружение действительно найдено.
+  const venv = venvNote(ctx.workspace.rootPath());
   return {
     ok: true,
     ...(passed ? {} : { failed: true }),
     summary: `сборка (${resolved.label}): код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
-    detail: `${commandLine(ctx, command)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
+    detail:
+      `${commandLine(ctx, command)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}` +
+      (venv ? `\n${venv}` : ''),
   };
+}
+
+/**
+ * Строка про виртуальное окружение — один раз на прогон сборки.
+ *
+ * Путь ищет `findPrimaryVenvSync` (тот же, что у подсветки и активации в
+ * редакторе): `.venv`, `venv`, `env` в корне проекта. Нет окружения — нет и
+ * строки: молчать дешевле, чем объяснять его отсутствие.
+ */
+function venvNote(root: string | null): string | null {
+  if (!root) return null;
+  // Возвращается путь к интерпретатору окружения, а не к папке.
+  const python = findPrimaryVenvSync(root);
+  if (!python) return null;
+  const dir = path.dirname(path.dirname(python));
+  return `venv: ${dir} — этот прогон идёт без активации; python проекта: ${python}.`;
 }
 
 /** Эхо длинной команды не повторяем: оно уже есть в карточке вызова. */

@@ -39,4 +39,4 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
 
 ## VI. Инструменты агента и экономия
 
-60. `venv`/`pyenv`: venv-lookup.ts есть — решить, нужен ли в наборе.
+Срез закрыт целиком: 54-67.
