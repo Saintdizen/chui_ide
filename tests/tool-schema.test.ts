@@ -229,7 +229,9 @@ describe('описания аргументов', () => {
 
     const notes = AGENT_TOOLS.flatMap((tool) =>
       Object.entries(tool.inputSchema.properties ?? {})
-        .filter(([name]) => /line|column/i.test(name))
+        // `maxLines` — потолок числа строк, а не номер строки: нумерация к нему
+        // не относится, и канон тут был бы ложью.
+        .filter(([name]) => /line|column/i.test(name) && name !== 'maxLines')
         .map(([name, property]) => ({
           tool: tool.name,
           name,

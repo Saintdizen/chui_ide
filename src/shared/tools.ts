@@ -149,6 +149,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description: 'Mask: ** any depth, * one segment. Default: all.',
         },
         limit: { type: 'number', description: 'Cap on entries.' },
+        depth: {
+          type: 'number',
+          description: 'Whole tree below `path` instead of one level: how deep to go. Default 3.',
+        },
+        maxLines: { type: 'number', description: 'For `depth`: cap on tree rows.' },
       },
     },
   },

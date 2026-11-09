@@ -56,7 +56,7 @@ describe('list', () => {
     // Обязательных нет нарочно: без `path` — корень проекта, без `glob` — его файлы.
     // Выбор делает `listAction`, и оба действия только читают.
     expect(tool.inputSchema.required).toBeUndefined();
-    expect(Object.keys(tool.inputSchema.properties)).toEqual(['path', 'glob', 'limit']);
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(['path', 'glob', 'limit', 'depth', 'maxLines']);
   });
 });
 
