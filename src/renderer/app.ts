@@ -402,19 +402,29 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     }
   }
 
-  /** Применить макет из настроек: размеры и видимость панелей. */
+  /**
+   * Применить макет из настроек: размеры и видимость панелей.
+   *
+   * Видимость трогаем, только если она в настройках изменилась (сравнение с прошлым
+   * применением). Свёрнутость панели человек меняет кнопкой, и в настройки она не
+   * пишется — иначе повторное применение тех же настроек (то есть любая другая
+   * правка в них) распахнуло бы панель, которую только что свернули.
+   */
+  let appliedLayout: LayoutSettings | undefined;
   const applyLayoutSettings = (saved: LayoutSettings | undefined): void => {
     if (!saved) return;
+    const prev = appliedLayout;
+    appliedLayout = saved;
     withoutPersist(() => {
       layout.setSidebarSize(saved.sidebarSize);
       layout.setRightSize(saved.rightSize);
       layout.setDockSize(saved.dockSize);
       layout.setSidebarPosition(saved.sidebarPosition);
-      layout.setSidebarVisible(saved.sidebarVisible);
-      layout.setRightVisible(saved.rightVisible);
-      layout.setDockVisible(saved.dockVisible);
+      if (!prev || prev.sidebarVisible !== saved.sidebarVisible) layout.setSidebarVisible(saved.sidebarVisible);
+      if (!prev || prev.rightVisible !== saved.rightVisible) layout.setRightVisible(saved.rightVisible);
+      if (!prev || prev.dockVisible !== saved.dockVisible) layout.setDockVisible(saved.dockVisible);
       layout.setDockPosition(saved.dockPosition ?? 'bottom');
-      layout.setEditorVisible(saved.editorVisible);
+      if (!prev || prev.editorVisible !== saved.editorVisible) layout.setEditorVisible(saved.editorVisible);
     });
   };
 

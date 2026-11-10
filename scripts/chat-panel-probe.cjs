@@ -682,10 +682,12 @@ app.whenReady().then(async () => {
     })()`,
   );
   check('в «Агенте» набор инструментов доступен', presetPicked.былоДоступен === true, presetPicked);
+  // «Авто» — не набор, а режим: набор выбирается по задаче (needs). Появился
+  // позже первого варианта пробы; пункты — от него и дальше к минимуму.
   check(
-    'в выборе набора четыре варианта — от полного к минимуму',
+    'в выборе набора «Авто» и четыре набора — от полного к минимуму',
     Array.isArray(presetPicked.labels) &&
-      presetPicked.labels.join('|') === 'Все инструменты|Правка|Только чтение|Минимум',
+      presetPicked.labels.join('|') === 'Авто|Все инструменты|Правка|Только чтение|Минимум',
     presetPicked.labels,
   );
   check('набор переключился на «Только чтение»', presetPicked.подпись === 'Только чтение', presetPicked);
@@ -777,6 +779,14 @@ app.whenReady().then(async () => {
         sendRight: Math.round(s.right),
         barRight: Math.round(b.right),
         sendInside: a.left >= b.left - 1 && a.right <= b.right + 1,
+        однаСтрока: (() => {
+          // Скрытые дети (например, input[type=file] у «приложить») сидят в 0,0
+          // и роняли бы проверку — берём только видимые.
+          const tops = [...act.children]
+            .filter((el) => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0)
+            .map((el) => Math.round(el.getBoundingClientRect().top));
+          return tops.length > 0 && tops.every((t) => Math.abs(t - tops[0]) <= 1);
+        })(),
       };
     })()`,
   );
@@ -785,7 +795,14 @@ app.whenReady().then(async () => {
     actionsBox !== null && actionsBox.вКарточке === false,
     actionsBox?.вКарточке,
   );
-  check('ряд действий — инлайн-флекс', actionsBox?.display === 'inline-flex', actionsBox?.display);
+  // Проверять `display === 'inline-flex'` бессмысленно: ряд лежит во flex-контейнере,
+  // а флекс-элемент по спеке блокифицируется — computed всегда `flex`. Само «в ряд»
+  // и есть то, что важно: кнопки стоят в одну строку.
+  check(
+    'ряд действий разложен в одну строку',
+    actionsBox !== null && actionsBox.display.startsWith('flex') && actionsBox.однаСтрока === true,
+    actionsBox && { display: actionsBox.display, однаСтрока: actionsBox.однаСтрока },
+  );
   check('ряд настроек не переполняется по ширине', actionsBox?.overflow === false, actionsBox?.overflow);
   check(
     '«отправить» прижата к правой кромке ряда настроек',
@@ -941,16 +958,21 @@ app.whenReady().then(async () => {
         title: node.querySelector('.composer-menu-title')?.textContent ?? '',
         hint: node.querySelector('.composer-menu-hint')?.textContent ?? '',
       }));
-      const first = items[0] ?? { title: '', hint: '' };
+      // Свои команды беседы (/compact и прочие) идут раньше всего — так решено
+      // при их появлении, и /argue первым уже быть не может. Важно другое:
+      // команда проекта стоит раньше ВСТРОЕННЫХ подсказок.
+      const перваяВстроенная = items.findIndex((item) => item.title.startsWith('/explain'));
+      const проектная = items.findIndex((item) => item.hint === 'команда проекта');
       return {
         титулы: items.map((item) => item.title),
-        своиПервыми: first.hint === 'команда проекта' && first.title.startsWith('/argue'),
-        естьВстроенная: items.some((item) => item.title.startsWith('/explain')),
+        своиПервыми:
+          проектная !== -1 && (перваяВстроенная === -1 || проектная < перваяВстроенная),
+        естьВстроенная: перваяВстроенная !== -1,
       };
     })()`,
   );
   check('меню `/` показывает команду проекта', Boolean(slash.титулы?.some((t) => t.startsWith('/argue'))), slash);
-  check('команда проекта стоит в меню первой', slash.своиПервыми === true, slash);
+  check('команда проекта стоит раньше встроенных', slash.своиПервыми === true, slash);
   check('встроенные команды остались в меню', slash.естьВстроенная === true, slash);
 
   const picked = await ask(
