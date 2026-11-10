@@ -164,6 +164,9 @@ function rewriteArguments(
   }
 }
 
+/** Поля, под которыми модель называла имя скрипта. Первое непустое — `script`. */
+const ALIAS_SCRIPT_FIELDS = ['task', 'command', 'cmd'] as const;
+
 /** `run`: старое имя поля → `script`. Обработчик читает только `script`. */
 function runScript(args: Record<string, unknown>): Record<string, unknown> {
   // `task` — переименованное поле из старых вызовов и сохранённых бесед.
@@ -184,9 +187,6 @@ function runScript(args: Record<string, unknown>): Record<string, unknown> {
   if (typeof cleaned.script === 'string' && cleaned.script.trim().length > 0) return cleaned;
   return { ...cleaned, script: alias };
 }
-
-/** Поля, под которыми модель называла имя скрипта. Первое непустое — `script`. */
-const ALIAS_SCRIPT_FIELDS = ['task', 'command', 'cmd'] as const;
 
 /** Незнакомое имя возвращается как есть: чужие (MCP) не наше дело. */
 export function canonicalCall(name: string, rawArguments: string): CanonicalCall {

@@ -35,6 +35,20 @@ describe('промпт агентного режима', () => {
     expect(text).toContain('содержимое — read');
   });
 
+  it('совет про cwd не обещает его инструменту run', () => {
+    // В схеме `run` (src/shared/tools.ts) только `script`: `cwd` там нет.
+    // Промпт долго утверждал обратное — модель звала run с адресом, которого
+    // он не понимает, и помогало это ровно ничем: cd уходил в terminal.
+
+    // Совет — одна длинная строка, и `run` в ней законен («разово — run»,
+    // «run с background»). Обещание адреса — отдельное звено, резанное `;`.
+    const text = agentPrompt('auto', { confirm: true });
+    const [cwdLink = ''] = text.split(';').filter((link) => link.includes('cwd'));
+
+    expect(cwdLink).toContain('terminal');
+    expect(cwdLink).not.toMatch(/у (terminal )?и run|и run есть/);
+  });
+
   it('минимум не обещает памяти и чтения картинок', () => {
     const minimal = agentPrompt('minimal', { confirm: true });
     // В «Минимуме» только ядро и ведение работы: поиск есть, правок нет.
