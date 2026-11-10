@@ -8,6 +8,7 @@ import type { DocumentStore } from './document-store';
 import type { EditService } from './edits';
 import type { EditorWorkspace } from '../editor/host/editor-workspace';
 import type { LspFeatures } from '../editor/host/lsp-features';
+import type { PeekAnchor } from '../editor/widgets/peek-widget';
 import { showPopupMenu, type PopupMenuItem } from '../ui/popup-menu';
 import type { ToastKind } from '../ui/toast';
 
@@ -93,8 +94,14 @@ export function createEditorFixes(deps: EditorFixesDeps) {
    * Быстрые исправления под курсором: спросить сервер, показать список у каретки,
    * применить выбранное. Правки идут через документную модель — значит с undo; команда
    * сервера выполняется там, где он живёт.
+   * `anchor` — место в окне, у которого поставить список, когда его позвали не из
+   * каретки (значок в жёлобе, меню по правому клику): тогда каретка остаётся где была.
    */
-  const runCodeActions = async (path: string, position: { line: number; column: number }): Promise<void> => {
+  const runCodeActions = async (
+    path: string,
+    position: { line: number; column: number },
+    anchor?: PeekAnchor | null,
+  ): Promise<void> => {
     // Контекст запроса — пометки ЭТОЙ строки: сервер отвечает исправлениями на них.
     const diagnostics = editors.lspDiagnostics(path).filter((item) => item.line === position.line);
     const actions = await lsp.codeActions(path, position, diagnostics);
@@ -134,8 +141,9 @@ export function createEditorFixes(deps: EditorFixesDeps) {
       showToast('Быстрых исправлений здесь нет');
       return;
     }
-    // Список ставим у каретки — как список подсказок: глаз уже там, где он печатает.
-    const point = editors.caretPoint();
+    // Обычно список ставим у каретки — как список подсказок: глаз уже там, где он
+    // печатает. Значок в жёлобе передаёт своё место: там каретка ни при чём.
+    const point = anchor ?? editors.caretPoint();
     showPopupMenu(items, point?.left ?? 0, (point?.bottom ?? 0) + 2);
   };
 

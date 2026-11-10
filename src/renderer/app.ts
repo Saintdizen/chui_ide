@@ -806,8 +806,7 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     },
     // Быстрые исправления: список действий языка показывает приложение — у него и попапы,
     // и языковой сервер, и документная модель для правок.
-    codeActions: (path, position) => void fixes.runCodeActions(path, position),
-    // Свёртка: диапазоны берём у сервера, а если он их не умеет — считаем по отступам.
+    codeActions: (path, position, anchor) => void fixes.runCodeActions(path, position, anchor),
     // Свёртка: сперва сервер (он видит блоки смыслово). Нет сервера — считаем сами:
     // по грамматике (скобки, блочные комментарии, длинные строки) и по отступам.
     // Два своих источника складываем: скобки накрывают C-подобный код, отступы —
@@ -850,7 +849,12 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
         openBookmarks: () => bookmarksModal.open(),
         refactorMenu: (path) => void fixes.runRefactorMenu(path),
         refactor: (path, action) => void fixes.runRefactor(path, action),
-        codeActions: (path, position) => void fixes.runCodeActions(path, position),
+        codeActions: (path, position) =>
+          void fixes.runCodeActions(path, position, {
+            left: event.clientX,
+            top: event.clientY,
+            bottom: event.clientY,
+          }),
         revealInOS: (path) => void commands.execute('file.revealInOS', path),
       });
       showContextMenu(items, event.clientX, event.clientY);

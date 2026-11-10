@@ -1167,15 +1167,24 @@ html {
 }
 
 .code-action-glyph::after {
+  /* Форма лампочки из одного источника: маска и красит, и обрезает — цвет берётся
+     из темы, как раньше. Колба и цоколь, как у значка bulb. */
+  --bulb: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='6' r='4.7'/%3E%3Crect x='6.2' y='10.4' width='3.6' height='1.7' rx='.8'/%3E%3Crect x='6.8' y='12.9' width='2.4' height='1.4' rx='.7'/%3E%3C/svg%3E");
   content: "";
   position: absolute;
   inset: 0;
   margin: auto;
-  width: 7px;
+  width: 9px;
   height: 9px;
-  border-radius: 50% 50% 45% 45%;
   background: var(--yellow_prime_background, #d7a21a);
   opacity: 0.85;
+  -webkit-mask: var(--bulb) center / contain no-repeat;
+  mask: var(--bulb) center / contain no-repeat;
+}
+
+/* Наведение: значок светлее — видно, что он нажимается. */
+.code-action-glyph:hover::after {
+  opacity: 1;
 }
 
 /* Строка, где стоит отладчик: подсвечиваем всю строку, а не только жёлоб. */

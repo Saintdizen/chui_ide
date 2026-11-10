@@ -370,7 +370,7 @@ export interface EditorHostOptions {
    * Быстрые исправления под курсором (Ctrl+.): показать список действий языка. Дело
    * приложения — у него и попапы, и языковой сервер, и документная модель для правок.
    */
-  codeActions?: (path: string, position: { line: number; column: number }) => void;
+  codeActions?: (path: string, position: { line: number; column: number }, anchor?: PeekAnchor | null) => void;
   /**
    * Диапазоны свёртки файла: у языкового сервера спрашивает приложение, а без сервера
    * их считают по отступам. Не задано — свёртки нет вовсе (и значков в жёлобе тоже).
@@ -599,7 +599,9 @@ export class EditorHost {
   /** Правый клик по тексту: приложение показывает своё меню (см. `EditorContextInfo`). */
   private readonly contextMenu: ((info: EditorContextInfo, event: MouseEvent) => void) | undefined;
   /** Быстрые исправления: список показывает приложение (см. `codeActions` в опциях). */
-  private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
+  private readonly codeActions:
+    | ((path: string, position: { line: number; column: number }, anchor?: PeekAnchor | null) => void)
+    | undefined;
   /** Диапазоны свёртки — от приложения (языковой сервер или отступы). */
   private readonly foldRanges: ((path: string, text: string) => Promise<readonly FoldRange[]>) | undefined;
   /** Подсветка включилась/выключилась (язык или порог размера) — для строки состояния. */
@@ -2267,8 +2269,8 @@ export class EditorHost {
 
   /** Значок в поле слева: что это значит — решает хозяин, а не представление. */
   private bindDecorationClicks(): void {
-    this.view.onGlyphClick = (line) => this.onGlyphClick(line);
-    this.view.onGlyphContextMenu = (line) => this.onGlyphClick(line, true);
+    this.view.onGlyphClick = (line, event) => this.onGlyphClick(line, false, event);
+    this.view.onGlyphContextMenu = (line, event) => this.onGlyphClick(line, true, event);
     this.view.onStripClick = (line) => this.onStripClick(line);
     // Правый клик по полоске: меню блока (то, чего не сделать щелчком по тексту).
     this.view.onStripContextMenu = (line) => this.onStripContextMenu(line);
@@ -2303,11 +2305,25 @@ export class EditorHost {
   }
 
   /**
+   * Где встать списку, который позвали значком в жёлобе: у самого значка, а не у каретки
+   * (она может быть где угодно, например в первой строке файла). Список открывается
+   * левым верхом на `bottom + 2`, поэтому left — правый край столбца значков, а bottom —
+   * верх строки: список встанет рядом с лампочкой и не накроет текст под ней.
+   */
+  private glyphAnchor(event?: MouseEvent): PeekAnchor | null {
+    if (!event) return null;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const rect = target?.getBoundingClientRect();
+    if (!rect) return { left: event.clientX, top: event.clientY, bottom: event.clientY - 2 };
+    return { left: rect.right + 4, top: rect.top, bottom: rect.top - 2 };
+  }
+
+  /**
    * Клик по полю значков. Порядок важен: у точки входа и у теста значки видны, а
    * точку останова ставят где угодно — поэтому она последняя. Правый клик по значку
    * точки просит меню (условие, удаление); если точки нет — то же, что левый.
    */
-  private onGlyphClick(line: number, menu = false): void {
+  private onGlyphClick(line: number, menu = false, event?: MouseEvent): void {
     const path = this.path;
     if (!path) return;
 
@@ -2326,7 +2342,7 @@ export class EditorHost {
       const marked = this.externalMarkers.get(path)?.some((item) => item.line === line) === true;
       const busy = this.breakpoints.get(path)?.some((item) => item.line === line) === true;
       if (marked && !busy) {
-        this.codeActions?.(path, { line, column: 1 });
+        this.codeActions?.(path, { line, column: 1 }, this.glyphAnchor(event));
         return;
       }
     }

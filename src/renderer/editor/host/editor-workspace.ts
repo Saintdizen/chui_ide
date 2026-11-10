@@ -143,7 +143,7 @@ export interface EditorWorkspaceOptions {
   /** Форматировать файл (инструмент языка спрашивает app, у редактора его нет). */
   formatCode?: (path: string) => void;
   /** Быстрые исправления под курсором: список и правки — дело приложения. */
-  codeActions?: (path: string, position: { line: number; column: number }) => void;
+  codeActions?: (path: string, position: { line: number; column: number }, anchor?: PeekAnchor | null) => void;
   /** Диапазоны свёртки файла: у сервера спрашивает приложение, а без — считает по отступам. */
   foldRanges?: (path: string, text: string) => Promise<readonly FoldRange[]>;
   /**
@@ -395,7 +395,9 @@ export class EditorWorkspace {
   /** Живой геттер настройки «форматировать при вставке». */
   private readonly formatOnPaste: (() => boolean) | undefined;
   /** Быстрые исправления: шов к приложению (сервер, список, применение правок). */
-  private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
+  private readonly codeActions:
+    | ((path: string, position: { line: number; column: number }, anchor?: PeekAnchor | null) => void)
+    | undefined;
   /** Диапазоны свёртки файла — тоже шов: у приложения и сервер, и подсчёт по отступам. */
   private readonly foldRanges: ((path: string, text: string) => Promise<readonly FoldRange[]>) | undefined;
   /** Код-линзы файла — шов: у сервера спрашивает приложение. */
@@ -979,7 +981,9 @@ export class EditorWorkspace {
     }
     // Быстрые исправления — тот же порядок: список показывает приложение.
     const codeActions = this.codeActions;
-    if (codeActions) context.codeActions = () => path && codeActions(path, this.pane.cursor());
+    if (codeActions) {
+      context.codeActions = () => path && codeActions(path, this.pane.cursor(), this.pane.caretPoint());
+    }
     // Карточка параметров — у самой панели: сервер дал функцию, панель знает каретку.
     // Нет источника подсказок — команды в палитре не будет (см. `requires`).
     if (this.signatureFromLanguage) context.parameterHints = () => this.pane.showParameterHints();
