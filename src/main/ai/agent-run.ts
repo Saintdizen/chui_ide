@@ -31,19 +31,23 @@ export async function runBuild(ctx: ToolContext, args: Record<string, unknown> =
   const root = ctx.workspace.rootPath();
   if (!root) return { ok: false, summary: 'Проект не открыт' };
 
-  const task = optionalString(args, 'task')?.trim();
-  const resolved = await buildCommand(root, task);
+  // `script` — имя из схемы (`shared/tools.ts`); `task` — старое имя того же поля:
+  // вызов по нему приходит из сохранённых прогонов, и `canonicalCall` перекладывает
+  // его в `script` до обработчика. Читаем оба: обход алиаса не должен ронять сборку
+  // на умолчание вместо названного скрипта.
+  const script = (optionalString(args, 'script') ?? optionalString(args, 'task'))?.trim();
+  const resolved = await buildCommand(root, script);
   if (!resolved) {
     const candidates = await buildCandidates(root);
-    const hint = task
-      ? `Скрипта \`${task}\` нет в package.json.`
+    const hint = script
+      ? `Скрипта \`${script}\` нет в package.json.`
       : 'Скрипта сборки нет, и tsc в node_modules не найден.';
     return {
       ok: false,
-      summary: task ? `Неизвестный скрипт: ${task}` : 'Сборка проекта не найдена',
+      summary: script ? `Неизвестный скрипт: ${script}` : 'Сборка проекта не найдена',
       detail:
         candidates.length > 0
-          ? `${hint}\nЕсть скрипты: ${candidates.join(', ')}. Вызови run с task из этого списка.`
+          ? `${hint}\nЕсть скрипты: ${candidates.join(', ')}. Вызови run с script из этого списка.`
           : `${hint} Собери вручную через terminal (action run), если команда известна.`,
     };
   }

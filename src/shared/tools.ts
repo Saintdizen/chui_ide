@@ -392,7 +392,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     description:
       'Run a project build or script: typecheck, build, lint, dev. The IDE picks the command from ' +
       'the project (tsc, npm run) — do not hand-roll it through terminal. `script` names one; ' +
-      'without it the default build runs.',
+      'without it the default build runs. `task` is the old name of the same field.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -1,6 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runTool, type SandboxRunner, type TerminalAgent, type ToolContext } from '../src/main/ai/agent-tools';
 import type { WorkspaceService } from '../src/main/workspace/workspace';
+
+/**
+ * Сборка здесь отвязана от диска: `buildCommand` читает настоящий `package.json`
+ * корня проекта, а в юнит-тесте корень — выдуманный `/p`. Подставка отдаёт то,
+ * что ждёт обработчик: готовую команду из имени скрипта.
+ */
+vi.mock('../src/main/project/build', () => ({
+  buildCommand: async (_root: string, task?: string) =>
+    task ? { command: `npm run ${task}`, label: `npm run ${task}` } : null,
+  buildCandidates: async () => ['build', 'lint', 'test'],
+  packageManagerRun: (_root: string, script: string) => ({
+    command: `npm run ${script}`,
+    label: `npm run ${script}`,
+  }),
+}));
 
 /**
  * Запуск команд ассистентом — три пути в одну дверь: `terminal` (он же с
@@ -251,6 +266,46 @@ describe('отказ — одним словом', () => {
     await runTool(ctx, 'terminalOpen', JSON.stringify({ cwd: `${ROOT}/packages/core` }));
 
     expect(term.created).toEqual([`${ROOT}/packages/core`]);
+  });
+
+  /**
+   * `run` исполняет скрипт из `package.json`, и имя скрипта приходит полем
+   * `script` — так объявлена схема. Пока обработчик читал `task`, вызов,
+   * сделанный строго по схеме, терял скрипт и молча шёл в умолчание сборки;
+   * ошибка была беззвучной: код возврата сходился.
+   */
+  it('run исполняет скрипт, названный в script', async () => {
+    const asked: string[] = [];
+    const ctx = {
+      workspace: workspace(),
+      sandbox: sandbox(),
+      confirmCommand: async (command: string) => {
+        asked.push(command);
+        return true;
+      },
+    } as unknown as ToolContext;
+
+    const outcome = await runTool(ctx, 'run', JSON.stringify({ script: 'lint' }));
+
+    expect(outcome.ok).toBe(true);
+    expect(asked).toEqual(['npm run lint']);
+  });
+
+  it('run понимает старое имя поля — task', async () => {
+    const asked: string[] = [];
+    const ctx = {
+      workspace: workspace(),
+      sandbox: sandbox(),
+      confirmCommand: async (command: string) => {
+        asked.push(command);
+        return true;
+      },
+    } as unknown as ToolContext;
+
+    const outcome = await runTool(ctx, 'run', JSON.stringify({ task: 'test' }));
+
+    expect(outcome.ok).toBe(true);
+    expect(asked).toEqual(['npm run test']);
   });
 });
 
