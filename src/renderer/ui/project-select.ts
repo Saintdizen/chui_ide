@@ -1,6 +1,5 @@
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
-import { h } from './dom';
 import { createSelect, type SelectOption, type SelectView } from './select';
 
 /** Что нужно селекту проекта из внешнего мира: всё остальное он делает сам. */
