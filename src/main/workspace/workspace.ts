@@ -734,7 +734,8 @@ export class WorkspaceService {
 
     // Сперва пробуем ripgrep: он обходит проект потоком и на большом дереве
     // быстрее нашего обхода. Нет его в системе или он не справился — ищем сами:
-    // результат у обоих путей один, выбор пути наружу не видён.
+    // результат у обоих путей один, но медленный путь называет себя: `slow`
+    // уезжает наружу, чтобы «пусто и долго» не выглядело как «пусто и быстро».
     //
     // «Не справился» — это нехватка `rg` и ошибка самого поиска (кривой шаблон),
     // но не отказ человека: прерванный поиск отменён, и обход `fs` его не повторяет
@@ -743,7 +744,10 @@ export class WorkspaceService {
     if (viaRipgrep) return viaRipgrep;
     signal?.throwIfAborted();
 
-    return this.searchWithFs(scope, options, limit, context, signal);
+    // Обход `fs` здесь — это ответ «ripgrep нет или он отказал». Помечаем, чтобы
+    // пустой или долгий ответ агент и панель могли отличить от быстрого ripgrep.
+    const viaFs = await this.searchWithFs(scope, options, limit, context, signal);
+    return { ...viaFs, slow: !(await this.hasRipgrep()) };
   }
 
   /**

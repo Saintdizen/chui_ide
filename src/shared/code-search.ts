@@ -139,6 +139,8 @@ export interface CodeSearchResult {
   hitTotal: number;
   scanned: number;
   truncated: boolean;
+  /** ripgrep не нашёлся: искали медленным обходом в процессе. */
+  slow?: boolean;
   /** Работает ли языковой сервер: без него ищем только текстом. */
   symbolsAvailable: boolean;
   /** Запрос — регулярка: объявлений не искали, вхождения — с учётом шаблона. */
@@ -185,6 +187,9 @@ export function formatCodeSearch(result: CodeSearchResult): { summary: string; d
   }
 
   if (result.truncated) parts.push('', 'Список обрезан — уточните запрос или сузьте папку.');
+  if (result.slow) {
+    parts.push('', 'Поиск шёл медленным обходом: ripgrep не найден. Поставьте ripgrep — поиск станет быстрее.');
+  }
 
   const summary =
     symbols.length === 0 && files.length === 0

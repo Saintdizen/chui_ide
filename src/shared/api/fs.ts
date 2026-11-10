@@ -91,6 +91,8 @@ export interface SearchResult {
   hits: SearchHit[];
   truncated: boolean;
   scanned: number;
+  /** Поиск шёл медленным обходом: ripgrep на машине не нашёлся. */
+  slow?: boolean;
 }
 
 export interface ReplaceFilesOptions {

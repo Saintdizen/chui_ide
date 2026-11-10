@@ -118,6 +118,7 @@ export async function codebaseSearch(ctx: ToolContext, args: Record<string, unkn
     hitTotal: hits.hits.length,
     scanned: hits.scanned,
     truncated: hits.truncated || found.length > limit,
+    slow: hits.slow === true,
     symbolsAvailable,
     regex: isRegex,
   });

@@ -172,4 +172,15 @@ describe('formatCodeSearch', () => {
     });
     expect(detail).toContain('Список обрезан');
   });
+
+  it('медленный поиск без ripgrep назван вслух', () => {
+    const { detail } = formatCodeSearch({
+      ...base,
+      symbolsAvailable: true,
+      symbols: [symbol({})],
+      symbolTotal: 1,
+      slow: true,
+    });
+    expect(detail).toContain('медленн');
+  });
 });

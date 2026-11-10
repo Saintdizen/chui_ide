@@ -37,7 +37,12 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
     `rg` не проверяется на старте и не сообщается: молчаливый медленный путь.
     Нужен явный признак «rg нет» в статусе. Сверка: `workspace.ts:186` держит
     `ripgrepFound`, но наружу (в renderer/статус) поле не отдаётся — так что
-    пункт открыт на показе, а не на обнаружении.
+     пункт открыт на показе, а не на обнаружении.
+     ЗАКРЫТ: `SearchResult.slow` (src/shared/api/fs.ts) ставится в
+     `searchWithFs` (workspace.ts), едет через `agent-code.ts` и в
+     `formatCodeSearch` (src/shared/code-search.ts) печатает оговорку
+     «искали медленным обходом — ripgrep не найден». Тест в
+     tests/code-search.test.ts. 8486 зелёных, tsc чист.
 19. Большие деревья: виртуализация есть, порог лага не мерен ни разу.
 20. Массовое изменение на диске (git checkout, сотни файлов): debounce есть,
     поведение не мерено.
