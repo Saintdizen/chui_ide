@@ -1783,9 +1783,9 @@ html {
 
 /* ── проводник ──────────────────────────────────────────────────────────── */
 
-/* Панель проекта — колонка из двух частей: блок открытых редакторов (своя высота)
-   и дерево (весь остаток). Общий столбец перестал прокручиваться: иначе список
-   дерева и список редакторов тянули бы прокрутку каждый свою. */
+/* Панель проекта — колонка из двух частей: артефакты агента (своя высота)
+   и дерево (весь остаток). Общий столбец не прокручивается: иначе дерево и
+   список артефактов тянули бы прокрутку каждый свою. */
 .sidebar-body {
   flex: 1;
   min-height: 0;
@@ -1794,141 +1794,8 @@ html {
   overflow: hidden;
 }
 
-/* Блок «Открытые редакторы» над деревом: те же файлы, что в полосе вкладок, но
-   списком — по нему видно, что открыто и что не сохранено, не глядя наверх.
-   Высота своя и не больше трети панели: дерево остаётся главным. */
-.open-editors {
-  flex: 0 1 auto;
-  max-height: 33%;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border_color);
-}
-
-/* Ничего не открыто — нет и блока. Правило нужно своё: `display: flex` выше
-   перебивает встроенное `[hidden] { display: none }`. */
-.open-editors[hidden] {
-  display: none;
-}
-
-.open-editors-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  height: calc(var(--tree_row_height) * var(--density));
-  padding: 0 8px 0 10px;
-  color: var(--text_color_tertiary);
-  font-size: var(--font_labels_size);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  user-select: none;
-}
-
-.open-editors-list {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: auto;
-}
-
-.open-editor {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  height: calc(var(--tree_row_height) * var(--density));
-  margin: 0 4px;
-  padding: 0 4px 0 8px;
-  border-radius: var(--radius_xs);
-  color: var(--text_color_secondary);
-  cursor: pointer;
-  user-select: none;
-}
-
-.open-editor:hover {
-  background: var(--element_background_hover);
-  color: var(--text_color);
-}
-
-/* Открытый файл — та же ступень, что у активной вкладки. */
-.open-editor.is-active {
-  background: var(--tab_active_background);
-  color: var(--text_color);
-}
-
-.open-editor:focus-visible {
-  outline: 1px solid var(--link_color);
-  outline-offset: -1px;
-}
-
-/* Предпросмотр — курсивом, как вкладка: его вытеснит следующий такой же. */
-.open-editor.is-preview .open-editor-name {
-  font-style: italic;
-}
-
-/* Точка занимает место всегда, иначе имена с точкой и без неё прыгали бы
-   на пиксель влево-вправо при сохранении. */
-.open-editor-dot {
-  flex: 0 0 auto;
-  width: 8px;
-  color: var(--link_color);
-  font-size: var(--font_labels_size);
-  line-height: 1;
-}
-
-.open-editor-name {
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Папка — только когда имена повторяются: без неё в списке два одинаковых
-   `index.ts` и не понять, который из них. */
-.open-editor-hint {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text_color_tertiary);
-  font-size: var(--font_small_size);
-}
-
-/* Крестик показывается на строке под курсором и на активной: постоянные крестики
-   в узком списке съедают имена. */
-.open-editor-close {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  margin-left: auto;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius_2xs);
-  background: transparent;
-  color: var(--text_color_tertiary);
-  font-size: var(--font_small_size);
-  line-height: 1;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.open-editor:hover .open-editor-close,
-.open-editor.is-active .open-editor-close {
-  opacity: 1;
-}
-
-.open-editor-close:hover {
-  background: var(--element_background_hover);
-  color: var(--text_color);
-}
-
-/* Артефакты — тот же список, что «Открытые редакторы», но про работу агента:
-   свежие сверху, подсказкой — заметка или папка. */
+/* Артефакты — список того, что агент трогал в работе: свежие сверху,
+   подсказкой — заметка или папка. */
 .artifacts {
   flex: 0 1 auto;
   max-height: 28%;
