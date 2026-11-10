@@ -197,10 +197,14 @@ export interface ConfirmCommandHostResult {
 /** Аргументы `ai.confirmBrowser`: действие в браузере, которое просит выполнить агент. */
 export interface ConfirmBrowserHostParams extends RunScopedHostParams {
   action: string;
+  /** Аргументы вызова как JSON — человек может поправить их до запуска. */
+  args?: Record<string, unknown>;
 }
 
 export interface ConfirmBrowserHostResult {
   allowed: boolean;
+  /** Аргументы после правки человека (нет — значит, их не меняли). */
+  args?: Record<string, unknown>;
 }
 
 /** Аргументы `ai.ask`: вопрос ассистента и, если есть, готовые варианты ответа. */

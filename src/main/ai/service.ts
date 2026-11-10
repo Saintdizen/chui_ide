@@ -281,8 +281,15 @@ export interface ChatHostBridge {
   confirmCommand(command: string): Promise<ConfirmCommandAnswer>;
   /** Запомнить выданное разрешение в настройках (кнопка «больше не спрашивать»). */
   rememberCommandGrant(grant: CommandGrant): void;
-  /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
-  confirmBrowser(action: string): Promise<boolean>;
+  /**
+   * Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт).
+   * В карточке видно аргументы вызова, и человек может их поправить до запуска:
+   * тогда действие выполняется с возвращёнными `args`.
+   */
+  confirmBrowser(
+    action: string,
+    args: Record<string, unknown>,
+  ): Promise<{ allowed: boolean; args?: Record<string, unknown> }>;
   /** Задать человеку вопрос и дождаться ответа: инструмент `ask`. Пустая строка — ответа не будет. */
   ask(question: string, options?: readonly string[]): Promise<string>;
   /**
@@ -1088,7 +1095,7 @@ export class AiService {
       toolContext.applyPatches = (patches, auto) => host.applyPatches(patches, auto);
       toolContext.confirmCommand = (command) => host.confirmCommand(command);
       toolContext.grantCommand = (grant) => host.rememberCommandGrant(grant);
-      toolContext.confirmBrowser = (action) => host.confirmBrowser(action);
+      toolContext.confirmBrowser = (action, args) => host.confirmBrowser(action, args);
       toolContext.ask = (question, options) => host.ask(question, options);
       toolContext.diagnostics = (path, folder) => host.getDiagnostics(path, folder);
       toolContext.openFiles = () => host.openFiles();

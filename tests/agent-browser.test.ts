@@ -27,6 +27,8 @@ function snapshot(overrides: Partial<BrowserSnapshot> = {}): BrowserSnapshot {
 interface Options {
   allowAll?: boolean;
   confirm?: (action: string) => Promise<boolean> | boolean;
+  /** Правка аргументов человеком: что вернуть вместо присланного. */
+  edit?: (args: Record<string, unknown>) => Record<string, unknown> | undefined;
   noConfirm?: boolean;
 }
 
@@ -67,9 +69,10 @@ function makeContext(options: Options = {}) {
     allowAll: options.allowAll ?? false,
     confirmBrowser: options.noConfirm
       ? undefined
-      : async (action: string) => {
+      : async (action: string, args: Record<string, unknown>) => {
           calls.push(`confirm:${action}`);
-          return options.confirm ? await options.confirm(action) : true;
+          const allowed = options.confirm ? await options.confirm(action) : true;
+          return { allowed, args: allowed ? options.edit?.(args) : undefined };
         },
   } as unknown as ToolContext;
   return { ctx, browser, calls };
@@ -166,6 +169,16 @@ describe('согласие человека', () => {
     const outcome = await run(ctx, { action: 'click', ref: 'e12' });
 
     expect(browser.click).toHaveBeenCalledWith('e12');
+    expect(outcome.ok).toBe(true);
+  });
+
+  it('правка аргументов человеком доезжает до действия', async () => {
+    // Карточка даёт поправить JSON до запуска: исправленный ref идёт в браузер.
+    const { ctx, browser } = makeContext({ edit: () => ({ ref: 'e77' }) });
+
+    const outcome = await run(ctx, { action: 'click', ref: 'e12' });
+
+    expect(browser.click).toHaveBeenCalledWith('e77');
     expect(outcome.ok).toBe(true);
   });
 

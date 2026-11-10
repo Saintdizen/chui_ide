@@ -3214,9 +3214,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   // Действия в браузере — тоже карточка в ленте: страница может сделать что угодно
   // от имени пользователя, поэтому вопрос задаётся тем же способом.
-  deps.host.handle('ai.confirmBrowser', async (params) => ({
-    allowed: await commandApproval.confirmBrowser(params.action, sessionByUid(params.conversation)),
-  }));
+  deps.host.handle('ai.confirmBrowser', async (params) =>
+    commandApproval.confirmBrowser(params.action, params.args, sessionByUid(params.conversation)),
+  );
 
   // Вопрос агенту к человеку: карточка с полем ввода (и кнопками вариантов).
   // Ответ уходит модели результатом вызова — прогон ждёт его и продолжается.

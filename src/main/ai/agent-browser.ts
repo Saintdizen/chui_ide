@@ -11,19 +11,30 @@ import { formatBrowserSnapshot, type BrowserSnapshot } from '../../shared/browse
 import { missingForAction, optionalBoolean, requireString } from './tool-args';
 import type { ToolContext, ToolOutcome } from './tool-context';
 
-async function permitBrowser(ctx: ToolContext, action: string): Promise<ToolOutcome | null> {
+/**
+ * Спрашивает человека о действии в браузере и отдаёт аргументы, с которыми его
+ * выполнять: человек может поправить их до запуска прямо в карточке вызова.
+ */
+async function permitBrowser(
+  ctx: ToolContext,
+  action: string,
+  args: Record<string, unknown>,
+): Promise<{ denied: ToolOutcome | null; args: Record<string, unknown> }> {
   if (!ctx.confirmBrowser)
     return {
-      ok: false,
-      summary: 'Браузер недоступен: окно редактора не подключено',
+      denied: { ok: false, summary: 'Браузер недоступен: окно редактора не подключено' },
+      args,
     };
-  if (ctx.allowAll) return null;
-  const allowed = await ctx.confirmBrowser(action);
-  if (allowed) return null;
+  if (ctx.allowAll) return { denied: null, args };
+  const answer = await ctx.confirmBrowser(action, args);
+  if (answer.allowed) return { denied: null, args: answer.args ?? args };
   return {
-    ok: false,
-    summary: 'Пользователь отклонил действие в браузере',
-    detail: 'Пользователь не разрешил это действие. Не повторяй его — предложи другой ход.',
+    denied: {
+      ok: false,
+      summary: 'Пользователь отклонил действие в браузере',
+      detail: 'Пользователь не разрешил это действие. Не повторяй его — предложи другой ход.',
+    },
+    args,
   };
 }
 
@@ -76,10 +87,12 @@ export async function browserAction(ctx: ToolContext, args: Record<string, unkno
 async function browserOpen(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
   const url = requireString(args, 'url').trim();
-  const denied = await permitBrowser(ctx, `открыть ${url}`);
-  if (denied) return denied;
+  const gate = await permitBrowser(ctx, `открыть ${url}`, args);
+  if (gate.denied) return gate.denied;
 
-  const snapshot = await ctx.browser.open(url);
+  const openUrl = requireString(gate.args, 'url').trim();
+  const snapshot = await ctx.browser.open(openUrl);
+
   return snapshotOutcome(snapshot, pageSummary(snapshot));
 }
 
@@ -109,33 +122,38 @@ async function browserScreenshot(ctx: ToolContext): Promise<ToolOutcome> {
 
 async function browserClick(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
-  const ref = requireString(args, 'ref').trim();
-  const denied = await permitBrowser(ctx, `нажать элемент ${ref} на странице`);
-  if (denied) return denied;
+  const gate = await permitBrowser(ctx, `нажать элемент ${requireString(args, 'ref').trim()} на странице`, args);
+  if (gate.denied) return gate.denied;
 
+  const ref = requireString(gate.args, 'ref').trim();
   const snapshot = await ctx.browser.click(ref);
   return snapshotOutcome(snapshot, `нажат ${ref} · ${pageSummary(snapshot)}`);
 }
 
 async function browserType(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
-  const ref = requireString(args, 'ref').trim();
-  const text = requireString(args, 'text');
   const submit = optionalBoolean(args, 'submit') ?? false;
-  const denied = await permitBrowser(ctx, `ввести текст в поле ${ref}${submit ? ' и отправить форму' : ''}`);
-  if (denied) return denied;
+  const gate = await permitBrowser(
+    ctx,
+    `ввести текст в поле ${requireString(args, 'ref').trim()}${submit ? ' и отправить форму' : ''}`,
+    args,
+  );
+  if (gate.denied) return gate.denied;
 
-  const snapshot = await ctx.browser.type(ref, text, submit);
-  return snapshotOutcome(snapshot, `введено в ${ref}${submit ? ' и отправлено' : ''} · ${pageSummary(snapshot)}`);
+  const ref = requireString(gate.args, 'ref').trim();
+  const text = requireString(gate.args, 'text');
+  const send = optionalBoolean(gate.args, 'submit') ?? false;
+  const snapshot = await ctx.browser.type(ref, text, send);
+  return snapshotOutcome(snapshot, `введено в ${ref}${send ? ' и отправлено' : ''} · ${pageSummary(snapshot)}`);
 }
 
 async function browserEvaluate(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
   const expression = requireString(args, 'expression');
-  const denied = await permitBrowser(ctx, `выполнить на странице: ${expression.slice(0, 120)}`);
-  if (denied) return denied;
+  const gate = await permitBrowser(ctx, `выполнить на странице: ${expression.slice(0, 120)}`, args);
+  if (gate.denied) return gate.denied;
 
-  const result = await ctx.browser.evaluate(expression);
+  const result = await ctx.browser.evaluate(requireString(gate.args, 'expression'));
   return { ok: true, summary: 'выражение выполнено', detail: result };
 }
 

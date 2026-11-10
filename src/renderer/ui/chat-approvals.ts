@@ -321,8 +321,10 @@ interface ApprovalRequest {
   done: string;
   /** Иконка карточки и строки итога. */
   icon: IconName;
-  /** Тело можно править до запуска (команды терминала — да, адреса — нет). */
+  /** Тело можно править до запуска (команды терминала, аргументы браузера — да, адреса — нет). */
   editable?: boolean;
+  /** Проверка правки перед запуском: текст с ошибкой не уходит, карточка ждёт исправления. */
+  validate?: (text: string) => string | null;
   /** Что сказала проверка модели, если она не разрешила сама. */
   review?: string;
   /**
@@ -335,6 +337,15 @@ interface ApprovalRequest {
   consequence?: { level: DangerLevel; note: string | null };
 }
 
+/**
+ * Ответ на карточку браузера: разрешение и, если человек поправил JSON,
+ * аргументы, с которыми действие действительно выполнится.
+ */
+export interface ConfirmBrowserAnswer {
+  allowed: boolean;
+  args?: Record<string, unknown>;
+}
+
 export interface CommandApproval {
   /**
    * Спросить разрешение на запуск команды. Ответ — не только «да/нет»: человек
@@ -343,8 +354,16 @@ export interface CommandApproval {
    * `cwd` — папка запуска, чтобы предложить «больше не спрашивать здесь».
    */
   confirm(command: string, review?: string, cwd?: string, session?: ChatSession): Promise<ConfirmCommandAnswer>;
-  /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
-  confirmBrowser(action: string, session?: ChatSession): Promise<boolean>;
+  /**
+   * Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт).
+   * `args` — аргументы вызова: человек может поправить их до запуска, и тогда
+   * действие выполнится с его правкой, а не с тем, что придумала модель.
+   */
+  confirmBrowser(
+    action: string,
+    args?: Record<string, unknown>,
+    session?: ChatSession,
+  ): Promise<ConfirmBrowserAnswer>;
 }
 
 /**
@@ -377,10 +396,15 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
     // Команду можно поправить ДО запуска: агент часто ошибается в мелочи
     // (`-t` вместо `-k`), а выбор между «как есть» и «нет» заставлял тратить
     // целый шаг на «он должен сам догадаться». Правка = «выполни именно это».
-    // Действие в браузере (`body` — адрес) не правим: это не команда.
+    // Аргументы браузера правим как JSON — адрес или селектор уходят в дело, а не в подпись.
     const editable = request.editable === true;
+    // JSON вызова — многострочный: низкое поле заставило бы крутить его вслепую.
     const commandInput = editable
-      ? h('textarea', { class: 'approval-command approval-command-input', rows: '2', spellcheck: 'false' })
+      ? h('textarea', {
+          class: 'approval-command approval-command-input',
+          rows: String(Math.min(14, Math.max(2, request.body.split('\n').length))),
+          spellcheck: 'false',
+        })
       : null;
     if (commandInput) commandInput.value = request.body;
     block.appendChild(commandInput ?? h('pre', { class: 'approval-command' }, request.body));
@@ -437,12 +461,29 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
       host.returnFocus();
     }
 
+    /** Правка с ошибкой не уходит: карточка ждёт исправления (не теряя набранное). */
+    let problemLine: HTMLElement | null = null;
+    const blockedByValidation = (): boolean => {
+      const edited = decidedCommand();
+      if (edited === undefined || !request.validate) return false;
+      const problem = request.validate(edited);
+      if (!problem) return false;
+      // Строку ошибки пересобираем, а не правим текст в существующей: правок
+      // может быть несколько подряд, а карточка должна показать последнюю.
+      problemLine?.remove?.();
+      problemLine = h('div', { class: 'approval-review-note is-problem' }, svgIcon('warning', 12), h('span', {}, problem));
+      block.appendChild(problemLine);
+      block.scrollIntoView?.({ block: 'nearest' });
+      return true;
+    };
+
     const runButton = h(
       'button',
       {
         class: 'btn btn-small btn-primary',
         type: 'button',
         onClick: () => {
+          if (blockedByValidation()) return;
           const edited = decidedCommand();
           finish(
             edited === undefined ? { allowed: true } : { allowed: true, command: edited },
@@ -462,6 +503,7 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
           type: 'button',
           title: `Больше не спрашивать: ${grant.label}`,
           onClick: () => {
+            if (blockedByValidation()) return;
             const edited = decidedCommand();
             finish(
               {
@@ -517,9 +559,11 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
           : [],
         session,
       ),
-    confirmBrowser: async (action, session) =>
-      (
-        await show(
+    // Аргументы вызова — то, что человек правит в карточке: поправленный адрес
+    // или селектор уходит в браузер, а не только на экран.
+    confirmBrowser: async (action, args, session) => {
+      if (!args) {
+        const shown = await show(
           {
             title: 'Ассистент просит действие в браузере',
             body: action,
@@ -529,9 +573,54 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
           },
           [],
           session,
-        )
-      ).allowed,
+        );
+        return { allowed: shown.allowed };
+      }
+      const shown = await show(
+        {
+          title: 'Ассистент просит действие в браузере',
+          body: JSON.stringify(args, null, 2),
+          editable: true,
+          hint: 'Действие выполнится в отдельном браузере IDE — он не видит ваши сессии и закладки. Аргументы можно поправить до запуска.',
+          validate: argsJsonProblem,
+          done: 'Действие в браузере',
+          icon: 'search',
+        },
+        [],
+        session,
+      );
+      if (!shown.allowed) return { allowed: false };
+      const edited = shown.command;
+      if (edited === undefined) return { allowed: true, args };
+      const parsed: unknown = JSON.parse(edited);
+      return {
+        allowed: true,
+        args:
+          parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : args,
+      };
+    },
   };
+}
+
+/**
+ * Проверка правки аргументов вызова: карточка не уйдёт с битым JSON.
+ *
+ * Правка — дешёвая альтернатива «отклонить и просить заново»: человек
+ * поправляет адрес или селектор, и то же действие продолжается. Но если текст
+ * не разбирается, лучше сказать об этом сразу, а не ронять вызов.
+ */
+function argsJsonProblem(text: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return `Не JSON: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    return 'Аргументы — объект в фигурных скобках: { "url": "…" }';
+  return null;
 }
 
 /**

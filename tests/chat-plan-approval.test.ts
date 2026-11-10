@@ -300,10 +300,41 @@ describe('chat-approvals: команда в браузере и в термин�
   it('действие в браузере рисуется своей подсказкой и отменяется', async () => {
     const create = await setupCommand();
     const { host: approvalHost, mounted } = host();
-    const decision = create(approvalHost as never).confirmBrowser('открыть страницу');
+    const decision = create(approvalHost as never).confirmBrowser('открыть страницу', undefined);
     expect(mounted[0]?.findAll((item) => item.text === 'открыть страницу')).toHaveLength(1);
     mounted[0]?.findAll((item) => item.text === 'Отменить')[0]?.fire('click');
-    await expect(decision).resolves.toBe(false);
+    await expect(decision).resolves.toEqual({ allowed: false });
     expect(mounted[0]?.findAll((item) => item.text === 'отменено')).toHaveLength(1);
+  });
+
+  it('аргументы браузера правятся до запуска', async () => {
+    // Карточка показывает JSON вызова: поправленный адрес/селектор идёт в браузер,
+    // а не только в текст карточки — отказ ради правки больше не нужен.
+    const create = await setupCommand();
+    const { host: approvalHost, mounted } = host();
+    const decision = create(approvalHost as never).confirmBrowser('нажать ссылку e12', { ref: 'e12' });
+    const field = mounted[0]?.findAll((item) => item.tag === 'textarea')[0];
+    expect(field?.value).toContain('"ref": "e12"');
+    if (field) field.value = '{ "ref": "e77" }';
+    mounted[0]?.findAll((item) => item.text === 'Выполнить')[0]?.fire('click');
+    await expect(decision).resolves.toEqual({ allowed: true, args: { ref: 'e77' } });
+  });
+
+  it('битый JSON не выполняется: карточка просит поправить', async () => {
+    const create = await setupCommand();
+    const { host: approvalHost, mounted } = host();
+    const decision = create(approvalHost as never).confirmBrowser('нажать ссылку e12', { ref: 'e12' });
+    let settled = false;
+    void decision.then(() => {
+      settled = true;
+    });
+    const field = mounted[0]?.findAll((item) => item.tag === 'textarea')[0];
+    if (field) field.value = '{ "ref": ';
+    mounted[0]?.findAll((item) => item.text === 'Выполнить')[0]?.fire('click');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    expect(
+      mounted[0]?.findAll((item) => item.text.startsWith('Не JSON')) ?? [],
+    ).toHaveLength(1);
   });
 });

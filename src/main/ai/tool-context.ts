@@ -462,8 +462,15 @@ export interface ToolContext {
    * Нет хуков — поля нет, и `runTool` ничего не спрашивает.
    */
   hooks?: AgentHooks;
-  /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
-  confirmBrowser?(action: string): Promise<boolean>;
+  /**
+   * Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт).
+   * `args` — аргументы вызова: человек может поправить их до запуска, тогда
+   * действие выполняется с возвращёнными аргументами.
+   */
+  confirmBrowser?(
+    action: string,
+    args: Record<string, unknown>,
+  ): Promise<{ allowed: boolean; args?: Record<string, unknown> }>;
   /** Песочница: подключена только при включённой настройке. */
   sandbox?: SandboxRunner;
   /**
