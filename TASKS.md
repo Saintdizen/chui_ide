@@ -42,17 +42,12 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
 
 ### 2. Проводник и всё вокруг
 
-17. `searchWithFs` (обход без ripgrep) режет на `scanFiles`; `rg` на машине НЕТ
-    (подтверждено skipIf ripgrep-run). На 1542 файлах не врёт, но отсутствие
-    `rg` не проверяется на старте и не сообщается: молчаливый медленный путь.
-    Нужен явный признак «rg нет» в статусе. Сверка: `workspace.ts:186` держит
-    `ripgrepFound`, но наружу (в renderer/статус) поле не отдаётся — так что
-     пункт открыт на показе, а не на обнаружении.
-     ЗАКРЫТ: `SearchResult.slow` (src/shared/api/fs.ts) ставится в
-     `searchWithFs` (workspace.ts), едет через `agent-code.ts` и в
-     `formatCodeSearch` (src/shared/code-search.ts) печатает оговорку
-     «искали медленным обходом — ripgrep не найден». Тест в
-     tests/code-search.test.ts. 8486 зелёных, tsc чист.
+17. ЗАКРЫТ (сверено по коду 10.11): `SearchResult.slow` ставится в
+    `searchWithFs` (workspace.ts:750, `slow: !(await this.hasRipgrep())`), едет
+    через слой инструмента в `formatCodeSearch` (src/shared/code-search.ts:190),
+    который печатает оговорку «медленный обход — ripgrep не найден». Тест на
+    текст оговорки — tests/code-search.test.ts:182. Работы здесь не осталось;
+    открытым он висел по старой записи «поле не отдаётся наружу» — устарела.
 19. Большие деревья: виртуализация есть, порог лага не мерен ни разу.
 20. Массовое изменение на диске (git checkout, сотни файлов): debounce есть,
     поведение не мерено.
