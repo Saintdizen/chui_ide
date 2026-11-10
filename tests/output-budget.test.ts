@@ -6,6 +6,14 @@ import type { ToolContext } from '../src/main/ai/tool-context';
 import { MAX_OUTPUT_TOKENS } from '../src/main/ai/output-budget';
 import { failureText } from '../src/main/ai/tool-rules';
 
+/**
+ * Строка «хорошо сформирована», если в ней нет одиночных суррогатов:
+ * каждый старший идёт в паре с младшим, младший — только после старшего.
+ * Замена `String.prototype.isWellFormed` из ES2024: `target` проекта — ES2022.
+ */
+const isWellFormed = (text: string): boolean =>
+  !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text);
+
 describe('ограничение цены результата', () => {
   it('учитывает состав текста, сохраняет хвост и не разрывает Unicode', () => {
     const limit = { chars: 1000, tokens: 100 };
@@ -14,7 +22,7 @@ describe('ограничение цены результата', () => {
         const result = fitOutput(source, limit, tail);
         expect(result.length).toBeLessThanOrEqual(limit.chars);
         expect(estimateTextTokens(result)).toBeLessThanOrEqual(limit.tokens);
-        expect(result.isWellFormed()).toBe(true);
+        expect(isWellFormed(result)).toBe(true);
       }
     }
     expect(fitOutput('prefix\nimportant error', { chars: 15, tokens: 100 }, true)).toBe('important error');
