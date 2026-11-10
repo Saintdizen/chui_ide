@@ -17,7 +17,7 @@ import { MAX_OUTPUT_CHARS } from './output-budget';
 import { clipTail, condenseOutput, foldPassedTests, spillNote, trimCommandTail } from './output-trim';
 import { runShellCommand, type RunOptions } from './run-command';
 import { createSpillStream } from './spill';
-import { ECHO_COMMAND_CHARS, needsConfirmation } from './tool-rules';
+import { needsConfirmation } from './tool-rules';
 import { commandLine } from './tool-command';
 import path from 'node:path';
 import { findPrimaryVenvSync } from '../python/environments';
@@ -118,9 +118,4 @@ function venvNote(root: string | null): string | null {
   if (!python) return null;
   const dir = path.dirname(path.dirname(python));
   return `venv: ${dir} — этот прогон идёт без активации; python проекта: ${python}.`;
-}
-
-/** Эхо длинной команды не повторяем: оно уже есть в карточке вызова. */
-export function echoLimit(): number {
-  return ECHO_COMMAND_CHARS;
 }

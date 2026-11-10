@@ -1,4 +1,3 @@
-import type { ChatMessage } from '../../shared/api';
 import type { ChatSession } from './chat-session';
 
 /**
@@ -108,17 +107,6 @@ export function revertPlan(checkpoints: readonly Checkpoint[], index: number): M
  */
 export function truncateCheckpoints(session: ChatSession, index: number): void {
   session.checkpoints = (session.checkpoints ?? []).slice(0, index);
-}
-
-/**
- * Где в истории начинается ход с номером `messageIndex`.
- *
- * После отката лента и `history` перерисовываются, и «номер вопроса» сам по себе
- * врёт — нужен он только чтобы найти границу среза до того, как всё сместится.
- */
-export function historyTailFrom(history: readonly ChatMessage[], messageIndex: number): ChatMessage[] {
-  const boundary = Math.max(0, messageIndex);
-  return history.slice(0, boundary);
 }
 
 /**

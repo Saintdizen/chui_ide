@@ -15,7 +15,7 @@
  *     — это не «выбрал то же самое», а «ничего не произошло»: иначе документ
  *     пометится изменённым от простого открытия списка.
  */
-import { LANGUAGES, languageLabel, type LanguageInfo } from '../../shared/languages';
+import { LANGUAGES, languageLabel } from '../../shared/languages';
 
 export type StatusChoiceKind = 'encoding' | 'indent' | 'language';
 
@@ -140,10 +140,4 @@ export function indentAfterChoice(
 /** Название языка по id — или честное «текст», если язык не выбран. */
 export function statusLanguageLabel(language: string | null): string {
   return language ? languageLabel(language) : '—';
-}
-
-/** Расширения языка — на случай подписи в списке выбора. */
-export function languageHint(info: LanguageInfo): string | undefined {
-  if (!info.extensions?.length) return undefined;
-  return info.extensions.map((ext) => `.${ext}`).join(' ');
 }

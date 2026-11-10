@@ -45,11 +45,6 @@ export interface ProjectAnalysis {
   note: string | null;
 }
 
-/** Пустой итог: проверять было нечего или нечем. */
-export function emptyAnalysis(note: string | null, tool: string | null = null): ProjectAnalysis {
-  return { tool, problems: [], timedOut: false, note };
-}
-
 /**
  * Проблемы линтера с абсолютными путями. Линтер называет путь от корня проекта
  * (так его и запускают), а пометки в редакторе живут по абсолютному.

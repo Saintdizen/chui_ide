@@ -120,11 +120,6 @@ export function rememberedGrant(scope: CommandGrantScope, command: string, cwd?:
   return { scope: 'command', value: normalizeCommand(command) };
 }
 
-/** Первое подходящее разрешение; нет — `null`, и тогда придётся спросить человека. */
-export function matchingGrant(grants: readonly CommandGrant[], request: CommandRequest): CommandGrant | null {
-  return grants.find((grant) => grantMatches(grant, request)) ?? null;
-}
-
 /**
  * Добавить разрешение. Повтор того же — не ошибка: старый срок заменяется,
  * иначе список рос бы одним и тем же. Слишком длинный список режется с начала:

@@ -1,5 +1,3 @@
-import { nameOf, parentOf } from '../../../shared/paths';
-
 /**
  * Самые частые команды, если PATH не прочитан: без них Tab не работал бы на
  * первом запуске. Список намеренно короткий — это не справочник, а старт.
@@ -156,9 +154,4 @@ export function dirToRead(tail: string, cwd: string): string {
   const slash = tail.lastIndexOf('/');
   const dirPart = slash < 0 ? '' : tail.slice(0, slash);
   return dirPart === '' ? cwd : dirPart.startsWith('/') ? dirPart : `${cwd}/${dirPart}`;
-}
-
-/** Имя файла без каталога — для сообщения «дописано до …». */
-export function completedName(completion: Completion): string {
-  return nameOf(completion.value.trimEnd()) || parentOf(completion.value);
 }

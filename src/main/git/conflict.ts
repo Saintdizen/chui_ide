@@ -47,15 +47,6 @@ async function hasWorkAtRisk(repoRoot: string, relative: string): Promise<boolea
   return !result.ok;
 }
 
-/**
- * `HEAD:<путь>` — содержимое из последнего коммита или `null`, если пути там нет
- * (файл только в индексе — например, добавлен этой же веткой).
- */
-export async function headBlob(repoRoot: string, relative: string): Promise<string | null> {
-  const result = await execGit(['show', `HEAD:${relative}`], repoRoot, { allowFailure: true });
-  return result.ok && !result.stderr ? result.stdout : null;
-}
-
 export async function markResolved(context: ConflictContext, filePath: string): Promise<GitStatus> {
   const { repoRoot, relative } = await locateFile(context.status, filePath);
   await execGit(['add', '--', relative], repoRoot);

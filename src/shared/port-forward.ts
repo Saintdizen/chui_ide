@@ -25,9 +25,6 @@ export interface PortEntry extends ListeningPort {
 
 const LOOPBACK = '127.0.0.1';
 
-/** IPv6-«любой адрес» и IPv4-«любой» с любых платформ. */
-const WILD = new Set(['*', '0.0.0.0', '[::]', '::', '']);
-
 function urlFor(port: number): string {
   return `http://${LOOPBACK}:${port}/`;
 }
@@ -160,9 +157,4 @@ export function portEntries(
     if (!!a.terminalId !== !!b.terminalId) return a.terminalId ? -1 : 1;
     return a.port - b.port;
   });
-}
-
-/** Адрес «0.0.0.0:8080» → открывается как 127.0.0.1 — для проверки в тестах. */
-export function isWildcardAddress(address: string): boolean {
-  return WILD.has(address);
 }

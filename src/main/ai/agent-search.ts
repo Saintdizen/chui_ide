@@ -370,15 +370,6 @@ export function searchCacheStats(): SearchCacheStats {
   return searchCache.stats();
 }
 
-/** Правка файла сбрасывает ответы, где он был; правка в корне — все. */
-export function forgetSearchFile(path: string): void {
-  searchCache.forgetFile(path);
-}
-
-export function forgetSearchTree(): void {
-  searchCache.forgetTree();
-}
-
 /**
  * Правка файла через `edit`/`write`: ответы, где он был, больше не верны.
  *
