@@ -6,6 +6,7 @@ import { WorkspaceService } from '../src/main/workspace/workspace';
 import { mcpAction, runExternalTool, webAction } from '../src/main/ai/agent-web';
 import { runTool } from '../src/main/ai/agent-tools';
 import type { ToolContext } from '../src/main/ai/tool-context';
+import type { CommandDecision } from '../src/shared/agent-grants';
 import type { McpResourceInfo, McpToolInfo } from '../src/shared/mcp';
 import type { FetchedPage } from '../src/shared/web-fetch';
 import type { WebSearchHit } from '../src/shared/web-search';
@@ -32,7 +33,8 @@ interface Parts {
   callResult?: { text: string; isError: boolean };
   readResult?: { text: string; isError: boolean };
   noMcp?: boolean;
-  confirm?: (command: string) => Promise<boolean>;
+  confirm?: (command: string) => Promise<CommandDecision>;
+  onCall?: () => void;
 }
 
 function mcpTool(over: Partial<McpToolInfo> = {}): McpToolInfo {
@@ -66,7 +68,10 @@ function ctx(parts: Parts = {}): ToolContext {
     providerLabel: parts.provider ?? 'Brave',
   }));
   const fetchFn = vi.fn(async () => parts.page ?? page());
-  const call = vi.fn(async () => parts.callResult ?? { text: 'ok', isError: false });
+  const call = vi.fn(async () => {
+    parts.onCall?.();
+    return parts.callResult ?? { text: 'ok', isError: false };
+  });
   const readResource = vi.fn(async () => parts.readResult ?? { text: 'тело', isError: false });
 
   const webSearch = parts.noSearch
@@ -354,6 +359,38 @@ describe('внешний инструмент MCP', () => {
   it('человек разрешил — в сводке видно подтверждение', async () => {
     const outcome = await runExternalTool(
       ctx({ tools: [mcpTool({ readOnly: false })], confirm: async () => true }),
+      'mcp__srv__ping',
+      { a: 1 },
+    );
+    expect(outcome.ok).toBe(true);
+    expect(outcome.summary).toContain('подтверждено');
+  });
+
+  /**
+   * Настоящее окно отвечает объектом {allowed}, а не булевым. Пока код читал
+   * ответ как булев, объект был истинным всегда — отказ человека не действовал.
+   */
+  it('человек отказал объектным ответом — вызов тоже не выполняется', async () => {
+    let called = false;
+    const outcome = await runExternalTool(
+      ctx({
+        tools: [mcpTool({ readOnly: false })],
+        confirm: async () => ({ allowed: false }),
+        onCall: () => {
+          called = true;
+        },
+      }),
+      'mcp__srv__ping',
+      {},
+    );
+    expect(called).toBe(false);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toBe('Пользователь запретил внешний вызов');
+  });
+
+  it('человек разрешил объектным ответом — вызов идёт', async () => {
+    const outcome = await runExternalTool(
+      ctx({ tools: [mcpTool({ readOnly: false })], confirm: async () => ({ allowed: true }) }),
       'mcp__srv__ping',
       { a: 1 },
     );

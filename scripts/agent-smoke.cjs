@@ -1437,13 +1437,14 @@ app.whenReady().then(async () => {
     const browserLog = [];
     const browserHost = {
       applyEdits: () => Promise.resolve({ rejected: true }),
+      // Контракт `ai.confirmBrowser` — объект `{allowed, args}`, а не флаг: с 11.11
+      // человек может поправить аргументы вызова до запуска, и поправленные
+      // возвращаются в `args`. Булев ответ здесь читался как отказ.
       confirmBrowser: (action) => {
         browserLog.push(action);
-        return Promise.resolve(true);
+        return Promise.resolve({ allowed: true });
       },
     };
-    // `browser` — «простой» инструмент ростера: схемой он не едет, о нём говорит
-    // строка в системном промпте, а схему докачивает первый вызов по имени.
     // `browser` — «простой» инструмент ростера: схемой он не едет (в каждом запросе
     // это токены ради вызова, которого может не быть), о нём говорит строка в
     // системном промпте, а схему докачивает первый вызов по имени. Здесь проверяем
@@ -1473,7 +1474,7 @@ app.whenReady().then(async () => {
       applyEdits: () => Promise.resolve({ rejected: true }),
       confirmBrowser: (action) => {
         idleLog.push(action);
-        return Promise.resolve(true);
+        return Promise.resolve({ allowed: true });
       },
     });
     check('снимок страницы не спрашивает разрешения', idleLog.length === 0, idleLog);
@@ -1487,7 +1488,7 @@ app.whenReady().then(async () => {
     requested = { name: 'browser', args: { action: 'click', ref: '1' } };
     run = await chat({
       applyEdits: () => Promise.resolve({ rejected: true }),
-      confirmBrowser: () => Promise.resolve(false),
+      confirmBrowser: () => Promise.resolve({ allowed: false }),
     });
     check(
       'отказ в браузере виден модели',

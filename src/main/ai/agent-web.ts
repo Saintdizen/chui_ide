@@ -13,6 +13,7 @@ import { formatWebResults } from '../../shared/web-search';
 import { describeValue } from '../../shared/tool-args';
 import type { McpResourceInfo, McpToolInfo } from '../../shared/mcp';
 import { unknownAction } from './agent-present';
+import { decisionAllowed } from '../../shared/agent-grants';
 
 /**
  * Вызов внешнего инструмента (MCP).
@@ -55,7 +56,9 @@ export async function runExternalTool(
         summary: 'Внешний вызов требует подтверждения, но окно не подключено',
       };
     }
-    const allowed = await ctx.confirmCommand(`${exposedName} ${JSON.stringify(args)}`);
+    // Команда приходит либо булевым, либо объектом {allowed} — объект всегда истинен,
+    // поэтому голое `if (!allowed)` пропускал вызов при отказе человека.
+    const allowed = decisionAllowed(await ctx.confirmCommand(`${exposedName} ${JSON.stringify(args)}`));
     if (!allowed) {
       return {
         ok: false,
