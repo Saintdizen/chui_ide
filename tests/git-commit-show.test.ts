@@ -9,9 +9,7 @@ describe('parseNumstat', () => {
   it('читает добавленные и удалённые строки', () => {
     const status = new Map([['src/a.ts', 'modified' as const]]);
     const files = parseNumstat(['12\t3\tsrc/a.ts'], status);
-    expect(files).toEqual([
-      { path: 'src/a.ts', status: 'modified', insertions: 12, deletions: 3 },
-    ]);
+    expect(files).toEqual([{ path: 'src/a.ts', status: 'modified', insertions: 12, deletions: 3 }]);
   });
 
   it('бинарник (`-`) даёт нули, а не выдуманное число', () => {

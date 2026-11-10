@@ -589,7 +589,10 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
  * — один предел: иначе клавиши, форма и файл разошлись бы в том, что считается
  * допустимым (так уже было с кеглем редактора).
  */
-export function sanitizeLayout(value: Partial<LayoutSettings> | undefined, fallback: LayoutSettings = DEFAULT_LAYOUT): LayoutSettings {
+export function sanitizeLayout(
+  value: Partial<LayoutSettings> | undefined,
+  fallback: LayoutSettings = DEFAULT_LAYOUT,
+): LayoutSettings {
   const source = value ?? {};
   const size = (raw: unknown, def: number): number => {
     const rounded = Math.round(Number(raw));

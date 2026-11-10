@@ -25,10 +25,7 @@ describe('заметки к файлам', () => {
     notes = setFileNote(notes as never, '/p/b.ts', 'b', undefined, root) as never;
     notes = setFileNote(notes as never, '/p/a.ts', 'a', undefined, root) as never;
     // Пути хранятся от корня: заметка переживает перенос папки проекта.
-    expect((notes as never as { files: { path: string }[] }).files.map((f) => f.path)).toEqual([
-      'a.ts',
-      'b.ts',
-    ]);
+    expect((notes as never as { files: { path: string }[] }).files.map((f) => f.path)).toEqual(['a.ts', 'b.ts']);
   });
 
   it('проект: один текст на все', () => {

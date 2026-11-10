@@ -96,7 +96,12 @@ async function loadChildren(
     .filter((item): item is CallTreeNode => item !== null);
 }
 
-function toNode(node: { name: string; detail?: string; uri: string; selectionRange: { start: { line: number; character: number } } }): CallTreeNode | null {
+function toNode(node: {
+  name: string;
+  detail?: string;
+  uri: string;
+  selectionRange: { start: { line: number; character: number } };
+}): CallTreeNode | null {
   if (!node.uri.startsWith('file:')) return null;
   return {
     name: node.name,

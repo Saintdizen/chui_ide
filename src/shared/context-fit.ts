@@ -840,10 +840,7 @@ export function condenseSupersededPlans(message: ChatMessage, keepId: string): C
  * поэтому повторный вызов на следующем шаге не двигает префикс — кеш цел.
  * Возвращает число изменённых сообщений, а не копию массива: правим на месте.
  */
-export function condenseHistoryCalls(
-  messages: ChatMessage[],
-  appliedIds: ReadonlySet<string>,
-): number {
+export function condenseHistoryCalls(messages: ChatMessage[], appliedIds: ReadonlySet<string>): number {
   if (appliedIds.size === 0) return 0;
   let changed = 0;
   for (let index = 0; index < messages.length; index += 1) {

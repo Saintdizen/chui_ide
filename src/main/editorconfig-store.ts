@@ -19,10 +19,7 @@ import {
  * перезапускают IDE после этого, а кэш без слежения за файлом давал бы
  * устаревшие значения и никак не сказал бы об этом.
  */
-export async function readEditorConfigFor(
-  root: string,
-  filePath: string,
-): Promise<ResolvedEditorConfig> {
+export async function readEditorConfigFor(root: string, filePath: string): Promise<ResolvedEditorConfig> {
   const layers: EditorConfigFile[] = [];
   const rootPath = path.resolve(root);
   const target = path.resolve(filePath);

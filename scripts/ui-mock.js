@@ -285,6 +285,8 @@ module.exports = [
 
   /** Настройки проекта из `.chui_ide` — в моке отдельное хранилище, как в main. */
   const projectSettings = {};
+  // Макет проекта из `.chui_ide/layout.json`: в моке держим в памяти, как настройки.
+  let projectLayout = null;
 
   const settings = {
     ai: {
@@ -1364,6 +1366,11 @@ module.exports = [
       Object.assign(projectSettings, params.patch ?? {});
       return structuredClone(projectSettings);
     },
+    'project.layout': () => (projectLayout ? structuredClone(projectLayout) : null),
+    'project.saveLayout': (params) => {
+      projectLayout = params.layout ?? null;
+      return projectLayout ? structuredClone(projectLayout) : null;
+    },
     // Карта проекта и окружения — заглушки: главное, чтобы методы отвечали.
     'project.scan': () => ({
       root: currentRoot ?? '',
@@ -1509,145 +1516,148 @@ module.exports = [
       running = true;
       // Беседа кончилась по любому исходу — опись пуста, и полоса прячется.
       try {
-
-      // Сжатие беседы — отдельный короткий запрос: модель отвечает резюме,
-      // а не обычным ответом с размышлениями и блоками кода.
-      const asked = params.messages.at(-1)?.content ?? '';
-      if (/Сожми нашу беседу/.test(asked)) {
-        await sleep(60);
-        const summary = 'Просили разобрать панель; правили package.json; раскладка ассистента проверена.';
-        emit(id, 'delta', { text: summary });
-        return {
-          text: summary,
-          finishReason: 'stop',
-          usage: { promptTokens: 9, completionTokens: 12 },
-          run: mockRun(false),
-        };
-      }
-
-      // Размышления reasoning-моделей приходят отдельным полем — показываем их блоком.
-      const thoughts = 'Сначала посмотрю на открытый файл. Потом отвечу коротко и по делу.';
-      if (FAST) emit(id, 'reasoning', { text: thoughts });
-      else {
-        for (const word of thoughts.split(' ')) {
-          await sleep(14);
-          if (cancelRequested) break;
-          emit(id, 'reasoning', { text: `${word} ` });
+        // Сжатие беседы — отдельный короткий запрос: модель отвечает резюме,
+        // а не обычным ответом с размышлениями и блоками кода.
+        const asked = params.messages.at(-1)?.content ?? '';
+        if (/Сожми нашу беседу/.test(asked)) {
+          await sleep(60);
+          const summary = 'Просили разобрать панель; правили package.json; раскладка ассистента проверена.';
+          emit(id, 'delta', { text: summary });
+          return {
+            text: summary,
+            finishReason: 'stop',
+            usage: { promptTokens: 9, completionTokens: 12 },
+            run: mockRun(false),
+          };
         }
-      }
 
-      // Как настоящий агент: сначала план, потом разрешение на команду, потом правка файла.
-      if (params.useTools) {
-        emit(id, 'plan', {
-          steps: [
-            { text: 'Изучить панель ассистента', status: 'done' },
-            { text: 'Проверить команду линтера', status: 'in_progress' },
-            { text: 'Применить правку package.json', status: 'pending' },
-          ],
-        });
+        // Размышления reasoning-моделей приходят отдельным полем — показываем их блоком.
+        const thoughts = 'Сначала посмотрю на открытый файл. Потом отвечу коротко и по делу.';
+        if (FAST) emit(id, 'reasoning', { text: thoughts });
+        else {
+          for (const word of thoughts.split(' ')) {
+            await sleep(14);
+            if (cancelRequested) break;
+            emit(id, 'reasoning', { text: `${word} ` });
+          }
+        }
 
-        // Пачка чтения проекта: в жизни агент смотрит десяток папок подряд,
-        // такие вызовы должны свернуться в одну строку, а не залить весь чат.
-        const folders = ['src', 'src/main', 'src/renderer', 'scripts'];
-        for (const [index, folder] of folders.entries()) {
-          const dirId = `mock-dir-${index}`;
-          emit(id, 'tool_start', { id: dirId, name: 'list_dir', args: JSON.stringify({ path: `${ROOT}/${folder}` }) });
-          await sleep(50);
+        // Как настоящий агент: сначала план, потом разрешение на команду, потом правка файла.
+        if (params.useTools) {
+          emit(id, 'plan', {
+            steps: [
+              { text: 'Изучить панель ассистента', status: 'done' },
+              { text: 'Проверить команду линтера', status: 'in_progress' },
+              { text: 'Применить правку package.json', status: 'pending' },
+            ],
+          });
+
+          // Пачка чтения проекта: в жизни агент смотрит десяток папок подряд,
+          // такие вызовы должны свернуться в одну строку, а не залить весь чат.
+          const folders = ['src', 'src/main', 'src/renderer', 'scripts'];
+          for (const [index, folder] of folders.entries()) {
+            const dirId = `mock-dir-${index}`;
+            emit(id, 'tool_start', {
+              id: dirId,
+              name: 'list_dir',
+              args: JSON.stringify({ path: `${ROOT}/${folder}` }),
+            });
+            await sleep(50);
+            emit(id, 'tool_result', {
+              id: dirId,
+              name: 'list_dir',
+              ok: true,
+              summary: 'элементов: 6',
+              detail: ['index.ts', 'service.ts', 'tools.ts', 'main.css', 'chat.ts', 'package.json']
+                .map((name) => `- ${name}`)
+                .join('\n'),
+            });
+          }
+
+          const command = 'npm run lint';
+          emit(id, 'tool_start', {
+            id: 'mock-call-0',
+            name: 'run_terminal',
+            args: JSON.stringify({ command }),
+          });
+          const permission = await askHost('ai.confirmCommand', { command });
           emit(id, 'tool_result', {
-            id: dirId,
-            name: 'list_dir',
-            ok: true,
-            summary: 'элементов: 6',
-            detail: ['index.ts', 'service.ts', 'tools.ts', 'main.css', 'chat.ts', 'package.json']
-              .map((name) => `- ${name}`)
-              .join('\n'),
+            id: 'mock-call-0',
+            name: 'run_terminal',
+            ok: Boolean(permission?.allowed),
+            summary: permission?.allowed ? 'код выхода 0' : 'Пользователь запретил выполнение команды',
+            detail: permission?.allowed ? `$ ${command}\n(мок: команда не выполняется)` : undefined,
+          });
+
+          const callId = 'mock-call-1';
+          const target = `${ROOT}/package.json`;
+          const edits = [
+            {
+              path: target,
+              edits: [
+                {
+                  startLine: 1,
+                  startColumn: 1,
+                  endLine: 1,
+                  endColumn: 1,
+                  newText: '// Правка агента\n// вторая строка\n// третья строка\n',
+                },
+              ],
+            },
+          ];
+
+          emit(id, 'tool_start', { id: callId, name: 'apply_edit', args: JSON.stringify({ edits }) });
+          const decision = await askHost('ai.applyEdits', { edits });
+          const ok = !decision?.rejected;
+          emit(id, 'tool_result', {
+            id: callId,
+            name: 'apply_edit',
+            ok,
+            summary: ok ? 'применено файлов: 1' : 'Пользователь отклонил правки',
           });
         }
 
-        const command = 'npm run lint';
-        emit(id, 'tool_start', {
-          id: 'mock-call-0',
-          name: 'run_terminal',
-          args: JSON.stringify({ command }),
-        });
-        const permission = await askHost('ai.confirmCommand', { command });
-        emit(id, 'tool_result', {
-          id: 'mock-call-0',
-          name: 'run_terminal',
-          ok: Boolean(permission?.allowed),
-          summary: permission?.allowed ? 'код выхода 0' : 'Пользователь запретил выполнение команды',
-          detail: permission?.allowed ? `$ ${command}\n(мок: команда не выполняется)` : undefined,
-        });
+        // Ответ с несколькими блоками: на нём видно, что подсветка включается
+        // для каждого языка по метке в ограде, а не только для `js`.
+        const answer =
+          'Проверка панели: ответ приходит потоком.\n' +
+          '```js\nconst answer = 42;\n```\n' +
+          '```diff\n- старый вызов модели\n+ новый вызов с планом\n```\n' +
+          '| Часть | Состояние |\n| --- | --- |\n| Лента | обновлена |\n| Композер | без изменений |\n' +
+          '- [x] собрал проект\n- [ ] проверил в браузере\n' +
+          '```python\ndef greet(name: str) -> str:\n    return f"привет, {name}"\n```\n' +
+          '```bash\nnpm run smoke:agent\n```\n' +
+          'Инлайн-код: `view.toggleRight` и `layout.setRightVisible(...)`.\n' +
+          `Файл — ${params.messages.at(-1)?.content ?? ''}.`;
+        // В быстром режиме ответ уходит одной порцией: браузер режет таймеры скрытой
+        // вкладки до секунды, и поток по словам длился бы минуты.
+        if (FAST) {
+          emit(id, 'delta', { text: answer });
+          return {
+            text: answer,
+            finishReason: 'stop',
+            usage: { promptTokens: 12, completionTokens: 24 },
+            run: mockRun(Boolean(params.useTools)),
+          };
+        }
 
-        const callId = 'mock-call-1';
-        const target = `${ROOT}/package.json`;
-        const edits = [
-          {
-            path: target,
-            edits: [
-              {
-                startLine: 1,
-                startColumn: 1,
-                endLine: 1,
-                endColumn: 1,
-                newText: '// Правка агента\n// вторая строка\n// третья строка\n',
-              },
-            ],
-          },
-        ];
-
-        emit(id, 'tool_start', { id: callId, name: 'apply_edit', args: JSON.stringify({ edits }) });
-        const decision = await askHost('ai.applyEdits', { edits });
-        const ok = !decision?.rejected;
-        emit(id, 'tool_result', {
-          id: callId,
-          name: 'apply_edit',
-          ok,
-          summary: ok ? 'применено файлов: 1' : 'Пользователь отклонил правки',
-        });
-      }
-
-      // Ответ с несколькими блоками: на нём видно, что подсветка включается
-      // для каждого языка по метке в ограде, а не только для `js`.
-      const answer =
-        'Проверка панели: ответ приходит потоком.\n' +
-        '```js\nconst answer = 42;\n```\n' +
-        '```diff\n- старый вызов модели\n+ новый вызов с планом\n```\n' +
-        '| Часть | Состояние |\n| --- | --- |\n| Лента | обновлена |\n| Композер | без изменений |\n' +
-        '- [x] собрал проект\n- [ ] проверил в браузере\n' +
-        '```python\ndef greet(name: str) -> str:\n    return f"привет, {name}"\n```\n' +
-        '```bash\nnpm run smoke:agent\n```\n' +
-        'Инлайн-код: `view.toggleRight` и `layout.setRightVisible(...)`.\n' +
-        `Файл — ${params.messages.at(-1)?.content ?? ''}.`;
-      // В быстром режиме ответ уходит одной порцией: браузер режет таймеры скрытой
-      // вкладки до секунды, и поток по словам длился бы минуты.
-      if (FAST) {
-        emit(id, 'delta', { text: answer });
+        let text = '';
+        for (const word of answer.split(' ')) {
+          await sleep(18);
+          if (cancelRequested) {
+            const stopped = new Error('Операция отменена');
+            stopped.code = -32800; // RpcErrorCode.Cancelled
+            throw stopped;
+          }
+          text += `${word} `;
+          emit(id, 'delta', { text: `${word} ` });
+        }
         return {
-          text: answer,
+          text,
           finishReason: 'stop',
           usage: { promptTokens: 12, completionTokens: 24 },
           run: mockRun(Boolean(params.useTools)),
         };
-      }
-
-      let text = '';
-      for (const word of answer.split(' ')) {
-        await sleep(18);
-        if (cancelRequested) {
-          const stopped = new Error('Операция отменена');
-          stopped.code = -32800; // RpcErrorCode.Cancelled
-          throw stopped;
-        }
-        text += `${word} `;
-        emit(id, 'delta', { text: `${word} ` });
-      }
-      return {
-        text,
-        finishReason: 'stop',
-        usage: { promptTokens: 12, completionTokens: 24 },
-        run: mockRun(Boolean(params.useTools)),
-      };
       } finally {
         running = false;
       }

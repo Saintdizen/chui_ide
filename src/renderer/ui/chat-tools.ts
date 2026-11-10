@@ -171,7 +171,10 @@ function toolStartLine(raw: string): number | null {
  * Последние две части — «src/main/app.ts»; в одном файле хватает имени.
  */
 function shortPath(path: string): string {
-  const parts = path.replace(/\\/g, '/').split('/').filter((part) => part.length > 0);
+  const parts = path
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((part) => part.length > 0);
   if (parts.length <= 2) return parts.join('/');
   return parts.slice(-2).join('/');
 }
@@ -864,7 +867,6 @@ function createToolGroup(
  * группу: в ленте остаётся её шапка («Просмотр папки, Чтение файла и ещё 2
  * · 6 · готово»), а сами строки — под раскрытием.
  */
-
 
 export function createToolFeed(
   container: HTMLElement,

@@ -166,7 +166,11 @@ app.whenReady().then(async () => {
     })()`,
   );
   console.log(`[tree] состояние окна: ${JSON.stringify(state)}`);
-  check('шапка сказала, где мы', typeof crumbsBottom?.text === 'string' && crumbsBottom.text.length > 0, crumbsBottom?.text);
+  check(
+    'шапка сказала, где мы',
+    typeof crumbsBottom?.text === 'string' && crumbsBottom.text.length > 0,
+    crumbsBottom?.text,
+  );
 
   await ask(
     ide,

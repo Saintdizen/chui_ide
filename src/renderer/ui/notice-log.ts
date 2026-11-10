@@ -91,9 +91,7 @@ export function createNoticeLog(deps: NoticeLogDeps): NoticeLogView {
             },
             source.where,
           );
-      actions.append(
-        h('span', { class: 'notice-log-sys' }, 'Куда смотреть: ', hint),
-      );
+      actions.append(h('span', { class: 'notice-log-sys' }, 'Куда смотреть: ', hint));
     }
     if (notice.action) {
       const action = notice.action;

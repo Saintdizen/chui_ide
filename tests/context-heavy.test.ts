@@ -98,7 +98,7 @@ describe('порог тяжёлого контекста', () => {
     expect(planned).not.toContain('как минимум');
     expect(planned).toContain('В пределах');
     expect(planned).toContain(`${PRICE_PLAN_STEPS} шагов`);
-    expect(planned).toContain(`${(200 * PRICE_PLAN_STEPS)}k`);
+    expect(planned).toContain(`${200 * PRICE_PLAN_STEPS}k`);
     // Факт короче плана — считаем по факту.
     const short = contextPriceNote(200_000, 3, PRICE_PLAN_STEPS);
     expect(short).not.toContain('как минимум');

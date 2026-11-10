@@ -39,10 +39,17 @@ const SELF_TAG = /<(?:tool_call|tool_calls|function_call|function_calls|dsml|inv
  * тоже надо убрать, иначе служебные токены остаются в ответе.
  */
 const DSML_BLOCK = new RegExp(
-  DSML_BAR.repeat(2) + 'DSML' + DSML_BAR.repeat(2) +
+  DSML_BAR.repeat(2) +
+    'DSML' +
+    DSML_BAR.repeat(2) +
     '[\\s\\S]*?(?:' +
-    DSML_BAR.repeat(2) + '\\/?DSML' + DSML_BAR.repeat(2) +
-    '|' + DSML_BAR.repeat(2) + '\\/?invoke' + DSML_BAR.repeat(2) +
+    DSML_BAR.repeat(2) +
+    '\\/?DSML' +
+    DSML_BAR.repeat(2) +
+    '|' +
+    DSML_BAR.repeat(2) +
+    '\\/?invoke' +
+    DSML_BAR.repeat(2) +
     '|$)',
   'gi',
 );
@@ -81,11 +88,7 @@ export function stripCallMarkup(text: string): string {
  * `stripCallMarkup` — когда ответ готов и показывать больше нечего.
  */
 export function cutMarkup(text: string): string {
-  return text
-    .replace(DSML_BLOCK, '')
-    .replace(BLOCK_TAG, '')
-    .replace(SELF_TAG, '')
-    .replace(BRACKET_CALL, '');
+  return text.replace(DSML_BLOCK, '').replace(BLOCK_TAG, '').replace(SELF_TAG, '').replace(BRACKET_CALL, '');
 }
 
 /**

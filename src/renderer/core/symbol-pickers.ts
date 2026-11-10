@@ -80,13 +80,11 @@ export function createSymbolPickers(deps: SymbolPickersDeps) {
     );
   };
 
-  define(
-    { id: 'editor.callers', title: 'Кто вызывает символ', category: 'Навигация' },
-    () => openCallHierarchy('incoming'),
+  define({ id: 'editor.callers', title: 'Кто вызывает символ', category: 'Навигация' }, () =>
+    openCallHierarchy('incoming'),
   );
-  define(
-    { id: 'editor.callees', title: 'Кого вызывает символ', category: 'Навигация' },
-    () => openCallHierarchy('outgoing'),
+  define({ id: 'editor.callees', title: 'Кого вызывает символ', category: 'Навигация' }, () =>
+    openCallHierarchy('outgoing'),
   );
 
   /**

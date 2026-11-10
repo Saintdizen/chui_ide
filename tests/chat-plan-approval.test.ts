@@ -333,8 +333,6 @@ describe('chat-approvals: команда в браузере и в термин�
     mounted[0]?.findAll((item) => item.text === 'Выполнить')[0]?.fire('click');
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(settled).toBe(false);
-    expect(
-      mounted[0]?.findAll((item) => item.text.startsWith('Не JSON')) ?? [],
-    ).toHaveLength(1);
+    expect(mounted[0]?.findAll((item) => item.text.startsWith('Не JSON')) ?? []).toHaveLength(1);
   });
 });

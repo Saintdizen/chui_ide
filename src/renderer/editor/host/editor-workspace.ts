@@ -376,7 +376,9 @@ export class EditorWorkspace {
   private readonly documentHighlights: EditorWorkspaceOptions['documentHighlights'];
   /** Переименование символа: шов к приложению (диалог имени и применение правок). */
   private readonly renameSymbol: ((path: string, position: { line: number; column: number }) => void) | undefined;
-  private readonly renameBySearch: ((path: string, position: { line: number; column: number }) => Promise<void>) | undefined;
+  private readonly renameBySearch:
+    | ((path: string, position: { line: number; column: number }) => Promise<void>)
+    | undefined;
   /** Перейти к месту — открыть файл и поставить курсор. */
   private readonly revealLocation: ((path: string, line: number, column: number) => void) | undefined;
   /** Чтение текста файла: нужно «заглядыванию» в определение (см. `peek-controller.ts`). */

@@ -97,7 +97,7 @@ button.status-item:focus-visible {
   letter-spacing: 0.05em;
 }
 
-.status-sparse[aria-expanded='true'] {
+.status-sparse[aria-expanded="true"] {
   color: var(--text_color);
 }
 

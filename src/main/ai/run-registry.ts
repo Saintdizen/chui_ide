@@ -34,7 +34,6 @@ export interface RunningRun {
   tools: Map<string, RunningTool>;
 }
 
-
 export class RunRegistry {
   private readonly runs = new Map<string, RunningRun>();
 

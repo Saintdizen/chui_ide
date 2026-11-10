@@ -169,7 +169,9 @@ export function unknownArguments(schema: JsonSchema, args: Record<string, unknow
     }
     const value = args[name];
     if (property.type === 'object' && property.properties && isPlainObject(value)) {
-      unknown.push(...unknownArguments(objectSchema(property.properties, property.required), value, `${prefix}${name}.`));
+      unknown.push(
+        ...unknownArguments(objectSchema(property.properties, property.required), value, `${prefix}${name}.`),
+      );
     }
     if (property.type === 'array' && property.items?.properties && Array.isArray(value)) {
       const itemSchema = objectSchema(property.items.properties, property.items.required);

@@ -23,10 +23,7 @@ describe('countByGroup: счёт по группам регэкспа', () => {
   });
 
   it('необязательная группа, не участвовавшая в матче, не считается', () => {
-    const counts = countByGroup([
-      match(1, ['a', undefined]),
-      match(2, ['b', 'x']),
-    ]);
+    const counts = countByGroup([match(1, ['a', undefined]), match(2, ['b', 'x'])]);
     expect(counts).toEqual([
       { index: 1, count: 2, sample: 'a' },
       { index: 2, count: 1, sample: 'x' },

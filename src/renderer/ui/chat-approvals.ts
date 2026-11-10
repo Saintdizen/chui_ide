@@ -359,11 +359,7 @@ export interface CommandApproval {
    * `args` — аргументы вызова: человек может поправить их до запуска, и тогда
    * действие выполнится с его правкой, а не с тем, что придумала модель.
    */
-  confirmBrowser(
-    action: string,
-    args?: Record<string, unknown>,
-    session?: ChatSession,
-  ): Promise<ConfirmBrowserAnswer>;
+  confirmBrowser(action: string, args?: Record<string, unknown>, session?: ChatSession): Promise<ConfirmBrowserAnswer>;
 }
 
 /**
@@ -471,7 +467,12 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
       // Строку ошибки пересобираем, а не правим текст в существующей: правок
       // может быть несколько подряд, а карточка должна показать последнюю.
       problemLine?.remove?.();
-      problemLine = h('div', { class: 'approval-review-note is-problem' }, svgIcon('warning', 12), h('span', {}, problem));
+      problemLine = h(
+        'div',
+        { class: 'approval-review-note is-problem' },
+        svgIcon('warning', 12),
+        h('span', {}, problem),
+      );
       block.appendChild(problemLine);
       block.scrollIntoView?.({ block: 'nearest' });
       return true;
@@ -596,9 +597,7 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
       return {
         allowed: true,
         args:
-          parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-            ? (parsed as Record<string, unknown>)
-            : args,
+          parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : args,
       };
     },
   };

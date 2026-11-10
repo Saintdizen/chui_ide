@@ -12,7 +12,11 @@ beforeAll(() => {
  * Контекст `#` глазами человека: он выбирает пункт, а до отправки должен
  * видеть, что именно уедет модели, и уметь это снять.
  */
-function harness(text: string, selection = '', budget?: () => { limit: number; overhead: number; reserve: number } | null) {
+function harness(
+  text: string,
+  selection = '',
+  budget?: () => { limit: number; overhead: number; reserve: number } | null,
+) {
   const session = { attachments: [], kept: [] } as unknown as ChatSession;
   const view = createAttachments({
     rpc: {} as never,

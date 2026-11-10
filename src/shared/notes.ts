@@ -82,9 +82,10 @@ export function sanitizeNotes(records: unknown, root: string | null): NotesState
   // Порядок — по пути: список открывается целиком, и постоянный порядок
   // важнее «свежие сверху» (иначе прыгает, пока пишут).
   files.sort((left, right) => left.path.localeCompare(right.path));
-  const project = typeof raw.project === 'string' && raw.project.trim().length > 0
-    ? raw.project.trim().slice(0, MAX_NOTE_CHARS)
-    : null;
+  const project =
+    typeof raw.project === 'string' && raw.project.trim().length > 0
+      ? raw.project.trim().slice(0, MAX_NOTE_CHARS)
+      : null;
   return { files, project };
 }
 
@@ -112,9 +113,7 @@ export function setFileNote(
   const body = text.trim().slice(0, MAX_NOTE_CHARS);
   const rest = notes.files.filter((entry) => entry.path !== stored);
   if (body.length === 0) return { ...notes, files: rest };
-  const next = [...rest, { path: stored, text: body, at }].sort((left, right) =>
-    left.path.localeCompare(right.path),
-  );
+  const next = [...rest, { path: stored, text: body, at }].sort((left, right) => left.path.localeCompare(right.path));
   return { ...notes, files: next };
 }
 

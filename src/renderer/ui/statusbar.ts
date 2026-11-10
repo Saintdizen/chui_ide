@@ -239,8 +239,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const whitespaceItem = h('button', {
     class: 'status-item',
     type: 'button',
-    onClick: (event: Event) =>
-      deps.runCommand('editor.cycleWhitespace', event.currentTarget as HTMLElement),
+    onClick: (event: Event) => deps.runCommand('editor.cycleWhitespace', event.currentTarget as HTMLElement),
   });
   const languageItem = h('button', {
     class: 'status-item',
@@ -426,10 +425,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     eolItem.textContent = state.eol ?? '';
     eolItem.title = state.eol === null ? '' : `Концы строк: ${state.eol}`;
     // Имя — словами, а не «LF»: кнопка без имени читается как текст на ней.
-    eolItem.setAttribute(
-      'aria-label',
-      state.eol === null ? 'Концы строк' : `Концы строк: ${state.eol}. Выбрать`,
-    );
+    eolItem.setAttribute('aria-label', state.eol === null ? 'Концы строк' : `Концы строк: ${state.eol}. Выбрать`);
     encodingItem.textContent = state.encoding;
     // Невидимые: три положения в одном чипе — пиктограмма и текущее словами.
     // У картинок и документов пробелов нет: чип скрыт, как и концы строк.
@@ -450,9 +446,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     indentItem.textContent = state.useTabs ? `таб ${state.tabSize}` : `${state.tabSize} с`;
     indentItem.setAttribute(
       'aria-label',
-      state.useTabs
-        ? `Отступы: табуляция, ${state.tabSize}. Выбрать`
-        : `Отступы: ${state.tabSize} пробела. Выбрать`,
+      state.useTabs ? `Отступы: табуляция, ${state.tabSize}. Выбрать` : `Отступы: ${state.tabSize} пробела. Выбрать`,
     );
     languageItem.textContent = state.language ?? '—';
     languageItem.setAttribute('aria-label', `Язык: ${state.language ?? 'не определён'}. Сменить`);
@@ -554,10 +548,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     );
     versionItem.textContent = state.version ? `v${state.version}` : '';
     // Версия — тоже кнопка: без имени из «v20.11» читалка не поймёт, что это язык проекта.
-    versionItem.setAttribute(
-      'aria-label',
-      state.version ? `Версия: ${state.version}. Выбрать` : 'Версия не известна',
-    );
+    versionItem.setAttribute('aria-label', state.version ? `Версия: ${state.version}. Выбрать` : 'Версия не известна');
     // Вид виджета решает чистый модуль: ноль — не всегда «чисто» (правила там).
     const problems = problemsWidget(state.problems);
     problemsItem.hidden = problems.hidden;

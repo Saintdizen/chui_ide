@@ -79,8 +79,8 @@ async function openSettings(): Promise<HTMLElement> {
   await modal.open();
   // Форма провайдера — отдельный экран, и открывается она кнопкой «Настроить
   // подключение…», а не выбором в списке. Регион живёт именно там.
-  const config = [...(modal.element as unknown as HTMLElement).querySelectorAll('button')].find(
-    (button) => (button.textContent ?? '').includes('Настроить подключение'),
+  const config = [...(modal.element as unknown as HTMLElement).querySelectorAll('button')].find((button) =>
+    (button.textContent ?? '').includes('Настроить подключение'),
   ) as unknown as HTMLElement | undefined;
   config?.click();
   // Форма — отдельное окно, монтируется в `document.body`, а не внутрь окна
@@ -92,9 +92,7 @@ async function openSettings(): Promise<HTMLElement> {
 // спрашиваем атрибут напрямую. В браузере это был бы `querySelector`, но
 // стенд проверяет поведение, а не возможности CSS-движка.
 const byRole = (root: HTMLElement, role: string): HTMLElement[] =>
-  [...root.querySelectorAll('div')].filter(
-    (node) => node.getAttribute('role') === role,
-  ) as unknown as HTMLElement[];
+  [...root.querySelectorAll('div')].filter((node) => node.getAttribute('role') === role) as unknown as HTMLElement[];
 
 beforeEach(() => {
   installMiniDom();

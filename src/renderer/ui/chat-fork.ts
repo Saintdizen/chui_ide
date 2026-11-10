@@ -73,10 +73,7 @@ export interface ForkCompare {
  * Сообщение считается общим по роли и тексту: id у копий разный, а слова —
  * те же, и сравнивать надо именно слова.
  */
-export function compareForks(
-  left: readonly ChatMessage[],
-  right: readonly ChatMessage[],
-): ForkCompare {
+export function compareForks(left: readonly ChatMessage[], right: readonly ChatMessage[]): ForkCompare {
   const same = (a: ChatMessage, b: ChatMessage): boolean =>
     a.role === b.role && (a.content ?? '') === (b.content ?? '');
 

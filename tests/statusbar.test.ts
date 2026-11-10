@@ -53,9 +53,7 @@ describe('статусная строка: клавиатура и читалк�
 
   it('у каждой видимой кнопки есть имя словами, а не только значение', () => {
     // Скрытый слот пропускаем: он не показывается ни глазом, ни читалкой.
-    const buttons = [...bar().querySelectorAll('button')].filter(
-      (button) => (button as HTMLElement).hidden !== true,
-    );
+    const buttons = [...bar().querySelectorAll('button')].filter((button) => (button as HTMLElement).hidden !== true);
     expect(buttons.length).toBeGreaterThan(0);
     for (const button of buttons) {
       // «12:3» и «LF» именем не считаются: имя — это фраза, в ней есть пробел.
@@ -65,9 +63,7 @@ describe('статусная строка: клавиатура и читалк�
 
   it('«строка:столбец» называются по-человечески и идут за кареткой', () => {
     const root = bar();
-    const position = [...root.querySelectorAll('button')].find(
-      (button) => button.textContent === '12:3',
-    );
+    const position = [...root.querySelectorAll('button')].find((button) => button.textContent === '12:3');
     expect(position).toBeTruthy();
     expect(position?.getAttribute('aria-label')).toBe('Строка 12, столбец 3');
   });

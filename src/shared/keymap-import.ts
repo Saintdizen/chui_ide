@@ -230,15 +230,17 @@ function vscodeCombo(key: string): string | null {
     else return null;
   }
   const named: Record<string, string> = { esc: 'Escape', return: 'Enter', space: 'Space' };
-  const tail =
-    named[main] ?? (main.length === 1 ? main.toUpperCase() : main[0]!.toUpperCase() + main.slice(1));
+  const tail = named[main] ?? (main.length === 1 ? main.toUpperCase() : main[0]!.toUpperCase() + main.slice(1));
   out.push(tail);
   return out.join('+');
 }
 
 /** Сочетание IDEA — наше: `ctrl alt L`, `shift F6`. */
 function ideaCombo(key: string): string | null {
-  const parts = key.trim().split(/\s+/).filter((part) => part.length > 0);
+  const parts = key
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part.length > 0);
   if (parts.length === 0) return null;
   const head = parts.slice(0, -1);
   const main = parts[parts.length - 1]!;

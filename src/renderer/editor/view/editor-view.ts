@@ -441,8 +441,7 @@ export class EditorView {
       color: () => window.getComputedStyle(this.root).color,
       // Закладки — не цвет текста: они обязаны отличаться и от черт самой карты,
       // и друг от друга на тёмной и светлой теме одинаково. Берём акцент интерфейса.
-      bookmarkColor: () =>
-        window.getComputedStyle(this.root).getPropertyValue('--accent_fill').trim() || '#e8a33d',
+      bookmarkColor: () => window.getComputedStyle(this.root).getPropertyValue('--accent_fill').trim() || '#e8a33d',
       scrollToRow: (row) => {
         this.stopScrollAnimation();
         this.viewport.scrollTop = row * this.metrics.lineHeight;
@@ -1719,7 +1718,6 @@ export class EditorView {
       fragment.append(span);
     }
   }
-
 
   /**
    * Системный пикер цвета для записи в тексте.

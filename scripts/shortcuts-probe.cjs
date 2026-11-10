@@ -126,7 +126,7 @@ app.whenReady().then(async () => {
   step(`окно: ${url}`);
   await ide.loadURL(url.includes('?') ? `${url}&probe=1` : `${url}?probe=1`);
   await wait(6000);
-  step(`мост проб: ${await ask(ide, "typeof window.__chui")} / search: ${await ask(ide, 'location.search')}`);
+  step(`мост проб: ${await ask(ide, 'typeof window.__chui')} / search: ${await ask(ide, 'location.search')}`);
 
   /* --- 1. Меню -------------------------------------------------------------- */
   const viewMenu = Menu.getApplicationMenu()?.items.find((item) => item.label === 'Вид');
@@ -156,7 +156,10 @@ app.whenReady().then(async () => {
   /* --- 4. Замер: чей Ctrl+P срабатывает ------------------------------------ */
   // Правило «меню бьёт renderer» (shortcut-hints.ts) — допущение о том, что
   // Electron съедает акселератор раньше окна. Проверяем его, а не верим.
-  await ask(ide, `(() => { const el = document.querySelector('.modal [aria-label="Закрыть"]') ?? document.querySelector('.modal .modal-close'); if (el) el.click(); return 'закрыл'; })()`);
+  await ask(
+    ide,
+    `(() => { const el = document.querySelector('.modal [aria-label="Закрыть"]') ?? document.querySelector('.modal .modal-close'); if (el) el.click(); return 'закрыл'; })()`,
+  );
   await wait(500);
   const watch = `(() => {
     window.__probeRuns = [];

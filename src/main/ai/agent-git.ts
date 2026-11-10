@@ -162,10 +162,7 @@ async function diffOutcome(root: string, args: Record<string, unknown>): Promise
 }
 
 /** `log`: коммиты одной строкой — хеш, дата, автор, тема. */
-async function logOutcome(
-  ctx: ToolContext,
-  args: Record<string, unknown>,
-): Promise<ToolOutcome> {
+async function logOutcome(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const limit = Math.min(Math.max(optionalInteger(args, 'limit') ?? LOG_DEFAULT, 1), 100);
   const file = optionalString(args, 'path');
   const root = await repoRoot(ctx);

@@ -234,8 +234,7 @@ export class InlineCompletions {
     if (local) {
       const cleanLocal = cleanCompletion(local);
       if (cleanLocal && id === this.requestId && this.controller.caret === caret) {
-        const shownLocal =
-          this.options.mode?.() === 'single-line' ? firstLine(cleanLocal) : cleanLocal;
+        const shownLocal = this.options.mode?.() === 'single-line' ? firstLine(cleanLocal) : cleanLocal;
         if (shownLocal) {
           this.suggestion = { offset: caret, text: shownLocal };
           this.view.setGhostText(caret, shownLocal);

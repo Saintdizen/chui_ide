@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  importIdeaKeymap,
-  importVsCodeKeymap,
-  mergeImportedOverrides,
-} from '../src/shared/keymap-import';
+import { importIdeaKeymap, importVsCodeKeymap, mergeImportedOverrides } from '../src/shared/keymap-import';
 
 /**
  * Импорт чужих карт клавиш. Главное: не связать команду с клавишей, которая
@@ -48,9 +44,7 @@ describe('importVsCodeKeymap', () => {
   });
 
   it('служебные клавиши названы нашими именами', () => {
-    const result = importVsCodeKeymap(
-      '[{"key":"ctrl+esc","command":"workbench.action.showCommands"}]',
-    );
+    const result = importVsCodeKeymap('[{"key":"ctrl+esc","command":"workbench.action.showCommands"}]');
     expect(result.overrides[0]!.combo).toBe('Ctrl+Escape');
   });
 
@@ -66,17 +60,12 @@ describe('importVsCodeKeymap', () => {
 describe('importIdeaKeymap', () => {
   it('читает действие и сочетание', () => {
     const xml = `<keymap><action id="ReformatCode"><keyboard-shortcut keymap="$default" first-keystroke="ctrl alt L"/></action></keymap>`;
-    expect(importIdeaKeymap(xml).overrides).toEqual([
-      { command: 'editor.format', combo: 'Ctrl+Alt+L' },
-    ]);
+    expect(importIdeaKeymap(xml).overrides).toEqual([{ command: 'editor.format', combo: 'Ctrl+Alt+L' }]);
   });
 
   it('несколько сочетаний у действия — все', () => {
     const xml = `<action id="Find"><keyboard-shortcut first-keystroke="ctrl f"/><keyboard-shortcut first-keystroke="alt f3"/></action>`;
-    expect(importIdeaKeymap(xml).overrides.map((entry) => entry.combo)).toEqual([
-      'Ctrl+F',
-      'Alt+F3',
-    ]);
+    expect(importIdeaKeymap(xml).overrides.map((entry) => entry.combo)).toEqual(['Ctrl+F', 'Alt+F3']);
   });
 
   it('неизвестное действие — в unknown', () => {

@@ -133,10 +133,7 @@ export function rankSnippets(
     return { symbol, text, why, score };
   });
   scored.sort(
-    (a, b) =>
-      b.score - a.score ||
-      a.symbol.path.localeCompare(b.symbol.path) ||
-      a.symbol.line - b.symbol.line,
+    (a, b) => b.score - a.score || a.symbol.path.localeCompare(b.symbol.path) || a.symbol.line - b.symbol.line,
   );
   // Объявления, где нет ни одного слова задачи, — не подбор, а шум: при запросе
   // `readFile` второе объявление `other` ничего в себе не содержит, и отдавать

@@ -95,7 +95,11 @@ export async function collectTree(
  * Строки дерева: отступ по глубине и те же пометки, что у плоского списка
  * (слэш у папки, крупный размер, ссылка с целью).
  */
-export function treeLines(nodes: readonly TreeNode[], root: string | null, maxLines: number): {
+export function treeLines(
+  nodes: readonly TreeNode[],
+  root: string | null,
+  maxLines: number,
+): {
   text: string;
   shown: number;
   total: number;

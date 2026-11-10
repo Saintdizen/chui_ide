@@ -93,7 +93,12 @@ async function scanDir(dir: string, scope: SkillScope, folder = '', depth = 0): 
       // Папка без `SKILL.md` — не навык, но в ней может лежать свой `.chui/skills`:
       // вложенность держим неглубокой, иначе обход всего дерева на каждом шаге.
       if (depth === 0 && !item.name.startsWith('.chui')) {
-        const nested = await scanDir(path.join(dir, item.name, SKILLS_DIR), scope, joinFolder(folder, item.name), depth + 1);
+        const nested = await scanDir(
+          path.join(dir, item.name, SKILLS_DIR),
+          scope,
+          joinFolder(folder, item.name),
+          depth + 1,
+        );
         found.push(...nested);
       }
       continue;

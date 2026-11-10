@@ -712,8 +712,7 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
       // съедает контекст целиком, а «что тронуто» обычно и есть ответ на
       // вопрос. Сам diff прикладывают отдельно — `#diff`.
       const lines = shown.files.map(
-        (file) =>
-          `${file.status.padEnd(9)} ${file.path} (+${file.insertions} −${file.deletions})`,
+        (file) => `${file.status.padEnd(9)} ${file.path} (+${file.insertions} −${file.deletions})`,
       );
       const body = [
         `Коммит ${shown.hash}: ${shown.summary}`,

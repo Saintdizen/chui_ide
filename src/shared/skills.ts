@@ -182,7 +182,11 @@ export function skillBody(text: string): string {
  * Имена уникальны вместе с папкой, поэтому при выборе побеждает ближний: навык из
  * папки файла важнее навыка корня. Тот же порядок, что у правил проекта.
  */
-export function findSkill(skills: readonly SkillEntry[], name: string, options: { folder?: string } = {}): SkillEntry | null {
+export function findSkill(
+  skills: readonly SkillEntry[],
+  name: string,
+  options: { folder?: string } = {},
+): SkillEntry | null {
   const wanted = normalizeSkillName(name);
   if (!wanted) return null;
   const here = normalizeFolder(options.folder);
@@ -202,7 +206,10 @@ export function findSkill(skills: readonly SkillEntry[], name: string, options: 
 
 /** Папка в одном виде: слеши прямые, без крайних — `''` — корень. */
 export function normalizeFolder(folder: string | undefined): string {
-  return (folder ?? '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+|\/+$/g, '');
+  return (folder ?? '')
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+|\/+$/g, '');
 }
 
 /** Навык папки действует в ней и ниже; навык корня — везде. */

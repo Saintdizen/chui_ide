@@ -248,7 +248,10 @@ function scopeOf(folder: string): string {
 
 /** Папка от корня проекта: без `./`, без слешей по краям, всегда через `/`. */
 export function normalizeInstructionFolder(folder: string | undefined): string {
-  return (folder ?? '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+|\/+$/g, '');
+  return (folder ?? '')
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+|\/+$/g, '');
 }
 
 /**

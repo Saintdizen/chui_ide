@@ -28,8 +28,14 @@ export const DEFAULT_FLOATING: FloatingRect = { left: 80, top: 80, width: 620, h
  * верхним краем окна он не бывает, иначе окно уехало бы целиком.
  */
 export function clampFloating(rect: FloatingRect, viewport: { width: number; height: number }): FloatingRect {
-  const width = Math.max(FLOATING_MIN_WIDTH, Math.min(rect.width, Math.max(FLOATING_MIN_WIDTH, viewport.width - FLOATING_MARGIN * 2)));
-  const height = Math.max(FLOATING_MIN_HEIGHT, Math.min(rect.height, Math.max(FLOATING_MIN_HEIGHT, viewport.height - FLOATING_MARGIN * 2)));
+  const width = Math.max(
+    FLOATING_MIN_WIDTH,
+    Math.min(rect.width, Math.max(FLOATING_MIN_WIDTH, viewport.width - FLOATING_MARGIN * 2)),
+  );
+  const height = Math.max(
+    FLOATING_MIN_HEIGHT,
+    Math.min(rect.height, Math.max(FLOATING_MIN_HEIGHT, viewport.height - FLOATING_MARGIN * 2)),
+  );
   const maxLeft = Math.max(FLOATING_MARGIN, viewport.width - width - FLOATING_MARGIN);
   const maxTop = Math.max(FLOATING_MARGIN, viewport.height - height - FLOATING_MARGIN);
   return {
@@ -74,7 +80,10 @@ export function resizeFloating(
  */
 export function centeredFloating(viewport: { width: number; height: number }): FloatingRect {
   const width = Math.min(DEFAULT_FLOATING.width, Math.max(FLOATING_MIN_WIDTH, viewport.width - FLOATING_MARGIN * 2));
-  const height = Math.min(DEFAULT_FLOATING.height, Math.max(FLOATING_MIN_HEIGHT, viewport.height - FLOATING_MARGIN * 2));
+  const height = Math.min(
+    DEFAULT_FLOATING.height,
+    Math.max(FLOATING_MIN_HEIGHT, viewport.height - FLOATING_MARGIN * 2),
+  );
   return clampFloating(
     {
       left: Math.round((viewport.width - width) / 2),

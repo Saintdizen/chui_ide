@@ -30,7 +30,10 @@ function deps(overrides: { repository?: boolean; failAdd?: boolean } = {}) {
       branch: 'main',
       rootSummaries: [{ root: MAIN, name: 'main', branch: 'main', ahead: 0, behind: 0, staged: 0, unstaged: 0 }],
       branches: () => Promise.resolve([{ name: 'main' }]),
-      worktrees: () => Promise.resolve([{ path: MAIN, branch: 'main', head: 'abc', bare: false, detached: false, locked: false, prunable: false }]),
+      worktrees: () =>
+        Promise.resolve([
+          { path: MAIN, branch: 'main', head: 'abc', bare: false, detached: false, locked: false, prunable: false },
+        ]),
       worktreeAdd: (path: string) => {
         if (overrides.failAdd) return Promise.reject(new Error('нет прав'));
         seen.added.push(path);

@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  PROFILE_KIND,
-  PROFILE_VERSION,
-  buildProfile,
-  parseProfile,
-  profilePatch,
-} from '../src/shared/profile';
+import { PROFILE_KIND, PROFILE_VERSION, buildProfile, parseProfile, profilePatch } from '../src/shared/profile';
 
 const settings = {
   editor: { fontSize: 15 },
@@ -25,9 +19,7 @@ describe('профиль рабочего окружения', () => {
     expect(profile.kind).toBe(PROFILE_KIND);
     expect(profile.version).toBe(PROFILE_VERSION);
     expect(profile.exportedAt).toBe('2026-01-02T03:04:05.000Z');
-    expect(Object.keys(profile.settings).sort()).toEqual(
-      ['ai', 'appearance', 'editor', 'layout'].sort(),
-    );
+    expect(Object.keys(profile.settings).sort()).toEqual(['ai', 'appearance', 'editor', 'layout'].sort());
   });
 
   it('не тащит машинное и незнакомое в файл', () => {
@@ -66,9 +58,7 @@ describe('профиль рабочего окружения', () => {
     expect(parseProfile('не json').ok).toBe(false);
     expect(parseProfile('{"kind":"что-то"}').error).toBe('Это не файл профиля');
     expect(parseProfile('null').ok).toBe(false);
-    expect(parseProfile({ kind: PROFILE_KIND, version: PROFILE_VERSION }).error).toBe(
-      'В профиле нет настроек',
-    );
+    expect(parseProfile({ kind: PROFILE_KIND, version: PROFILE_VERSION }).error).toBe('В профиле нет настроек');
   });
 
   it('профиль из будущей версии не применяется молча', () => {

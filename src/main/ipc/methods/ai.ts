@@ -152,12 +152,7 @@ export function registerAiMethods(router: RpcRouter, deps: RpcServices): void {
           },
           rememberCommandGrant: (grant) => rememberCommandGrant(grant),
           confirmBrowser: (action, args) =>
-            deps.host.request(
-              ctx.sender,
-              'ai.confirmBrowser',
-              { action, args, conversation },
-              ctx.signal,
-            ),
+            deps.host.request(ctx.sender, 'ai.confirmBrowser', { action, args, conversation }, ctx.signal),
           ask: (question, options) =>
             deps.host
               .request(ctx.sender, 'ai.ask', { question, options, conversation }, ctx.signal)

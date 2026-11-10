@@ -402,11 +402,7 @@ export interface CompletionAssistantOptions {
  * `TM_LINE_NUMBER` и `TM_SELECTED_TEXT` (пустой: подсказку вызывают не
  * поверх выделения).
  */
-function snippetVariables(
-  path: string | null,
-  line: number,
-  selected: string,
-): SnippetVariables {
+function snippetVariables(path: string | null, line: number, selected: string): SnippetVariables {
   if (path === null) return { TM_SELECTED_TEXT: selected };
   // Путь в проекте — с прямыми слэшами: сниппет не должен зависеть от того,
   // на какой системе он раскрыт.

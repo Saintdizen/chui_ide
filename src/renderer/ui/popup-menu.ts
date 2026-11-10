@@ -40,7 +40,7 @@ export type PopupOptions = {
   anchor?: HTMLElement;
   /** Меню закрылось — неважно, выбором пункта, Esc или кликом вне. */
   onClose?(): void;
-} & ({
+} & {
   /**
    * Куда вернуть фокус после закрытия — когда «что было в фокусе» не годится: у правого
    * клика фокус мог стоять на `body`, а у меню из панели — в её поле.
@@ -51,7 +51,7 @@ export type PopupOptions = {
    * (см. `showDetachedMenu`), иначе меню перебило бы её хозяина.
    */
   restoreFocus?: boolean;
-});
+};
 
 interface Level {
   menu: HTMLElement;

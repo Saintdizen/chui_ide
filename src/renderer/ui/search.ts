@@ -168,10 +168,7 @@ export function createSearchView(deps: SearchDeps): SearchView {
           h('span', { class: 'search-line' }, String(hit.line)),
           h('span', { class: 'search-text' }, highlight(hit.text, query)),
         );
-        row.addEventListener(
-          'click',
-          () => void deps.commands.execute('file.revealAt', path, hit.line, hit.column),
-        );
+        row.addEventListener('click', () => void deps.commands.execute('file.revealAt', path, hit.line, hit.column));
         results.appendChild(row);
       }
     }
@@ -206,9 +203,7 @@ export function createSearchView(deps: SearchDeps): SearchView {
     const files: string[] = [];
 
     for (const path of paths) {
-      const fresh = await deps.rpc
-        .request('workspace.readFile', { path })
-        .catch(() => null);
+      const fresh = await deps.rpc.request('workspace.readFile', { path }).catch(() => null);
       if (fresh === null) continue;
       const before = (deps.documents.get(path)?.value ?? fresh.text).split('\n');
       let changed = false;

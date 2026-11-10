@@ -29,9 +29,7 @@ describe('строка полосы', () => {
   });
 
   it('длинный список укорачивается, но не молчит о хвосте', () => {
-    expect(runningLabel(snapshot(['terminal', 'read', 'edit', 'search', 'web']))).toBe(
-      'terminal +4 · 12 с',
-    );
+    expect(runningLabel(snapshot(['terminal', 'read', 'edit', 'search', 'web']))).toBe('terminal +4 · 12 с');
   });
 });
 

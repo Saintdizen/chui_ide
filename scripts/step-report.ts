@@ -155,20 +155,20 @@ if (overlaps.length > 0) {
 const acting = runs.filter((run) => Array.isArray(run.steps) && run.steps.length > 0);
 if (acting.length > 0) {
   // Прогон, в котором была хоть одна успешная правка, — состоявшееся действие.
-  const does = (run: typeof acting[number]): boolean =>
+  const does = (run: (typeof acting)[number]): boolean =>
     run.steps.some((step) => (step.calls ?? []).some((call) => call.name === 'edit' && call.ok));
   const done = acting.filter(does);
-  const stepsToDo = done.map((run) => run.steps.findIndex((step) => (step.calls ?? []).some((call) => call.name === 'edit' && call.ok)) + 1);
-  const callsOf = (run: typeof acting[number]): number => sum(run.steps.map((step) => (step.calls ?? []).length));
+  const stepsToDo = done.map(
+    (run) => run.steps.findIndex((step) => (step.calls ?? []).some((call) => call.name === 'edit' && call.ok)) + 1,
+  );
+  const callsOf = (run: (typeof acting)[number]): number => sum(run.steps.map((step) => (step.calls ?? []).length));
   console.log('');
   console.log(`Цена действия: прогонов ${acting.length}, довели до правки ${done.length}`);
   if (done.length > 0) {
     console.log(`  медиана шагов до первой правки: ${median(stepsToDo)}`);
     console.log(`  медиана вызовов на прогон с правкой: ${median(done.map(callsOf))}`);
   }
-  console.log(
-    `  без правки: ${acting.length - done.length} — это шаги впустую или ответ словами`,
-  );
+  console.log(`  без правки: ${acting.length - done.length} — это шаги впустую или ответ словами`);
 }
 
 // Шаг: цена и кеш. Кеш префикса — единственная причина, по которой постоянная часть

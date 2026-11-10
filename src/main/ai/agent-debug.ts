@@ -38,8 +38,7 @@ async function status(ctx: ToolContext): Promise<ToolOutcome> {
     return {
       ok: true,
       summary: `отладчик: ${phase}`,
-      detail:
-        'Сессия не идёт. `debug` action start поднимает её, action breakpoints ставит точки останова до запуска.',
+      detail: 'Сессия не идёт. `debug` action start поднимает её, action breakpoints ставит точки останова до запуска.',
     };
   }
 
@@ -76,7 +75,7 @@ async function stack(ctx: ToolContext): Promise<ToolOutcome> {
     return {
       ok: true,
       summary: `отладчик: ${phase}, кадров нет`,
-      detail: 'Стек есть только в момент останова: `continue` или точка останова.'
+      detail: 'Стек есть только в момент останова: `continue` или точка останова.',
     };
   }
 
@@ -104,14 +103,15 @@ async function breakpoints(ctx: ToolContext, args: Record<string, unknown>): Pro
     return { ok: false, summary: 'Не задана строка: нужен `line` или `lines`' };
   }
 
-  const result = await ctx.debug.setBreakpoints(file, numbers.map((line) => ({ line })));
+  const result = await ctx.debug.setBreakpoints(
+    file,
+    numbers.map((line) => ({ line })),
+  );
   const root = ctx.workspace.rootPath();
   const target = relativePath(file, root);
   const verified = result.filter((point) => point.verified).length;
   const lines = result.map((point) =>
-    point.verified
-      ? `  ${target}:${point.line} — стоит`
-      : `  ${target}:${point.line} — не подтверждена`,
+    point.verified ? `  ${target}:${point.line} — стоит` : `  ${target}:${point.line} — не подтверждена`,
   );
 
   return {
@@ -154,7 +154,13 @@ async function perform(ctx: ToolContext, args: Record<string, unknown>): Promise
     return { ok: false, summary: `Сессии нет: ${phase}`, detail: 'Сначала action start.' };
   }
 
-  const action = requireString(args, 'action').trim() as 'continue' | 'pause' | 'stepOver' | 'stepInto' | 'stepOut' | 'stop';
+  const action = requireString(args, 'action').trim() as
+    | 'continue'
+    | 'pause'
+    | 'stepOver'
+    | 'stepInto'
+    | 'stepOut'
+    | 'stop';
   const root = ctx.workspace.rootPath();
 
   switch (action) {
@@ -182,7 +188,11 @@ async function perform(ctx: ToolContext, args: Record<string, unknown>): Promise
   // могут быть ещё от прошлой стоянки. Показываем, что есть, и честно говорим.
   const frames = ctx.debug.stack();
   if (frames.length === 0) {
-    return { ok: true, summary: `${action}: программа выполняется, стоек нет`, detail: 'action status покажет кадры, когда остановится.' };
+    return {
+      ok: true,
+      summary: `${action}: программа выполняется, стоек нет`,
+      detail: 'action status покажет кадры, когда остановится.',
+    };
   }
   return {
     ok: true,

@@ -53,10 +53,7 @@ export type SnippetVariables = Readonly<Record<string, string>>;
  * остаётся обычным долларом. Вложенных подстановок не разбираем: в наборе проекта их
  * нет, а поддерживать то, что не встречается, — держать непроверенный код.
  */
-export function expandSnippet(
-  body: string,
-  variables: SnippetVariables = {},
-): ExpandedSnippet {
+export function expandSnippet(body: string, variables: SnippetVariables = {}): ExpandedSnippet {
   let text = '';
   const tabstops: SnippetTabstop[] = [];
   const choices: SnippetChoice[] = [];
@@ -92,9 +89,7 @@ export function expandSnippet(
       const pipe = /^(\d+)\|([\s\S]*)\|$/.exec(inner);
       if (pipe) {
         const index = Number.parseInt(pipe[1] ?? '', 10);
-        const options = (pipe[2] ?? '')
-          .split(',')
-          .map((option) => option.replace(/\\,/g, ',').trim());
+        const options = (pipe[2] ?? '').split(',').map((option) => option.replace(/\\,/g, ',').trim());
         appendChoice(index, options);
         i = close + 1;
         continue;

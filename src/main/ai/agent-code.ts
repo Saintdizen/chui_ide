@@ -222,9 +222,7 @@ async function snippetsAnswer(
     summary: `фрагменты по «${query}»: ${picked.length} из ${candidates.length}`,
     detail:
       `Фрагменты под задачу — от лучшего к худшему. ` +
-      (found.length > 0
-        ? `Объявлений от сервера ${found.length}, `
-        : 'Языкового сервера нет — искал по тексту, ') +
+      (found.length > 0 ? `Объявлений от сервера ${found.length}, ` : 'Языкового сервера нет — искал по тексту, ') +
       `тел собрано ${candidates.length}.\n\n` +
       body +
       '\nПолное объявление — read с startLine/endLine по номеру строки.',

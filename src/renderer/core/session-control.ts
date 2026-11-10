@@ -4,19 +4,19 @@ import type {
   SessionState,
   UnsavedBuffer,
   WorkspaceInfo,
-} from "../../shared/api";
-import { sanitizeMacroSteps } from "../editor/input/macro";
-import { selectUnsavedBuffers } from "../../shared/session";
-import type { BookmarkRecord } from "../../shared/bookmarks";
+} from '../../shared/api';
+import { sanitizeMacroSteps } from '../editor/input/macro';
+import { selectUnsavedBuffers } from '../../shared/session';
+import type { BookmarkRecord } from '../../shared/bookmarks';
 import type { NotesState } from '../../shared/notes';
-import type { FileLabelRecord } from "../../shared/file-labels";
-import type { WorkspaceRoot } from "../../shared/workspace-roots";
-import type { DockView } from "../ui/dock";
-import type { DebugController } from "./debug";
-import type { DocumentStore } from "./document-store";
-import type { EditorApi } from "./editor-api";
-import type { OpenEditors } from "./open-editors";
-import type { RpcClient } from "./rpc";
+import type { FileLabelRecord } from '../../shared/file-labels';
+import type { WorkspaceRoot } from '../../shared/workspace-roots';
+import type { DockView } from '../ui/dock';
+import type { DebugController } from './debug';
+import type { DocumentStore } from './document-store';
+import type { EditorApi } from './editor-api';
+import type { OpenEditors } from './open-editors';
+import type { RpcClient } from './rpc';
 
 /** Проводник в той части, что нужна сессии: какие папки раскрыты и что закреплено. */
 export interface ExpandedTree {
@@ -89,9 +89,9 @@ export interface SessionDeps {
     restore(cwd: readonly string[], active: number): Promise<void>;
   };
   /** Группа вкладок на экране — чтобы сессия её записала (читается при сохранении). */
-  tabGroup?: () => "editor" | "terminal";
+  tabGroup?: () => 'editor' | 'terminal';
   /** Вернуть группу прошлой сессии: показать терминал вместо редактора (только вид). */
-  restoreTabGroup?: (group: "editor" | "terminal") => void;
+  restoreTabGroup?: (group: 'editor' | 'terminal') => void;
   workspace: WorkspaceRoots;
   dock: DockView;
   debugPanel: WatchPanel;
@@ -137,18 +137,7 @@ const DEEP_SAVE_DEBOUNCE_MS = 2000;
  * восстановить место при открытии проекта и попросить сохранить при изменении.
  */
 export function createSessionControl(deps: SessionDeps): SessionControl {
-  const {
-    rpc,
-    documents,
-    openEditors,
-    editors,
-    debug,
-    explorer,
-    workspace,
-    dock,
-    debugPanel,
-    layout,
-  } = deps;
+  const { rpc, documents, openEditors, editors, debug, explorer, workspace, dock, debugPanel, layout } = deps;
   /** Вкладки терминала без доступа к нему нет: тогда это поле сессии просто не пишется. */
   const terminal = deps.terminalTabs;
 
@@ -201,8 +190,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     debug.restoreBreakpoints([...byPath.entries()]);
     // Значки рисует редактор: карту держит он, а состояние — контроллер. Файлы
     // значки получат сразу, даже не открытые: модель появится — отрисуется по карте.
-    for (const [path, list] of debug.allBreakpoints())
-      editors.setBreakpoints(path, list);
+    for (const [path, list] of debug.allBreakpoints()) editors.setBreakpoints(path, list);
   };
 
   /**
@@ -213,9 +201,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
    * Возвращает пути, которые действительно получили текст: по ним видно, какие
    * вкладки надо показать, если их нет в списке открытых.
    */
-  const restoreUnsaved = async (
-    buffers: readonly UnsavedBuffer[],
-  ): Promise<string[]> => {
+  const restoreUnsaved = async (buffers: readonly UnsavedBuffer[]): Promise<string[]> => {
     const restored: string[] = [];
     for (const item of buffers) {
       try {
@@ -233,7 +219,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       // свою работу глазами. Восстановленный буфер — это «дочитал до этого места».
       // Место последней правки берём у документа: он помнит его с момента правки.
       const lastEdit = document.lastEdit;
-      if (document.setText(item.text, "programmatic")) restored.push(item.path);
+      if (document.setText(item.text, 'programmatic')) restored.push(item.path);
       else if (document.dirty) restored.push(item.path);
       if (lastEdit) editors.restoreCursorPositions({ [item.path]: lastEdit });
     }
@@ -255,9 +241,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     // Несохранённые правки — часть рабочего места: без них перезапуск (и любое
     // закрытие окна) терял бы работу, которую человек ещё не записал.
     const unsaved = selectUnsavedBuffers(
-      documents
-        .dirty()
-        .map((document) => ({ path: document.path, text: document.value })),
+      documents.dirty().map((document) => ({ path: document.path, text: document.value })),
     );
     // Записанный макрос — тоже часть рабочего места: его повторяют и после перезапуска.
     const macro = editors.macroSteps();
@@ -269,14 +253,10 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
       // Порядок использования — отдельно от полосы: `Ctrl+Tab` после перезапуска должен
       // вести туда же, куда вёл до него.
-      ...(openEditors.recent.length > 0
-        ? { mru: [...openEditors.recent] }
-        : {}),
+      ...(openEditors.recent.length > 0 ? { mru: [...openEditors.recent] } : {}),
       expanded: explorer.expandedPaths(),
       // Где стояла прокрутка дерева. Ноль не пишем: свежий проект начинается сверху.
-      ...(explorer.scrollTop() > 0
-        ? { explorerScroll: explorer.scrollTop() }
-        : {}),
+      ...(explorer.scrollTop() > 0 ? { explorerScroll: explorer.scrollTop() } : {}),
       pinned: explorer.pinnedPaths(),
       ...(explorer.labels().length > 0 ? { labels: explorer.labels() } : {}),
       // Заметки пишем только когда они есть: пустой блок в файле сессии —
@@ -287,9 +267,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       // и человек возвращается к тому же. Оболочки живут только в текущем окне, поэтому
       // пишем каталоги, а восстанавливаем сессии заново.
       // Группа вкладок: фиксируем только терминал — «редактор» и есть умолчание.
-      ...(deps.tabGroup && deps.tabGroup() === "terminal"
-        ? { activeTabGroup: "terminal" as const }
-        : {}),
+      ...(deps.tabGroup && deps.tabGroup() === 'terminal' ? { activeTabGroup: 'terminal' as const } : {}),
       ...(terminal && terminal.state().cwd.length > 0
         ? {
             terminalTabs: terminal.state().cwd,
@@ -302,9 +280,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       // пустые не пишем, чтобы файл не разрастался полями-пустышками.
       ...(Object.keys(options).length > 0 ? { debugLaunch: options } : {}),
       ...(watch.length > 0 ? { debugWatch: watch } : {}),
-      ...(exceptions.uncaught || exceptions.caught
-        ? { debugExceptions: exceptions }
-        : {}),
+      ...(exceptions.uncaught || exceptions.caught ? { debugExceptions: exceptions } : {}),
       ...(breakpoints.length > 0 ? { breakpoints } : {}),
       // Закладки — тоже рабочее место: пустые не пишем, чтобы файл не пух полями-пустышками.
       ...(bookmarks.length > 0 ? { bookmarks } : {}),
@@ -323,9 +299,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
   const persist = (): void => {
     if (!root || restoring) return;
     // не сохранилось — не повод мешать работе
-    void rpc
-      .request("session.save", { root, state: capture() })
-      .catch(() => undefined);
+    void rpc.request('session.save', { root, state: capture() }).catch(() => undefined);
   };
 
   /**
@@ -362,7 +336,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     restoring = true;
     try {
       openEditors.closeAll();
-      const state = await rpc.request("session.load", { root: target });
+      const state = await rpc.request('session.load', { root: target });
 
       // Макрос из прошлой сессии: повтор доступен сразу, без новой записи.
       editors.restoreMacro(sanitizeMacroSteps(state.macro));
@@ -420,8 +394,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       // Параметры запуска, наблюдение и точки останова — из прошлой сессии проекта.
       deps.setDebugOptions(state.debugLaunch ?? {});
       debugPanel.setWatch(state.debugWatch ?? []);
-      if (state.debugExceptions)
-        void debug.setExceptionFilters(state.debugExceptions);
+      if (state.debugExceptions) void debug.setExceptionFilters(state.debugExceptions);
       restoreBreakpoints(state.breakpoints ?? []);
       // Закладки: список восстанавливает модель, а редактор рисует значки по её событию.
       deps.bookmarks.restore(state.bookmarks ?? []);
@@ -441,8 +414,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
         void terminal.restore(state.terminalTabs, state.terminalActive ?? 0);
       }
       // Группа — последней: восстановление вкладок терминала само делает его активным.
-      if (state.activeTabGroup === "terminal")
-        deps.restoreTabGroup?.("terminal");
+      if (state.activeTabGroup === 'terminal') deps.restoreTabGroup?.('terminal');
     } catch {
       // повреждённый файл сессии не должен мешать — начинаем с чистого места
     } finally {

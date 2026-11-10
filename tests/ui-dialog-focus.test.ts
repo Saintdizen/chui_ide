@@ -61,7 +61,10 @@ describe('оверлеи объявлены диалогами', () => {
   });
 
   it('символы проекта', () => {
-    const picker = createSymbolPicker({ rpc: { request: vi.fn(async () => []) } as never, openSymbol: vi.fn() } as never);
+    const picker = createSymbolPicker({
+      rpc: { request: vi.fn(async () => []) } as never,
+      openSymbol: vi.fn(),
+    } as never);
     asDialog(picker.element as unknown as HTMLElement, 'Символы проекта');
   });
 });
@@ -71,7 +74,10 @@ describe('фокус возвращается тому, у кого его вз�
     const button = ownerButton();
     button.focus();
 
-    const picker = createSymbolPicker({ rpc: { request: vi.fn(async () => []) } as never, openSymbol: vi.fn() } as never);
+    const picker = createSymbolPicker({
+      rpc: { request: vi.fn(async () => []) } as never,
+      openSymbol: vi.fn(),
+    } as never);
     document.body.append(picker.element as unknown as HTMLElement);
 
     picker.open();

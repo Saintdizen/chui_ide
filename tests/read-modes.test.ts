@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  importsBlock,
-  indentationTree,
-  readModeArg,
-  treeMaxLines,
-  treeOffset,
-} from '../src/main/ai/agent-read-modes';
+import { importsBlock, indentationTree, readModeArg, treeMaxLines, treeOffset } from '../src/main/ai/agent-read-modes';
 
 const TS_SAMPLE = [
   "import { a } from './a';",
@@ -90,10 +84,7 @@ describe('дерево по отступам', () => {
   });
 
   it('режет по maxLines и offset', () => {
-    const lines = [
-      'a() {', '  b() {', '    c();', '  }', '}',
-      'd() {', '  e() {', '    f();', '  }', '}',
-    ];
+    const lines = ['a() {', '  b() {', '    c();', '  }', '}', 'd() {', '  e() {', '    f();', '  }', '}'];
     const full = indentationTree(lines);
     expect(full.total).toBe(2);
     // Вложенные `b()`/`e()` — тела, а не уровни: уровней всего два.
@@ -122,12 +113,7 @@ describe('импорты', () => {
   });
 
   it('видит require, use и #include', () => {
-    const block = importsBlock([
-      "const fs = require('fs');",
-      'use strict;',
-      '#include <stdio.h>',
-      'int main() {',
-    ]);
+    const block = importsBlock(["const fs = require('fs');", 'use strict;', '#include <stdio.h>', 'int main() {']);
     expect(block.count).toBe(3);
   });
 });

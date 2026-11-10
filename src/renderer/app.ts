@@ -6,129 +6,101 @@ import {
   type Settings,
   type SettingsPatch,
   type WorkspaceChangedPayload,
-} from "../shared/api";
-import { mergeDeep, type ProjectSettings } from "../shared/project-config";
-import { aiPanelPlan } from "../shared/ai-panel";
-import { settingsPlan } from "../shared/settings-plan";
-import { sanitizeEditorFontSize } from "../shared/editor-font-scale";
-import {
-  lspChipFor,
-  NO_LSP_STATUS,
-  type LspFailureStatus,
-  type LspStatus,
-} from "../shared/lsp-status";
-import {
-  symbolIndexChip,
-  type SymbolIndexStatus,
-} from "../shared/symbol-index";
-import { createSymbolPoller } from "./core/symbol-poll";
-import { perf } from "../shared/perf";
-import type { FileOperation } from "../shared/lsp-workspace-edit";
-import type { LspProgress } from "../shared/lsp-progress";
-import type { LspProjectDiagnosticsPayload } from "../shared/api";
-import type { NotesState } from "../shared/notes";
-import { createLspProgressController } from "./core/lsp-progress";
-import { createProjectDiagnosticsApplier } from "./core/project-diagnostics";
-import { createSpellServerCheck } from "./core/spell-server-check";
-import { PROJECT_STAGE_EVENT } from "../shared/project-analysis";
-import type { ProjectStageEvent } from "../shared/project-analysis";
-import {
-  snippetsFromCodeSnippets,
-  languageOfSnippetFile,
-} from "../shared/code-snippets";
-import { DEFAULT_SNIPPETS, type Snippet } from "../shared/snippets";
-import { revertPrompt } from "../shared/unsaved";
-import { AutoSave } from "./core/auto-save";
-import { createBlameController } from "./core/blame";
-import { createChangeGutterController } from "./core/change-gutter";
-import { CommandRegistry, type CommandDescriptor } from "./core/commands";
-import { createDiskConflict } from "./core/disk-conflict";
-import { PROJECT_TYPES_OWNER, ProjectCheck } from "./core/project-check";
-import type { TextDocument } from "./core/document";
-import { uriToPath } from "./core/document";
-import { DocumentStore } from "./core/document-store";
-import { EditService } from "./core/edits";
-import { renameBySearchFallback } from "./core/rename-by-search";
-import { HostService } from "./core/host";
-import { EditorWorkspace } from "./editor/host/editor-workspace";
-import { DocumentRegistry } from "./editor/host/document-registry";
-import { LspFeatures } from "./editor/host/lsp-features";
-import { GitModel } from "./core/git-model";
-import { ReviewModel } from "./core/review-model";
-import { registerPathCommands } from "./core/path-commands";
-import { registerCompareCommands } from "./core/compare-commands";
-import { registerSearchCommands } from "./core/search-commands";
-import { registerFormatCommands } from "./core/format-commands";
-import { registerMacroCommands } from "./core/macro-commands";
-import { registerSettingsCommands } from "./core/settings-commands";
-import { registerLanguageCommands } from "./core/language-commands";
-import {
-  registerGitCommands,
-  registerSymbolLists,
-} from "./core/git-registrations";
-import { createEditorFixes } from "./core/editor-fixes";
-import { createGutterMenus } from "./core/gutter-menus";
-import { BookmarkModel } from "./core/bookmarks";
-import { editorContextMenuPlan } from "./core/editor-menu";
-import { SpellCheck } from "./core/spellcheck";
-import { ProjectPackagesModel } from "./core/project-packages";
-import { parseCoverageJson } from "../shared/coverage-json";
-import { parseNodeCoverage } from "../shared/node-coverage";
-import { diagnoseHighlighting, refreshHighlight } from "./core/highlight";
-import { KeybindingService } from "./core/keybindings";
-import { menuAccelerators } from "../shared/app-menu";
-import {
-  shortcutSources,
-  tooltipFor,
-  type ShortcutSource,
-} from "./core/shortcut-hints";
-import { menuComboOverrides } from "../shared/keybindings";
-import { DEFAULT_KEYBINDINGS } from "./core/default-keybindings";
-import { attachDoubleShift } from "./core/double-shift";
-import {
-  languageFromPath,
-  languageLabel,
-  languageIndent,
-} from "./core/languages";
-import { setFileAssociations } from "../shared/languages";
-import { normalizeBrowserUrl, isLocalUrl } from "../shared/browser";
-import { imageFormatLabel, isImagePath } from "../shared/images";
-import { fileUrlFor, isPdfPath, pdfTabTitle } from "../shared/pdf";
-import {
-  isOfficePath,
-  officeFormatLabel as officeFormatChip,
-} from "../shared/office";
-import { BrowserTabs } from "./core/browser-tabs";
-import { ImportChecker } from "./core/import-check";
-import { LspClient } from "./core/lsp";
-import { OpenEditors } from "./core/open-editors";
-import { AutoPanelLayout, MIN_TRUSTED_WIDTH } from "./core/panel-layout";
-import { ProjectToolsModel } from "./core/project-tools";
-import { createPreloadPlanner } from "./core/env-preload";
-import { hasEntries, splitSettingsPatch } from "./core/settings-patch";
-import { projectSymbolAnswer, toProjectSymbols } from "./core/project-symbols";
-import { registerFileCreateCommands } from "./core/file-create-commands";
-import { registerFileMutationCommands } from "./core/file-mutation-commands";
-import { registerDebugCommands } from "./core/debug-commands";
-import { registerAiCommands } from "./core/ai-commands";
-import { registerViewCommands, type ZenSnapshot } from "./core/view-commands";
-import { registerAppViewCommands } from "./core/app-view-commands";
-import { registerEditorFixCommands } from "./core/editor-fix-commands";
-import {
-  registerEditorModeCommands,
-  type EditorModeName,
-} from "./core/editor-mode-commands";
-import { registerFileSaveCommands } from "./core/file-save-commands";
-import { registerFileTabCommands } from "./core/file-tab-commands";
+} from '../shared/api';
+import { mergeDeep, type ProjectSettings } from '../shared/project-config';
+import { aiPanelPlan } from '../shared/ai-panel';
+import { settingsPlan } from '../shared/settings-plan';
+import { sanitizeEditorFontSize } from '../shared/editor-font-scale';
+import { lspChipFor, NO_LSP_STATUS, type LspFailureStatus, type LspStatus } from '../shared/lsp-status';
+import { symbolIndexChip, type SymbolIndexStatus } from '../shared/symbol-index';
+import { createSymbolPoller } from './core/symbol-poll';
+import { perf } from '../shared/perf';
+import type { FileOperation } from '../shared/lsp-workspace-edit';
+import type { LspProgress } from '../shared/lsp-progress';
+import type { LspProjectDiagnosticsPayload } from '../shared/api';
+import type { NotesState } from '../shared/notes';
+import { createLspProgressController } from './core/lsp-progress';
+import { createProjectDiagnosticsApplier } from './core/project-diagnostics';
+import { createSpellServerCheck } from './core/spell-server-check';
+import { PROJECT_STAGE_EVENT } from '../shared/project-analysis';
+import type { ProjectStageEvent } from '../shared/project-analysis';
+import { snippetsFromCodeSnippets, languageOfSnippetFile } from '../shared/code-snippets';
+import { DEFAULT_SNIPPETS, type Snippet } from '../shared/snippets';
+import { revertPrompt } from '../shared/unsaved';
+import { AutoSave } from './core/auto-save';
+import { createBlameController } from './core/blame';
+import { createChangeGutterController } from './core/change-gutter';
+import { CommandRegistry, type CommandDescriptor } from './core/commands';
+import { createDiskConflict } from './core/disk-conflict';
+import { PROJECT_TYPES_OWNER, ProjectCheck } from './core/project-check';
+import type { TextDocument } from './core/document';
+import { uriToPath } from './core/document';
+import { DocumentStore } from './core/document-store';
+import { EditService } from './core/edits';
+import { renameBySearchFallback } from './core/rename-by-search';
+import { HostService } from './core/host';
+import { EditorWorkspace } from './editor/host/editor-workspace';
+import { DocumentRegistry } from './editor/host/document-registry';
+import { LspFeatures } from './editor/host/lsp-features';
+import { GitModel } from './core/git-model';
+import { ReviewModel } from './core/review-model';
+import { registerPathCommands } from './core/path-commands';
+import { registerCompareCommands } from './core/compare-commands';
+import { registerSearchCommands } from './core/search-commands';
+import { registerFormatCommands } from './core/format-commands';
+import { registerMacroCommands } from './core/macro-commands';
+import { registerSettingsCommands } from './core/settings-commands';
+import { registerLanguageCommands } from './core/language-commands';
+import { registerGitCommands, registerSymbolLists } from './core/git-registrations';
+import { createEditorFixes } from './core/editor-fixes';
+import { createGutterMenus } from './core/gutter-menus';
+import { BookmarkModel } from './core/bookmarks';
+import { editorContextMenuPlan } from './core/editor-menu';
+import { SpellCheck } from './core/spellcheck';
+import { ProjectPackagesModel } from './core/project-packages';
+import { parseCoverageJson } from '../shared/coverage-json';
+import { parseNodeCoverage } from '../shared/node-coverage';
+import { diagnoseHighlighting, refreshHighlight } from './core/highlight';
+import { KeybindingService } from './core/keybindings';
+import { menuAccelerators } from '../shared/app-menu';
+import { shortcutSources, tooltipFor, type ShortcutSource } from './core/shortcut-hints';
+import { menuComboOverrides } from '../shared/keybindings';
+import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
+import { attachDoubleShift } from './core/double-shift';
+import { languageFromPath, languageLabel, languageIndent } from './core/languages';
+import { setFileAssociations } from '../shared/languages';
+import { normalizeBrowserUrl, isLocalUrl } from '../shared/browser';
+import { imageFormatLabel, isImagePath } from '../shared/images';
+import { fileUrlFor, isPdfPath, pdfTabTitle } from '../shared/pdf';
+import { isOfficePath, officeFormatLabel as officeFormatChip } from '../shared/office';
+import { BrowserTabs } from './core/browser-tabs';
+import { ImportChecker } from './core/import-check';
+import { LspClient } from './core/lsp';
+import { OpenEditors } from './core/open-editors';
+import { AutoPanelLayout, MIN_TRUSTED_WIDTH } from './core/panel-layout';
+import { ProjectToolsModel } from './core/project-tools';
+import { createPreloadPlanner } from './core/env-preload';
+import { hasEntries, splitSettingsPatch } from './core/settings-patch';
+import { projectSymbolAnswer, toProjectSymbols } from './core/project-symbols';
+import { registerFileCreateCommands } from './core/file-create-commands';
+import { registerFileMutationCommands } from './core/file-mutation-commands';
+import { registerDebugCommands } from './core/debug-commands';
+import { registerAiCommands } from './core/ai-commands';
+import { registerViewCommands, type ZenSnapshot } from './core/view-commands';
+import { registerAppViewCommands } from './core/app-view-commands';
+import { registerEditorFixCommands } from './core/editor-fix-commands';
+import { registerEditorModeCommands, type EditorModeName } from './core/editor-mode-commands';
+import { registerFileSaveCommands } from './core/file-save-commands';
+import { registerFileTabCommands } from './core/file-tab-commands';
 import { registerKeymapImportCommands } from './core/keymap-import-command';
-import { registerExplorerCommands } from "./core/explorer-commands";
-import { registerRunCommands } from "./core/run-commands";
-import { registerPythonCommands } from "./core/python-commands";
-import { DebugController, frameForHover } from "./core/debug";
-import { resolveInlineValues } from "./core/inline-values";
-import { RpcClient } from "./core/rpc";
-import { resolveExplorerSettings } from "../shared/explorer-settings";
-import { createSessionControl } from "./core/session-control";
+import { registerExplorerCommands } from './core/explorer-commands';
+import { registerRunCommands } from './core/run-commands';
+import { registerPythonCommands } from './core/python-commands';
+import { DebugController, frameForHover } from './core/debug';
+import { resolveInlineValues } from './core/inline-values';
+import { RpcClient } from './core/rpc';
+import { resolveExplorerSettings } from '../shared/explorer-settings';
+import { createSessionControl } from './core/session-control';
 import {
   collectRunTargets,
   entryLine,
@@ -137,149 +109,125 @@ import {
   type RunTarget,
   type RunnableFile,
   testTargetOf,
-} from "./core/run-config";
-import type { ProjectScan } from "../shared/project-scan";
-import {
-  detectNodeTestRunner,
-  type NodeTestRunner,
-} from "../shared/node-tests";
-import { formatDocument, type FormatDeps } from "./core/format-commands";
-import { createFileWrite } from "./core/file-write";
-import { createInstallActions } from "./core/install-actions";
-import { isNodeLanguage } from "../shared/languages";
-import { indentFoldRanges, mergeFoldRanges } from "../shared/fold-ranges";
-import { featureOff } from "../shared/lsp-visibility";
-import { FORMATTER_LABELS, normalizeFormatterChoice } from "../shared/formatter";
-import { createChangedLinesCache } from "../shared/changed-lines";
-import { surroundOptions } from "./editor/input/surround";
-import { semanticFoldRanges } from "./editor/highlight/folds";
-import { languageGrammar } from "./editor/highlight/lazy-registry";
-import { toWorkspaceFileEdits } from "../shared/lsp-workspace-edit";
-import { applySaveEdits } from "../shared/save-edits";
-import { applyTextEdits, fromOffset } from "../shared/edits";
-import {
-  isAbsolutePath,
-  isInsidePath,
-  joinPath,
-  pathAfter,
-  separatorOf,
-  splitPath,
-} from "../shared/paths";
-import { ThemeService } from "./core/theme-service";
-import { WindowFrame } from "./core/window-frame";
-import { WorkspaceModel } from "./core/workspace-model";
-import { showContextMenu } from "./ui/context-menu";
-import { createBreadcrumbs } from "./ui/breadcrumbs";
-import { createChatPanel, type ChatView } from "./ui/chat";
-import { createAutomations } from "./core/automations";
-import { createDock } from "./ui/dock";
-import { createConflictView, toastKindFor } from "./ui/conflict-view";
-import { createDiffView } from "./ui/diff-view";
-import { basename, h, svgIcon, type IconName } from "./ui/dom";
-import { createEmptyState } from "./ui/empty-state";
-import { createImageView } from "./ui/image-view";
-import { createBrowserView } from "./ui/browser-view";
-import { createExplorer } from "./ui/explorer";
-import { createArtifactsBlock } from "./ui/artifacts-block";
-import { createRunArtifacts } from "./core/artifacts";
-import { mountProjectSelect } from "./ui/project-select";
-import { createLaunchOptionsModal } from "./ui/launch-options-modal";
-import { createLayout } from "./ui/layout";
-import { createLspLogPanel } from "./ui/lsp-log";
-import { createLspPopover } from "./ui/lsp-popover";
-import { createMarkdownPreview, isMarkdownPath } from "./ui/markdown-preview";
-import { createDocView } from "./ui/doc-view";
-import { createNotebookPanel } from "./ui/notebook-panel";
-import { logoMark } from "./ui/logo";
-import { createNodeEnvPopover } from "./ui/node-env-popover";
-import { createOutline } from "./ui/outline";
-import { createProblemPanel } from "./ui/problem-panel";
-import { problemBadgeText } from "../shared/problem-list";
-import { TODO_QUERY, toTodoItems } from "../shared/todo-list";
-import { createPalette } from "./ui/palette";
-import { createRecentCommands } from "./core/recent-commands";
-import { createPythonEnvPopover } from "./ui/python-env-popover";
-import { createLazyPopover } from "./ui/lazy-popover";
-import type { SearchHit } from "../shared/api";
-import {
-  flattenFileSymbols,
-  filterSymbols,
-  type ProjectSymbol,
-} from "../shared/lsp-symbols";
-import {
-  combineMeaning,
-  meaningRegex,
-  selectPlaces,
-} from "../shared/meaning-search";
-import { createMeaningSearch } from "./ui/meaning-search";
-import { createQuickOpen } from "./ui/quick-open";
-import { createSymbolPicker } from "./ui/symbol-picker";
-import { closePopupMenu, showPopupMenu } from "./ui/popup-menu";
-import { createPromptModal } from "./ui/prompt-modal";
-import { createRunButton } from "./ui/run-button";
-import { createSearchView } from "./ui/search";
-import { createSourceControl } from "./ui/source-control";
-import { createRootSettingsModal } from "./ui/root-settings-modal";
-import { createRemoteFileModal } from "./ui/remote-file-modal";
-import { createStashModal } from "./ui/stash-modal";
-import { createRebaseModal } from "./ui/rebase-modal";
-import { createRefDiffModal } from "./ui/ref-diff-modal";
-import { createFolderCompareModal } from "./ui/folder-compare-modal";
-import { createBisectModal } from "./ui/bisect-modal";
-import { createWorktreeModal } from "./ui/worktree-modal";
-import { createLfsModal } from "./ui/lfs-modal";
-import { createSparseModal } from "./ui/sparse-modal";
-import { createHistoryModal } from "./ui/history-modal";
-import { createBookmarksModal } from "./ui/bookmarks-modal";
-import { createSurroundModal } from "./ui/surround-modal";
-import { createRegexTester } from "./ui/regex-tester";
-import { createStructuralSearch } from "./ui/structural-search";
-import { createIdentityModal } from "./ui/identity-modal";
-import { createTelemetryModal } from "./ui/telemetry-modal";
-import { createForgeModal } from "./ui/forge-modal";
-import { createIssuesModal } from "./ui/issues-modal";
-import { createPipelinesModal } from "./ui/pipelines-modal";
-import { createNotificationsModal } from "./ui/notifications-modal";
-import { createTextModal } from "./ui/text-modal";
-import { createStatusBar } from "./ui/statusbar";
+} from './core/run-config';
+import type { ProjectScan } from '../shared/project-scan';
+import { detectNodeTestRunner, type NodeTestRunner } from '../shared/node-tests';
+import { formatDocument, type FormatDeps } from './core/format-commands';
+import { createFileWrite } from './core/file-write';
+import { createInstallActions } from './core/install-actions';
+import { isNodeLanguage } from '../shared/languages';
+import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
+import { featureOff } from '../shared/lsp-visibility';
+import { FORMATTER_LABELS, normalizeFormatterChoice } from '../shared/formatter';
+import { createChangedLinesCache } from '../shared/changed-lines';
+import { surroundOptions } from './editor/input/surround';
+import { semanticFoldRanges } from './editor/highlight/folds';
+import { languageGrammar } from './editor/highlight/lazy-registry';
+import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
+import { applySaveEdits } from '../shared/save-edits';
+import { applyTextEdits, fromOffset } from '../shared/edits';
+import { isAbsolutePath, isInsidePath, joinPath, pathAfter, separatorOf, splitPath } from '../shared/paths';
+import { ThemeService } from './core/theme-service';
+import { WindowFrame } from './core/window-frame';
+import { WorkspaceModel } from './core/workspace-model';
+import { showContextMenu } from './ui/context-menu';
+import { createBreadcrumbs } from './ui/breadcrumbs';
+import { createChatPanel, type ChatView } from './ui/chat';
+import { createAutomations } from './core/automations';
+import { createDock } from './ui/dock';
+import { createConflictView, toastKindFor } from './ui/conflict-view';
+import { createDiffView } from './ui/diff-view';
+import { basename, h, svgIcon, type IconName } from './ui/dom';
+import { createEmptyState } from './ui/empty-state';
+import { createImageView } from './ui/image-view';
+import { createBrowserView } from './ui/browser-view';
+import { createExplorer } from './ui/explorer';
+import { createArtifactsBlock } from './ui/artifacts-block';
+import { createRunArtifacts } from './core/artifacts';
+import { mountProjectSelect } from './ui/project-select';
+import { createLaunchOptionsModal } from './ui/launch-options-modal';
+import { createLayout } from './ui/layout';
+import { createLspLogPanel } from './ui/lsp-log';
+import { createLspPopover } from './ui/lsp-popover';
+import { createMarkdownPreview, isMarkdownPath } from './ui/markdown-preview';
+import { createDocView } from './ui/doc-view';
+import { createNotebookPanel } from './ui/notebook-panel';
+import { logoMark } from './ui/logo';
+import { createNodeEnvPopover } from './ui/node-env-popover';
+import { createOutline } from './ui/outline';
+import { createProblemPanel } from './ui/problem-panel';
+import { problemBadgeText } from '../shared/problem-list';
+import { TODO_QUERY, toTodoItems } from '../shared/todo-list';
+import { createPalette } from './ui/palette';
+import { createRecentCommands } from './core/recent-commands';
+import { createPythonEnvPopover } from './ui/python-env-popover';
+import { createLazyPopover } from './ui/lazy-popover';
+import type { SearchHit } from '../shared/api';
+import { flattenFileSymbols, filterSymbols, type ProjectSymbol } from '../shared/lsp-symbols';
+import { combineMeaning, meaningRegex, selectPlaces } from '../shared/meaning-search';
+import { createMeaningSearch } from './ui/meaning-search';
+import { createQuickOpen } from './ui/quick-open';
+import { createSymbolPicker } from './ui/symbol-picker';
+import { closePopupMenu, showPopupMenu } from './ui/popup-menu';
+import { createPromptModal } from './ui/prompt-modal';
+import { createRunButton } from './ui/run-button';
+import { createSearchView } from './ui/search';
+import { createSourceControl } from './ui/source-control';
+import { createRootSettingsModal } from './ui/root-settings-modal';
+import { createRemoteFileModal } from './ui/remote-file-modal';
+import { createStashModal } from './ui/stash-modal';
+import { createRebaseModal } from './ui/rebase-modal';
+import { createRefDiffModal } from './ui/ref-diff-modal';
+import { createFolderCompareModal } from './ui/folder-compare-modal';
+import { createBisectModal } from './ui/bisect-modal';
+import { createWorktreeModal } from './ui/worktree-modal';
+import { createLfsModal } from './ui/lfs-modal';
+import { createSparseModal } from './ui/sparse-modal';
+import { createHistoryModal } from './ui/history-modal';
+import { createBookmarksModal } from './ui/bookmarks-modal';
+import { createSurroundModal } from './ui/surround-modal';
+import { createRegexTester } from './ui/regex-tester';
+import { createStructuralSearch } from './ui/structural-search';
+import { createIdentityModal } from './ui/identity-modal';
+import { createTelemetryModal } from './ui/telemetry-modal';
+import { createForgeModal } from './ui/forge-modal';
+import { createIssuesModal } from './ui/issues-modal';
+import { createPipelinesModal } from './ui/pipelines-modal';
+import { createNotificationsModal } from './ui/notifications-modal';
+import { createTextModal } from './ui/text-modal';
+import { createStatusBar } from './ui/statusbar';
 import {
   indentAfterChoice,
   isStatusChoice,
   statusChoices,
   statusLanguageLabel,
   type StatusChoiceKind,
-} from "./core/status-choices";
-import { needsLspRefresh, statusPatch } from "./core/status-state";
-import type { SectionId, SettingsModalView } from "./ui/settings-modal";
-import { createRecentFiles } from "./core/recent-files";
-import { activeTabId, createTabs, type PagesTabSource } from "./ui/tabs";
-import { createTerminalPanel } from "./ui/terminal";
-import { createPortsPanel } from "./ui/ports-panel";
-import { createDebugPanel } from "./ui/debug-panel";
-import { createTestPanel } from "./ui/test-panel";
-import { createTodoPanel } from "./ui/todo-panel";
-import { createNoticeLog } from "./ui/notice-log";
-import { showToast } from "./ui/toast";
-import { installTooltips } from "./ui/tooltip";
-import { createVenvModal } from "./ui/venv-modal";
-import { createLspServers } from "./core/lsp-servers";
-import { editorActionCommands } from "./core/editor-actions";
-import { outcomeOfFailure } from "./core/file-operations";
-import { editorSurfacePlan } from "./core/editor-surface";
-import {
-  testMarkerSignature as testMarkerSignatureOf,
-  testMarkersFor,
-} from "./core/test-markers";
-import { errorText } from "./core/file-errors";
+} from './core/status-choices';
+import { needsLspRefresh, statusPatch } from './core/status-state';
+import type { SectionId, SettingsModalView } from './ui/settings-modal';
+import { createRecentFiles } from './core/recent-files';
+import { activeTabId, createTabs, type PagesTabSource } from './ui/tabs';
+import { createTerminalPanel } from './ui/terminal';
+import { createPortsPanel } from './ui/ports-panel';
+import { createDebugPanel } from './ui/debug-panel';
+import { createTestPanel } from './ui/test-panel';
+import { createTodoPanel } from './ui/todo-panel';
+import { createNoticeLog } from './ui/notice-log';
+import { showToast } from './ui/toast';
+import { installTooltips } from './ui/tooltip';
+import { createVenvModal } from './ui/venv-modal';
+import { createLspServers } from './core/lsp-servers';
+import { editorActionCommands } from './core/editor-actions';
+import { outcomeOfFailure } from './core/file-operations';
+import { editorSurfacePlan } from './core/editor-surface';
+import { testMarkerSignature as testMarkerSignatureOf, testMarkersFor } from './core/test-markers';
+import { errorText } from './core/file-errors';
 
 /**
  * Точка сборки приложения: сервисы, команды, подписки.
  * Всё остальное — модули, которые друг о друге почти ничего не знают.
  */
-export async function startApplication(
-  mount: HTMLElement,
-  options: { probe?: boolean } = {},
-): Promise<void> {
+export async function startApplication(mount: HTMLElement, options: { probe?: boolean } = {}): Promise<void> {
   // Мост для проб — по просьбе снаружи (см. main.ts), а не по флагу сборки.
   const probeBridge = options.probe === true;
   // Подсказки — свои, вместо системных: ставятся один раз на всё окно и ловят
@@ -303,7 +251,7 @@ export async function startApplication(
   const packages = new ProjectPackagesModel(rpc, workspace);
 
   /** Какая группа вкладок была на экране — часть раскладки, а не полосы (см. ниже). */
-  let activeTabGroup: "editor" | "terminal" = "editor";
+  let activeTabGroup: 'editor' | 'terminal' = 'editor';
   const layout = createLayout(mount, { onChange: () => void persistLayout() });
 
   // `#codebase` в чате: сколько мест собираем и сколько тянем строк из текстового
@@ -361,7 +309,7 @@ export async function startApplication(
   layout.statusBarHost.appendChild(statusBar.element);
 
   // ОбщеIDE-настройки хранятся в userData; настройки проекта (.chui_ide) ложатся поверх.
-  let baseSettings = await rpc.request("settings.get");
+  let baseSettings = await rpc.request('settings.get');
   let projectSettings: ProjectSettings = {};
   /** Макет рабочей области проекта; `null` — своего нет, действует общий из userData. */
   let projectLayout: LayoutSettings | null = null;
@@ -375,8 +323,8 @@ export async function startApplication(
    */
   const applyUiScale = (scale: number): void => {
     const root = document.documentElement;
-    root.style.setProperty("--font_scale", String(scale));
-    root.style.setProperty("--density", String(scale));
+    root.style.setProperty('--font_scale', String(scale));
+    root.style.setProperty('--density', String(scale));
   };
   applyUiScale(settings.appearance.uiScale);
 
@@ -405,20 +353,15 @@ export async function startApplication(
   // Правка настроек: IDE-секции уходят в userData, проектные (editor/explorer/run/lsp) — в .chui_ide.
   async function saveSettingsPatch(value: SettingsPatch): Promise<Settings> {
     const root = workspace.root;
-    const { project: projectPatch, global: globalPatch } = splitSettingsPatch(
-      value as Record<string, unknown>,
-    );
+    const { project: projectPatch, global: globalPatch } = splitSettingsPatch(value as Record<string, unknown>);
     if (root && hasEntries(projectPatch)) {
-      projectSettings = await rpc.request("project.updateSettings", {
+      projectSettings = await rpc.request('project.updateSettings', {
         root,
         patch: projectPatch as ProjectSettings,
       });
     }
     if (hasEntries(globalPatch)) {
-      baseSettings = await rpc.request(
-        "settings.update",
-        globalPatch as SettingsPatch,
-      );
+      baseSettings = await rpc.request('settings.update', globalPatch as SettingsPatch);
     }
     const next = rebuildSettings();
     applySettings(next);
@@ -443,12 +386,10 @@ export async function startApplication(
     projectLayout = snapshot;
     // Без проекта (пустое окно) писать некуда — тогда запоминаем общий макет.
     if (!workspace.root) {
-      baseSettings = await rpc
-        .request("settings.update", { layout: snapshot })
-        .catch(() => baseSettings);
+      baseSettings = await rpc.request('settings.update', { layout: snapshot }).catch(() => baseSettings);
       return;
     }
-    await rpc.request("project.saveLayout", { root: workspace.root, layout: snapshot }).catch(() => null);
+    await rpc.request('project.saveLayout', { root: workspace.root, layout: snapshot }).catch(() => null);
   }
 
   /** Программное изменение макета не должно сохранять само себя. */
@@ -472,7 +413,7 @@ export async function startApplication(
       layout.setSidebarVisible(saved.sidebarVisible);
       layout.setRightVisible(saved.rightVisible);
       layout.setDockVisible(saved.dockVisible);
-    layout.setDockPosition(saved.dockPosition ?? 'bottom');
+      layout.setDockPosition(saved.dockPosition ?? 'bottom');
       layout.setEditorVisible(saved.editorVisible);
     });
   };
@@ -480,9 +421,9 @@ export async function startApplication(
   // При открытии проекта накладываем настройки из его `.chui_ide` поверх общих.
   async function loadProjectConfig(root: string): Promise<void> {
     const [config, savedLayout] = await Promise.all([
-      rpc.request("project.config", { root }).catch(() => null),
+      rpc.request('project.config', { root }).catch(() => null),
       // Своего макета может не быть — тогда `null` и остаётся общий.
-      rpc.request("project.layout", { root }).catch(() => null),
+      rpc.request('project.layout', { root }).catch(() => null),
     ]);
     projectSettings = config ?? {};
     projectLayout = savedLayout;
@@ -500,7 +441,7 @@ export async function startApplication(
 
   // Макет восстановлен из userData ещё до открытия проекта: панели сразу на месте.
   applyLayoutSettings(baseSettings.layout);
-  const info = await rpc.request("app.info");
+  const info = await rpc.request('app.info');
   // Версию приложения печатаем при старте: по ней видно, на чём воспроизводят проблему.
   console.info(
     `[chui] v${info.appVersion} · Electron ${info.electron} · Chromium ${info.chrome}`,
@@ -549,7 +490,7 @@ export async function startApplication(
   spell.setUserWords(settings.editor.spellWords);
   spell.setProjectWords(settings.editor.spellProjectWords ?? []);
   void rpc
-    .request("spell.dictionary")
+    .request('spell.dictionary')
     .then((dictionary) => spell.setDictionary(dictionary.words))
     .catch(() => undefined);
 
@@ -564,9 +505,7 @@ export async function startApplication(
    * поднимается или языка в нём нет.
    */
   const symbolsFromIndex = async (query: string) =>
-    toProjectSymbols(
-      await rpc.request("index.find", { query }).catch(() => []),
-    );
+    toProjectSymbols(await rpc.request('index.find', { query }).catch(() => []));
 
   /**
    * Подсказки из карты вместе с языковыми серверами — обычный ответ на запрос
@@ -574,8 +513,8 @@ export async function startApplication(
    */
   const symbolsFromProject = async (query: string) => {
     const [found, status] = await Promise.all([
-      rpc.request("lsp.symbols", { query }).catch(() => []),
-      rpc.request("index.status").catch(() => null),
+      rpc.request('lsp.symbols', { query }).catch(() => []),
+      rpc.request('index.status').catch(() => null),
     ]);
     // Карта не собрана — расширять нечем, и молчим: пустой ответ не должен
     // выглядеть как «в проекте ничего нет». Решение — в core/project-symbols.ts.
@@ -585,383 +524,338 @@ export async function startApplication(
   // Свои языки по имени файла: язык нужен сразу — подсветке, значкам, запуску.
   setFileAssociations(settings.editor.fileAssociations);
 
-  const editors = new EditorWorkspace(
-    layout.editorHost,
-    new DocumentRegistry(documents),
-    {
-      tabSize: settings.editor.tabSize,
-      insertSpaces: settings.editor.insertSpaces,
-      fontSize: settings.editor.fontSize,
-      lineHeight: settings.editor.lineHeight,
-      cursorStyle: settings.editor.cursorStyle,
-      cursorBlink: settings.editor.cursorBlink,
-      rulers: settings.editor.rulers,
-      whitespace: settings.editor.renderWhitespace,
-      // Клик по чипу в строке состояния листает режим — иначе выбор жил бы до
-      // первой смены кегля, которая пересобирает вид из настроек.
-      onWhitespaceChanged: (mode) => {
-        void saveSettingsPatch({ editor: { renderWhitespace: mode } }).catch(() => undefined);
-      },
-      minimap: settings.editor.minimap,
-      overview: settings.editor.overviewRuler,
-      wordWrap: settings.editor.wordWrap,
-      smoothScroll: settings.editor.smoothScroll,
-      hoverDelayMs: settings.editor.hoverDelayMs,
-      vimMode: settings.editor.vimMode,
-      // Смена режима Vim обновляет значок в строке состояния.
-      onVimModeChange: () => refreshStatus(),
-      // Подсветку выключил размер файла — строка состояния скажет почему и даст выход.
-      onHighlightStatus: () => refreshStatus(),
-      emacsMode: settings.editor.emacsMode,
-      tabMovesFocus: settings.editor.tabMovesFocus,
-      ligatures: settings.editor.fontLigatures,
-      // Ctrl+колесо: размер шрифта живёт в настройках, поэтому редактор только просит шаг.
-      onZoomFont: (step) => zoomFontByWheel(step),
-      // Живой геттер: настройку меняют в окне без пересоздания редактора.
-      emmetEnabled: () => settings.editor.emmet,
-      // Проверка орфографии: словарь общий, настройка — живой геттер.
-      spellcheck: spell,
-      spellcheckEnabled: () => settings.editor.spellcheck,
-      // Слово, добавленное в словарь. С открытым проектом `editor` целиком уходит
-      // в `.chui_ide/settings.json` (`splitSettingsPatch`), поэтому пишем свой список
-      // `spellProjectWords`: слово живёт с кодом, а не с машиной. Без проекта тот же
-      // список ляжет в общие настройки человека — читаем его оттуда же.
-      spellSaveWord: (word) => {
-        void saveSettingsPatch({
-          editor: { spellProjectWords: [...(settings.editor.spellProjectWords ?? []), word] },
-        }).catch(() => undefined);
-      },
-      snippets: () => [
-        // Сниппеты чужого проекта — первыми: триггер проекта важнее общего, он для
-        // этого проекта и написан. Затем пользовательские и встроенные.
-        ...projectSnippets(),
-        ...settings.editor.snippets,
-        ...DEFAULT_SNIPPETS,
-      ],
-      // Наведение от сервера: текст разметки в карточку. Языки из `lsp.hoverOff`
-      // молчат совсем: в JSON или CSV карточка закрывает данные, а объяснять
-      // там нечего — держим настройку рядом с inlay hints / code lens.
-      hoverFromLanguage: async (path, position) => {
-        if (featureOff(settings, 'hoverOff', path)) return null;
-        const text = await lsp.hover(path, position);
-        return text ? { text } : null;
-      },
-      // Подсказки от сервера подмешиваются к словам языка и документа.
-      completionFromLanguage: (path, position, context) =>
-        lsp.completionList(path, position, context),
-      // Повторный Ctrl+Space расширяет список символами проекта: сначала свои объявления,
-      // потом из зависимостей. Источник — карта символов: она отвечает мгновенно и без
-      // языкового сервера, а `package` в ответе и есть признак чужого объявления.
-      // При наборе (`onlyIndex`) нужна только карта — серверы спрашивают свой путь.
-      projectSymbols: (query: string, onlyIndex?: boolean) =>
-        onlyIndex ? symbolsFromIndex(query) : symbolsFromProject(query),
-      // Файлы проекта — для подсказок пути внутри импорта: `from './ut'` просит файл,
-      // а не слово. Пути приходят относительными — так их и пишут в импорте.
-      projectFiles: () => rpc.request("workspace.listFiles").catch(() => []),
-      // Переход в другой файл из панели `Ctrl+G` (`файл:строка`). Путь из подсказки
-      // относительный (`src/main.ts`), а открытие работает с абсолютным.
-      openPath: (path: string, line: number, column: number) => {
-        const absolute = isAbsolutePath(path)
-          ? path
-          : joinPath(workspace.root ?? "", path);
-        void openPath(absolute).then(() =>
-          editors.reveal(absolute, line, column),
-        );
-      },
-      // Алиасы `paths` из tsconfig: подсказка после точки разворачивает по ним импорт
-      // (`@/core` → `src/core`). Пути приходят от корня проекта (`src/...`), как их и пишут.
-      importAliases: async () => {
-        const { aliases } = await rpc
-          .request("workspace.importAliases")
-          .catch(
-            (): {
-              aliases: {
-                prefixes: Record<string, string>;
-                exact: readonly string[];
-              };
-            } => ({
-              aliases: { prefixes: {}, exact: [] },
-            }),
-          );
-        const patterns = [
-          ...Object.entries(aliases.prefixes),
-          // Шаблон без `*` совпадает только целиком — звёздочку к нему не приписываем.
-          ...aliases.exact.map((name): [string, string] => [
-            name,
-            aliases.prefixes[name] ?? "",
-          ]),
-        ];
-        return patterns.map(([prefix, target]) => ({
-          // На правой стороне шаблон собирается обратно со звёздочкой: `@/` + `*`
-          // и `src/` + `*` — это `paths` как его пишут в tsconfig.
-          pattern: prefix in aliases.prefixes ? `${prefix}*` : prefix,
-          target: prefix in aliases.prefixes ? `${target}*` : target,
-          baseDir: "",
-        }));
-      },
-      // Ссылки в коде: сервер помечает участки (пути в import, адреса) — их показываем
-      // подчёркнутыми, а клик открывает адрес или файл (см. `openDocumentLink`).
-      documentLinks: async (path) => {
-        const links = await lsp.documentLinks(path);
-        // Часть серверов адрес отдаёт только в `resolve` — доводим те, у кого его нет.
-        return Promise.all(
-          links.map(async (link) => {
-            if (link.target) return link;
-            const target = await lsp
-              .resolveDocumentLink(path, link.source)
-              .catch(() => null);
-            return target ? { ...link, target } : link;
-          }),
-        );
-      },
-      openLink: (target, path) => void openDocumentLink(target, path),
-      // Связанные участки: имена парных тегов (открывающий и закрывающий) правятся вместе.
-      linkedEditing: (path, position) =>
-        lsp.linkedEditingRanges(path, position),
-      // Выделение по структуре: сервер отдаёт цепочку участков вокруг места (слово,
-      // выражение, строка, блок) — по ней работают «выделить шире/уже».
-      selectionRanges: (path, position) => lsp.selectionRanges(path, position),
-      // Семантическая подсветка: точные роли от сервера поверх своей грамматики.
-      semanticTokens: (path, languageId) =>
-        lsp.semanticTokens(path, languageId),
-      // Знаки-триггеры сервера (`@` в CSS, `:` в JSON): попап открывается сразу по ним.
-      completionTriggers: (path) => lsp.completionTriggers(path),
-      // Дотягивание подсказки: описание символа подтягивается при выделении строки.
-      resolveCompletionItem: (path, item) => lsp.resolveCompletion(path, item),
-      // Подсказка о параметрах вызова: карточка у каретки по набранной `(` или `,`.
-      // Контекст (ручной вызов / знак / повтор) уходит серверу: без него он не знает,
-      // что карточка уже открыта, и второй раз присылает те же перегрузки.
-      signatureFromLanguage: (path, position, context) =>
-        lsp.signatureHelp(path, position, context),
-      // Определение и ссылки — списком мест, как и прочие переходы.
-      symbols: {
-        definition: (path, position) => lsp.definition(path, position),
-        // Обещание, тип и реализации: отдельные запросы, потому что `definition`
-        // отвечает на другой вопрос — «где это реализовано». В TS это важно.
-        declaration: (path, position) =>
-          lsp.related(path, position, "declaration"),
-        typeDefinition: (path, position) =>
-          lsp.related(path, position, "typeDefinition"),
-        implementation: (path, position) =>
-          lsp.related(path, position, "implementation"),
-        references: (path, position) => lsp.references(path, position),
-      },
-      // Хлебные крошки над текстом: символы файла (уже готовые из LSP) и место курсора.
-      fileSymbols: async (path) => {
-        try {
-          return await lsp.documentSymbols(path);
-        } catch {
-          return null;
-        }
-      },
-      // Переход к месту: открыть файл (это умеет приложение) и встать на строку.
-      revealLocation: (path, line, column) =>
-        void openPath(path).then(() => editors.reveal(path, line, column)),
-      // Выбор обёртки показывает приложение: у редактора нет ни модалок, ни списка
-      // вариантов. Сам список зависит от языка файла — его знает редактор.
-      surroundWith: () => surroundModal.open(),
-      // Форматирование участка сервером: правки приходят готовыми — применяем обычным путём.
-      // Отступ по набранному знаку: сервер объявил триггеры — спрашиваем его сразу.
-      formatOnType: (path, line, column, ch) =>
-        lsp.formatOnType(path, line, column, ch),
-      formatRange: (path, range) => void formatRangeWithServer(path, range),
-      formatOnPaste: () => settings.editor.formatOnPaste,
-      // Текст целевого файла для «заглядывания»: открытый берём из документа (в нём
-      // и несохранённые правки), прочий — с диска. Не прочитали — копию не покажем.
-      readText: async (path) => {
-        // Картинка — не текст: в копии оказался бы бинарь (см. `shared/images.ts`).
-        if (isImagePath(path)) return null;
-        const open = documents.get(path);
-        if (open) return open.value;
-        try {
-          return (await rpc.request("workspace.readFile", { path })).text;
-        } catch {
-          return null;
-        }
-      },
-      relativePath: (path) => workspace.relative(path),
-      // Запись файла на диск: подсказкам надо сбросить прочитанное — иначе новое поле
-      // в соседнем файле не появится после точки до перезапуска окна.
-      onDidWriteFile: (listener) =>
-        documents.onDidChangeDirty((document) => {
-          if (!document.dirty) listener(document.path);
-        }).dispose,
-      onNotice: (text) => showToast(text),
-      renameBySearch: (path, position) => renameBySearchFallback(path, position, {
+  const editors = new EditorWorkspace(layout.editorHost, new DocumentRegistry(documents), {
+    tabSize: settings.editor.tabSize,
+    insertSpaces: settings.editor.insertSpaces,
+    fontSize: settings.editor.fontSize,
+    lineHeight: settings.editor.lineHeight,
+    cursorStyle: settings.editor.cursorStyle,
+    cursorBlink: settings.editor.cursorBlink,
+    rulers: settings.editor.rulers,
+    whitespace: settings.editor.renderWhitespace,
+    // Клик по чипу в строке состояния листает режим — иначе выбор жил бы до
+    // первой смены кегля, которая пересобирает вид из настроек.
+    onWhitespaceChanged: (mode) => {
+      void saveSettingsPatch({ editor: { renderWhitespace: mode } }).catch(() => undefined);
+    },
+    minimap: settings.editor.minimap,
+    overview: settings.editor.overviewRuler,
+    wordWrap: settings.editor.wordWrap,
+    smoothScroll: settings.editor.smoothScroll,
+    hoverDelayMs: settings.editor.hoverDelayMs,
+    vimMode: settings.editor.vimMode,
+    // Смена режима Vim обновляет значок в строке состояния.
+    onVimModeChange: () => refreshStatus(),
+    // Подсветку выключил размер файла — строка состояния скажет почему и даст выход.
+    onHighlightStatus: () => refreshStatus(),
+    emacsMode: settings.editor.emacsMode,
+    tabMovesFocus: settings.editor.tabMovesFocus,
+    ligatures: settings.editor.fontLigatures,
+    // Ctrl+колесо: размер шрифта живёт в настройках, поэтому редактор только просит шаг.
+    onZoomFont: (step) => zoomFontByWheel(step),
+    // Живой геттер: настройку меняют в окне без пересоздания редактора.
+    emmetEnabled: () => settings.editor.emmet,
+    // Проверка орфографии: словарь общий, настройка — живой геттер.
+    spellcheck: spell,
+    spellcheckEnabled: () => settings.editor.spellcheck,
+    // Слово, добавленное в словарь. С открытым проектом `editor` целиком уходит
+    // в `.chui_ide/settings.json` (`splitSettingsPatch`), поэтому пишем свой список
+    // `spellProjectWords`: слово живёт с кодом, а не с машиной. Без проекта тот же
+    // список ляжет в общие настройки человека — читаем его оттуда же.
+    spellSaveWord: (word) => {
+      void saveSettingsPatch({
+        editor: { spellProjectWords: [...(settings.editor.spellProjectWords ?? []), word] },
+      }).catch(() => undefined);
+    },
+    snippets: () => [
+      // Сниппеты чужого проекта — первыми: триггер проекта важнее общего, он для
+      // этого проекта и написан. Затем пользовательские и встроенные.
+      ...projectSnippets(),
+      ...settings.editor.snippets,
+      ...DEFAULT_SNIPPETS,
+    ],
+    // Наведение от сервера: текст разметки в карточку. Языки из `lsp.hoverOff`
+    // молчат совсем: в JSON или CSV карточка закрывает данные, а объяснять
+    // там нечего — держим настройку рядом с inlay hints / code lens.
+    hoverFromLanguage: async (path, position) => {
+      if (featureOff(settings, 'hoverOff', path)) return null;
+      const text = await lsp.hover(path, position);
+      return text ? { text } : null;
+    },
+    // Подсказки от сервера подмешиваются к словам языка и документа.
+    completionFromLanguage: (path, position, context) => lsp.completionList(path, position, context),
+    // Повторный Ctrl+Space расширяет список символами проекта: сначала свои объявления,
+    // потом из зависимостей. Источник — карта символов: она отвечает мгновенно и без
+    // языкового сервера, а `package` в ответе и есть признак чужого объявления.
+    // При наборе (`onlyIndex`) нужна только карта — серверы спрашивают свой путь.
+    projectSymbols: (query: string, onlyIndex?: boolean) =>
+      onlyIndex ? symbolsFromIndex(query) : symbolsFromProject(query),
+    // Файлы проекта — для подсказок пути внутри импорта: `from './ut'` просит файл,
+    // а не слово. Пути приходят относительными — так их и пишут в импорте.
+    projectFiles: () => rpc.request('workspace.listFiles').catch(() => []),
+    // Переход в другой файл из панели `Ctrl+G` (`файл:строка`). Путь из подсказки
+    // относительный (`src/main.ts`), а открытие работает с абсолютным.
+    openPath: (path: string, line: number, column: number) => {
+      const absolute = isAbsolutePath(path) ? path : joinPath(workspace.root ?? '', path);
+      void openPath(absolute).then(() => editors.reveal(absolute, line, column));
+    },
+    // Алиасы `paths` из tsconfig: подсказка после точки разворачивает по ним импорт
+    // (`@/core` → `src/core`). Пути приходят от корня проекта (`src/...`), как их и пишут.
+    importAliases: async () => {
+      const { aliases } = await rpc.request('workspace.importAliases').catch(
+        (): {
+          aliases: {
+            prefixes: Record<string, string>;
+            exact: readonly string[];
+          };
+        } => ({
+          aliases: { prefixes: {}, exact: [] },
+        }),
+      );
+      const patterns = [
+        ...Object.entries(aliases.prefixes),
+        // Шаблон без `*` совпадает только целиком — звёздочку к нему не приписываем.
+        ...aliases.exact.map((name): [string, string] => [name, aliases.prefixes[name] ?? '']),
+      ];
+      return patterns.map(([prefix, target]) => ({
+        // На правой стороне шаблон собирается обратно со звёздочкой: `@/` + `*`
+        // и `src/` + `*` — это `paths` как его пишут в tsconfig.
+        pattern: prefix in aliases.prefixes ? `${prefix}*` : prefix,
+        target: prefix in aliases.prefixes ? `${target}*` : target,
+        baseDir: '',
+      }));
+    },
+    // Ссылки в коде: сервер помечает участки (пути в import, адреса) — их показываем
+    // подчёркнутыми, а клик открывает адрес или файл (см. `openDocumentLink`).
+    documentLinks: async (path) => {
+      const links = await lsp.documentLinks(path);
+      // Часть серверов адрес отдаёт только в `resolve` — доводим те, у кого его нет.
+      return Promise.all(
+        links.map(async (link) => {
+          if (link.target) return link;
+          const target = await lsp.resolveDocumentLink(path, link.source).catch(() => null);
+          return target ? { ...link, target } : link;
+        }),
+      );
+    },
+    openLink: (target, path) => void openDocumentLink(target, path),
+    // Связанные участки: имена парных тегов (открывающий и закрывающий) правятся вместе.
+    linkedEditing: (path, position) => lsp.linkedEditingRanges(path, position),
+    // Выделение по структуре: сервер отдаёт цепочку участков вокруг места (слово,
+    // выражение, строка, блок) — по ней работают «выделить шире/уже».
+    selectionRanges: (path, position) => lsp.selectionRanges(path, position),
+    // Семантическая подсветка: точные роли от сервера поверх своей грамматики.
+    semanticTokens: (path, languageId) => lsp.semanticTokens(path, languageId),
+    // Знаки-триггеры сервера (`@` в CSS, `:` в JSON): попап открывается сразу по ним.
+    completionTriggers: (path) => lsp.completionTriggers(path),
+    // Дотягивание подсказки: описание символа подтягивается при выделении строки.
+    resolveCompletionItem: (path, item) => lsp.resolveCompletion(path, item),
+    // Подсказка о параметрах вызова: карточка у каретки по набранной `(` или `,`.
+    // Контекст (ручной вызов / знак / повтор) уходит серверу: без него он не знает,
+    // что карточка уже открыта, и второй раз присылает те же перегрузки.
+    signatureFromLanguage: (path, position, context) => lsp.signatureHelp(path, position, context),
+    // Определение и ссылки — списком мест, как и прочие переходы.
+    symbols: {
+      definition: (path, position) => lsp.definition(path, position),
+      // Обещание, тип и реализации: отдельные запросы, потому что `definition`
+      // отвечает на другой вопрос — «где это реализовано». В TS это важно.
+      declaration: (path, position) => lsp.related(path, position, 'declaration'),
+      typeDefinition: (path, position) => lsp.related(path, position, 'typeDefinition'),
+      implementation: (path, position) => lsp.related(path, position, 'implementation'),
+      references: (path, position) => lsp.references(path, position),
+    },
+    // Хлебные крошки над текстом: символы файла (уже готовые из LSP) и место курсора.
+    fileSymbols: async (path) => {
+      try {
+        return await lsp.documentSymbols(path);
+      } catch {
+        return null;
+      }
+    },
+    // Переход к месту: открыть файл (это умеет приложение) и встать на строку.
+    revealLocation: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
+    // Выбор обёртки показывает приложение: у редактора нет ни модалок, ни списка
+    // вариантов. Сам список зависит от языка файла — его знает редактор.
+    surroundWith: () => surroundModal.open(),
+    // Форматирование участка сервером: правки приходят готовыми — применяем обычным путём.
+    // Отступ по набранному знаку: сервер объявил триггеры — спрашиваем его сразу.
+    formatOnType: (path, line, column, ch) => lsp.formatOnType(path, line, column, ch),
+    formatRange: (path, range) => void formatRangeWithServer(path, range),
+    formatOnPaste: () => settings.editor.formatOnPaste,
+    // Текст целевого файла для «заглядывания»: открытый берём из документа (в нём
+    // и несохранённые правки), прочий — с диска. Не прочитали — копию не покажем.
+    readText: async (path) => {
+      // Картинка — не текст: в копии оказался бы бинарь (см. `shared/images.ts`).
+      if (isImagePath(path)) return null;
+      const open = documents.get(path);
+      if (open) return open.value;
+      try {
+        return (await rpc.request('workspace.readFile', { path })).text;
+      } catch {
+        return null;
+      }
+    },
+    relativePath: (path) => workspace.relative(path),
+    // Запись файла на диск: подсказкам надо сбросить прочитанное — иначе новое поле
+    // в соседнем файле не появится после точки до перезапуска окна.
+    onDidWriteFile: (listener) =>
+      documents.onDidChangeDirty((document) => {
+        if (!document.dirty) listener(document.path);
+      }).dispose,
+    onNotice: (text) => showToast(text),
+    renameBySearch: (path, position) =>
+      renameBySearchFallback(path, position, {
         wordAt: (at, line, column) => editors.wordAt(at, line, column),
-        ask: (title, value) =>
-          promptValue({ title, label: 'Новое имя', value }).then((answer) => answer),
-        search: (query) =>
-          rpc
-            .request('workspace.search', { query, maxResults: 500 })
-            .then((result) => result.hits),
+        ask: (title, value) => promptValue({ title, label: 'Новое имя', value }).then((answer) => answer),
+        search: (query) => rpc.request('workspace.search', { query, maxResults: 500 }).then((result) => result.hits),
         apply: (files) => edits.applyFileEdits(files),
         notify: showToast,
       }),
 
-      // Переименование: имя спрашиваем диалогом, правки применяет документная модель.
-      renameSymbol: (path, position) => {
-        void (async () => {
-          // Спрашиваем сервер ДО диалога: он знает, есть ли под курсором символ и можно
-          // ли его вообще переименовывать (`prepareRename`). Раньше окно открывалось на
-          // пустом месте, и человек узнавал об отказе лишь после ввода имени. Заодно
-          // сервер даёт готовое имя для подстановки — не всегда это слово под курсором.
-          const prepared = await lsp
-            .prepareRename(path, position)
-            .catch(() => null);
-          if (!prepared) {
-            await editors.renameBySearchSymbol(path, position);
-            return;
-          }
-          if (prepared.message) {
-            showToast(prepared.message, "error");
-            return;
-          }
-          // Сервер сказал, что именно переименует: подсвечиваем участок до ввода имени,
-          // чтобы человек видел, что заменится. Координаты сервера 0-based — host 1-based.
-          if (prepared.range) {
-            editors.selectSpan(
-              path,
-              {
-                line: prepared.range.start.line + 1,
-                column: prepared.range.start.column + 1,
-              },
-              {
-                line: prepared.range.end.line + 1,
-                column: prepared.range.end.column + 1,
-              },
-            );
-          }
-          const newName = await promptValue({
-            title: "Переименовать символ",
-            label: "Новое имя",
-            value: prepared.word ?? "",
-          });
-          if (!newName) return;
-          const edit = await lsp.workspaceEdit(path, position, newName);
-          if (
-            !edit ||
-            (edit.files.length === 0 && edit.operations.length === 0)
-          ) {
-            showToast("Сервер не смог переименовать этот символ", "error");
-            return;
-          }
-          // Операции с файлами — до правок содержимого: сервер вправе переименовать файл,
-          // а правки затем придут уже по новым путям (см. `shared/lsp-workspace-edit.ts`).
-          const failure = await applyFileOperations(edit.operations);
-          if (failure) {
-            showToast(failure, "error");
-            return;
-          }
-          if (edit.files.length > 0) {
-            const result = await edits.applyFileEdits(edit.files);
-            if (result.failed.length > 0)
-              showToast(result.failed[0]!.message, "error");
-          }
-        })();
-      },
-      // Inline-подсказка «допиши за меня»: запрос к модели уходит в main через RPC.
-      fullLineCorpus: () => editors.fullLineLines(),
-      inlineCompletion: {
-        // Два замка, а не один: личная галочка автодополнения и мастер-тумблер AI.
-        // Main оба тоже проверяет (`requireAiEnabled`), но он тогда уже ответил
-        // отказом — а значит, на каждую паузу в наборе летел бы RPC-вызов в никуда
-        // и сыпался бы toast об ошибке. Редактор должен молчать сам.
-        // Серверный путь работает и без модели: `enabled` пропускает, если есть хоть один источник.
-        enabled: () => settings.ai.inlineCompletion.enabled,
-        mode: () => settings.ai.inlineCompletion.mode ?? 'multi-line',
-        debounceMs: () => settings.ai.inlineCompletion.debounceMs,
-        complete: async ({ path, language, prefix, suffix }) => {
-          // Проверяем ещё и здесь: `enabled()` спрашивают по краю, а пауза в наборе
-          // и сам запрос могут попасть в разные стороны тумблера.
-          // Модель выключена — спросить язык: серверы умеют `textDocument/inlineCompletion`.
-          // Отказ сервера ничем не отличается от «подсказать нечего», и молчание — норма.
-          if (!settings.ai.enabled) {
-            const [first] = await lsp.inlineCompletion(path, {
-              line: prefix.split("\n").length,
-              column: (prefix.split("\n").at(-1)?.length ?? 0) + 1,
-            });
-            return first ?? null;
-          }
-          try {
-            const result = await rpc.request("ai.complete", {
-              path: workspace.relative(path),
-              language,
-              prefix,
-              suffix,
-            });
-            return result.text || null;
-          } catch {
-            // Модель недоступна, ключа нет, выключено — подсказки просто нет.
-            return null;
-          }
-        },
-      },
-      // Быстрые исправления: список действий языка показывает приложение — у него и попапы,
-      // и языковой сервер, и документная модель для правок.
-      codeActions: (path, position) =>
-        void fixes.runCodeActions(path, position),
-      // Свёртка: диапазоны берём у сервера, а если он их не умеет — считаем по отступам.
-      // Свёртка: сперва сервер (он видит блоки смыслово). Нет сервера — считаем сами:
-      // по грамматике (скобки, блочные комментарии, длинные строки) и по отступам.
-      // Два своих источника складываем: скобки накрывают C-подобный код, отступы —
-      // то, что блоками не описано (Python, YAML, тексты).
-      foldRanges: async (path, text) => {
-        const fromServer = await lsp.foldingRanges(path);
-        if (fromServer.length > 0) return fromServer;
-        // Свёртка ждёт реестр (см. `lazy-registry`): без грамматики возвращаются только
-        // отступы, а реестр к этому моменту обычно уже приехал — его просит открытие файла.
-        const grammar = semanticFoldRanges(
-          await languageGrammar(languageFromPath(path)),
-          text,
-        );
-        const indent = indentFoldRanges(text, settings.editor.tabSize);
-        return mergeFoldRanges([...grammar, ...indent]);
-      },
-      // Код-линзы: подписи-действия у объявлений («3 ссылки», «Запустить тест»). Клик
-      // исполняет команду сервера, а его правки (если вернёт) применяем обычным путём.
-      codeLenses: (path) =>
-        featureOff(settings, "codeLensOff", path)
-          ? Promise.resolve([])
-          : lsp.codeLenses(path),
-      lensCommand: (path, command) => void runLensCommand(path, command),
-      // Подсказки-вставки: тип переменной, имя параметра — прямо в коде. Серверу нужен
-      // диапазон, и спрашиваем только видимую часть файла (см. `inlayWindow` в editor-host).
-      inlayHints: (path, end, start) =>
-        featureOff(settings, "inlayHintsOff", path)
-          ? Promise.resolve([])
-          : lsp.inlayHints(path, end, start),
-      // Плашки цветов: сервер CSS/SCSS/LESS знает, что `#3b82f6` и `rgb(...)` — цвет.
-      documentColors: (path) => lsp.documentColors(path),
-      // Вхождения символа: сервер знает области видимости, свой поиск по тексту — нет.
-      documentHighlights: (path, position) =>
-        lsp.documentHighlights(path, position),
-      // Правый клик по тексту: состав пунктов — `core/editor-menu.ts` (чистая функция,
-      // покрыта тестом), а показывает приложение: попапы и реестр команд у него.
-      contextMenu: (info, event) => {
-        const items = editorContextMenuPlan(info, {
-          hasAction: (id) =>
-            editors.listActions().some((action) => action.id === id),
-          runAction: (id) => editors.runAction(id),
-          cut: () => editors.cutToClipboard(),
-          copy: () => editors.copyToClipboard(),
-          paste: () => editors.pasteFromClipboard(),
-          spellingAtCursor: () => Boolean(editors.spellingWordAtCursor()),
-          addToDictionary: () => editors.addSpellingWordToDictionary(),
-          ignoreSpelling: () => editors.ignoreSpellingWord(),
-          isBookmarked: (path, line) => bookmarks.isBookmarked(path, line),
-          toggleBookmark: (path, line) => bookmarks.toggle(path, line),
-          openBookmarks: () => bookmarksModal.open(),
-          refactorMenu: (path) => void fixes.runRefactorMenu(path),
-          refactor: (path, action) => void fixes.runRefactor(path, action),
-          codeActions: (path, position) =>
-            void fixes.runCodeActions(path, position),
-          revealInOS: (path) => void commands.execute("file.revealInOS", path),
+    // Переименование: имя спрашиваем диалогом, правки применяет документная модель.
+    renameSymbol: (path, position) => {
+      void (async () => {
+        // Спрашиваем сервер ДО диалога: он знает, есть ли под курсором символ и можно
+        // ли его вообще переименовывать (`prepareRename`). Раньше окно открывалось на
+        // пустом месте, и человек узнавал об отказе лишь после ввода имени. Заодно
+        // сервер даёт готовое имя для подстановки — не всегда это слово под курсором.
+        const prepared = await lsp.prepareRename(path, position).catch(() => null);
+        if (!prepared) {
+          await editors.renameBySearchSymbol(path, position);
+          return;
+        }
+        if (prepared.message) {
+          showToast(prepared.message, 'error');
+          return;
+        }
+        // Сервер сказал, что именно переименует: подсвечиваем участок до ввода имени,
+        // чтобы человек видел, что заменится. Координаты сервера 0-based — host 1-based.
+        if (prepared.range) {
+          editors.selectSpan(
+            path,
+            {
+              line: prepared.range.start.line + 1,
+              column: prepared.range.start.column + 1,
+            },
+            {
+              line: prepared.range.end.line + 1,
+              column: prepared.range.end.column + 1,
+            },
+          );
+        }
+        const newName = await promptValue({
+          title: 'Переименовать символ',
+          label: 'Новое имя',
+          value: prepared.word ?? '',
         });
-        showContextMenu(items, event.clientX, event.clientY);
+        if (!newName) return;
+        const edit = await lsp.workspaceEdit(path, position, newName);
+        if (!edit || (edit.files.length === 0 && edit.operations.length === 0)) {
+          showToast('Сервер не смог переименовать этот символ', 'error');
+          return;
+        }
+        // Операции с файлами — до правок содержимого: сервер вправе переименовать файл,
+        // а правки затем придут уже по новым путям (см. `shared/lsp-workspace-edit.ts`).
+        const failure = await applyFileOperations(edit.operations);
+        if (failure) {
+          showToast(failure, 'error');
+          return;
+        }
+        if (edit.files.length > 0) {
+          const result = await edits.applyFileEdits(edit.files);
+          if (result.failed.length > 0) showToast(result.failed[0]!.message, 'error');
+        }
+      })();
+    },
+    // Inline-подсказка «допиши за меня»: запрос к модели уходит в main через RPC.
+    fullLineCorpus: () => editors.fullLineLines(),
+    inlineCompletion: {
+      // Два замка, а не один: личная галочка автодополнения и мастер-тумблер AI.
+      // Main оба тоже проверяет (`requireAiEnabled`), но он тогда уже ответил
+      // отказом — а значит, на каждую паузу в наборе летел бы RPC-вызов в никуда
+      // и сыпался бы toast об ошибке. Редактор должен молчать сам.
+      // Серверный путь работает и без модели: `enabled` пропускает, если есть хоть один источник.
+      enabled: () => settings.ai.inlineCompletion.enabled,
+      mode: () => settings.ai.inlineCompletion.mode ?? 'multi-line',
+      debounceMs: () => settings.ai.inlineCompletion.debounceMs,
+      complete: async ({ path, language, prefix, suffix }) => {
+        // Проверяем ещё и здесь: `enabled()` спрашивают по краю, а пауза в наборе
+        // и сам запрос могут попасть в разные стороны тумблера.
+        // Модель выключена — спросить язык: серверы умеют `textDocument/inlineCompletion`.
+        // Отказ сервера ничем не отличается от «подсказать нечего», и молчание — норма.
+        if (!settings.ai.enabled) {
+          const [first] = await lsp.inlineCompletion(path, {
+            line: prefix.split('\n').length,
+            column: (prefix.split('\n').at(-1)?.length ?? 0) + 1,
+          });
+          return first ?? null;
+        }
+        try {
+          const result = await rpc.request('ai.complete', {
+            path: workspace.relative(path),
+            language,
+            prefix,
+            suffix,
+          });
+          return result.text || null;
+        } catch {
+          // Модель недоступна, ключа нет, выключено — подсказки просто нет.
+          return null;
+        }
       },
     },
-  );
+    // Быстрые исправления: список действий языка показывает приложение — у него и попапы,
+    // и языковой сервер, и документная модель для правок.
+    codeActions: (path, position) => void fixes.runCodeActions(path, position),
+    // Свёртка: диапазоны берём у сервера, а если он их не умеет — считаем по отступам.
+    // Свёртка: сперва сервер (он видит блоки смыслово). Нет сервера — считаем сами:
+    // по грамматике (скобки, блочные комментарии, длинные строки) и по отступам.
+    // Два своих источника складываем: скобки накрывают C-подобный код, отступы —
+    // то, что блоками не описано (Python, YAML, тексты).
+    foldRanges: async (path, text) => {
+      const fromServer = await lsp.foldingRanges(path);
+      if (fromServer.length > 0) return fromServer;
+      // Свёртка ждёт реестр (см. `lazy-registry`): без грамматики возвращаются только
+      // отступы, а реестр к этому моменту обычно уже приехал — его просит открытие файла.
+      const grammar = semanticFoldRanges(await languageGrammar(languageFromPath(path)), text);
+      const indent = indentFoldRanges(text, settings.editor.tabSize);
+      return mergeFoldRanges([...grammar, ...indent]);
+    },
+    // Код-линзы: подписи-действия у объявлений («3 ссылки», «Запустить тест»). Клик
+    // исполняет команду сервера, а его правки (если вернёт) применяем обычным путём.
+    codeLenses: (path) => (featureOff(settings, 'codeLensOff', path) ? Promise.resolve([]) : lsp.codeLenses(path)),
+    lensCommand: (path, command) => void runLensCommand(path, command),
+    // Подсказки-вставки: тип переменной, имя параметра — прямо в коде. Серверу нужен
+    // диапазон, и спрашиваем только видимую часть файла (см. `inlayWindow` в editor-host).
+    inlayHints: (path, end, start) =>
+      featureOff(settings, 'inlayHintsOff', path) ? Promise.resolve([]) : lsp.inlayHints(path, end, start),
+    // Плашки цветов: сервер CSS/SCSS/LESS знает, что `#3b82f6` и `rgb(...)` — цвет.
+    documentColors: (path) => lsp.documentColors(path),
+    // Вхождения символа: сервер знает области видимости, свой поиск по тексту — нет.
+    documentHighlights: (path, position) => lsp.documentHighlights(path, position),
+    // Правый клик по тексту: состав пунктов — `core/editor-menu.ts` (чистая функция,
+    // покрыта тестом), а показывает приложение: попапы и реестр команд у него.
+    contextMenu: (info, event) => {
+      const items = editorContextMenuPlan(info, {
+        hasAction: (id) => editors.listActions().some((action) => action.id === id),
+        runAction: (id) => editors.runAction(id),
+        cut: () => editors.cutToClipboard(),
+        copy: () => editors.copyToClipboard(),
+        paste: () => editors.pasteFromClipboard(),
+        spellingAtCursor: () => Boolean(editors.spellingWordAtCursor()),
+        addToDictionary: () => editors.addSpellingWordToDictionary(),
+        ignoreSpelling: () => editors.ignoreSpellingWord(),
+        isBookmarked: (path, line) => bookmarks.isBookmarked(path, line),
+        toggleBookmark: (path, line) => bookmarks.toggle(path, line),
+        openBookmarks: () => bookmarksModal.open(),
+        refactorMenu: (path) => void fixes.runRefactorMenu(path),
+        refactor: (path, action) => void fixes.runRefactor(path, action),
+        codeActions: (path, position) => void fixes.runCodeActions(path, position),
+        revealInOS: (path) => void commands.execute('file.revealInOS', path),
+      });
+      showContextMenu(items, event.clientX, event.clientY);
+    },
+  });
   /**
    * Политика записи: хвосты, перевод строки, формат — та же, что у Ctrl+S.
    * Один файл не должен получать разный текст в зависимости от того, кто его
@@ -985,25 +879,18 @@ export async function startApplication(
     path: string,
     command: { command: string; arguments: readonly unknown[] },
   ): Promise<void> => {
-    const answer = await lsp.executeCommand(
-      path,
-      command.command,
-      command.arguments,
-    );
+    const answer = await lsp.executeCommand(path, command.command, command.arguments);
     const fileEdits = toWorkspaceFileEdits(answer, uriToPath);
     if (fileEdits) {
       const result = await edits.applyFileEdits(fileEdits);
-      if (result.failed.length > 0)
-        showToast(result.failed[0]!.message, "error");
+      if (result.failed.length > 0) showToast(result.failed[0]!.message, 'error');
     }
   };
   // Подпись blame у строки под курсором. Запрос идёт в git за одной строкой;
   // показ по умолчанию выключен и включается командой (см. `git.toggleBlame`).
   const blame = createBlameController({
     blameLine: async (path, line) => {
-      const lines = await git
-        .blame(path, { startLine: line, endLine: line })
-        .catch(() => []);
+      const lines = await git.blame(path, { startLine: line, endLine: line }).catch(() => []);
       return lines[0] ?? null;
     },
     blameFile: (path) => git.blame(path).catch(() => []),
@@ -1026,7 +913,7 @@ export async function startApplication(
   // в редактор — потому что контроллер отладки живёт здесь, в приложении, а не в ядре.
   editors.setDebugHover(async (expression, at) => {
     const state = debug.get();
-    if (state.phase !== "stopped") return null;
+    if (state.phase !== 'stopped') return null;
     // Строка под курсором может принадлежать не верхнему кадру, а тому, кто его
     // вызвал: считаем выражение в том кадре, чьи файл и строка совпали.
     const frame = frameForHover(state.frames, at);
@@ -1043,17 +930,14 @@ export async function startApplication(
     const state = debug.get();
     const path = editors.currentPath;
     // Кадр берём тот, что в текущем файле: значения видны и в вызывающих кадрах стека.
-    const frame =
-      state.phase === "stopped"
-        ? state.frames.find((item) => item.path === path)
-        : undefined;
+    const frame = state.phase === 'stopped' ? state.frames.find((item) => item.path === path) : undefined;
     const document = path ? documents.get(path) : null;
     if (!frame || !path || !document) {
       editors.setDebugInlineValues(null, []);
       return;
     }
     const text = document.value;
-    const lineCount = text.split("\n").length;
+    const lineCount = text.split('\n').length;
     const items = await lsp
       .inlineValues(
         path,
@@ -1065,14 +949,10 @@ export async function startApplication(
       editors.setDebugInlineValues(path, []);
       return;
     }
-    const values = await resolveInlineValues(
-      items,
-      text,
-      async (expression) => {
-        const result = await debug.evaluate(expression, frame.id);
-        return { value: result.value };
-      },
-    );
+    const values = await resolveInlineValues(items, text, async (expression) => {
+      const result = await debug.evaluate(expression, frame.id);
+      return { value: result.value };
+    });
     editors.setDebugInlineValues(path, values);
   };
   // Приёмник обратных вызовов из main: правки агента приходят сюда.
@@ -1101,12 +981,10 @@ export async function startApplication(
   const projectSnippets = (): readonly Snippet[] => snippetsCache;
   const loadProjectSnippets = async (): Promise<void> => {
     const { files, userFiles } = await rpc
-      .request("workspace.snippetFiles")
+      .request('workspace.snippetFiles')
       .catch(() => ({ files: [], userFiles: [] }));
     const parse = (list: readonly { name: string; text: string }[]) =>
-      list.flatMap((file) =>
-        snippetsFromCodeSnippets(file.text, languageOfSnippetFile(file.name)),
-      );
+      list.flatMap((file) => snippetsFromCodeSnippets(file.text, languageOfSnippetFile(file.name)));
     // Проектные первыми: они написаны под этот проект, значит важнее общих.
     snippetsCache = [...parse(files), ...parse(userFiles)];
   };
@@ -1115,7 +993,7 @@ export async function startApplication(
   let settingsLoading: Promise<SettingsModalView> | null = null;
   let pendingSettings: Settings | null = null;
   const createSettingsView = async (): Promise<SettingsModalView> => {
-    const { createSettingsModal } = await import("./ui/settings-modal");
+    const { createSettingsModal } = await import('./ui/settings-modal');
     return createSettingsModal({
       rpc,
       commands,
@@ -1127,18 +1005,17 @@ export async function startApplication(
       // иначе панель окажется под ним.
       openLspLog: () => {
         void settingsModal.close();
-        dock.show("lsp-log");
+        dock.show('lsp-log');
       },
     });
   };
   const settingsModal: SettingsModalView = {
     // Пока окна нет, отдаём пустую заглушку: в body её кладут только при открытии.
-    element: document.createElement("div"),
+    element: document.createElement('div'),
     open: async (section?: SectionId) => {
       settingsLoading ??= createSettingsView();
       settingsView = await settingsLoading;
-      if (!settingsView.element.isConnected)
-        document.body.appendChild(settingsView.element);
+      if (!settingsView.element.isConnected) document.body.appendChild(settingsView.element);
       if (pendingSettings !== null) settingsView.applySettings(pendingSettings);
       await settingsView.open(section);
     },
@@ -1160,10 +1037,7 @@ export async function startApplication(
    * объявления роняет запуск целиком (`Cannot access 'mi' before initialization`).
    */
   const shortcuts = (): ShortcutSource =>
-    shortcutSources(
-      commands.list(),
-      menuAccelerators(menuComboOverrides(settings.keybindings.overrides)),
-    );
+    shortcutSources(commands.list(), menuAccelerators(menuComboOverrides(settings.keybindings.overrides)));
   /**
    * Сколько миллисекунд после показа окна нажатие считается «вернул фокус»,
    * а не выбором. То же значение, что у двойного Shift: это одно и то же
@@ -1182,9 +1056,7 @@ export async function startApplication(
       // которым ничего не пользуется.
       const root = workspace.root;
       if (root && !isInsidePath(root, environment.path)) {
-        void setProjectInterpreter(environment.python).then(() =>
-          reloadPythonEnvironment(),
-        );
+        void setProjectInterpreter(environment.python).then(() => reloadPythonEnvironment());
         return;
       }
       reloadPythonEnvironment();
@@ -1231,9 +1103,7 @@ export async function startApplication(
     // Удалённые папки рабочего места: адреса из настроек, файл смотрит своё окно.
     remoteRoots: () => settings.workspace.remoteRoots,
     removeRemoteRoot: (address) => {
-      const next = settings.workspace.remoteRoots.filter(
-        (item) => item !== address,
-      );
+      const next = settings.workspace.remoteRoots.filter((item) => item !== address);
       void saveSettingsPatch({ workspace: { remoteRoots: next } });
     },
     openRemoteFile: (address) => void remoteFileModal.open(address),
@@ -1254,9 +1124,7 @@ export async function startApplication(
   // Список открытых файлов живёт в полосе вкладок самого редактора — второй,
   // дублирующий список в боковой панели убран: один файл давал две записи.
   // Артефакты прогона — рядом с редактором, а не только в ленте чата.
-  layout.sidebarBody.appendChild(
-    createArtifactsBlock({ artifacts: runArtifacts, commands }).element,
-  );
+  layout.sidebarBody.appendChild(createArtifactsBlock({ artifacts: runArtifacts, commands }).element);
   layout.sidebarBody.appendChild(explorer.element);
 
   const sourceControl = createSourceControl({
@@ -1279,7 +1147,7 @@ export async function startApplication(
    */
   const gitManagerPopover = createLazyPopover({
     create: () => ({ element: sourceControl.element }),
-    className: "popover-git",
+    className: 'popover-git',
     width: 360,
     // Свежее состояние: репозиторий мог измениться вне приложения.
     beforeOpen: () => void git.refresh(),
@@ -1303,10 +1171,7 @@ export async function startApplication(
         configured: () => settings.run.pythonPath,
         platform: () => info.platform,
         projectKind: () => projectScan?.kind.label ?? null,
-        projectPython: () =>
-          workspace.root
-            ? (settings.run.pythonByRoot[workspace.root] ?? "")
-            : "",
+        projectPython: () => (workspace.root ? (settings.run.pythonByRoot[workspace.root] ?? '') : ''),
         onSelect: (command) => {
           // Интерпретатор выбирается для ЭТОГО проекта: два Python-проекта не
           // должны подменять друг другу окружение. Пусто — вернуться к общему.
@@ -1331,7 +1196,7 @@ export async function startApplication(
       }),
     // Ширину не задаём: попап жмётся по содержимому (`.popover-python-env`),
     // а фиксированные 340 px растягивали его на пустом месте.
-    className: "popover-python-env",
+    className: 'popover-python-env',
     // Снимок обновляем при каждом открытии: попап мог провисеть долго.
     refresh: (view) => void view.refresh(),
   });
@@ -1360,7 +1225,7 @@ export async function startApplication(
       }),
     // Ширину не задаём: попап жмётся по содержимому (`.popover-node-env`),
     // а фиксированные 340 px растягивали его на пустом месте.
-    className: "popover-node-env",
+    className: 'popover-node-env',
     refresh: (view) => void view.refresh(),
   });
 
@@ -1378,24 +1243,24 @@ export async function startApplication(
         rpc,
         onRestart: () => {
           close();
-          void commands.execute("lsp.restart");
+          void commands.execute('lsp.restart');
         },
         onStop: () => {
           close();
-          void commands.execute("lsp.stop");
+          void commands.execute('lsp.stop');
         },
         onShowLog: () => {
           close();
-          dock.show("lsp-log");
+          dock.show('lsp-log');
         },
         onOpenSettings: () => {
           close();
-          settingsModal.open("lsp");
+          settingsModal.open('lsp');
         },
       }),
-    className: "popover-lsp-status",
+    className: 'popover-lsp-status',
     width: 340,
-    align: "end",
+    align: 'end',
     refresh: (view) => void view.refresh(),
   });
 
@@ -1418,14 +1283,14 @@ export async function startApplication(
     // Свойства берём у панели, которая в фокусе: именно её файл человек видит.
     const pane = editors.pane;
     if (!pane.activePath) {
-      showToast("Откройте файл: кодировка и отступы — свойства файла");
+      showToast('Откройте файл: кодировка и отступы — свойства файла');
       return;
     }
     const indentNow = pane.indentChoice();
     const choices = statusChoices(kind, {
       language: pane.documentLanguage,
       // Писатель всегда кладёт на диск UTF-8 — другого у нас просто нет.
-      encoding: "UTF-8",
+      encoding: 'UTF-8',
       tabSize: indentNow.tabSize,
       useTabs: !indentNow.insertSpaces,
     });
@@ -1439,9 +1304,7 @@ export async function startApplication(
           // Чужой id молча не применяем: список — это закрытый набор, и если он
           // разойдётся с тем, что умеет документ, человек увидит причину, а не тишину.
           if (!isStatusChoice(kind, choice.id)) {
-            showToast(
-              `Этот ${kind === "language" ? "язык" : "вариант"} сейчас не выбрать`,
-            );
+            showToast(`Этот ${kind === 'language' ? 'язык' : 'вариант'} сейчас не выбрать`);
             return;
           }
           const message = applyStatusChoice(kind, choice.id, pane);
@@ -1462,16 +1325,12 @@ export async function startApplication(
    * Отделено от попапа, потому что три ветки никак не связаны с разметкой: смена языка
    * трогает подсветку, отступ — контроллер, кодировка вообще только обьясняет.
    */
-  function applyStatusChoice(
-    kind: StatusChoiceKind,
-    id: string,
-    pane: typeof editors.pane,
-  ): string | null {
-    if (kind === "language") {
+  function applyStatusChoice(kind: StatusChoiceKind, id: string, pane: typeof editors.pane): string | null {
+    if (kind === 'language') {
       pane.setLanguageOf(id);
       return `Язык файла: ${statusLanguageLabel(id)}`;
     }
-    if (kind === "indent") {
+    if (kind === 'indent') {
       const indent = pane.indentChoice();
       const next = indentAfterChoice(id, {
         tabSize: indent.tabSize,
@@ -1480,14 +1339,10 @@ export async function startApplication(
       // Тот же отступ — не повод трогать файл: молчим, а не сообщаем «сделано».
       if (!next) return null;
       pane.setIndentChoice(next.tabSize, !next.useTabs);
-      return next.useTabs
-        ? "Отступ: табуляция"
-        : `Отступ: ${next.tabSize} пробела`;
+      return next.useTabs ? 'Отступ: табуляция' : `Отступ: ${next.tabSize} пробела`;
     }
     // Кодировка: писатель всегда UTF-8, выбора нет. Говорим это прямо.
-    return id === "utf-8"
-      ? null
-      : "Файлы пишутся только в UTF-8 — другой кодировки нет";
+    return id === 'utf-8' ? null : 'Файлы пишутся только в UTF-8 — другой кодировки нет';
   }
 
   /**
@@ -1506,7 +1361,7 @@ export async function startApplication(
 
   function preloadEnvironment(): void {
     if (!preloadPlanner.shouldPreload()) return;
-    if (preloadPlanner.target() === "node") nodeEnvPopover.warm();
+    if (preloadPlanner.target() === 'node') nodeEnvPopover.warm();
     else pythonEnvPopover.warm();
   }
 
@@ -1514,7 +1369,7 @@ export async function startApplication(
   // грамматик через `editor-view`, и статический импорт увез бы все 34 языка в первый
   // чанк. Фабрика ставится сразу, модуль приезжает `import()` — к первому открытию
   // экрана различий он уже здесь.
-  void import("./editor/host/diff-editor").then((module) => {
+  void import('./editor/host/diff-editor').then((module) => {
     editors.setDiffFactory((container) => new module.OwnDiffEditor(container));
   });
 
@@ -1522,11 +1377,9 @@ export async function startApplication(
     createDiff: (container) => editors.createDiff(container),
     git,
     // Тот же вход, что у разрешения конфликтов: несохранённый документ важнее диска.
-    readText: async (path) =>
-      documents.get(path)?.value ??
-      (await rpc.request("workspace.readFile", { path })).text,
+    readText: async (path) => documents.get(path)?.value ?? (await rpc.request('workspace.readFile', { path })).text,
     reviews,
-    notify: (message) => showToast(message, "error"),
+    notify: (message) => showToast(message, 'error'),
   });
   layout.editorHost.appendChild(diffView.element);
 
@@ -1534,9 +1387,7 @@ export async function startApplication(
   const conflictView = createConflictView({
     createDiff: (container) => editors.createDiff(container),
     git,
-    readText: async (path) =>
-      documents.get(path)?.value ??
-      (await rpc.request("workspace.readFile", { path })).text,
+    readText: async (path) => documents.get(path)?.value ?? (await rpc.request('workspace.readFile', { path })).text,
     applyEdits: async (path, list) => {
       // Документ и редактор меняются вместе (см. EditService): правка попадает в undo
       // и в сохранение, а не только в буфер.
@@ -1547,10 +1398,7 @@ export async function startApplication(
     finish: async (path) => {
       const document = await edits.ensureDocument(path);
       const outcome = await edits.saveDocument(document);
-      if (outcome === "conflict")
-        throw new Error(
-          "Файл изменён на диске — сохраните вручную и отметьте решённым",
-        );
+      if (outcome === 'conflict') throw new Error('Файл изменён на диске — сохраните вручную и отметьте решённым');
       await git.markResolved(path);
     },
     remerge: async (path, force) => {
@@ -1562,10 +1410,10 @@ export async function startApplication(
     confirm: async (message) => {
       // Тот же диалог, что и при перечитывании с диска: вопрос «потеряешь работу?»
       // должен выглядеть одинаково, где бы он ни встал.
-      const { confirmed } = await rpc.request("dialog.confirm", {
-        title: "Пере-слияние",
+      const { confirmed } = await rpc.request('dialog.confirm', {
+        title: 'Пере-слияние',
         message,
-        confirmLabel: "Вернуть маркеры",
+        confirmLabel: 'Вернуть маркеры',
       });
       return confirmed;
     },
@@ -1595,7 +1443,7 @@ export async function startApplication(
   let projectScan: ProjectScan | null = null;
 
   /** Вид проекта: от него зависит, чем собирать и запускать тесты (pytest или Node). */
-  const isPythonProject = (): boolean => projectScan?.kind.id === "python";
+  const isPythonProject = (): boolean => projectScan?.kind.id === 'python';
 
   /**
    * Плагины pytest, которые не загрузились у окружения проекта (см. сбор в main).
@@ -1612,10 +1460,7 @@ export async function startApplication(
    * Цель прогона тестов панели: селектор узла, а `null` — все тесты проекта. Раннер
    * выбираем по карте проекта: у Python это pytest, у Node — раннер проекта.
    */
-  const testTargetFor = (
-    selector: string | null,
-    options: { report?: boolean } = {},
-  ): RunTarget =>
+  const testTargetFor = (selector: string | null, options: { report?: boolean } = {}): RunTarget =>
     testTargetOf(tools.get(), nodeRunner(), selector, {
       ...options,
       platform: info.platform,
@@ -1639,24 +1484,13 @@ export async function startApplication(
    * здесь есть ещё и наполовину пройденные ветви. Нет файла или он битый — молча
    * остаёмся при том, что пришло из вывода pytest.
    */
-  const applyCoverageJson = async (
-    absolute: (path: string) => string,
-  ): Promise<void> => {
-    const file = await rpc
-      .request("project.readCoverage", { kind: "pytest" })
-      .catch(() => null);
+  const applyCoverageJson = async (absolute: (path: string) => string): Promise<void> => {
+    const file = await rpc.request('project.readCoverage', { kind: 'pytest' }).catch(() => null);
     if (!file?.text) return;
     const json = parseCoverageJson(file.text);
     if (json.files.length === 0) return;
     editors.setCoverage(
-      json.files.map(
-        (entry) =>
-          [
-            absolute(entry.path),
-            entry.missingLines,
-            entry.partialLines,
-          ] as const,
-      ),
+      json.files.map((entry) => [absolute(entry.path), entry.missingLines, entry.partialLines] as const),
     );
   };
 
@@ -1667,16 +1501,13 @@ export async function startApplication(
    * оставляем как есть. Итог отдаём и панели: там сводка и список файлов.
    */
   const applyNodeCoverage = async (root: string): Promise<void> => {
-    const file = await rpc
-      .request("project.readCoverage", { kind: "node" })
-      .catch(() => null);
+    const file = await rpc.request('project.readCoverage', { kind: 'node' }).catch(() => null);
     if (!file?.text) return;
     const report = parseNodeCoverage(file.text);
     if (report.files.length === 0) return;
 
     const separator = separatorOf(root);
-    const absolute = (filePath: string): string =>
-      joinPath(root, splitPath(filePath).join(separator));
+    const absolute = (filePath: string): string => joinPath(root, splitPath(filePath).join(separator));
     const entries = report.files.map((entry) => {
       // Отчёт печатает пути с прямыми слэшами; корень на Windows — с обратными.
       const native = entry.path.split(/[/\\]+/).join(separator);
@@ -1690,14 +1521,7 @@ export async function startApplication(
     });
 
     editors.setCoverage(
-      entries.map(
-        (entry) =>
-          [
-            entry.path,
-            entry.file.missingLines,
-            entry.file.partialLines,
-          ] as const,
-      ),
+      entries.map((entry) => [entry.path, entry.file.missingLines, entry.file.partialLines] as const),
     );
     testPanel.setCoverage({
       total: report.total,
@@ -1721,18 +1545,17 @@ export async function startApplication(
       if (!workspace.root) return null;
       // Python-проект собирает pytest, Node — свой раннер (vitest, jest или `node --test`).
       if (isPythonProject()) {
-        const suite = await rpc.request("python.tests");
+        const suite = await rpc.request('python.tests');
         // Запоминаем отключённые плагины: те же ключи нужны прогону из панели.
         pytestDisabledPlugins = suite.disabledPlugins ?? [];
-        return { runner: "pytest", ...suite };
+        return { runner: 'pytest', ...suite };
       }
       pytestDisabledPlugins = [];
-      return rpc.request("node.tests");
+      return rpc.request('node.tests');
     },
     // Панель просит отчёт — команда уносит в терминал и печать кода выхода,
     // по ней панель и красит узлы.
-    onRun: (selector, options) =>
-      void runTarget(testTargetFor(selector, options)),
+    onRun: (selector, options) => void runTarget(testTargetFor(selector, options)),
     // Покрытие у Python считает pytest-cov, у Node — провайдер проекта (vitest или
     // jest). У встроенного `node --test` отчёт текстовый, без построчной разбивки —
     // там кнопки «С покрытием» нет (см. `canCoverage`).
@@ -1740,10 +1563,8 @@ export async function startApplication(
       void (async () => {
         if (!isPythonProject()) {
           const runner = nodeRunner();
-          if (runner !== "vitest" && runner !== "jest") return;
-          const paths = await rpc
-            .request("project.coverageJsonPath")
-            .catch(() => null);
+          if (runner !== 'vitest' && runner !== 'jest') return;
+          const paths = await rpc.request('project.coverageJsonPath').catch(() => null);
           nodeCoverageDir = paths?.dir ?? null;
           void runTarget(
             nodeCoverageTarget(tools.get(), runner, selector, {
@@ -1755,7 +1576,7 @@ export async function startApplication(
           return;
         }
         coverageJsonPath = await rpc
-          .request("project.coverageJsonPath")
+          .request('project.coverageJsonPath')
           .then((result) => result.path)
           .catch(() => null);
         void runTarget(
@@ -1773,9 +1594,9 @@ export async function startApplication(
     canCoverage: () => {
       if (!isPythonProject()) {
         const runner = nodeRunner();
-        return runner === "vitest" || runner === "jest";
+        return runner === 'vitest' || runner === 'jest';
       }
-      return !pytestDisabledPlugins.includes("pytest_cov");
+      return !pytestDisabledPlugins.includes('pytest_cov');
     },
     // Отчёт покрытия → подсветка непокрытых строк в редакторе. Отчёт даёт пути от
     // корня проекта; редактор ключует файлы абсолютными — собираем их здесь.
@@ -1789,8 +1610,7 @@ export async function startApplication(
         return;
       }
       const separator = separatorOf(root);
-      const absolute = (filePath: string): string =>
-        joinPath(root, splitPath(filePath).join(separator));
+      const absolute = (filePath: string): string => joinPath(root, splitPath(filePath).join(separator));
       editors.setCoverage(
         report.files
           .filter((file) => file.missingLines.length > 0)
@@ -1799,13 +1619,11 @@ export async function startApplication(
       void applyCoverageJson(absolute);
     },
     // Пересобирать список по правке стоит только когда панель тестов на виду.
-    isVisible: () => dock.visible && dock.activeId === "tests",
+    isVisible: () => dock.visible && dock.activeId === 'tests',
   });
   // Исход прогона — в значок теста в жёлобе: панель знает его по селекторам,
   // редактор превращает их в цвет значка у строки объявления теста.
-  testPanel.onDidChangeOutcomes(() =>
-    editors.setTestOutcomes(testPanel.outcomes()),
-  );
+  testPanel.onDidChangeOutcomes(() => editors.setTestOutcomes(testPanel.outcomes()));
 
   // Структура текущего файла: классы и функции списком, клик — переход к объявлению.
   const outline = createOutline({
@@ -1813,7 +1631,7 @@ export async function startApplication(
     openEditors,
     documents,
     reveal: (path, line, column) => editors.reveal(path, line, column),
-    isVisible: () => dock.visible && dock.activeId === "outline",
+    isVisible: () => dock.visible && dock.activeId === 'outline',
   });
 
   const dock = createDock();
@@ -1836,18 +1654,16 @@ export async function startApplication(
     // Ручку отдаём наружу (`openStream`, а не `stream`): по ней полоса прерывает проход,
     // который иначе досчитывал бы до конца, пока человек уже смотрит в другое место.
     analyze: (onStage) =>
-      rpc.openStream("project.analyze", undefined, (event, payload) => {
-        if (event === PROJECT_STAGE_EVENT)
-          onStage(payload as ProjectStageEvent);
+      rpc.openStream('project.analyze', undefined, (event, payload) => {
+        if (event === PROJECT_STAGE_EVENT) onStage(payload as ProjectStageEvent);
       }),
-    setMarkers: (path, owner, list) =>
-      editors.setExternalMarkers(path, owner, list),
+    setMarkers: (path, owner, list) => editors.setExternalMarkers(path, owner, list),
     onState: (state) => {
       // Провал проверки не прячем: без него числа в виджете вечно нулевые.
-      if (state.phase === "failed" && state.note) showToast(state.note);
+      if (state.phase === 'failed' && state.note) showToast(state.note);
       statusBar.update({ problems: problemsStatus() });
       dock.refreshBadges();
-      if (dock.visible && dock.activeId === "problems") problemPanel.refresh();
+      if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
     },
   });
   // Один источник для всех мест, где обновляется виджет: числа плюс признаки
@@ -1862,21 +1678,17 @@ export async function startApplication(
     check: {
       ...(projectCheck.progress() ?? typeCheck.progress() ?? {}),
       // «Прервать» — только у идущего прохода и только если у него есть ручка.
-      cancellable: (projectCheck.progress()
-        ? projectCheck
-        : typeCheck
-      ).cancellable(),
+      cancellable: (projectCheck.progress() ? projectCheck : typeCheck).cancellable(),
     } as ReturnType<typeof projectCheck.progress> & { cancellable?: boolean },
   });
   const problemPanel = createProblemPanel({
     markers: () => editors.markers(),
     // Из панели файла может и не быть на экране — открываем его тем же путём, что и всё.
-    reveal: (path, line, column) =>
-      void openPath(path).then(() => editors.reveal(path, line, column)),
+    reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
     label: (path) => workspace.relative(path),
     // Действие пустого состояния (п.10): до первой проверки список честно пуст,
     // и «Проблем нет» без кнопки читалось как «всё чисто».
-    check: () => void commands.execute("project.check"),
+    check: () => void commands.execute('project.check'),
     // «Проблем нет» до первой проверки было утверждением, а не фактом: список
     // пуст ещё и потому, что проект не проверяли.
     unchecked: () => projectCheck.unchecked(),
@@ -1886,18 +1698,15 @@ export async function startApplication(
   const typeCheck = new ProjectCheck(
     {
       root: () => workspace.root,
-      analyze: () => rpc.request("project.types"),
-      setMarkers: (path, owner, list) =>
-        editors.setExternalMarkers(path, owner, list),
+      analyze: () => rpc.request('project.types'),
+      setMarkers: (path, owner, list) => editors.setExternalMarkers(path, owner, list),
       owner: PROJECT_TYPES_OWNER,
       onState: (state) => {
-        if (state.phase === "failed" && state.note) showToast(state.note);
-        if (state.phase === "done" && state.tool === null && state.note)
-          showToast(state.note);
+        if (state.phase === 'failed' && state.note) showToast(state.note);
+        if (state.phase === 'done' && state.tool === null && state.note) showToast(state.note);
         statusBar.update({ problems: problemsStatus() });
         dock.refreshBadges();
-        if (dock.visible && dock.activeId === "problems")
-          problemPanel.refresh();
+        if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
       },
     },
     // Шагов нет: tsc идёт одним куском и о середине молчит — полоса бежит без чисел.
@@ -1908,7 +1717,7 @@ export async function startApplication(
   // группировку отдаёт `shared/todo-list.ts`.
   const todoPanel = createTodoPanel({
     scan: async () => {
-      const result = await rpc.request("workspace.search", {
+      const result = await rpc.request('workspace.search', {
         query: TODO_QUERY,
         isRegex: true,
         caseSensitive: false,
@@ -1916,8 +1725,7 @@ export async function startApplication(
       });
       return toTodoItems(result.hits);
     },
-    reveal: (path, line, column) =>
-      void openPath(path).then(() => editors.reveal(path, line, column)),
+    reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
     label: (path) => workspace.relative(path),
     hasWorkspace: () => workspace.root !== null,
   });
@@ -1946,84 +1754,83 @@ export async function startApplication(
     readText: (path) => documents.get(path)?.value ?? null,
     readHead: (path) => git.headText(path),
     relativePath: (path) => workspace.relative(path),
-    isVisible: () => dock.activeId === "notebooks",
+    isVisible: () => dock.activeId === 'notebooks',
   });
 
   // Порядок вкладок задаёт порядок регистрации, поэтому он здесь явный: первыми идут
   // те, что открывают чаще всего, — терминал и поиск, — дальше остальные.
   dock.register({
-    id: "terminal",
-    title: "Терминал",
+    id: 'terminal',
+    title: 'Терминал',
     element: terminalPanel.element,
     onShow: () => {
       void terminalPanel.open();
       // Показать терминал — значит уйти в его группу вкладок (см. `activeTabGroup`).
-      setTabGroup("terminal");
+      setTabGroup('terminal');
     },
   });
   // Порты опрашиваем только на видимой вкладке: `onShow` запускает таймер.
   const portsPanel = createPortsPanel({
-    list: () => rpc.request("terminal.ports"),
-    open: (url) =>
-      void rpc.request("shell.openExternal", { url }).catch(() => undefined),
+    list: () => rpc.request('terminal.ports'),
+    open: (url) => void rpc.request('shell.openExternal', { url }).catch(() => undefined),
     // Отдельного «показать эту сессию» в API панели нет — открываем вкладку
     // терминала: человек видит живой вывод и понимает, чей это порт.
-    revealTerminal: () => dock.show("terminal"),
+    revealTerminal: () => dock.show('terminal'),
   });
   dock.register({
-    id: "ports",
-    title: "Порты",
+    id: 'ports',
+    title: 'Порты',
     element: portsPanel.element,
     onShow: () => portsPanel.open(),
   });
   // Док показывает вкладку только через `onShow`, а скрывает без обратного
   // вызова: уход с вкладки ловим по смене видимости и активности.
   dock.onVisibilityChange(() => {
-    const onPorts = dock.visible && dock.activeId === "ports";
+    const onPorts = dock.visible && dock.activeId === 'ports';
     if (!onPorts) portsPanel.close();
   });
   dock.register({
-    id: "search",
-    title: "Поиск",
+    id: 'search',
+    title: 'Поиск',
     element: searchView.element,
     onShow: () => searchView.focus(),
   });
   dock.register({
-    id: "notebooks",
-    title: "Ячейки",
+    id: 'notebooks',
+    title: 'Ячейки',
     element: notebookPanel.element,
     onShow: () => notebookPanel.refresh(),
   });
   dock.register({
-    id: "tests",
-    title: "Тесты",
+    id: 'tests',
+    title: 'Тесты',
     element: testPanel.element,
     onShow: () => void testPanel.refresh(),
   });
   // Журнал языковых серверов: хвост файла, который main пишет при `lsp.trace`.
   // Читаем при показе вкладки — журнал растёт, пока панель скрыта.
   const lspLog = createLspLogPanel({
-    fetch: (lines) => rpc.request("lsp.trace", { lines }),
-    openSettings: () => settingsModal.open("lsp"),
+    fetch: (lines) => rpc.request('lsp.trace', { lines }),
+    openSettings: () => settingsModal.open('lsp'),
   });
   dock.register({
-    id: "lsp-log",
-    title: "LSP",
+    id: 'lsp-log',
+    title: 'LSP',
     element: lspLog.element,
     onShow: () => void lspLog.refresh(),
   });
   // Структуру собираем при показе вкладки: файл мог смениться, пока панель была скрыта.
   dock.register({
-    id: "outline",
-    title: "Структура",
+    id: 'outline',
+    title: 'Структура',
     element: outline.element,
     onShow: () => outline.refresh(),
   });
   // Список собираем при показе вкладки и по изменению пометок (ниже). Значок на вкладке —
   // те же числа, что в статус-баре: ошибки, а без ошибок — предупреждения.
   dock.register({
-    id: "problems",
-    title: "Проблемы",
+    id: 'problems',
+    title: 'Проблемы',
     element: problemPanel.element,
     badge: () => problemBadgeText(problemPanel.counts()),
     onShow: () => problemPanel.refresh(),
@@ -2031,8 +1838,8 @@ export async function startApplication(
   // Задачи: пометки TODO/FIXME/HACK/XXX по проекту. Список собирает поиск по проекту
   // с готовым запросом, а разбор находок и группировку панели отдаёт `shared/todo-list.ts`.
   dock.register({
-    id: "todo",
-    title: "Задачи",
+    id: 'todo',
+    title: 'Задачи',
     element: todoPanel.element,
     badge: () => todoPanel.badge(),
     onShow: () => todoPanel.refresh(),
@@ -2076,7 +1883,7 @@ export async function startApplication(
   // Когда он виден — решает `syncImage` по активной вкладке.
   const imageView = createImageView({
     rpc,
-    notify: (message) => showToast(message, "error"),
+    notify: (message) => showToast(message, 'error'),
   });
   layout.editorHost.appendChild(imageView.element);
 
@@ -2084,7 +1891,7 @@ export async function startApplication(
   // Когда он виден — решает `syncDoc` по активной вкладке.
   const docView = createDocView({
     rpc,
-    notify: (message) => showToast(message, "error"),
+    notify: (message) => showToast(message, 'error'),
   });
   layout.editorHost.appendChild(docView.element);
 
@@ -2097,9 +1904,8 @@ export async function startApplication(
   let chatForBrowser: ChatView | null = null;
   const browserView = createBrowserView({
     rpc,
-    openExternal: (url) =>
-      void rpc.request("shell.openExternal", { url }).catch(() => undefined),
-    notify: (message) => showToast(message, "error"),
+    openExternal: (url) => void rpc.request('shell.openExternal', { url }).catch(() => undefined),
+    notify: (message) => showToast(message, 'error'),
     attachImage: (image) => chatForBrowser?.attachImage(image),
     attachContext: (item) => chatForBrowser?.attachContext(item),
   });
@@ -2163,12 +1969,12 @@ export async function startApplication(
 
   /** Куда зовём, если AI выключен: подсказка вместо тихого «ничего не произошло». */
   const warnAiDisabled = (): void => {
-    showToast("AI выключен в настройках. Включить: Настройки → AI.", "error");
+    showToast('AI выключен в настройках. Включить: Настройки → AI.', 'error');
   };
 
   /** Группа вкладок на экране (`editor` или `terminal`) и реакция на её смену. */
   let onTabGroupChange: () => void = () => undefined;
-  function setTabGroup(group: "editor" | "terminal"): void {
+  function setTabGroup(group: 'editor' | 'terminal'): void {
     if (activeTabGroup === group) return;
     activeTabGroup = group;
     onTabGroupChange();
@@ -2199,36 +2005,34 @@ export async function startApplication(
     const tabName = activeTabId(tabSources);
     if (tabName === '') island.removeAttribute('aria-labelledby');
     else island.setAttribute('aria-labelledby', tabName);
-    island.classList.toggle("is-browser", plan.shown === "page");
-    island.classList.toggle("is-image", plan.shown === "image");
-    island.classList.toggle("is-doc", plan.shown === "doc");
-    island.classList.toggle("is-markdown", plan.shown === "markdown");
-    if (plan.shown !== "page") browserView.hide();
-    if (plan.shown !== "image") imageView.hide();
-    if (plan.shown !== "doc") docView.hide();
-    if (plan.shown !== "markdown") {
+    island.classList.toggle('is-browser', plan.shown === 'page');
+    island.classList.toggle('is-image', plan.shown === 'image');
+    island.classList.toggle('is-doc', plan.shown === 'doc');
+    island.classList.toggle('is-markdown', plan.shown === 'markdown');
+    if (plan.shown !== 'page') browserView.hide();
+    if (plan.shown !== 'image') imageView.hide();
+    if (plan.shown !== 'doc') docView.hide();
+    if (plan.shown !== 'markdown') {
       markdownPreview.hide();
       markdownPreviewShown = false;
     }
     switch (plan.shown) {
-      case "page": {
+      case 'page': {
         const page = browserTabs.active;
         // Вложение приезжает из main готовым слоем: показываем, только если его нет.
         // Иначе каждый чих вкладки (смена заголовка, загрузка) дёргал бы main зря.
-        if (page && (browserView.pageId !== page.id || !browserView.isOpen))
-          browserView.show(page);
+        if (page && (browserView.pageId !== page.id || !browserView.isOpen)) browserView.show(page);
         break;
       }
-      case "image":
+      case 'image':
         // Только при смене файла: перезапись сбрасывала бы прокрутку и мигала на каждом
         // чихе вкладок.
-        if (activePath !== null && imageView.path !== activePath)
-          imageView.show(activePath);
+        if (activePath !== null && imageView.path !== activePath) imageView.show(activePath);
         break;
-      case "doc":
+      case 'doc':
         if (activePath !== null) docView.show(activePath);
         break;
-      case "markdown":
+      case 'markdown':
         // `show()` всегда перечитывает файл и поднимает прокрутку вверх — зовём, только
         // когда разметку действительно надо обновить (после правки или переключения
         // вкладки). Остальные поводы (страница, режим) ей ни к чему.
@@ -2247,7 +2051,7 @@ export async function startApplication(
   // Открыть файл (деревом, ссылкой, палитрой) — значит уйти в группу редактора:
   // терминал остаётся открытым снизу, но на экране теперь код.
   openEditors.onDidChange(() => {
-    if (openEditors.active) setTabGroup("editor");
+    if (openEditors.active) setTabGroup('editor');
   });
 
   /** Часы правок файла и разметки: что показывать — решает `applySurfaces`. */
@@ -2257,10 +2061,7 @@ export async function startApplication(
   }
 
   /** Включить/выключить просмотр разметки (по умолчанию — у активного файла). */
-  function setMarkdownPreview(
-    on: boolean,
-    path: string | null = openEditors.active?.path ?? null,
-  ): void {
+  function setMarkdownPreview(on: boolean, path: string | null = openEditors.active?.path ?? null): void {
     if (path === null || !isMarkdownPath(path)) return;
     if (on) markdownPreviews.add(path);
     else markdownPreviews.delete(path);
@@ -2342,9 +2143,7 @@ export async function startApplication(
     // Инвариант держит сам `layout` (см. `applyPanelIntent`); здесь — чтобы сказать
     // вслух, почему кнопка не отозвалась.
     if (layout.rightVisible && !layout.editorVisible) {
-      showToast(
-        "Редактор скрыт: ассистент — единственное, что есть в окне. Верните редактор (Ctrl+Alt+E)",
-      );
+      showToast('Редактор скрыт: ассистент — единственное, что есть в окне. Верните редактор (Ctrl+Alt+E)');
       return;
     }
     layout.setRightVisible(!layout.rightVisible);
@@ -2373,14 +2172,13 @@ export async function startApplication(
     // панели фокус остаётся, и без этого прогон считался бы просмотренным.
     isChatVisible: () => layout.rightVisible,
     // Тот же системный диалог, что у отката правок Git: откат чекпойнта необратим.
-    confirm: async (options) =>
-      (await rpc.request("dialog.confirm", options)).confirmed,
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
     onRunEnd: (how, _title) => {
       // ЗАГОЛОВОК ОКНА НЕ ТРОГАЕМ. Он принадлежит шапке: `refreshStatus` держит
       // там имя открытого файла и переписывает его при каждом изменении — наш
       // текст жил бы до первого чиха и всё равно был бы затёрт.
       // Видимый след — метка на кнопке AI; словами её говорит `aria-label`.
-      markChatUnseen(how === "failed");
+      markChatUnseen(how === 'failed');
       // Работа кончилась — подпись про неё больше не правда (её снимет и `seal`).
       setChatBusyHint(null);
     },
@@ -2395,10 +2193,10 @@ export async function startApplication(
     // окно синхронного возврата не даёт (`open` зовёт `onAccept`).
     askCommit: () => {
       conditionInput.open({
-        title: "Какой коммит приложить",
-        label: "Хеш (или его начало) — из панели истории",
-        value: "",
-        confirmLabel: "Приложить",
+        title: 'Какой коммит приложить',
+        label: 'Хеш (или его начало) — из панели истории',
+        value: '',
+        confirmLabel: 'Приложить',
         onAccept: (value) => {
           const hash = value.trim();
           if (hash.length > 0) chat.attachCommit(hash);
@@ -2411,11 +2209,9 @@ export async function startApplication(
     // Без открытого проекта список пуст: прикладывать нечего, и об этом скажет чат.
     codebase: async (query: string) => {
       const [symbols, found] = await Promise.all([
+        rpc.request('lsp.symbols', { query }).catch(() => [] as ProjectSymbol[]),
         rpc
-          .request("lsp.symbols", { query })
-          .catch(() => [] as ProjectSymbol[]),
-        rpc
-          .request("workspace.search", {
+          .request('workspace.search', {
             query: meaningRegex(query),
             isRegex: true,
             caseSensitive: false,
@@ -2428,21 +2224,14 @@ export async function startApplication(
         line: hit.line,
         text: hit.text,
       }));
-      return selectPlaces(
-        combineMeaning(symbols, lines, query, CODEBASE_HITS),
-        CODEBASE_PLACES,
-        CODEBASE_PER_FILE,
-      );
+      return selectPlaces(combineMeaning(symbols, lines, query, CODEBASE_HITS), CODEBASE_PLACES, CODEBASE_PER_FILE);
     },
     settings,
     settingsModal,
     host,
     // Строки — те же, что у `show open`: файл-результат `present` открывается на
     // месте, если модель его назвала, а иначе — целиком (см. `OpenFileHandler`).
-    openFile: async (
-      path: string,
-      position?: { line?: number; column?: number },
-    ) => {
+    openFile: async (path: string, position?: { line?: number; column?: number }) => {
       await openPath(path);
       revealAt(path, position);
     },
@@ -2451,15 +2240,11 @@ export async function startApplication(
   // а прогон начинается его `Enter`. Токенов без человека никто не тратит.
   createAutomations({
     documents,
-    root: () => workspace.root ?? "",
+    root: () => workspace.root ?? '',
     settings: () => settings.ai.automations,
     onDue: (item, reason) => {
       chat.draftPrompt(item.prompt);
-      showToast(
-        reason === "save"
-          ? `Автоматизация «${item.name}»: запрос в чате`
-          : `Пора: «${item.name}»`,
-      );
+      showToast(reason === 'save' ? `Автоматизация «${item.name}»: запрос в чате` : `Пора: «${item.name}»`);
     },
   });
   layout.rightBody.appendChild(chat.element);
@@ -2512,13 +2297,13 @@ export async function startApplication(
 
   const runControl = createRunButton((target) => void runTarget(target));
   // Имя открытого файла в центре шапки: показывается, когда кнопки запуска нет.
-  const topBarName = h("span", { class: "topbar-name" });
+  const topBarName = h('span', { class: 'topbar-name' });
 
   /* ── запуск ────────────────────────────────────────────────────────────── */
 
   const tools = new ProjectToolsModel(rpc, () => settings.run, info.platform);
   /** Подпись последнего нарисованного значка запуска: не трогаем украшения зря. */
-  let runMarkerSignature = "";
+  let runMarkerSignature = '';
 
   /** Перечитать карту проекта: дёшево — обход имён без чтения содержимого. */
   async function refreshScan(): Promise<void> {
@@ -2527,7 +2312,7 @@ export async function startApplication(
     refreshStatus();
     // Прогрев серверов ждёт именно этого обещания (см. `waitForScan` ниже).
     scanSettled = rpc
-      .request("project.scan")
+      .request('project.scan')
       .then((scan) => {
         projectScan = scan;
       })
@@ -2574,14 +2359,14 @@ export async function startApplication(
             execute: (id, args) => void commands.execute(id, ...(args ?? [])),
             // Куда смотреть, если тост уже ушёл: журнал сервера и окно настроек —
             // без этого отказ живёт минуту и исчезает без следа.
-            source: { where: "Журнал языка — вкладка «LSP» внизу" },
+            source: { where: 'Журнал языка — вкладка «LSP» внизу' },
           })
         : showToast(message, kind, {
-            source: { where: "Настройки → Языки", command: "settings.open" },
+            source: { where: 'Настройки → Языки', command: 'settings.open' },
           }),
     openLspSettings: () => {
       // Окно настроек на разделе «Языки»: оттуда ставят сервер, которого нет.
-      settingsModal.open("lsp");
+      settingsModal.open('lsp');
     },
     onStatus: (status) => applyLspStatus(status),
     onPrewarmed: () => refreshSymbolIndex(),
@@ -2602,8 +2387,7 @@ export async function startApplication(
    * Как только карта готова — опрос прекращается, виджет гаснет.
    */
   const symbolPoller = createSymbolPoller({
-    request: async () =>
-      (await rpc.request("index.status")) as SymbolIndexStatus,
+    request: async () => (await rpc.request('index.status')) as SymbolIndexStatus,
     show: (status) =>
       statusBar.update({
         symbols: symbolIndexChip(status as SymbolIndexStatus),
@@ -2628,9 +2412,7 @@ export async function startApplication(
   }
 
   /** Файл как программа: путь от корня нужен для команды в терминале. */
-  const runnableFileOf = (
-    document: TextDocument | null,
-  ): RunnableFile | null => {
+  const runnableFileOf = (document: TextDocument | null): RunnableFile | null => {
     const root = workspace.root;
     if (!document || !root) return null;
     const relative = workspace.relative(document.path);
@@ -2645,13 +2427,7 @@ export async function startApplication(
   };
 
   function targetsFor(document: TextDocument | null): RunTarget[] {
-    return collectRunTargets(
-      runnableFileOf(document),
-      tools.get(),
-      projectScan,
-      nodeRunner(),
-      pytestDisabledPlugins,
-    );
+    return collectRunTargets(runnableFileOf(document), tools.get(), projectScan, nodeRunner(), pytestDisabledPlugins);
   }
 
   /**
@@ -2680,7 +2456,7 @@ export async function startApplication(
   }
 
   /** Подпись для значков тестов: версия документа в ней — правка может добавить тест. */
-  let testMarkerSignature = "";
+  let testMarkerSignature = '';
 
   /**
    * Значки запуска отдельных тестов в жёлобе. Тестовый ли файл и какие в нём тесты —
@@ -2707,10 +2483,9 @@ export async function startApplication(
   /** Запуск цели: файл сохраняем, панель показываем, команду набираем в терминале. */
   async function runTarget(target: RunTarget): Promise<void> {
     if (settings.run.saveBeforeRun) {
-      for (const document of documents.dirty())
-        await fileWrite.saveDocument(document);
+      for (const document of documents.dirty()) await fileWrite.saveDocument(document);
     }
-    dock.show("terminal");
+    dock.show('terminal');
     await terminalPanel.run(target.command, target.label);
   }
 
@@ -2728,14 +2503,8 @@ export async function startApplication(
     onBeforeShow: () => {
       const known = new Set(commands.list().map((descriptor) => descriptor.id));
       const recent = recentCommands.ids().filter((id) => known.has(id));
-      if (
-        JSON.stringify(recent) ===
-        JSON.stringify(settings.commandPalette?.recent ?? [])
-      )
-        return;
-      void rpc
-        .request("settings.update", { commandPalette: { recent } })
-        .catch(() => undefined);
+      if (JSON.stringify(recent) === JSON.stringify(settings.commandPalette?.recent ?? [])) return;
+      void rpc.request('settings.update', { commandPalette: { recent } }).catch(() => undefined);
     },
     // П.1: сочетание в палитре кликабельно и ведёт туда, где его меняют.
     // Возвращает ПРИЗНАК, и это не формальность. Браузер отдаёт клик в окно,
@@ -2747,14 +2516,14 @@ export async function startApplication(
         return false;
       }
       // Со второго параметра раздел открывается сразу на строке команды.
-      void settingsModal.open("keybindings", command);
+      void settingsModal.open('keybindings', command);
       return true;
     },
   });
   document.body.appendChild(palette.element);
 
   // F1 внутри редактора — наша палитра: две палитры в одном окне только путают.
-  editors.openPaletteOnF1(() => void commands.execute("palette.open"));
+  editors.openPaletteOnF1(() => void commands.execute('palette.open'));
 
   /* ── кнопки шапки ──────────────────────────────────────────────────────── */
 
@@ -2775,10 +2544,10 @@ export async function startApplication(
     glyph?: SVGSVGElement,
   ): void => {
     const button = h(
-      "button",
+      'button',
       {
-        class: "icon-btn",
-        type: "button",
+        class: 'icon-btn',
+        type: 'button',
         title,
         onClick: () => void commands.execute(command),
       },
@@ -2790,59 +2559,39 @@ export async function startApplication(
 
   /** Панель закрывают и кнопкой, и командой, и сплиттером — подсветка идёт за состоянием. */
   const syncViewButtons = (): void => {
-    viewButtons
-      .get("project")
-      ?.classList.toggle("is-active", layout.sidebarVisible);
-    viewButtons
-      .get("editorToggle")
-      ?.classList.toggle("is-active", layout.editorVisible);
-    viewButtons
-      .get("search")
-      ?.classList.toggle(
-        "is-active",
-        layout.dockVisible && dock.activeId === "search",
-      );
+    viewButtons.get('project')?.classList.toggle('is-active', layout.sidebarVisible);
+    viewButtons.get('editorToggle')?.classList.toggle('is-active', layout.editorVisible);
+    viewButtons.get('search')?.classList.toggle('is-active', layout.dockVisible && dock.activeId === 'search');
     // Кнопка нижней панели помнит состояние самого острова, а не одной вкладки:
     // она его распахивает и захлопывает целиком.
-    viewButtons.get("dock")?.classList.toggle("is-active", layout.dockVisible);
-    viewButtons.get("split")?.classList.toggle("is-active", editors.isSplit);
+    viewButtons.get('dock')?.classList.toggle('is-active', layout.dockVisible);
+    viewButtons.get('split')?.classList.toggle('is-active', editors.isSplit);
     // Кнопка браузера помнит, показана ли страница сейчас: тем же значком её и
     // открывают повторно — как кнопки панелей.
-    viewButtons
-      .get("browser")
-      ?.classList.toggle("is-active", browserView.isOpen);
+    viewButtons.get('browser')?.classList.toggle('is-active', browserView.isOpen);
     // Выключенный AI прячем из шапки: неактивная кнопка всё равно звала бы в чат.
-    const aiButton = viewButtons.get("ai");
+    const aiButton = viewButtons.get('ai');
     if (aiButton) {
       aiButton.hidden = !aiEnabled();
-      aiButton.classList.toggle(
-        "is-active",
-        aiEnabled() && layout.rightVisible,
-      );
+      aiButton.classList.toggle('is-active', aiEnabled() && layout.rightVisible);
       // Метка «есть непрочитанное»: точка на кнопке панели, которая сейчас
       // свёрнута. Когда панель открыта, человек уже видит чат — метка лишняя.
+      aiButton.classList.toggle('has-unseen', aiEnabled() && chatUnseen && !layout.rightVisible);
       aiButton.classList.toggle(
-        "has-unseen",
-        aiEnabled() && chatUnseen && !layout.rightVisible,
-      );
-      aiButton.classList.toggle(
-        "has-unseen-error",
+        'has-unseen-error',
         aiEnabled() && chatUnseen && chatUnseenFailed && !layout.rightVisible,
       );
       aiButton.setAttribute(
-        "aria-label",
+        'aria-label',
         aiEnabled() && chatBusyHint && !layout.rightVisible
           ? `AI Assistant (Ctrl+Shift+A) — сейчас: ${chatBusyHint}`
           : chatUnseen && !layout.rightVisible
-            ? "AI Assistant (Ctrl+Shift+A) — есть новый ответ"
-            : "AI Assistant (Ctrl+Shift+A)",
+            ? 'AI Assistant (Ctrl+Shift+A) — есть новый ответ'
+            : 'AI Assistant (Ctrl+Shift+A)',
       );
       // Работа идёт — на кнопке пульсирующая точка, даже если человек ничего не
       // пропустил: ответа ждать ещй, и это видно без раскрытия панели.
-      aiButton.classList.toggle(
-        "is-busy",
-        aiEnabled() && chatBusyHint !== null,
-      );
+      aiButton.classList.toggle('is-busy', aiEnabled() && chatBusyHint !== null);
     }
   };
 
@@ -2866,7 +2615,7 @@ export async function startApplication(
     });
     syncViewButtons();
   };
-  window.addEventListener("resize", syncAdaptivePanels);
+  window.addEventListener('resize', syncAdaptivePanels);
   // Первый расчёт не решает: макет уже пришёл из настроек, и автопоказ не вправе
   // его переигрывать — при узком окне он свернул бы обе панели, и человек увидел
   // бы, что выбор из прошлой сессии потерян.
@@ -2879,14 +2628,14 @@ export async function startApplication(
   // Меню рисует renderer, поэтому оно выглядит как остальные выпадашки; системное
   // меню остаётся внутри main ради горячих клавиш (см. `shared/app-menu.ts`).
   const menuButton = h(
-    "button",
+    'button',
     {
-      class: "icon-btn",
-      type: "button",
-      title: "Меню приложения",
-      onClick: () => void commands.execute("app.showMenu"),
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Меню приложения',
+      onClick: () => void commands.execute('app.showMenu'),
     },
-    svgIcon("menu", 16),
+    svgIcon('menu', 16),
   );
   layout.topBarLeft.appendChild(menuButton);
   // Имя проекта и переключение между недавними — в шапке окна, сразу за меню:
@@ -2898,23 +2647,23 @@ export async function startApplication(
   // Ветка git — рядом с проектом: она часть его состояния. Кнопка же служит якорем
   // поповера менеджера git (Ctrl+Shift+G), поэтому живёт в шапке, а не в полосе.
   const gitButton = h(
-    "button",
+    'button',
     {
-      class: "select status-git",
-      type: "button",
+      class: 'select status-git',
+      type: 'button',
       hidden: true,
-      title: "Менеджер git (Ctrl+Shift+G)",
+      title: 'Менеджер git (Ctrl+Shift+G)',
       onclick: () => openGitManager(gitButton),
     },
     // Ветка — не «просто подпись»: перед ней иконка ветки, как у кнопок
     // действия. Класс `topbar-icon` держит иконку в ряду и красит её
     // отдельно от шеврона (`.status-git > svg` ниже — только шеврон).
-    h("span", { class: "topbar-icon" }, svgIcon("branch", 12)),
-    h("span", { class: "status-git-label" }),
-    h("span", { class: "status-git-changes" }),
+    h('span', { class: 'topbar-icon' }, svgIcon('branch', 12)),
+    h('span', { class: 'status-git-label' }),
+    h('span', { class: 'status-git-changes' }),
     // Шеврон — как у `.select` в этой же шапке: кнопка открывает список, и
     // форма должна обещать то же, что соседний селектор проекта.
-    svgIcon("chevronDown", 12),
+    svgIcon('chevronDown', 12),
   );
   layout.topBarLeft.appendChild(gitButton);
   const syncGitButton = () => {
@@ -2923,10 +2672,10 @@ export async function startApplication(
     if (branch === null) return;
     /* Имя и счётчик — разные узлы: имя режется многоточием, счётчик всегда цел.
        Раньше оба писались в первый span, и «±N» уезжало вместе с обрезкой. */
-    const label = gitButton.querySelector<HTMLElement>(".status-git-label")!;
-    const changes = gitButton.querySelector<HTMLElement>(".status-git-changes")!;
+    const label = gitButton.querySelector<HTMLElement>('.status-git-label')!;
+    const changes = gitButton.querySelector<HTMLElement>('.status-git-changes')!;
     label.textContent = branch;
-    changes.textContent = git.changeCount > 0 ? `±${git.changeCount}` : "";
+    changes.textContent = git.changeCount > 0 ? `±${git.changeCount}` : '';
     changes.hidden = git.changeCount === 0;
   };
   git.onDidChange(() => syncGitButton());
@@ -2939,67 +2688,30 @@ export async function startApplication(
   // Переключатели раскладки — справа, у кнопок окна: они меняют вид окна, а не
   // содержимое, и в ряду действий над файлами им не место.
   // Переключатель боковой панели: он про то же — что открыто слева.
-  addTopButton(
-    layout.topBarRight,
-    "project",
-    "panel",
-    "Боковая панель (Ctrl+B)",
-    "view.toggleSidebar",
-  );
+  addTopButton(layout.topBarRight, 'project', 'panel', 'Боковая панель (Ctrl+B)', 'view.toggleSidebar');
   // Панель редактора: тот же смысл — что открыто в центре. Прячется целиком, отдавая
   // место соседям; правка файлов при этом не теряется, вкладки никуда не деваются.
-  addTopButton(
-    layout.topBarRight,
-    "editorToggle",
-    "panelCenter",
-    "Панель редактора (Ctrl+Alt+E)",
-    "view.toggleEditor",
-  );
+  addTopButton(layout.topBarRight, 'editorToggle', 'panelCenter', 'Панель редактора (Ctrl+Alt+E)', 'view.toggleEditor');
   // Нижний остров (терминал, поиск, задачи): кнопка целиком включает и выключает его,
   // а значок — та же рамка с полосой, что у боковой панели, только полоса снизу.
-  addTopButton(
-    layout.topBarRight,
-    "dock",
-    "panelBottom",
-    "Нижняя панель (Alt+F12)",
-    "view.toggleDock",
-  );
+  addTopButton(layout.topBarRight, 'dock', 'panelBottom', 'Нижняя панель (Alt+F12)', 'view.toggleDock');
   // Разделение области редактора: два файла рядом. Кнопка помнит состояние.
-  addTopButton(
-    layout.topBarRight,
-    "split",
-    "split",
-    "Разделить редактор (Ctrl+\\)",
-    "view.splitEditor",
-  );
+  addTopButton(layout.topBarRight, 'split', 'split', 'Разделить редактор (Ctrl+\\)', 'view.splitEditor');
   // Служебное — за разделителем. Палитры команд и настроек в шапке больше нет:
   // палитра живёт на Ctrl+Shift+P и в меню «Вид», настройки — в меню «Файл».
-  layout.topBarRight.appendChild(h("span", { class: "topbar-sep" }));
+  layout.topBarRight.appendChild(h('span', { class: 'topbar-sep' }));
   // Палитра живёт на Ctrl+Shift+P и в меню «Вид»: кнопку в шапке человек попросил
   // убрать с глаз. Из разметки она не удалена — скрыта: на неё опираются живые
   // пробы (palette-probe и соседние), а места в полосе `hidden` не занимает.
-  addTopButton(
-    layout.topBarRight,
-    "palette",
-    "command",
-    "Палитра команд (Ctrl+Shift+P)",
-    "palette.open",
-  );
-  const paletteButton = viewButtons.get("palette");
+  addTopButton(layout.topBarRight, 'palette', 'command', 'Палитра команд (Ctrl+Shift+P)', 'palette.open');
+  const paletteButton = viewButtons.get('palette');
   if (paletteButton) paletteButton.hidden = true;
   // Ассистент носит знак приложения, а не звезду-искру: тот же знак, что
   // в пустом состоянии редактора, — кнопка и экран говорят одно и то же.
   // Кнопка AI в шапке бьёт в `ai.toggle`, а не в собственную команду: прежняя
   // `view.toggleRight` звала `toggleChat()` мимо проверки `aiEnabled()` и открывала
   // панель при выключенном AI — та же ошибка, что чинил `ai.toggle` (см. ниже).
-  addTopButton(
-    layout.topBarRight,
-    "ai",
-    "sparkle",
-    "AI Assistant (Ctrl+Shift+A)",
-    "ai.toggle",
-    logoMark(13),
-  );
+  addTopButton(layout.topBarRight, 'ai', 'sparkle', 'AI Assistant (Ctrl+Shift+A)', 'ai.toggle', logoMark(13));
 
   // Своя рамка создаётся последней: кнопки окна должны стоять с краю шапки,
   // а не перед кнопками действий.
@@ -3018,10 +2730,7 @@ export async function startApplication(
   };
 
   const recentFiles = createRecentFiles();
-  const openPath = async (
-    path: string,
-    options: { preview?: boolean } = {},
-  ): Promise<void> => {
+  const openPath = async (path: string, options: { preview?: boolean } = {}): Promise<void> => {
     // PDF — тоже не текст, и показывать его умеет сам движок: вкладка-страница со
     // встроенным просмотрщиком (см. `shared/pdf.ts`). Документ ему не нужен:
     // открывать в редакторе нечего, а вкладку ведёт `BrowserTabs`.
@@ -3074,25 +2783,23 @@ export async function startApplication(
    * сервер этим говорит, что отсутствие файла/существование цели — не беда.
    * Что считается ошибкой и как она звучит для человека — решает `core/file-operations.ts`.
    */
-  const applyFileOperations = async (
-    operations: readonly FileOperation[],
-  ): Promise<string | null> => {
+  const applyFileOperations = async (operations: readonly FileOperation[]): Promise<string | null> => {
     for (const operation of operations) {
       try {
-        if (operation.kind === "create") {
-          await rpc.request("workspace.createFile", { path: operation.path });
-        } else if (operation.kind === "rename") {
-          await rpc.request("workspace.rename", {
+        if (operation.kind === 'create') {
+          await rpc.request('workspace.createFile', { path: operation.path });
+        } else if (operation.kind === 'rename') {
+          await rpc.request('workspace.rename', {
             from: operation.from,
             to: operation.to,
           });
         } else {
-          await rpc.request("workspace.trash", { path: operation.path });
+          await rpc.request('workspace.trash', { path: operation.path });
         }
       } catch (error) {
         // «Пропустить молча» решает модуль: только свой флаг прощает свою ошибку.
         const outcome = outcomeOfFailure(operation, error);
-        if (outcome.kind === "skipped") continue;
+        if (outcome.kind === 'skipped') continue;
         return outcome.error;
       }
     }
@@ -3100,33 +2807,22 @@ export async function startApplication(
   };
 
   /** Встать на место в открытом файле: без позиции вкладка просто открывается целиком. */
-  const revealAt = (
-    path: string,
-    position?: { line?: number; column?: number },
-  ): void => {
+  const revealAt = (path: string, position?: { line?: number; column?: number }): void => {
     if (position?.line === undefined) return;
     editors.reveal(path, position.line, position.column ?? 1);
   };
 
-  const openDocumentLink = async (
-    target: string,
-    fromPath: string,
-  ): Promise<void> => {
+  const openDocumentLink = async (target: string, fromPath: string): Promise<void> => {
     if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
-      if (target.startsWith("file:")) {
+      if (target.startsWith('file:')) {
         await openPath(uriToPath(target));
         return;
       }
-      await rpc
-        .request("shell.openExternal", { url: target })
-        .catch(() => undefined);
+      await rpc.request('shell.openExternal', { url: target }).catch(() => undefined);
       return;
     }
     // Внешней схемы нет — считаем путём относительно файла.
-    const base = fromPath.slice(
-      0,
-      Math.max(fromPath.lastIndexOf("/"), fromPath.lastIndexOf("\\")),
-    );
+    const base = fromPath.slice(0, Math.max(fromPath.lastIndexOf('/'), fromPath.lastIndexOf('\\')));
     await openPath(`${base}/${target}`);
   };
 
@@ -3156,18 +2852,16 @@ export async function startApplication(
       const path = editors.currentPath;
       if (!path) return [];
       const symbols = await lsp.documentSymbols(path);
-      return filterSymbols(flattenFileSymbols(symbols, path), query).map(
-        (symbol) => ({
-          path: symbol.path,
-          line: symbol.line,
-          column: symbol.column,
-          label: symbol.name,
-          detail: symbol.kind,
-        }),
-      );
+      return filterSymbols(flattenFileSymbols(symbols, path), query).map((symbol) => ({
+        path: symbol.path,
+        line: symbol.line,
+        column: symbol.column,
+        label: symbol.name,
+        detail: symbol.kind,
+      }));
     },
     search: async (query) => {
-      const found = await rpc.request("workspace.search", {
+      const found = await rpc.request('workspace.search', {
         query,
         maxResults: 50,
       });
@@ -3179,8 +2873,7 @@ export async function startApplication(
         detail: workspace.relative(hit.path),
       }));
     },
-    reveal: (path, line, column) =>
-      void openPath(path).then(() => editors.reveal(path, line, column)),
+    reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
   });
   document.body.appendChild(quickOpen.element);
 
@@ -3192,10 +2885,10 @@ export async function startApplication(
   const stashModal = createStashModal({
     git,
     confirm: async (options) => {
-      const { confirmed } = await rpc.request("dialog.confirm", options);
+      const { confirmed } = await rpc.request('dialog.confirm', options);
       return confirmed;
     },
-    notify: (message) => showToast(message, "error"),
+    notify: (message) => showToast(message, 'error'),
   });
   document.body.appendChild(stashModal.element);
 
@@ -3204,17 +2897,13 @@ export async function startApplication(
   document.body.appendChild(textModal.element);
 
   /** Ввод одной строки как Promise: `null`, если окно закрыли без подтверждения. */
-  const promptValue = (input: {
-    title: string;
-    label: string;
-    value: string;
-  }): Promise<string | null> =>
+  const promptValue = (input: { title: string; label: string; value: string }): Promise<string | null> =>
     new Promise((resolve) => {
       conditionInput.open({
         title: input.title,
         label: input.label,
         value: input.value,
-        confirmLabel: "Задать",
+        confirmLabel: 'Задать',
         onAccept: (value) => resolve(value),
         onCancel: () => resolve(null),
       });
@@ -3230,8 +2919,8 @@ export async function startApplication(
     git,
     askMessage: (subject) =>
       promptValue({
-        title: "Новое сообщение коммита",
-        label: "Сообщение",
+        title: 'Новое сообщение коммита',
+        label: 'Сообщение',
         value: subject,
       }),
     notify: (message, kind) => showToast(message, kind),
@@ -3276,8 +2965,7 @@ export async function startApplication(
       await workspace.open(path);
       showToast(`Открыт рабочий каталог ${basename(path)}`);
     },
-    confirm: async (options) =>
-      (await rpc.request("dialog.confirm", options)).confirmed,
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
     notify: (message, kind) => showToast(message, kind),
   });
   document.body.appendChild(worktreeModal.element);
@@ -3305,7 +2993,7 @@ export async function startApplication(
     rpc,
     restore: async (path, text) => {
       const document = await edits.ensureDocument(path);
-      document.setText(text, "programmatic");
+      document.setText(text, 'programmatic');
       await edits.saveDocument(document, { force: true });
     },
     // Вторая половина ленты — коммиты git того же файла. Нет репозитория — лента
@@ -3334,8 +3022,7 @@ export async function startApplication(
     rpc,
     notify: (message, kind) => showToast(message, kind),
     // Файл лежит в пользовательских данных, вне проекта: открывает проводник системы.
-    reveal: (path) =>
-      void rpc.request("shell.revealInOS", { path }).catch(() => undefined),
+    reveal: (path) => void rpc.request('shell.revealInOS', { path }).catch(() => undefined),
   });
   document.body.appendChild(telemetryModal.element);
 
@@ -3345,8 +3032,7 @@ export async function startApplication(
     git,
     currentBranch: () => git.branch,
     notify: (message, kind) => showToast(message, kind),
-    confirm: async (options) =>
-      (await rpc.request("dialog.confirm", options)).confirmed,
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
   });
   document.body.appendChild(forgeModal.element);
 
@@ -3355,8 +3041,7 @@ export async function startApplication(
   const issuesModal = createIssuesModal({
     git,
     notify: (message, kind) => showToast(message, kind),
-    confirm: async (options) =>
-      (await rpc.request("dialog.confirm", options)).confirmed,
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
   });
   document.body.appendChild(issuesModal.element);
 
@@ -3364,8 +3049,7 @@ export async function startApplication(
   const pipelinesModal = createPipelinesModal({
     git,
     notify: (message, kind) => showToast(message, kind),
-    confirm: async (options) =>
-      (await rpc.request("dialog.confirm", options)).confirmed,
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
   });
   document.body.appendChild(pipelinesModal.element);
 
@@ -3384,9 +3068,7 @@ export async function startApplication(
       // Ctrl+Enter: сначала разделить (если ещё нет), потом открыть — файл уйдёт
       // в ставшую активной правую панель.
       if (side && !editors.isSplit) editors.splitEditor();
-      void openPath(symbol.path).then(() =>
-        editors.reveal(symbol.path, symbol.line, symbol.column),
-      );
+      void openPath(symbol.path).then(() => editors.reveal(symbol.path, symbol.line, symbol.column));
     },
   });
   document.body.appendChild(symbolPicker.element);
@@ -3397,12 +3079,10 @@ export async function startApplication(
     rpc,
     openSymbol: (symbol, side) => {
       if (side && !editors.isSplit) editors.splitEditor();
-      void openPath(symbol.path).then(() =>
-        editors.reveal(symbol.path, symbol.line, symbol.column),
-      );
+      void openPath(symbol.path).then(() => editors.reveal(symbol.path, symbol.line, symbol.column));
     },
     source: {
-      placeholder: "Символ в файле — класс, метод, функция…",
+      placeholder: 'Символ в файле — класс, метод, функция…',
       breadcrumb: true,
       minQuery: 0,
       load: async (query) => {
@@ -3422,9 +3102,7 @@ export async function startApplication(
     rpc,
     relative: (path) => workspace.relative(path),
     openHit: (hit) => {
-      void openPath(hit.path).then(() =>
-        editors.reveal(hit.path, hit.line, hit.column),
-      );
+      void openPath(hit.path).then(() => editors.reveal(hit.path, hit.line, hit.column));
     },
   });
   document.body.appendChild(meaningSearch.element);
@@ -3434,9 +3112,7 @@ export async function startApplication(
     debug,
     onRevealFrame: (frame) => {
       if (!frame.path) return;
-      void openPath(frame.path).then(() =>
-        editors.revealDebugFrame(frame.path!, frame.line, frame.column),
-      );
+      void openPath(frame.path).then(() => editors.revealDebugFrame(frame.path!, frame.line, frame.column));
     },
     // Наблюдение изменилось — рабочее место стоит сохранить (см. сессию ниже).
     onWatchChange: () => session.scheduleSave(),
@@ -3446,8 +3122,8 @@ export async function startApplication(
     promptValue,
   });
   dock.register({
-    id: "debug",
-    title: "Отладка",
+    id: 'debug',
+    title: 'Отладка',
     element: debugPanel.element,
     onShow: () => debugPanel.refresh(),
   });
@@ -3493,7 +3169,7 @@ export async function startApplication(
     // Терминал восстанавливает вкладки сам (своей зависимостью сессии), здесь — только вид.
     tabGroup: () => activeTabGroup,
     restoreTabGroup: (group) => {
-      if (group === "terminal") dock.show("terminal");
+      if (group === 'terminal') dock.show('terminal');
     },
     layout,
     getDebugOptions: () => debugOptions,
@@ -3516,7 +3192,7 @@ export async function startApplication(
   const surroundModal = createSurroundModal({
     options: () => surroundOptions(editors.activeLanguage()),
     apply: (option) => {
-      if (!editors.surroundSelection(option)) showToast("Нет открытого файла");
+      if (!editors.surroundSelection(option)) showToast('Нет открытого файла');
     },
   });
   document.body.appendChild(surroundModal.element);
@@ -3541,7 +3217,7 @@ export async function startApplication(
       if (!path) return false;
       const document = documents.get(path);
       if (!document || document.readOnly) {
-        showToast("Файл открыт только для чтения", "error");
+        showToast('Файл открыт только для чтения', 'error');
         return false;
       }
       // Одной правкой на весь участок — так она ложится в историю одним шагом.
@@ -3563,7 +3239,7 @@ export async function startApplication(
         },
       ]);
       if (result.failed.length > 0) {
-        showToast(result.failed[0]!.message, "error");
+        showToast(result.failed[0]!.message, 'error');
         return false;
       }
       return true;
@@ -3571,10 +3247,8 @@ export async function startApplication(
     activePath: () => editors.currentPath,
     // Охват по проекту — тем же образцом: слой main обходит файлы и пишет изменённые,
     // а открытые вкладки перечитываем, иначе редактор покажет текст до замены.
-    searchProject: (options) =>
-      rpc.request("workspace.structuralSearch", options),
-    replaceProject: (options) =>
-      rpc.request("workspace.structuralReplace", options),
+    searchProject: (options) => rpc.request('workspace.structuralSearch', options),
+    replaceProject: (options) => rpc.request('workspace.structuralReplace', options),
     reloadFile: (path) => reloadIfOpen(path),
     openFile: (path) => openPath(path).then(() => undefined),
   });
@@ -3583,8 +3257,7 @@ export async function startApplication(
   const bookmarksModal = createBookmarksModal({
     bookmarks,
     root: () => workspace.root,
-    reveal: (path, line) =>
-      void openPath(path).then(() => editors.reveal(path, line, 1)),
+    reveal: (path, line) => void openPath(path).then(() => editors.reveal(path, line, 1)),
   });
   document.body.appendChild(bookmarksModal.element);
 
@@ -3594,10 +3267,7 @@ export async function startApplication(
     openSettings: () => settingsModal.open(),
   });
   document.body.appendChild(noticeLog.element);
-  commands.register(
-    { id: "notice.log", title: "Уведомления: журнал", category: "Вид" },
-    () => noticeLog.open(),
-  );
+  commands.register({ id: 'notice.log', title: 'Уведомления: журнал', category: 'Вид' }, () => noticeLog.open());
 
   /*
    * Сохранить документ на диск. Если файл изменился снаружи после нашего чтения,
@@ -3632,8 +3302,7 @@ export async function startApplication(
     for (const path of paintedBookmarks) {
       if (!files.has(path)) editors.setBookmarks(path, []);
     }
-    for (const path of files)
-      editors.setBookmarks(path, bookmarks.linesOf(path));
+    for (const path of files) editors.setBookmarks(path, bookmarks.linesOf(path));
     paintedBookmarks.clear();
     for (const path of files) paintedBookmarks.add(path);
   };
@@ -3655,8 +3324,7 @@ export async function startApplication(
     save: {
       policy: writePolicy,
       format: (document) => formatDocument(formatDeps, document),
-      codeActions: (document, kinds) =>
-        fixes.runSourceActions(document.path, kinds),
+      codeActions: (document, kinds) => fixes.runSourceActions(document.path, kinds),
     },
     git: {
       saveBeforeCommit: () => settings.git.saveBeforeCommit !== false,
@@ -3666,13 +3334,12 @@ export async function startApplication(
     roots: () => workspace.roots,
     openPath: (path) => openPath(path),
     refreshTree: () => explorer.scheduleRefresh(),
-    confirm: async (options) =>
-      (await rpc.request("dialog.confirm", options)).confirmed,
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
     showToast,
     basename,
   });
 
-  window.addEventListener("beforeunload", (event) => {
+  window.addEventListener('beforeunload', (event) => {
     session.saveNow();
     // История бесед пишется с паузой: без немедленной записи последний выбор
     // (набор инструментов, цель, память чтений) терялся бы, если окно закрыли
@@ -3713,10 +3380,7 @@ export async function startApplication(
     if (!document || document.readOnly) return false;
     const serverEdits = await lsp.formatRange(path, range).catch(() => []);
     if (serverEdits.length === 0) {
-      if (!options.silent)
-        showToast(
-          "Нечем форматировать участок: языковой сервер этого не умеет",
-        );
+      if (!options.silent) showToast('Нечем форматировать участок: языковой сервер этого не умеет');
       return false;
     }
     // Правки могли ничего не изменить (сервер вернул тот же текст) — это не ошибка.
@@ -3724,17 +3388,16 @@ export async function startApplication(
     try {
       after = applyTextEdits(document.value, serverEdits);
     } catch {
-      if (!options.silent)
-        showToast("Форматирование вернуло несогласованные правки", "error");
+      if (!options.silent) showToast('Форматирование вернуло несогласованные правки', 'error');
       return false;
     }
     if (after === document.value) {
-      if (!options.silent) showToast("Менять нечего");
+      if (!options.silent) showToast('Менять нечего');
       return true;
     }
     const result = await edits.applyFileEdits([{ path, edits: serverEdits }]);
     if (result.failed.length > 0) {
-      if (!options.silent) showToast(result.failed[0]!.message, "error");
+      if (!options.silent) showToast(result.failed[0]!.message, 'error');
       return false;
     }
     return true;
@@ -3764,13 +3427,8 @@ export async function startApplication(
       pythonEnvPopover.refresh();
     },
   });
-  const {
-    installPythonPackages,
-    installRequirements,
-    installNodePackages,
-    setProjectInterpreter,
-    pickExistingVenv,
-  } = install;
+  const { installPythonPackages, installRequirements, installNodePackages, setProjectInterpreter, pickExistingVenv } =
+    install;
 
   // Быстрые правки под курсором: свои (поставить пакет) и серверные (refactor,
   // действия языка). Состав меню — `core/editor-fixes.ts`.
@@ -3790,16 +3448,13 @@ export async function startApplication(
   /* ── реестр команд ─────────────────────────────────────────────────────── */
 
   /** Все команды проходят через один обработчик ошибок — UI не падает молча. */
-  const define = (
-    descriptor: CommandDescriptor,
-    handler: (...args: unknown[]) => unknown,
-  ): void => {
+  const define = (descriptor: CommandDescriptor, handler: (...args: unknown[]) => unknown): void => {
     commands.register(descriptor, async (...args) => {
       try {
         return await handler(...args);
       } catch (error) {
         console.error(`[chui] команда ${descriptor.id} упала:`, error);
-        showToast(errorText(error), "error");
+        showToast(errorText(error), 'error');
         return undefined;
       }
     });
@@ -3818,18 +3473,17 @@ export async function startApplication(
   let editorActionDisposers: Array<() => void> = [];
   const syncEditorActions = (): void => {
     for (const dispose of editorActionDisposers) dispose();
-    editorActionDisposers = editorActionCommands(editors.listActions()).map(
-      (command) =>
-        commands.register(command, async () => {
-          // `editor.<id>` — обратно в id редактора: пункт заведён под префиксом.
-          const actionId = command.id.slice("editor.".length);
-          try {
-            editors.runAction(actionId);
-          } catch (error) {
-            console.error(`[chui] действие ${actionId} упало:`, error);
-            showToast(errorText(error), "error");
-          }
-        }),
+    editorActionDisposers = editorActionCommands(editors.listActions()).map((command) =>
+      commands.register(command, async () => {
+        // `editor.<id>` — обратно в id редактора: пункт заведён под префиксом.
+        const actionId = command.id.slice('editor.'.length);
+        try {
+          editors.runAction(actionId);
+        } catch (error) {
+          console.error(`[chui] действие ${actionId} упало:`, error);
+          showToast(errorText(error), 'error');
+        }
+      }),
     );
   };
 
@@ -3885,15 +3539,9 @@ export async function startApplication(
   });
 
   // Ручной запуск проверки проекта: после установки зависимостей окно не надо перезапускать.
-  define(
-    { id: "project.check", title: "Проверить проект", category: "Проект" },
-    () => projectCheck.run(),
-  );
+  define({ id: 'project.check', title: 'Проверить проект', category: 'Проект' }, () => projectCheck.run());
   // Медленная проверка — по команде: на большом проекте tsc идёт десятками секунд.
-  define(
-    { id: "project.types", title: "Проверить типы", category: "Проект" },
-    () => typeCheck.run(),
-  );
+  define({ id: 'project.types', title: 'Проверить типы', category: 'Проект' }, () => typeCheck.run());
 
   // Сравнение двух файлов — из дерева, тем же экраном, что показывает git-различия.
   // Это просмотр: блоки без кнопок индексации (см. `openFiles`).
@@ -3934,25 +3582,14 @@ export async function startApplication(
   const testTarget = (): RunTarget | undefined => {
     const active = openEditors.active;
     const relative = active ? workspace.relative(active.path) : null;
-    const targets = collectRunTargets(
-      runnableFileOf(active),
-      tools.get(),
-      projectScan,
-      nodeRunner(),
-    );
+    const targets = collectRunTargets(runnableFileOf(active), tools.get(), projectScan, nodeRunner());
     const runnable = relative && relative !== active?.path ? relative : null;
     // Цели тестов у языков называются по-разному: у Python — `pytest:…`, у Node —
     // `node-tests:…`. Сначала пробуем файл, в котором стоит человек, потом — все тесты.
     return (
       targets.find(
-        (item) =>
-          item.source === "test" &&
-          (item.id === `pytest:${runnable}` ||
-            item.id === `node-tests:${runnable}`),
-      ) ??
-      targets.find(
-        (item) => item.id === "pytest:all" || item.id === "node-tests:all",
-      )
+        (item) => item.source === 'test' && (item.id === `pytest:${runnable}` || item.id === `node-tests:${runnable}`),
+      ) ?? targets.find((item) => item.id === 'pytest:all' || item.id === 'node-tests:all')
     );
   };
 
@@ -3986,36 +3623,27 @@ export async function startApplication(
    */
   const activeDebuggableFile = (): TextDocument | null => {
     const active = openEditors.active;
-    if (active?.languageId === "typescript") {
-      showToast(
-        "TypeScript отлаживается через собранный .js: точки в .ts встанут по source-карте",
-        "error",
-      );
+    if (active?.languageId === 'typescript') {
+      showToast('TypeScript отлаживается через собранный .js: точки в .ts встанут по source-карте', 'error');
       return null;
     }
-    if (
-      !active ||
-      (active.languageId !== "python" && active.languageId !== "javascript")
-    ) {
-      showToast("Отладчик работает с файлами Python и JavaScript", "error");
+    if (!active || (active.languageId !== 'python' && active.languageId !== 'javascript')) {
+      showToast('Отладчик работает с файлами Python и JavaScript', 'error');
       return null;
     }
     return active;
   };
 
   /** Начать отладку активного файла: адаптер подберётся по языку (debugpy или Node). */
-  const startDebug = async (
-    options: DebugLaunchOptions = debugOptions,
-  ): Promise<void> => {
+  const startDebug = async (options: DebugLaunchOptions = debugOptions): Promise<void> => {
     const active = activeDebuggableFile();
     if (!active) return;
     if (settings.run.saveBeforeRun) {
-      for (const document of documents.dirty())
-        await fileWrite.saveDocument(document);
+      for (const document of documents.dirty()) await fileWrite.saveDocument(document);
     }
     const result = await debug.start(active.path, options);
-    if (!result.ok) showToast(result.message, "error");
-    else dock.show("debug");
+    if (!result.ok) showToast(result.message, 'error');
+    else dock.show('debug');
   };
 
   // Команды отладки — `core/debug-commands.ts`: тексты, клавиши, «что сказать,
@@ -4030,12 +3658,7 @@ export async function startApplication(
     launchOptions,
     // Конфигурации читаются по запросу: файл правят руками, и копия в памяти
     // показывала бы устаревший список ровно тогда, когда его только что поправили.
-    launchConfigs: async () =>
-      (
-        await rpc
-          .request("workspace.launchConfigs")
-          .catch(() => ({ configs: [] }))
-      ).configs,
+    launchConfigs: async () => (await rpc.request('workspace.launchConfigs').catch(() => ({ configs: [] }))).configs,
     pickLaunchConfig: async (configs) => {
       const rect = layout.editorHost.getBoundingClientRect();
       return new Promise((resolve) => {
@@ -4150,8 +3773,7 @@ export async function startApplication(
       get: () => settings.appearance.uiScale,
       // Тем же путём, что и список в настройках: значение одно и живёт в
       // `settings.json`. Иначе команда показала бы одно, а окно настроек — другое.
-      set: (scale) =>
-        void saveSettingsPatch({ appearance: { uiScale: scale } }),
+      set: (scale) => void saveSettingsPatch({ appearance: { uiScale: scale } }),
     },
     // Кегль текста: тот же путь, что у поля в настройках и у `Ctrl+колеса` над
     // редактором. Запись идёт через `zoomFontByWheel` — одна правка на всех.
@@ -4184,9 +3806,7 @@ export async function startApplication(
     settings = { ...settings, editor: { ...settings.editor, fontSize: next } };
     // Применяем сразу: ждать записи на диск, чтобы увидеть шаг, — не то, чего ждёшь от колеса.
     editors.applyOptions({ fontSize: next });
-    void saveSettingsPatch({ editor: { fontSize: next } }).catch(
-      () => undefined,
-    );
+    void saveSettingsPatch({ editor: { fontSize: next } }).catch(() => undefined);
   };
 
   // Режимы ввода и орфография — `core/editor-mode-commands.ts`: там порядок
@@ -4262,7 +3882,7 @@ export async function startApplication(
   const openBrowserPage = (rawUrl: string): void => {
     const normalized = normalizeBrowserUrl(rawUrl);
     if (!normalized.ok) {
-      showToast(normalized.reason, "error");
+      showToast(normalized.reason, 'error');
       return;
     }
     // Дальше всё делает модель: вкладка появится в полосе, а полотно покажет страницу.
@@ -4283,11 +3903,10 @@ export async function startApplication(
     }),
     menuAnchor: menuButton,
     // Настройки хранят только ПОДМЕНЫ; штатные сочетания берутся из дерева меню.
-    menuAccelerators: () =>
-      menuAccelerators(menuComboOverrides(settings.keybindings.overrides)),
+    menuAccelerators: () => menuAccelerators(menuComboOverrides(settings.keybindings.overrides)),
     execute: (command, ...args) => commands.execute(command, ...args),
     runMenuRole: (role) => {
-      void rpc.request("menu.role", { role });
+      void rpc.request('menu.role', { role });
     },
     promptValue,
     openBrowserPage,
@@ -4306,18 +3925,14 @@ export async function startApplication(
   // Закрыть проект: окно IDE уступает место стартовому окну со списком проектов
   // (`app.closeProject` в main). Путь тот же, что у закрытия окна, — с вопросом
   // о несохранённых файлах.
-  define(
-    { id: "project.close", title: "Закрыть проект", category: "Файл" },
-    () => fileWrite.closeWindowSafely(true),
-  );
+  define({ id: 'project.close', title: 'Закрыть проект', category: 'Файл' }, () => fileWrite.closeWindowSafely(true));
 
   registerGitCommands({
     define,
     write: {
       git,
       showToast,
-      confirm: async (options) =>
-        (await rpc.request("dialog.confirm", options)).confirmed,
+      confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
       root: () => workspace.root,
       relative: (path) => workspace.relative(path),
       saveDirtyForGit: () => fileWrite.saveDirtyForGit(),
@@ -4329,7 +3944,7 @@ export async function startApplication(
       showToast,
       isAiEnabled: aiEnabled,
       warnAiDisabled,
-      commitMessage: (payload) => rpc.request("ai.commitMessage", payload),
+      commitMessage: (payload) => rpc.request('ai.commitMessage', payload),
       setMessage: (message) => sourceControl.setMessage(message),
       // Панель изменений теперь в поповере у кнопки ветки: уже открытый не переключаем (toggle бы закрыл).
       revealComposer: () => {
@@ -4376,8 +3991,7 @@ export async function startApplication(
     history: {
       git,
       showToast,
-      confirm: async (options) =>
-        (await rpc.request("dialog.confirm", options)).confirmed,
+      confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
       ask: (options) => promptValue(options),
       popup: (items) => {
         const rect = layout.editorHost.getBoundingClientRect();
@@ -4398,8 +4012,7 @@ export async function startApplication(
       currentPath: () => editors.currentPath,
       pullMode: () => settings.git.pullMode,
       isMultiRoot: () => workspace.isMultiRoot,
-      confirm: async (options) =>
-        (await rpc.request("dialog.confirm", options)).confirmed,
+      confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
       activePath: () => openEditors.active?.path ?? null,
       hasTab: (path) => openEditors.has(path),
       closeTab: (path) => openEditors.close(path),
@@ -4435,7 +4048,7 @@ export async function startApplication(
       openBrowserPage(url);
       return;
     }
-    void rpc.request("shell.openExternal", { url }).catch(() => undefined);
+    void rpc.request('shell.openExternal', { url }).catch(() => undefined);
   };
 
   // Команды Python — в `core/python-commands.ts`: меню, проверки и то, что видит человек.
@@ -4501,8 +4114,7 @@ export async function startApplication(
     textOf: (path) => editors.currentText(path),
     // Сохранённое — С ДИСКА, мимо реестра документов: в реестре лежит черновик,
     // и сверить его с самим собой значило бы показать «различий нет» всегда.
-    readText: async (path) =>
-      (await rpc.request("workspace.readFile", { path })).text,
+    readText: async (path) => (await rpc.request('workspace.readFile', { path })).text,
     // Буфер читает окно: `navigator.clipboard` доступен только там, где есть
     // пользовательский жест, — а команду вызвали из меню или палитры.
     readClipboard: async () => navigator.clipboard.readText(),
@@ -4520,9 +4132,7 @@ export async function startApplication(
     rpc,
     openEditors: {
       get active() {
-        return editors.activePath
-          ? (documents.get(editors.activePath) ?? null)
-          : null;
+        return editors.activePath ? (documents.get(editors.activePath) ?? null) : null;
       },
     },
     workspace: {
@@ -4609,7 +4219,7 @@ export async function startApplication(
     // Пометки принадлежат владельцу, а не языку: гасим оба источника LSP разом.
     // Сервер обычно один на проект — снимать их по одному всё равно нечем.
     // Повтор безопасен: второй `clearOwner` ничего не найдёт и не перерисует.
-    if (failed.length > 0) editors.clearExternalMarkers(["lsp", "lsp-project"]);
+    if (failed.length > 0) editors.clearExternalMarkers(['lsp', 'lsp-project']);
   }
 
   /** Показать чип по уже известному состоянию — без нового запроса. */
@@ -4617,14 +4227,12 @@ export async function startApplication(
     forgetDiagnosticsOf(status.failed ?? []);
     lspStatus = status;
     statusBar.update({
-      lsp: settings.lsp.enabled
-        ? lspChipFor(openEditors.active?.languageId ?? null, lspStatus)
-        : null,
+      lsp: settings.lsp.enabled ? lspChipFor(openEditors.active?.languageId ?? null, lspStatus) : null,
     });
   }
 
   async function refreshLspStatus(): Promise<void> {
-    const status = await rpc.request("lsp.status").catch(() => null);
+    const status = await rpc.request('lsp.status').catch(() => null);
     if (status) applyLspStatus(status);
   }
 
@@ -4642,15 +4250,14 @@ export async function startApplication(
    * на закрытие файла шлёт пустой список и стёр бы счёт (см. `core/project-diagnostics.ts`).
    */
   const applyProjectDiagnostics = createProjectDiagnosticsApplier({
-    setMarkers: (path, diagnostics) =>
-      editors.setExternalMarkers(path, "lsp-project", diagnostics),
+    setMarkers: (path, diagnostics) => editors.setExternalMarkers(path, 'lsp-project', diagnostics),
   });
 
   // Орфография проекта (cSpell): источники разные с LSP — иначе один прогон
   // стирал бы пометки другого.
   const checkSpelling = createSpellServerCheck({
     rpc,
-    setMarkers: (path, diagnostics) => editors.setExternalMarkers(path, "cspell", diagnostics),
+    setMarkers: (path, diagnostics) => editors.setExternalMarkers(path, 'cspell', diagnostics),
     enabled: () => settings.editor.spellcheck,
     projectWords: () => settings.editor.spellProjectWords ?? [],
   });
@@ -4660,19 +4267,10 @@ export async function startApplication(
     const projectTools = tools.get();
     // Картинка или Office — не язык: в чипе показываем формат (PNG, SVG).
     const activePath = active?.path ?? null;
-    const format: "image" | "office" | null =
-      activePath === null
-        ? null
-        : isImagePath(activePath)
-          ? "image"
-          : isOfficePath(activePath)
-            ? "office"
-            : null;
+    const format: 'image' | 'office' | null =
+      activePath === null ? null : isImagePath(activePath) ? 'image' : isOfficePath(activePath) ? 'office' : null;
     const language = format === null ? (active?.languageId ?? null) : null;
-    const indent =
-      settings.editor.languageIndent && language
-        ? languageIndent(language)
-        : null;
+    const indent = settings.editor.languageIndent && language ? languageIndent(language) : null;
     const inputs = {
       active: active
         ? {
@@ -4684,9 +4282,9 @@ export async function startApplication(
         : null,
       format,
       formatLabel:
-        format === "image" && activePath !== null
+        format === 'image' && activePath !== null
           ? imageFormatLabel(activePath)
-          : format === "office" && activePath !== null
+          : format === 'office' && activePath !== null
             ? officeFormatChip(activePath)
             : null,
       languageLabel: language ? languageLabel(language) : null,
@@ -4710,9 +4308,7 @@ export async function startApplication(
       // отформатирован и спрятаны ли подписи-действия.
       lenses: lensesStatus(active?.path ?? null),
       formatter: active ? formatterStatus() : null,
-      macro: editors.isRecordingMacro()
-        ? { steps: editors.macroSteps().length }
-        : null,
+      macro: editors.isRecordingMacro() ? { steps: editors.macroSteps().length } : null,
       tools: projectTools,
       configuredPython: settings.run.pythonPath,
     };
@@ -4729,20 +4325,15 @@ export async function startApplication(
     // Имя файла и проекта — и в шапке, и в заголовке окна. Заголовок описывает
     // содержимое, а не повторяет имя приложения: оно тут только запасной вариант,
     // когда ничего не открыто.
-    const title = active
-      ? project
-        ? `${basename(active.path)} — ${project}`
-        : basename(active.path)
-      : "chui_iDE";
+    const title = active ? (project ? `${basename(active.path)} — ${project}` : basename(active.path)) : 'chui_iDE';
     topBarName.textContent = title;
     document.title = title;
     // Название приложения — моношрифтом, имя файла — интерфейсным.
-    topBarName.classList.toggle("is-brand", !active);
-    topBarName.title = active?.path ?? "chui_iDE";
+    topBarName.classList.toggle('is-brand', !active);
+    topBarName.title = active?.path ?? 'chui_iDE';
   };
 
-  const syncEmptyState = (): void =>
-    emptyState.update(openEditors.paths.length > 0);
+  const syncEmptyState = (): void => emptyState.update(openEditors.paths.length > 0);
 
   const applySettings = (next: Settings): void => {
     const previous = settings;
@@ -4792,9 +4383,7 @@ export async function startApplication(
     if (plan.autoSave) autoSave.settingsChanged();
     // Дерево получает настройки С УЧЁТОМ отличий активного корня: у каждой папки
     // области они свои (см. `shared/explorer-settings.ts`).
-    explorer.applySettings(
-      resolveExplorerSettings(next.explorer, workspace.root),
-    );
+    explorer.applySettings(resolveExplorerSettings(next.explorer, workspace.root));
     // Избранное живёт в настройках: пришли новые — показываем их (список сверяется
     // у модели, поэтому писать его обратно по этому событию не нужно).
     explorer.setFavorites(next.workspace.favorites);
@@ -4816,7 +4405,7 @@ export async function startApplication(
     });
     // Свёрнутость — следствие тумблера, а не выбор человека: в настройки не пишем.
     if (panel.hide) withoutPersist(() => layout.setRightVisible(false));
-    if (panel.toggle === "enabled" && panel.show) {
+    if (panel.toggle === 'enabled' && panel.show) {
       withoutPersist(() => layout.setRightVisible(true));
     }
     // Языковые серверы включили тумблером в настройках — подхватываем их и греем
@@ -4861,11 +4450,11 @@ export async function startApplication(
     scheduleTreeRefresh: () => explorer.scheduleRefresh(),
     confirmRevert: async (targets) => {
       const prompt = revertPrompt(targets);
-      const { confirmed } = await rpc.request("dialog.confirm", {
-        title: "Перечитать с диска",
+      const { confirmed } = await rpc.request('dialog.confirm', {
+        title: 'Перечитать с диска',
         message: prompt.message,
         detail: prompt.detail,
-        confirmLabel: "Отменить правки",
+        confirmLabel: 'Отменить правки',
       });
       return confirmed;
     },
@@ -4947,7 +4536,7 @@ export async function startApplication(
         if (payload?.path) void reloadIfOpen(payload.path);
         // Пометки TODO/FIXME могли появиться или пропасть — пересобираем список,
         // но только когда панель задач на виду: поиск по проекту — работа заметная.
-        if (dock.visible && dock.activeId === "todo") todoPanel.schedule();
+        if (dock.visible && dock.activeId === 'todo') todoPanel.schedule();
         break;
       }
       case PushTopic.ApprovalReview: {
@@ -4957,8 +4546,7 @@ export async function startApplication(
           command?: string;
           reason?: string;
         };
-        if (payload?.command)
-          chat.noteApprovalReview(payload.command, payload.reason ?? "");
+        if (payload?.command) chat.noteApprovalReview(payload.command, payload.reason ?? '');
         break;
       }
       case PushTopic.AiPaused: {
@@ -4989,14 +4577,11 @@ export async function startApplication(
           severity?: string;
           server?: string;
         } | null;
-        if (typeof said?.message !== "string" || !said.message.trim()) break;
+        if (typeof said?.message !== 'string' || !said.message.trim()) break;
         // В тостах три вида, в LSP — четыре: предупреждение человека тоже должно
         // видеть, но не красным.
-        const kind = said.severity === "error" ? "error" : "info";
-        showToast(
-          said.server ? `${said.server}: ${said.message}` : said.message,
-          kind,
-        );
+        const kind = said.severity === 'error' ? 'error' : 'info';
+        showToast(said.server ? `${said.server}: ${said.message}` : said.message, kind);
         break;
       }
       case PushTopic.LspRefresh: {
@@ -5004,7 +4589,7 @@ export async function startApplication(
         // подсказки-вставки или подсветку. Без этого правка в другом файле оставляла
         // их устаревшими до перезапуска сервера.
         const refresh = message.payload as { method?: unknown } | null;
-        if (typeof refresh?.method !== "string") break;
+        if (typeof refresh?.method !== 'string') break;
         editors.refreshFromServer(refresh.method);
         break;
       }
@@ -5016,36 +4601,34 @@ export async function startApplication(
       case PushTopic.LspProjectDiagnostics:
         // Пометки закрытых файлов, снятые обходом проекта: источник отдельный от живого
         // сервера, иначе закрытие файла обнуляло бы счёт (см. `core/project-diagnostics.ts`).
-        applyProjectDiagnostics(
-          message.payload as LspProjectDiagnosticsPayload,
-        );
+        applyProjectDiagnostics(message.payload as LspProjectDiagnosticsPayload);
         break;
       case PushTopic.BrowserNav: {
         const payload = message.payload as BrowserEventPayload;
-        if (!payload || typeof payload !== "object") break;
+        if (!payload || typeof payload !== 'object') break;
         // Страница просит новую вкладку (`_blank`, `window.open`): вторых окон у нас
         // нет — заводим вкладку в той же полосе.
-        if (payload.kind === "newTab") {
+        if (payload.kind === 'newTab') {
           browserTabs.open(payload.url);
           break;
         }
         // Страницу открыл агент: вложение уже есть, ключ дал main — забираем вкладку.
-        if (payload.kind === "opened") {
+        if (payload.kind === 'opened') {
           browserTabs.adopt(payload.id, payload.url, true);
           break;
         }
         // Агент закончил: вкладка уходит вместе с вложением.
-        if (payload.kind === "closed") {
+        if (payload.kind === 'closed') {
           browserPages.close(payload.id);
           break;
         }
         // Общий доступ к странице: агент работает в этой же вкладке.
-        if (payload.kind === "shared" || payload.kind === "unshared") {
-          browserView.setShared(payload.id, payload.kind === "shared");
+        if (payload.kind === 'shared' || payload.kind === 'unshared') {
+          browserView.setShared(payload.id, payload.kind === 'shared');
           break;
         }
         // Агент действует на странице: без метки его действия неотличимы от чужих.
-        if (payload.kind === "agent") {
+        if (payload.kind === 'agent') {
           markAgentPage(payload.id, payload.action);
           break;
         }
@@ -5078,8 +4661,7 @@ export async function startApplication(
     applySurfaces();
     // Точки останова контроллер помнит по файлам, а редактор о них не знает:
     // при открытии вкладки отдаём ему набор — значки (с условиями) появятся сразу.
-    for (const path of openEditors.paths)
-      editors.setBreakpoints(path, debug.breakpointsOf(path));
+    for (const path of openEditors.paths) editors.setBreakpoints(path, debug.breakpointsOf(path));
     // Другая вкладка может быть другим кадром стека — значения в ней свои.
     void refreshDebugInlineValues();
     // Орфография проекта считается в main по запросу: текст открытого файла,
@@ -5097,7 +4679,7 @@ export async function startApplication(
   // меняют только `.git`, а рабочее дерево — нет: наблюдателя за этим может и
   // не быть. На возврат фокуса перечитываем состояние репозитория, чтобы пометки
   // в дереве и счётчик не отставали от жизни.
-  window.addEventListener("focus", () => void git.refresh());
+  window.addEventListener('focus', () => void git.refresh());
   /**
    * Автосохранение: пишет несохранённые файлы по режиму из настроек. Путь записи — тот же,
    * что у Ctrl+S (правки при сохранении и форматирование), но без вопроса и тостов на каждый
@@ -5116,32 +4698,27 @@ export async function startApplication(
           trimTrailingWhitespace: settings.editor.trimTrailingWhitespace,
           insertFinalNewline: settings.editor.insertFinalNewline,
         });
-        if (prepared !== document.value)
-          document.setText(prepared, "programmatic");
-        if (settings.editor.formatOnSave)
-          await formatDocument(formatDeps, document);
+        if (prepared !== document.value) document.setText(prepared, 'programmatic');
+        if (settings.editor.formatOnSave) await formatDocument(formatDeps, document);
         try {
           const outcome = await edits.saveDocument(document);
-          if (outcome === "conflict") skipped.push(basename(document.path));
+          if (outcome === 'conflict') skipped.push(basename(document.path));
         } catch {
           // Не записалось — файл остался «грязным», следующая попытка повторит.
         }
       }
       if (skipped.length > 0) {
-        showToast(
-          `Автосохранение пропущено (файл изменён на диске): ${skipped.join(", ")}`,
-          "error",
-        );
+        showToast(`Автосохранение пропущено (файл изменён на диске): ${skipped.join(', ')}`, 'error');
       }
     },
   });
   // Реакция только на правку ЧЕЛОВЕКОМ: правки ассистента ложатся в буфер и пишутся своим
   // путём (см. «не записано на диск»), а загрузка с диска — не повод что-то записывать.
   documents.onDidChange(({ change }) => {
-    if (change.source === "user") autoSave.documentChanged();
+    if (change.source === 'user') autoSave.documentChanged();
   });
   // Окно ушло в фон: в этом режиме здесь и записываем — иначе работа останется в буфере.
-  window.addEventListener("blur", () => autoSave.windowBlurred());
+  window.addEventListener('blur', () => autoSave.windowBlurred());
 
   documents.onDidChange(({ document }) => {
     refreshStatus();
@@ -5155,18 +4732,14 @@ export async function startApplication(
   });
   // Значок ▶ в жёлобе: запускаем тот файл, в котором на него нажали.
   editors.onRunMarker(({ path }) => {
-    const target = targetsFor(documents.get(path) ?? null).find(
-      (item) => item.id === `file:${path}`,
-    );
+    const target = targetsFor(documents.get(path) ?? null).find((item) => item.id === `file:${path}`);
     if (target) void runTarget(target);
   });
 
   // Значок у объявления теста: запускаем ровно этот — селектор уже собран разбором.
   // Чем запускать, решает язык файла: у Python это pytest, у JS/TS — раннер проекта.
   editors.onTestMarker(({ path, selector, name }) => {
-    const node = isNodeLanguage(documents.get(path)?.languageId ?? "")
-      ? nodeRunner()
-      : null;
+    const node = isNodeLanguage(documents.get(path)?.languageId ?? '') ? nodeRunner() : null;
     void runTarget(
       testTargetOf(tools.get(), node, selector, {
         platform: info.platform,
@@ -5186,9 +4759,7 @@ export async function startApplication(
   // Клик по полю номеров строк — точка останова: контроллер держит набор, а
   // редактор рисует по нему значки. Один источник истины — контроллер.
   editors.onBreakpointToggle(({ path, line }) => {
-    void debug
-      .toggleBreakpoint(path, line)
-      .then((breakpoints) => editors.setBreakpoints(path, breakpoints));
+    void debug.toggleBreakpoint(path, line).then((breakpoints) => editors.setBreakpoints(path, breakpoints));
   });
 
   // Меню жёлоба — точки останова и блоки изменений: состав и подтверждения
@@ -5207,16 +4778,12 @@ export async function startApplication(
     focusTarget: () => editors.pane.focusElement,
     saveDocument: (document) => fileWrite.saveDocument(document),
     reloadIfOpen,
-    undoDiscard: (undo) => rpc.request("workspace.undoDiscard", { undo }),
-    confirm: (options) => rpc.request("dialog.confirm", options),
+    undoDiscard: (undo) => rpc.request('workspace.undoDiscard', { undo }),
+    confirm: (options) => rpc.request('dialog.confirm', options),
   });
   // Место последнего нажатия — для меню жёлоба: у события контекстного меню нет
   // координат окна, а меню ставится по месту нажатия.
-  document.addEventListener(
-    "mousedown",
-    (event) => gutterMenus.trackPointer(event.clientX, event.clientY),
-    true,
-  );
+  document.addEventListener('mousedown', (event) => gutterMenus.trackPointer(event.clientX, event.clientY), true);
 
   editors.onBreakpointMenu(gutterMenus.openBreakpointMenu);
   // Правый клик по полоске изменения: меню блока (индексировать, убрать, откатить).
@@ -5227,14 +4794,14 @@ export async function startApplication(
   let revealedFrameId: number | null = null;
   let debugWasStopped = false;
   debug.onDidChange((state) => {
-    const frame = state.phase === "stopped" ? state.topFrame : null;
+    const frame = state.phase === 'stopped' ? state.topFrame : null;
     editors.setDebugLine(frame?.path ?? null, frame?.line ?? null);
 
     // Панель отладки показываем только на НОВОМ останове: иначе каждое событие
     // (в том числе «программа идёт») уводило бы фокус из той вкладки дока, куда
     // человек ушёл сам, — например, в терминал.
-    const stopped = state.phase === "stopped";
-    if (stopped && !debugWasStopped) dock.show("debug");
+    const stopped = state.phase === 'stopped';
+    if (stopped && !debugWasStopped) dock.show('debug');
     debugWasStopped = stopped;
 
     // Остановились в файле, которого нет на экране, — открываем его и встаём на
@@ -5242,11 +4809,9 @@ export async function startApplication(
     // только на НОВОМ останове: пока отладчик стоит, человек мог уйти в другой файл.
     if (frame?.path && frame.id !== revealedFrameId) {
       revealedFrameId = frame.id;
-      void openPath(frame.path).then(() =>
-        editors.revealDebugFrame(frame.path!, frame.line, frame.column),
-      );
+      void openPath(frame.path).then(() => editors.revealDebugFrame(frame.path!, frame.line, frame.column));
     }
-    if (state.phase === "idle") revealedFrameId = null;
+    if (state.phase === 'idle') revealedFrameId = null;
     // Значения переменных в строках: на новом останове и шаге они пересчитываются.
     void refreshDebugInlineValues();
   });
@@ -5264,7 +4829,7 @@ export async function startApplication(
     // Другая рабочая папка в ТОЙ ЖЕ области (добавили, убрали или переключили):
     // проект тот же, вкладки закрывать нельзя. Обновляем то, что считается по
     // активному корню, — окружение, структуру и запуск.
-    if (reason === "roots") {
+    if (reason === 'roots') {
       void (async () => {
         await tools.refresh(workspace.root);
         // У другого корня свои `.vscode/*.code-snippets`.
@@ -5284,17 +4849,13 @@ export async function startApplication(
         void lspServers.prewarm();
       })();
       // Активный корень сменился — у него может быть свой набор настроек дерева.
-      explorer.applySettings(
-        resolveExplorerSettings(settings.explorer, workspace.root),
-      );
+      explorer.applySettings(resolveExplorerSettings(settings.explorer, workspace.root));
       return;
     }
 
     // Новый проект виден только после кадра: два rAF — это «уже нарисовано»,
     // первый же срабатывает до отрисовки. Замер открыт в `workspace.open`.
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => perf.end("project:paint")),
-    );
+    requestAnimationFrame(() => requestAnimationFrame(() => perf.end('project:paint')));
 
     // Сменился ПРОЕКТ: окружение нового греем сразу (попап открывается без ожидания).
     void (async () => {
@@ -5347,7 +4908,7 @@ export async function startApplication(
     statusBar.update({ problems: problemsStatus() });
     // Значок вкладки и список проблем читают те же пометки: обновляем их вместе.
     dock.refreshBadges();
-    if (dock.visible && dock.activeId === "problems") problemPanel.refresh();
+    if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
   });
 
   theme.onDidChange(() => {
@@ -5359,19 +4920,15 @@ export async function startApplication(
   // Полоски изменений для уже открытых файлов — если при старте что-то открыто.
   changeGutter.refresh();
 
-  const keys = new KeybindingService(
-    commands,
-    DEFAULT_KEYBINDINGS,
-    () => settings.keybindings.overrides,
-  );
+  const keys = new KeybindingService(commands, DEFAULT_KEYBINDINGS, () => settings.keybindings.overrides);
   // Выход из дзена по Escape. Без условия Escape отнял бы клавишу у редактора
   // (снять мультикурсор, закрыть поиск) — дзен проверяется на каждое нажатие.
   // `unlessHandled` — очередь: открытое окно/поиск ест Escape первым, дзен только
   // если до него не дошло (см. `ContextBinding.unlessHandled`).
   keys.bindInContext({
-    combo: "Escape",
-    command: "view.zen",
-    when: () => layout.root.classList.contains("is-zen"),
+    combo: 'Escape',
+    command: 'view.zen',
+    when: () => layout.root.classList.contains('is-zen'),
     unlessHandled: true,
   });
   keys.attach(window);
@@ -5379,21 +4936,20 @@ export async function startApplication(
   // Перебор вкладок (Ctrl+Tab) кончается вместе с клавишей: снимок порядка живёт от
   // нажатия до отпускания. Потеря фокуса — тоже конец: следующий Ctrl+Tab должен
   // начинать с свежей вкладки, а не продолжать старый перебор.
-  window.addEventListener("keyup", (event) => {
-    if (event.key === "Control" || event.key === "Meta")
-      openEditors.endRecentCycle();
+  window.addEventListener('keyup', (event) => {
+    if (event.key === 'Control' || event.key === 'Meta') openEditors.endRecentCycle();
   });
-  window.addEventListener("blur", () => openEditors.endRecentCycle());
+  window.addEventListener('blur', () => openEditors.endRecentCycle());
 
   // Двойное нажатие Shift — второй способ позвать палитру, как в Zed/JetBrains.
   // Хоткей меню и Ctrl+Shift+P работают там, где фокус в окне; этот — заодно и после
   // того, как фокус вернулся из панели браузера (там Shift человек жмёт «просто так»).
-  attachDoubleShift(window, () => void commands.execute("palette.open"));
+  attachDoubleShift(window, () => void commands.execute('palette.open'));
 
   // Проект мог быть открыт ещё в стартовом окне: main помнит корень, и окно IDE
   // забирает его себе, чтобы не спрашивать папку второй раз. Делаем это после
   // подписок — иначе дерево, панель изменений и статусбар не узнают об открытии.
-  const current = await rpc.request("workspace.current");
+  const current = await rpc.request('workspace.current');
   if (current.root) await workspace.open(current.root);
 
   await refreshScan();

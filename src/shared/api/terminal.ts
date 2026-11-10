@@ -1,7 +1,7 @@
-import type { BookmarkRecord } from "../bookmarks";
-import type { NotesState } from "../notes";
-import type { FileLabelRecord } from "../file-labels";
-import type { DebugExceptionFilters, DebugLaunchOptions } from "./debug";
+import type { BookmarkRecord } from '../bookmarks';
+import type { NotesState } from '../notes';
+import type { FileLabelRecord } from '../file-labels';
+import type { DebugExceptionFilters, DebugLaunchOptions } from './debug';
 
 /* ── Терминал ───────────────────────────────────────────────────────────── */
 
@@ -54,7 +54,7 @@ export interface SessionState {
    * вывод из `dockActive`: `dockActive` помнит и «Поиск», а группа — только те две.
    * Нужно, чтобы после перезапуска открывался тот же полотен, на котором работали.
    */
-  activeTabGroup?: "editor" | "terminal";
+  activeTabGroup?: 'editor' | 'terminal';
   /**
    * Рабочие каталоги вкладок терминала, слева направо. Восстанавливаем именно каталоги:
    * писать в ту же оболочку — не то же самое, что открыть её там, где стоял.
@@ -188,7 +188,7 @@ export interface BrowserNavState {
 }
 
 /** Как менять масштаб страницы: шаг туда-обратно, вписать по ширине или 1:1. */
-export type BrowserZoomMode = "in" | "out" | "fit" | "actual";
+export type BrowserZoomMode = 'in' | 'out' | 'fit' | 'actual';
 
 /**
  * Элемент страницы, выбранный мышью для вопроса в чате.
@@ -227,23 +227,22 @@ export interface BrowserPickedElement {
  */
 export type BrowserEventPayload =
   /** Состояние активной вкладки: им живут адресная строка и кнопки. */
-  | ({ kind: "state"; id: string } & BrowserNavState)
+  | ({ kind: 'state'; id: string } & BrowserNavState)
   /** Страница просит новую вкладку (`_blank`, `window.open`): вторых окон у нас нет. */
-  | { kind: "newTab"; id: string; url: string }
+  | { kind: 'newTab'; id: string; url: string }
   /** Страницу открыл агент: вкладку заводит renderer, а ключ вкладки дал main. */
-  | { kind: "opened"; id: string; url: string }
+  | { kind: 'opened'; id: string; url: string }
   /** Агент закончил работу — вкладку убираем вместе с вложением. */
-  | { kind: "closed"; id: string }
+  | { kind: 'closed'; id: string }
   /** Человек поделился вкладкой с ассистентом: агент работает в этой же странице. */
-  | { kind: "shared"; id: string }
+  | { kind: 'shared'; id: string }
   /** Общий доступ снят (отозван или вкладка закрыта): агент снова заводит свою. */
-  | { kind: "unshared"; id: string }
+  | { kind: 'unshared'; id: string }
   /**
    * Агент действует на вкладке: нажал, ввёл текст, выполнил скрипт, открыл адрес.
    * Человек должен видеть, что страница под его руками живёт не только от него.
    */
-  | { kind: "agent"; id: string; action: string };
+  | { kind: 'agent'; id: string; action: string };
 
 /** Действие над вкладкой браузера, которое renderer просит выполнить main. */
-export type BrowserAction =
-  "back" | "forward" | "reload" | "stop" | "navigate" | "devtools";
+export type BrowserAction = 'back' | 'forward' | 'reload' | 'stop' | 'navigate' | 'devtools';

@@ -11,9 +11,7 @@ describe('decisionCommand', () => {
   });
 
   it('правка человека важнее предложенного', () => {
-    expect(decisionCommand({ allowed: true, command: 'pytest -k math' }, 'pytest -t math')).toBe(
-      'pytest -k math',
-    );
+    expect(decisionCommand({ allowed: true, command: 'pytest -k math' }, 'pytest -t math')).toBe('pytest -k math');
   });
 
   it('пустая правка — не правка', () => {

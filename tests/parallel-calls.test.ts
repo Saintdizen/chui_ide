@@ -48,10 +48,7 @@ describe('план шага', () => {
   });
 
   it('один и тот же файл — разные группы: чтение и правка зависят от порядка', () => {
-    const plan = planStepCalls([
-      call('1', 'read', { path: '/a.ts' }),
-      call('2', 'read', { path: '/a.ts' }),
-    ]);
+    const plan = planStepCalls([call('1', 'read', { path: '/a.ts' }), call('2', 'read', { path: '/a.ts' })]);
     expect(plan).toHaveLength(2);
   });
 

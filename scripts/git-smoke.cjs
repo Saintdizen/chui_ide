@@ -170,7 +170,11 @@ app.whenReady().then(async () => {
     // в `status`, а `undo` — текст последнего шага, которым это можно вернуть.
     const afterDiscard = await git.discard([file]);
     const left = (afterDiscard.status.files ?? []).filter((f) => f.path === file);
-    check('discard возвращает файл к HEAD', left.length === 0, left.map((f) => f.change));
+    check(
+      'discard возвращает файл к HEAD',
+      left.length === 0,
+      left.map((f) => f.change),
+    );
     // `undo` — запись того, как вернуть правку (`{ kind: 'restore', text }`), а
     // `null`, когда возвращать нечего. Здесь файл был добавлен в индекс и убран
     // им же: в HEAD его нет, значит возвращать нечего — `null` и есть ответ.

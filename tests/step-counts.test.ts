@@ -72,7 +72,11 @@ describe('счётчик шагов', () => {
     const record = buildCountsRecord(run(), {
       savings: { chars: 4_000, tokens: 1_000, parts: [{ name: 'search-cache', chars: 4_000, times: 2 }] },
     });
-    expect(record.savings).toEqual({ chars: 4_000, tokens: 1_000, parts: [{ name: 'search-cache', chars: 4_000, times: 2 }] });
+    expect(record.savings).toEqual({
+      chars: 4_000,
+      tokens: 1_000,
+      parts: [{ name: 'search-cache', chars: 4_000, times: 2 }],
+    });
     // Запись остаётся без содержания: только имя механизма и числа.
     expect(formatCountsLine(record)).not.toContain('xxxx');
   });

@@ -70,11 +70,14 @@ export function showForkCompare(deps: ForkCompareDeps, leftTitle?: string): void
     h(
       'div',
       { class: 'fork-compare-summary' },
-      result.shared === 0
-        ? 'Ветки расходятся с первого сообщения'
-        : `Первые ${result.shared} сообщений совпадают`,
+      result.shared === 0 ? 'Ветки расходятся с первого сообщения' : `Первые ${result.shared} сообщений совпадают`,
     ),
-    h('div', { class: 'fork-compare-columns' }, column(left, result.left, result.shared), column(right, result.right, result.shared)),
+    h(
+      'div',
+      { class: 'fork-compare-columns' },
+      column(left, result.left, result.shared),
+      column(right, result.right, result.shared),
+    ),
   );
 
   const openLeft = h('button', { class: 'modal-btn', type: 'button' }, `Открыть «${left.title}»`);

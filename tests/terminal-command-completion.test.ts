@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { completeTerminal, dirToRead, splitTail, type CompletionContext } from '../src/renderer/terminal/core/command-completion';
+import {
+  completeTerminal,
+  dirToRead,
+  splitTail,
+  type CompletionContext,
+} from '../src/renderer/terminal/core/command-completion';
 
 /**
  * Tab в терминале. Не автодополнение «всё как в bash» — только три вещи,

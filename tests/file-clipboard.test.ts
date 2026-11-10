@@ -10,7 +10,7 @@ import { pasteNotice, planPaste, type FileClip } from '../src/renderer/core/file
 const clip = (mode: 'copy' | 'move', ...paths: string[]): FileClip => ({ mode, paths });
 const none = (): boolean => false;
 
- describe('planPaste', () => {
+describe('planPaste', () => {
   it('копирует в другую папку', () => {
     const plan = planPaste(clip('copy', '/p/src/a.ts'), '/p/dst', none);
     expect(plan.targets).toEqual(['/p/dst/a.ts']);
@@ -35,9 +35,7 @@ const none = (): boolean => false;
   });
 
   it('одно препятствие не отменяет остальные', () => {
-    const plan = planPaste(clip('copy', '/p/src/a.ts', '/p/src/b.ts'), '/p/dst', (path) =>
-      path === '/p/dst/a.ts',
-    );
+    const plan = planPaste(clip('copy', '/p/src/a.ts', '/p/src/b.ts'), '/p/dst', (path) => path === '/p/dst/a.ts');
     expect(plan.sources).toEqual(['/p/src/b.ts']);
     expect(plan.conflicts).toEqual(['a.ts']);
   });
@@ -45,9 +43,7 @@ const none = (): boolean => false;
 
 describe('pasteNotice', () => {
   it('считает вслух', () => {
-    const plan = planPaste(clip('copy', '/p/src/a.ts', '/p/src/b.ts'), '/p/dst', (path) =>
-      path === '/p/dst/a.ts',
-    );
+    const plan = planPaste(clip('copy', '/p/src/a.ts', '/p/src/b.ts'), '/p/dst', (path) => path === '/p/dst/a.ts');
     expect(pasteNotice(plan, clip('copy'))).toBe('скопировано: 1 · уже есть: 1');
   });
 
@@ -57,8 +53,6 @@ describe('pasteNotice', () => {
   });
 
   it('нечего сказать — говорит и это', () => {
-    expect(pasteNotice({ sources: [], targets: [], skipped: 0, conflicts: [] }, clip('copy'))).toBe(
-      'Вставлять нечего',
-    );
+    expect(pasteNotice({ sources: [], targets: [], skipped: 0, conflicts: [] }, clip('copy'))).toBe('Вставлять нечего');
   });
 });

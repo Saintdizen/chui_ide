@@ -3468,17 +3468,17 @@
    статус-бар низкий, и горизонтальный ряд расширял бы его вправо до чужих
    значков. */
 .chat-running {
-   flex-wrap: wrap;
-   row-gap: 2px;
- }
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
 
 .chat-running-tools {
-   display: flex;
-   flex-wrap: wrap;
-   gap: 4px;
-   margin-left: 0;
-   width: 100%;
- }
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 0;
+  width: 100%;
+}
 
 .chat-running-tool {
   display: inline-flex;

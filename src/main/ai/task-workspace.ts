@@ -1,5 +1,12 @@
 import path from 'node:path';
-import type { DirEntry, FileContent, FileStat, ReplaceFilesOptions, SearchOptions, SearchResult } from '../../shared/api/fs';
+import type {
+  DirEntry,
+  FileContent,
+  FileStat,
+  ReplaceFilesOptions,
+  SearchOptions,
+  SearchResult,
+} from '../../shared/api/fs';
 import type { DocsQuery, DocsResult } from '../../shared/docs-index';
 import type { WorkspaceService } from '../workspace/workspace';
 import { RpcFailure } from '../ipc/router';

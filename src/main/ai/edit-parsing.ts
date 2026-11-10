@@ -258,10 +258,13 @@ function parseEditItem(value: unknown, fileIndex: number, editIndex: number): Ed
     // пришло вместо строки: без этого второй вызов неоткуда улучшить.
     const v = raw.newText as unknown;
     const shape =
-      v === null ? 'пустое значение null'
-      : Array.isArray(v) ? `массив из ${v.length}`
-      : typeof v === 'object' ? 'объектом'
-      : typeof v;
+      v === null
+        ? 'пустое значение null'
+        : Array.isArray(v)
+          ? `массив из ${v.length}`
+          : typeof v === 'object'
+            ? 'объектом'
+            : typeof v;
     const fields =
       typeof v === 'object' && v !== null && !Array.isArray(v)
         ? ` Поля: ${Object.keys(v as Record<string, unknown>).join(', ') || '—'}.`

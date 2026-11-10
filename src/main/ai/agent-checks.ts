@@ -79,7 +79,9 @@ export async function diagnostics(
 
   const target = optionalString(args, 'path');
   // `folder` — папка, `project` — весь проект: одно и то же поле хоста, разное удобство.
-  const folder = optionalString(args, 'folder') ?? (args.project === true || whole ? ctx.workspace.rootPath() ?? undefined : undefined);
+  const folder =
+    optionalString(args, 'folder') ??
+    (args.project === true || whole ? (ctx.workspace.rootPath() ?? undefined) : undefined);
   const result = await ctx.diagnostics(target, folder);
   const items = result.items.slice(0, MAX_DIAGNOSTICS);
 

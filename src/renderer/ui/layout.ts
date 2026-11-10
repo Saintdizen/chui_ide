@@ -2,7 +2,13 @@ import { clear, h } from './dom';
 import { FILE_PANEL_ID } from './tabs';
 import { applyPanelIntent, type PanelState, panelOrder } from '../core/panel-layout';
 import type { SidebarPosition } from '../../shared/api/settings';
-import { centeredFloating, clampFloating, dragFloating, resizeFloating, type FloatingRect } from '../../shared/floating-dock';
+import {
+  centeredFloating,
+  clampFloating,
+  dragFloating,
+  resizeFloating,
+  type FloatingRect,
+} from '../../shared/floating-dock';
 
 /**
  * Каркас в духе современных IDE: фон приложения темнее панелей, панели —
@@ -317,19 +323,27 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     /** Сдвинуть плавающую панель на смещение в пикселях (перетаскивание). */
     moveDockFloating(dx: number, dy: number) {
       if (floating === null) return;
-      floating = dragFloating(floating, { dx, dy }, {
-        width: root.clientWidth,
-        height: root.clientHeight,
-      });
+      floating = dragFloating(
+        floating,
+        { dx, dy },
+        {
+          width: root.clientWidth,
+          height: root.clientHeight,
+        },
+      );
       applyFloating();
     },
     /** Потянуть за угол: размер окна, с пределом по содержимому. */
     resizeDockFloating(dx: number, dy: number) {
       if (floating === null) return;
-      floating = resizeFloating(floating, { dx, dy }, {
-        width: root.clientWidth,
-        height: root.clientHeight,
-      });
+      floating = resizeFloating(
+        floating,
+        { dx, dy },
+        {
+          width: root.clientWidth,
+          height: root.clientHeight,
+        },
+      );
       applyFloating();
     },
     setDockVisible(visible: boolean) {

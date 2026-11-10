@@ -17,12 +17,7 @@ import { WorkspaceService } from '../src/main/workspace/workspace';
 describe('разбор пометок', () => {
   it('ловятся TODO, FIXME, HACK, XXX', () => {
     const text = ['// TODO: доделать', '// FIXME потом', '/* HACK */', '# XXX'].join('\n');
-    expect(scanTodoText('f.ts', text, 10).map((hit) => hit.kind)).toEqual([
-      'TODO',
-      'FIXME',
-      'HACK',
-      'XXX',
-    ]);
+    expect(scanTodoText('f.ts', text, 10).map((hit) => hit.kind)).toEqual(['TODO', 'FIXME', 'HACK', 'XXX']);
   });
 
   it('границы слова: TODOS и MethodTODO — не пометки', () => {
@@ -55,11 +50,7 @@ describe('todo инструментом', () => {
   beforeEach(async () => {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-todo-'));
     await fs.mkdir(path.join(dir, 'src'), { recursive: true });
-    await fs.writeFile(
-      path.join(dir, 'src/a.ts'),
-      '// TODO: первое\nexport const a = 1;\n// FIXME: второе\n',
-      'utf8',
-    );
+    await fs.writeFile(path.join(dir, 'src/a.ts'), '// TODO: первое\nexport const a = 1;\n// FIXME: второе\n', 'utf8');
     await fs.writeFile(path.join(dir, 'src/b.ts'), 'export const b = 2;\n', 'utf8');
     await fs.writeFile(path.join(dir, 'notes.md'), 'TODO: в заметках\n', 'utf8');
     workspace = new WorkspaceService(() => undefined);

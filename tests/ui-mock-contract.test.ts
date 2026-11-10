@@ -81,14 +81,11 @@ const NOT_MOCKED: Record<string, string[]> = {
     'debug.stop',
     'debug.variables',
   ],
-  // Словарь орфографии из списка ушёл: `app.ts` теперь пишет `spell.dictionary`
-  // двойными кавычками, страж его видит — и моку есть что ответить.
+  // Словарь орфографии из списка ушёл: `app.ts` пишет `spell.dictionary`
+  // в одинарных кавычках, страж его видит — и моку есть что ответить.
   'правка импортов — файлы и языковой сервер живут в main': ['workspace.updateImports'],
   // Профиль экспортируется и импортируется через диалоги — они в main, в моке их нет.
-  'профиль ходит в диалоги файловой системы — они в main': [
-    'settings.exportProfileTo',
-    'settings.importProfileFrom',
-  ],
+  'профиль ходит в диалоги файловой системы — они в main': ['settings.exportProfileTo', 'settings.importProfileFrom'],
   'внешние инструменты (MCP) — процессы запускает main': ['ai.mcpTools'],
   'проверка команды и остановка сервера — процессы живут в main': ['lsp.check', 'lsp.stop'],
   // Настоящий cSpell с 79 словарями живет в main: в мок его не тащить —
@@ -102,10 +99,7 @@ const NOT_MOCKED: Record<string, string[]> = {
   'поиск импортирующих читает диск целиком: мок отдаёт пустое': ['workspace.importers'],
   // Импорт карт клавиш: файл выбирает системный диалог, его в моке нет.
   'выбор файла для импорта клавиш живёт в main (showOpenDialog)': ['dialog.openFile'],
-  'снимок окна и коммит живут в main: в моке окна их нет': [
-    'window.captureScreenshot',
-    'git.commitShow',
-  ],
+  'снимок окна и коммит живут в main: в моке окна их нет': ['window.captureScreenshot', 'git.commitShow'],
   'нужен настоящий репозиторий и клиент git — в моке их нет': [
     'git.bisectMark',
     'git.bisectReset',

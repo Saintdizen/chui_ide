@@ -240,7 +240,7 @@ app.whenReady().then(async () => {
     check('project_map исполнился успешно', run.results[0]?.ok === true, run.results[0]?.summary);
     check('подробная форма называет манифест', detail.includes('Манифесты: package.json'), detail);
     check('подробная форма даёт пример теста', detail.includes('tests/util.test.js'), detail);
-        // Совет в конце — про настоящие инструменты этой сборки: `list` с glob и
+    // Совет в конце — про настоящие инструменты этой сборки: `list` с glob и
     // `search`, а не про `find_files`, которого давно нет.
     check(
       'подробная форма говорит, куда смотреть дальше',

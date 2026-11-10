@@ -227,10 +227,7 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
       const name =
         typeof raw === 'string' && raw.length > 0
           ? raw
-          : await deps.presets.askName(
-              `Раскладка: ${layouts.map((entry) => entry.name).join(', ')}`,
-              layouts[0]!.name,
-            );
+          : await deps.presets.askName(`Раскладка: ${layouts.map((entry) => entry.name).join(', ')}`, layouts[0]!.name);
       if (name === null) return;
       const layout = findLayout(layouts, name);
       // Не нашли — молчим не молча: промах по имени и «нет такой» снаружи

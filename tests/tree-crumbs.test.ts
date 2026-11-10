@@ -12,8 +12,13 @@ import { ancestorsAt, breadcrumbChanged, type CrumbRow } from '../src/renderer/c
  */
 // `dir` по умолчанию собирается из имён предков — ровно так, как его отдаёт
 // дерево проводника: путь строки от корня проекта, без её собственного имени.
-const row = (depth: number, name?: string, dir?: string): CrumbRow => ({ depth, ...(name ? { name } : {}), ...(dir ? { dir } : {}) });
-const inDir = (depth: number, name: string, ...parents: string[]): CrumbRow => row(depth, name, ['/repo', ...parents].join('/'));
+const row = (depth: number, name?: string, dir?: string): CrumbRow => ({
+  depth,
+  ...(name ? { name } : {}),
+  ...(dir ? { dir } : {}),
+});
+const inDir = (depth: number, name: string, ...parents: string[]): CrumbRow =>
+  row(depth, name, ['/repo', ...parents].join('/'));
 
 const ROOT = '/repo';
 

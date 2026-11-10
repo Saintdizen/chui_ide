@@ -364,7 +364,11 @@ app.whenReady().then(async () => {
     // переживёт беседу и её сжатие.
     requested = { name: 'mind', args: { action: 'notes' } };
     run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
-    check('mind исполняется по имени', run.starts[0]?.name === 'mind', run.starts.map((x) => x.name));
+    check(
+      'mind исполняется по имени',
+      run.starts[0]?.name === 'mind',
+      run.starts.map((x) => x.name),
+    );
     await memory.remember(dir, 'В этом проекте договорились использовать pytest');
     run = await chat(undefined);
     check(
@@ -445,7 +449,11 @@ app.whenReady().then(async () => {
     requested = { name: 'search', args: { action: 'code', query: 'read file' } };
     run = await chat(undefined);
     const codeSearch = String(run.results[0]?.detail ?? '');
-    check('поиск по символам исполняется', run.starts[0]?.name === 'search', run.starts.map((x) => x.name));
+    check(
+      'поиск по символам исполняется',
+      run.starts[0]?.name === 'search',
+      run.starts.map((x) => x.name),
+    );
     check('объявление символа в ответе', codeSearch.includes('функция readFile'), codeSearch);
     check(
       'точное имя идёт раньше похожего',
@@ -479,7 +487,11 @@ app.whenReady().then(async () => {
     run = await chat(undefined);
     const outline = String(run.results[0]?.detail ?? '');
     // `lsp` — строка ростера: схемой не едет, вызов приходит по имени.
-    check('lsp исполняется с языковым сервером', run.starts[0]?.name === 'lsp', run.starts.map((x) => x.name));
+    check(
+      'lsp исполняется с языковым сервером',
+      run.starts[0]?.name === 'lsp',
+      run.starts.map((x) => x.name),
+    );
     check('скелет содержит объявления с номерами строк', /3–40: класс Parser/.test(outline), outline);
     check('вложенный метод показан с отступом', outline.includes('  5–9: метод parse'), outline);
     check('скелет ушёл модели', sentToModel(run.bodies[run.bodies.length - 1]).includes('класс Parser'));
@@ -527,7 +539,11 @@ app.whenReady().then(async () => {
     const searchResult = String(run.results[0]?.detail ?? '');
     // `web` — строка ростера: схемой не едет, о нём говорит строка в промпте, а
     // схему докачивает первый вызов по имени. Проверяем, что вызов доходит.
-    check('включённый web исполняется по имени', run.starts[0]?.name === 'web', run.starts.map((x) => x.name));
+    check(
+      'включённый web исполняется по имени',
+      run.starts[0]?.name === 'web',
+      run.starts.map((x) => x.name),
+    );
     check('результаты поиска дошли до модели', searchResult.includes('https://docs.example/scale'), searchResult);
     check(
       'разметка в выдаче снята, а источник назван',
@@ -548,8 +564,9 @@ app.whenReady().then(async () => {
     settings.ai.webFetch = { enabled: false };
     requested = { name: 'web', args: { action: 'search', query: 'ffmpeg scale' } };
     run = await chat(undefined);
-    const onlySearch = (run.bodies.at(-1)?.tools ?? [])
-      .flatMap((tool) => tool.function?.parameters?.properties?.action?.enum ?? []);
+    const onlySearch = (run.bodies.at(-1)?.tools ?? []).flatMap(
+      (tool) => tool.function?.parameters?.properties?.action?.enum ?? [],
+    );
     check('без настройки fetch в web не предлагается', !onlySearch.includes('fetch'), onlySearch);
 
     const pageUrl = `http://127.0.0.1:${server.address().port}/page`;
@@ -559,7 +576,11 @@ app.whenReady().then(async () => {
     const pageResult = String(run.results[0]?.detail ?? '');
     // `web` — строка ростера: схему докачивает первый вызов по имени, и отказ был
     // бы виден по его исходу. Здесь важнее сам факт доступа к странице.
-    check('включённый fetch исполняется по имени', run.starts[0]?.name === 'web', run.starts.map((x) => x.name));
+    check(
+      'включённый fetch исполняется по имени',
+      run.starts[0]?.name === 'web',
+      run.starts.map((x) => x.name),
+    );
     check('страница прочитана', run.results[0]?.ok === true, run.results[0]);
     check('заголовок страницы назван', pageResult.includes('Страница: Сборка проекта'), pageResult.split('\n')[0]);
     check('текст страницы без разметки', pageResult.includes('npm run build'), pageResult);
@@ -774,7 +795,9 @@ app.whenReady().then(async () => {
     ai.attachMcp(undefined);
     check(
       'непомещающиеся инструменты — отказ с числами',
-      /не помещаются в окно/.test(tooSmall) && /окно 64 токенов/.test(tooSmall) && /описания инструментов — \d+/.test(tooSmall),
+      /не помещаются в окно/.test(tooSmall) &&
+        /окно 64 токенов/.test(tooSmall) &&
+        /описания инструментов — \d+/.test(tooSmall),
       tooSmall,
     );
     // Сказано, что делать: текст начинается с заглавной («Возьмите модель с большим окном»).
@@ -927,7 +950,11 @@ app.whenReady().then(async () => {
 
     requested = { name: 'terminal', args: { command: 'echo chui-cmd-ok' } };
     run = await chat(shellHost);
-    check('с мостом terminal предлагается', run.starts[0]?.name === 'terminal', run.starts.map((x) => x.name));
+    check(
+      'с мостом terminal предлагается',
+      run.starts[0]?.name === 'terminal',
+      run.starts.map((x) => x.name),
+    );
     check('команда выполнена успешно', run.results[0]?.ok === true, run.results[0]?.summary);
     check(
       'вывод команды ушёл модели',
@@ -978,7 +1005,11 @@ app.whenReady().then(async () => {
     run = await chat(shellHost);
     // `terminal` — строка ростера (схема стоит токенов в каждом запросе, а зовётся
     // он не всегда): в наборе схем его нет, а вызов по имени исполняется.
-    check('с мостом фоновая команда исполняется', run.starts[0]?.name === 'terminal', run.starts.map((x) => x.name));
+    check(
+      'с мостом фоновая команда исполняется',
+      run.starts[0]?.name === 'terminal',
+      run.starts.map((x) => x.name),
+    );
     const jobSummary = String(run.results[0]?.summary ?? '');
     const jobId = /job-\d+/.exec(jobSummary)?.[0] ?? '';
     check('задание получило номер', jobId.startsWith('job-'), jobSummary);
@@ -1210,7 +1241,11 @@ app.whenReady().then(async () => {
     requested = { name: 'checks', args: { action: 'diagnostics' } };
     run = await chat(diagHost);
     // `checks` — строка ростера: схемой не едет, зовётся по имени, линтер за мостом.
-    check('checks (diagnostics) исполняется с мостом', run.starts[0]?.name === 'checks', run.starts.map((x) => x.name));
+    check(
+      'checks (diagnostics) исполняется с мостом',
+      run.starts[0]?.name === 'checks',
+      run.starts.map((x) => x.name),
+    );
     check(
       'диагностика вернулась модели',
       run.results[0]?.ok === true && String(run.results[0]?.summary).includes('ошибок: 1'),
@@ -1417,7 +1452,11 @@ app.whenReady().then(async () => {
     run = await chat(browserHost);
     const browserNames = (run.bodies[0]?.tools ?? []).map((tool) => tool.function?.name);
     check('включённый браузер назван в ростере, а не схемой', !browserNames?.includes('browser'), browserNames);
-    check('и вызов по имени исполняется', run.starts[0]?.name === 'browser', run.starts.map((s2) => s2.name));
+    check(
+      'и вызов по имени исполняется',
+      run.starts[0]?.name === 'browser',
+      run.starts.map((s2) => s2.name),
+    );
 
     check('действие в браузере спросило разрешение', browserLog.length === 1, browserLog);
     check('адрес ушёл в подтверждение как есть', browserLog[0] === 'открыть example.com', browserLog);
@@ -1551,7 +1590,11 @@ app.whenReady().then(async () => {
     // строка о нём есть, а вызов по имени исполняется.
     run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
     check('навык назван в ростере', !run.toolNames.includes('skill'), run.toolNames);
-    check('и тело навыка отдано по вызову', run.starts[0]?.name === 'skill', run.starts.map((s2) => s2.name));
+    check(
+      'и тело навыка отдано по вызову',
+      run.starts[0]?.name === 'skill',
+      run.starts.map((s2) => s2.name),
+    );
     const firstPrompt = (run.bodies[0]?.messages ?? [])
       .filter((message) => message.role === 'system')
       .map((message) => String(message.content ?? ''))
@@ -1578,7 +1621,11 @@ app.whenReady().then(async () => {
       .filter((message) => message.role === 'system')
       .map((message) => String(message.content ?? ''))
       .join('\n');
-    check('без навыков каталога в промпте нет', !barePrompt.includes('Навыки — готовые сценарии'), barePrompt.slice(0, 120));
+    check(
+      'без навыков каталога в промпте нет',
+      !barePrompt.includes('Навыки — готовые сценарии'),
+      barePrompt.slice(0, 120),
+    );
 
     /* 18. правки по якорю (`edit`, было `apply_patch`): позиций нет, фрагмент ищет
        документ. Имя одно — старое `apply_patch` живёт только как псевдоним истории.

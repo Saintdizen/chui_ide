@@ -11,36 +11,25 @@
  * и уходят в pty. Про RPC знает только эта панель — движок от него не зависит.
  */
 
-import {
-  PushTopic,
-  type TerminalDataPayload,
-  type TerminalExitPayload,
-  type TerminalSession,
-} from "../../shared/api";
-import type { RpcClient } from "../core/rpc";
-import { Terminal } from "../terminal/core/screen";
-import { searchBuffer, stepMatch } from "../terminal/core/search";
-import { shortenShellTitle } from "../terminal/core/title";
-import {
-  encodeKey,
-  encodeMouse,
-  encodePaste,
-  isPasteStroke,
-  type KeyStroke,
-} from "../terminal/input/keys";
-import { TermView } from "../terminal/view/term-view";
-import { shortcutKey } from "../../shared/physical-key";
-import { terminalSnapshot, type TerminalSnapshot } from "../../shared/terminal-snapshot";
+import { PushTopic, type TerminalDataPayload, type TerminalExitPayload, type TerminalSession } from '../../shared/api';
+import type { RpcClient } from '../core/rpc';
+import { Terminal } from '../terminal/core/screen';
+import { searchBuffer, stepMatch } from '../terminal/core/search';
+import { shortenShellTitle } from '../terminal/core/title';
+import { encodeKey, encodeMouse, encodePaste, isPasteStroke, type KeyStroke } from '../terminal/input/keys';
+import { TermView } from '../terminal/view/term-view';
+import { shortcutKey } from '../../shared/physical-key';
+import { terminalSnapshot, type TerminalSnapshot } from '../../shared/terminal-snapshot';
 import {
   completeTerminal,
   splitTail,
   COMPLETION_COMMANDS,
   type CompletionContext,
-} from "../terminal/core/command-completion";
-import { h, svgIcon } from "./dom";
-import { showPopupMenu, type PopupMenuItem } from "./popup-menu";
-import { showToast } from "./toast";
-import { errorText } from "../core/file-errors";
+} from '../terminal/core/command-completion';
+import { h, svgIcon } from './dom';
+import { showPopupMenu, type PopupMenuItem } from './popup-menu';
+import { showToast } from './toast';
+import { errorText } from '../core/file-errors';
 
 /**
  * Пункты меню по правому клику в консоли.
@@ -63,26 +52,24 @@ export interface TerminalMenuActions {
   kill(): void;
 }
 
-export function terminalMenuItems(
-  actions: TerminalMenuActions,
-): PopupMenuItem[] {
+export function terminalMenuItems(actions: TerminalMenuActions): PopupMenuItem[] {
   return [
     // Вставка и копирование — одна группа: работа с буфером.
     {
-      label: "Копировать",
-      hint: "Ctrl+Shift+C",
+      label: 'Копировать',
+      hint: 'Ctrl+Shift+C',
       enabled: actions.hasSelection,
       onSelect: actions.copy,
     },
-    { label: "Вставить", hint: "Ctrl+V", onSelect: actions.paste },
+    { label: 'Вставить', hint: 'Ctrl+V', onSelect: actions.paste },
     { separator: true },
     // Найти и очистить — действия над экраном, а не над буфером.
-    { label: "Найти в консоли", hint: "Ctrl+F", onSelect: actions.find },
-    { label: "Очистить экран", onSelect: actions.clear },
+    { label: 'Найти в консоли', hint: 'Ctrl+F', onSelect: actions.find },
+    { label: 'Очистить экран', onSelect: actions.clear },
     { separator: true },
     // Последним, в опасной группе: уводит из запущенной программы.
     {
-      label: "Завершить процесс",
+      label: 'Завершить процесс',
       danger: true,
       enabled: !actions.exited,
       onSelect: actions.kill,
@@ -163,48 +150,48 @@ export function createTerminalPanel(deps: {
   /** Ссылка из консоли: решает вызывающий — вкладкой в IDE или системным браузером. */
   openLink: (url: string) => void;
 }): TerminalPanelView {
-  const tabsHost = h("div", { class: "term-tabs" });
-  const body = h("div", { class: "term-body" });
+  const tabsHost = h('div', { class: 'term-tabs' });
+  const body = h('div', { class: 'term-body' });
 
   const addButton = h(
-    "button",
+    'button',
     {
-      class: "icon-btn",
-      type: "button",
-      title: "Новый терминал",
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Новый терминал',
       onClick: () => void createSession(),
     },
-    svgIcon("plus", 15),
+    svgIcon('plus', 15),
   );
   const clearButton = h(
-    "button",
+    'button',
     {
-      class: "icon-btn",
-      type: "button",
-      title: "Очистить экран",
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Очистить экран',
       onClick: () => clearActive(),
     },
-    svgIcon("refresh", 14),
+    svgIcon('refresh', 14),
   );
   const killButton = h(
-    "button",
+    'button',
     {
-      class: "icon-btn",
-      type: "button",
-      title: "Завершить процесс",
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Завершить процесс',
       onClick: () => void killActive(),
     },
-    svgIcon("trash", 14),
+    svgIcon('trash', 14),
   );
 
   const element = h(
-    "div",
-    { class: "terminal-panel" },
+    'div',
+    { class: 'terminal-panel' },
     h(
-      "div",
-      { class: "term-toolbar" },
+      'div',
+      { class: 'term-toolbar' },
       tabsHost,
-      h("div", { class: "toolbar-spacer" }),
+      h('div', { class: 'toolbar-spacer' }),
       addButton,
       clearButton,
       killButton,
@@ -213,69 +200,61 @@ export function createTerminalPanel(deps: {
   );
 
   // Панель поиска: висит поверх полотна справа сверху, место у вывода не отнимает.
-  const findInput = h("input", {
-    class: "term-find-input",
-    type: "text",
-    placeholder: "Найти в терминале",
-    spellcheck: "false",
+  const findInput = h('input', {
+    class: 'term-find-input',
+    type: 'text',
+    placeholder: 'Найти в терминале',
+    spellcheck: 'false',
   });
-  const findCount = h("span", { class: "term-find-count" });
+  const findCount = h('span', { class: 'term-find-count' });
   const findPrev = h(
-    "button",
+    'button',
     {
-      class: "icon-btn",
-      type: "button",
-      title: "Предыдущее совпадение",
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Предыдущее совпадение',
       onClick: () => findRun(false, -1),
     },
-    svgIcon("chevronUp", 14),
+    svgIcon('chevronUp', 14),
   );
   const findNext = h(
-    "button",
+    'button',
     {
-      class: "icon-btn",
-      type: "button",
-      title: "Следующее совпадение",
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Следующее совпадение',
       onClick: () => findRun(false, 1),
     },
-    svgIcon("chevronDown", 14),
+    svgIcon('chevronDown', 14),
   );
   const findClose = h(
-    "button",
+    'button',
     {
-      class: "icon-btn",
-      type: "button",
-      title: "Закрыть поиск",
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Закрыть поиск',
       onClick: () => closeFind(),
     },
-    svgIcon("close", 14),
+    svgIcon('close', 14),
   );
-  const findBar = h(
-    "div",
-    { class: "term-find" },
-    findInput,
-    findCount,
-    findPrev,
-    findNext,
-    findClose,
-  );
+  const findBar = h('div', { class: 'term-find' }, findInput, findCount, findPrev, findNext, findClose);
   findBar.hidden = true;
   body.append(findBar);
 
   // Номер текущего совпадения: -1 — совпадение не выбрано (новый запрос или ничего не нашлось).
   let findCurrent = -1;
 
-  findInput.addEventListener("input", () => {
+  findInput.addEventListener('input', () => {
     findCurrent = -1;
     findRun(true, 1);
   });
-  findInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
+  findInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
       event.preventDefault();
       findRun(false, event.shiftKey ? -1 : 1);
       return;
     }
-    if (event.key === "Escape") {
+    if (event.key === 'Escape') {
       event.preventDefault();
       closeFind();
     }
@@ -314,11 +293,9 @@ export function createTerminalPanel(deps: {
       const entry = sessions.get(payload.id);
       if (!entry) return;
       entry.exited = true;
-      entry.tab.classList.add("is-exited");
+      entry.tab.classList.add('is-exited');
       // Строку о завершении пишем в модель: она переживёт закрытие процесса.
-      entry.term.write(
-        `\r\n\x1b[90m[процесс завершён, код ${payload.exitCode}]\x1b[0m\r\n`,
-      );
+      entry.term.write(`\r\n\x1b[90m[процесс завершён, код ${payload.exitCode}]\x1b[0m\r\n`);
       entry.view.render();
       entry.view.stickToBottom();
     }
@@ -338,7 +315,7 @@ export function createTerminalPanel(deps: {
   }
 
   async function openSession(cwd?: string): Promise<string | null> {
-    const container = h("div", { class: "term-instance" });
+    const container = h('div', { class: 'term-instance' });
     body.appendChild(container);
 
     // Модель заводим на размере по умолчанию: настоящий размер узнаем после раскладки.
@@ -351,7 +328,7 @@ export function createTerminalPanel(deps: {
       onMouse: (event) => {
         if (!sessionId) return;
         void deps.rpc
-          .request("terminal.write", {
+          .request('terminal.write', {
             id: sessionId,
             data: encodeMouse(event, term.mouseSgr),
           })
@@ -359,8 +336,7 @@ export function createTerminalPanel(deps: {
       },
       // Выделение появилось — копируем сразу, как в терминалах Linux с primary selection.
       onSelectionChange: (text) => {
-        if (text)
-          void navigator.clipboard.writeText(text).catch(() => undefined);
+        if (text) void navigator.clipboard.writeText(text).catch(() => undefined);
       },
       // Гиперссылка (OSC 8): решает вызывающий. Локальный адрес открывается вкладкой
       // в IDE (рядом с кодом), чужой — системным браузером; схемы проверяет main.
@@ -376,7 +352,7 @@ export function createTerminalPanel(deps: {
     }
 
     try {
-      const session = await deps.rpc.request("terminal.create", {
+      const session = await deps.rpc.request('terminal.create', {
         cols: size?.cols ?? DEFAULT_COLS,
         rows: size?.rows ?? DEFAULT_ROWS,
         cwd: cwd ?? deps.cwd() ?? undefined,
@@ -384,16 +360,16 @@ export function createTerminalPanel(deps: {
       sessionId = session.id;
 
       const tab = h(
-        "button",
+        'button',
         {
-          class: "term-tab",
-          type: "button",
+          class: 'term-tab',
+          type: 'button',
           title: `${session.shell} · ${session.cwd}`,
         },
         session.title,
       );
-      tab.addEventListener("click", () => activate(session.id));
-      tab.addEventListener("auxclick", (event) => {
+      tab.addEventListener('click', () => activate(session.id));
+      tab.addEventListener('auxclick', (event) => {
         if (event.button === 1) void closeSession(session.id);
       });
 
@@ -404,12 +380,12 @@ export function createTerminalPanel(deps: {
         container,
         tab,
         exited: false,
-        line: "",
+        line: '',
         history: [],
         renamed: null,
         // Каталог, с которым открыта: после перезапуска её открывают там же.
         cwd: session.cwd,
-        title: "",
+        title: '',
       };
       sessions.set(session.id, entry);
       tabsHost.appendChild(tab);
@@ -427,7 +403,7 @@ export function createTerminalPanel(deps: {
     } catch (error) {
       container.remove();
       view.dispose();
-      showToast(errorText(error), "error");
+      showToast(errorText(error), 'error');
       return null;
     }
   }
@@ -444,8 +420,7 @@ export function createTerminalPanel(deps: {
     const wanted = entry.term.title;
     if (wanted === entry.title) return;
     entry.title = wanted;
-    const full =
-      entry.renamed ?? (wanted === "" ? entry.session.title : wanted);
+    const full = entry.renamed ?? (wanted === '' ? entry.session.title : wanted);
     entry.tab.title = full;
     entry.tab.textContent = shortenShellTitle(full);
   }
@@ -456,9 +431,7 @@ export function createTerminalPanel(deps: {
   /** Записать текст в сессию как вставку: с маркерами, если программа о них просила. */
   function writePaste(entry: SessionView, text: string): void {
     const data = encodePaste(text, entry.term.bracketedPaste);
-    void deps.rpc
-      .request("terminal.write", { id: entry.session.id, data })
-      .catch(() => undefined);
+    void deps.rpc.request('terminal.write', { id: entry.session.id, data }).catch(() => undefined);
   }
 
   /**
@@ -563,7 +536,7 @@ export function createTerminalPanel(deps: {
    * `Ctrl+C` — сигнал, поэтому без меню выделенное не скопировать с мыши.
    */
   function bindMenu(entry: SessionView): void {
-    entry.view.element.addEventListener("contextmenu", (event) => {
+    entry.view.element.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       showPopupMenu(
         terminalMenuItems({
@@ -589,7 +562,7 @@ export function createTerminalPanel(deps: {
   /** Клавиатура и вставка: событие с вида кодируется в байты и уходит в pty. */
   function bindInput(entry: SessionView): void {
     const root = entry.view.element;
-    root.addEventListener("keydown", (event) => {
+    root.addEventListener('keydown', (event) => {
       const stroke = {
         key: event.key,
         // Физическая клавиша рядом с символом: сочетания терминала не должны зависеть
@@ -608,13 +581,13 @@ export function createTerminalPanel(deps: {
         return;
       }
       // Ctrl+F — поиск в консоли (как в редакторе).
-      if (event.ctrlKey && !event.shiftKey && shortcutOf(event) === "F") {
+      if (event.ctrlKey && !event.shiftKey && shortcutOf(event) === 'F') {
         event.preventDefault();
         openFind();
         return;
       }
       // Ctrl+Shift+C — копировать выделение (в терминале `Ctrl+C` — сигнал, а не копия).
-      if (event.ctrlKey && event.shiftKey && shortcutOf(event) === "C") {
+      if (event.ctrlKey && event.shiftKey && shortcutOf(event) === 'C') {
         const text = entry.view.selectedText();
         if (text) {
           void navigator.clipboard.writeText(text).catch(() => undefined);
@@ -637,9 +610,7 @@ export function createTerminalPanel(deps: {
           const tail = splitTail(entry.line).tail;
           const patch = completion.value.slice(entry.line.length - tail.length);
           entry.line = completion.value;
-          void deps.rpc
-            .request('terminal.write', { id: entry.session.id, data: patch })
-            .catch(() => undefined);
+          void deps.rpc.request('terminal.write', { id: entry.session.id, data: patch }).catch(() => undefined);
           return;
         }
         // Имён нет в кэше — читаем каталог и пробуем ещё раз с тем же Tab.
@@ -648,9 +619,7 @@ export function createTerminalPanel(deps: {
         void fillDirCache(entry, splitTail(entry.line).tail).then((filled) => {
           if (!filled) {
             // Каталог не прочитался — пусть решит оболочка, у неё своё завершение.
-            void deps.rpc
-              .request("terminal.write", { id: entry.session.id, data: "\t" })
-              .catch(() => undefined);
+            void deps.rpc.request('terminal.write', { id: entry.session.id, data: '\t' }).catch(() => undefined);
             return;
           }
           const retry = completeTerminal(entry.line, completionContext(entry));
@@ -658,9 +627,7 @@ export function createTerminalPanel(deps: {
           const retryTail = splitTail(entry.line).tail;
           const retryPatch = retry.value.slice(entry.line.length - retryTail.length);
           entry.line = retry.value;
-          void deps.rpc
-            .request("terminal.write", { id: entry.session.id, data: retryPatch })
-            .catch(() => undefined);
+          void deps.rpc.request('terminal.write', { id: entry.session.id, data: retryPatch }).catch(() => undefined);
         });
         return;
       }
@@ -668,15 +635,13 @@ export function createTerminalPanel(deps: {
       // не навигация по интерфейсу, а ввод в консоль.
       event.preventDefault();
       trackLine(entry, stroke, data);
-      void deps.rpc
-        .request("terminal.write", { id: entry.session.id, data })
-        .catch(() => undefined);
+      void deps.rpc.request('terminal.write', { id: entry.session.id, data }).catch(() => undefined);
     });
 
     // Событие `paste` тоже слушаем: его пришлёт контекстное меню и вставка мышью
     // (если полотну когда-нибудь дадут редактируемость). Обычный `Ctrl+V` идёт выше.
-    root.addEventListener("paste", (event) => {
-      const text = event.clipboardData?.getData("text");
+    root.addEventListener('paste', (event) => {
+      const text = event.clipboardData?.getData('text');
       if (!text) return;
       event.preventDefault();
       writePaste(entry, text);
@@ -692,7 +657,7 @@ export function createTerminalPanel(deps: {
 
     for (const [key, item] of sessions) {
       item.container.hidden = key !== id;
-      item.tab.classList.toggle("is-active", key === id);
+      item.tab.classList.toggle('is-active', key === id);
     }
 
     fitSession(entry);
@@ -716,7 +681,7 @@ export function createTerminalPanel(deps: {
       if (next) activate(next);
     }
 
-    await deps.rpc.request("terminal.kill", { id }).catch(() => undefined);
+    await deps.rpc.request('terminal.kill', { id }).catch(() => undefined);
   }
 
   /**
@@ -731,7 +696,7 @@ export function createTerminalPanel(deps: {
     entry.term.resize(size.cols, size.rows);
     entry.view.render();
     void deps.rpc
-      .request("terminal.resize", {
+      .request('terminal.resize', {
         id: entry.session.id,
         cols: size.cols,
         rows: size.rows,
@@ -755,8 +720,8 @@ export function createTerminalPanel(deps: {
   /** Закрыть поиск: спрятать панель и снять подсветку. */
   function closeFind(): void {
     findBar.hidden = true;
-    findInput.value = "";
-    findCount.textContent = "";
+    findInput.value = '';
+    findCount.textContent = '';
     findCurrent = -1;
     const entry = active();
     if (entry) {
@@ -775,22 +740,18 @@ export function createTerminalPanel(deps: {
     const query = findInput.value;
     if (query.length === 0) {
       entry.view.clearSearch();
-      findCount.textContent = "";
+      findCount.textContent = '';
       return;
     }
-    const result = searchBuffer(
-      (row) => entry.view.lineText(row),
-      entry.view.bufferRows(),
-      query,
-    );
+    const result = searchBuffer((row) => entry.view.lineText(row), entry.view.bufferRows(), query);
     if (result.error) {
       entry.view.clearSearch();
-      findCount.textContent = "ошибка";
+      findCount.textContent = 'ошибка';
       return;
     }
     if (result.matches.length === 0) {
       entry.view.clearSearch();
-      findCount.textContent = "нет";
+      findCount.textContent = 'нет';
       return;
     }
     if (reset) findCurrent = -1;
@@ -807,7 +768,7 @@ export function createTerminalPanel(deps: {
     if (!entry) return;
     // Очистка экрана — это ED 2 (весь экран), ED 3 (история) и возврат курсора домой:
     // так же это делает сама оболочка по `clear`.
-    entry.term.write("\x1b[2J\x1b[3J\x1b[H");
+    entry.term.write('\x1b[2J\x1b[3J\x1b[H');
     entry.view.render();
   }
 
@@ -878,8 +839,7 @@ export function createTerminalPanel(deps: {
       // создаётся только если терминала ещё нет. Панель показывает вызывающая
       // сторона — поэтому здесь никакой связи с доком.
       const current = active();
-      const id =
-        current && !current.exited ? current.session.id : await createSession();
+      const id = current && !current.exited ? current.session.id : await createSession();
       if (!id) return;
 
       const entry = sessions.get(id);
@@ -893,9 +853,7 @@ export function createTerminalPanel(deps: {
         entry.renamed = title;
         activate(id);
       }
-      await deps.rpc
-        .request("terminal.write", { id, data: `${command}\r` })
-        .catch(() => undefined);
+      await deps.rpc.request('terminal.write', { id, data: `${command}\r` }).catch(() => undefined);
       entry?.view.focus();
     },
     clearActive,

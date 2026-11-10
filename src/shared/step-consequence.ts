@@ -114,8 +114,6 @@ export function editsConsequence(paths: readonly string[], lines?: number): Edit
   return {
     level: 'writes',
     note:
-      unique.length === 1
-        ? `перезапишет 1 файл${scope}: ${unique[0]}`
-        : `перезапишет файлов: ${unique.length}${scope}`,
+      unique.length === 1 ? `перезапишет 1 файл${scope}: ${unique[0]}` : `перезапишет файлов: ${unique.length}${scope}`,
   };
 }

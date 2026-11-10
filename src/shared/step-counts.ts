@@ -202,7 +202,7 @@ export function buildCountsRecord(run: ChatRunLog, input: CountsInput = {}): Run
       output: usage.completionTokens ?? 0,
       cacheCreation: usage.cacheCreationTokens ?? 0,
       ...(() => {
-        const carriedSteps = steps.filter((s) => typeof s.carried === "number");
+        const carriedSteps = steps.filter((s) => typeof s.carried === 'number');
         return carriedSteps.length > 0
           ? { carriedTotal: carriedSteps.reduce((sum, s) => sum + (s.carried ?? 0), 0) }
           : {};
@@ -458,9 +458,7 @@ export function callHash(name: string, argsJson: string): string {
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? '';
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-    a < b ? -1 : a > b ? 1 : 0,
-  );
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;
 }
 

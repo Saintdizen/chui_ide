@@ -4,13 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
-import {
-  SNIPPETS_MAX,
-  queryWords,
-  rankSnippets,
-  scoreSnippet,
-  snippetOf,
-} from '../src/main/ai/snippets';
+import { SNIPPETS_MAX, queryWords, rankSnippets, scoreSnippet, snippetOf } from '../src/main/ai/snippets';
 import type { SearchSymbol } from '../src/shared/code-search';
 
 /**
@@ -73,15 +67,7 @@ describe('оценка', () => {
 });
 
 describe('тело объявления', () => {
-  const lines = [
-    'function readFile() {',
-    '  const a = 1;',
-    '}',
-    '',
-    'function other() {',
-    '  return 2;',
-    '}',
-  ];
+  const lines = ['function readFile() {', '  const a = 1;', '}', '', 'function other() {', '  return 2;', '}'];
 
   it('берёт от объявления до пустой строки', () => {
     const text = snippetOf(lines, sym({ line: 1 }), sym({ line: 5, name: 'other' }));
@@ -150,8 +136,7 @@ describe('search action: code со snippets', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
-  const ctx = (): ToolContext =>
-    ({ workspace, root: dir, symbols: mockSymbols } as unknown as ToolContext);
+  const ctx = (): ToolContext => ({ workspace, root: dir, symbols: mockSymbols }) as unknown as ToolContext;
 
   it('отдаёт тело объявления, а не только строку объявления', async () => {
     const outcome = await runTool(

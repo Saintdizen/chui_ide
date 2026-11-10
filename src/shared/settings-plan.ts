@@ -46,10 +46,7 @@ function same(a: unknown, b: unknown): boolean {
 export function settingsPlan(previous: Settings, next: Settings): SettingsPlan {
   return {
     spellWords: !same(previous.editor.spellWords, next.editor.spellWords),
-    spellProjectWords: !same(
-      previous.editor.spellProjectWords ?? [],
-      next.editor.spellProjectWords ?? [],
-    ),
+    spellProjectWords: !same(previous.editor.spellProjectWords ?? [], next.editor.spellProjectWords ?? []),
     autoSave:
       previous.editor.autoSave !== next.editor.autoSave ||
       previous.editor.autoSaveDelayMs !== next.editor.autoSaveDelayMs,

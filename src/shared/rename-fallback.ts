@@ -68,8 +68,12 @@ export function planRename(word: string, to: string, hits: readonly SearchHit[])
   if (refused !== null) return { files: [], total: 0, refused };
   if (renameRefusal(to) !== null) return { files: [], total: 0, refused: 'Новое имя не годится: нужен идентификатор.' };
 
-    if (hits.length > RENAME_MAX_HITS) {
-    return { files: [], total: 0, refused: `Слово встречается больше ${RENAME_MAX_HITS} раз — это уже замена по проекту, а не переименование.` };
+  if (hits.length > RENAME_MAX_HITS) {
+    return {
+      files: [],
+      total: 0,
+      refused: `Слово встречается больше ${RENAME_MAX_HITS} раз — это уже замена по проекту, а не переименование.`,
+    };
   }
 
   const byFile = new Map<string, RenameEdit[]>();

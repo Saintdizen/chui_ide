@@ -35,11 +35,7 @@ export interface PastePlan {
  * План вставки. `exists` отвечает, есть ли путь на диске — через него, а не
  * через `fs`: ядро не знает о файловой системе, а тест не трогает диск.
  */
-export function planPaste(
-  clip: FileClip,
-  targetDir: string,
-  exists: (path: string) => boolean,
-): PastePlan {
+export function planPaste(clip: FileClip, targetDir: string, exists: (path: string) => boolean): PastePlan {
   const sources: string[] = [];
   const targets: string[] = [];
   const conflicts: string[] = [];

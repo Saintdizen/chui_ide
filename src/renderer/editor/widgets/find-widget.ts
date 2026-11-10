@@ -491,12 +491,7 @@ export class FindWidget {
 
   private stepReplaceHistory(delta: number): void {
     if (this.replaceCursor < 0) this.lastTypedReplace = this.replaceInput.value;
-    const next = stepHistory(
-      this.replaceHistory.entries(),
-      this.replaceCursor,
-      delta,
-      this.lastTypedReplace,
-    );
+    const next = stepHistory(this.replaceHistory.entries(), this.replaceCursor, delta, this.lastTypedReplace);
     this.replaceCursor = next.index;
     this.replaceInput.value = next.query ?? this.lastTypedReplace;
     this.replaceInput.select();

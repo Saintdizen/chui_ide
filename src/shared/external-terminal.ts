@@ -68,7 +68,7 @@ export function pickExternalTerminal(
   const preferred = choice.preferred?.trim() ?? '';
   // Первое слово — и вся строка целиком: `spawn` берёт одну команду, и
   // `xterm --title got` в качестве команды — не то, что человек имел в виду.
-  const chosen = preferred === '' ? '' : preferred.split(/\s/)[0] ?? '';
+  const chosen = preferred === '' ? '' : (preferred.split(/\s/)[0] ?? '');
   if (chosen && chosen === preferred && isAvailable(chosen)) return { command: chosen, args: [] };
 
   if (platform === 'darwin') {

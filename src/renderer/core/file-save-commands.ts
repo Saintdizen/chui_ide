@@ -106,8 +106,7 @@ export function registerFileSaveCommands(define: DefineCommand, deps: FileSaveDe
       category: 'Файл',
       keybinding: 'Ctrl+Alt+F',
       enabled: () => openEditors.active !== null && deps.formatDocument !== undefined,
-      disabledReason: () =>
-        openEditors.active === null ? 'Нет открытого файла' : 'Форматирование недоступно',
+      disabledReason: () => (openEditors.active === null ? 'Нет открытого файла' : 'Форматирование недоступно'),
     },
     async () => {
       const document = openEditors.active;

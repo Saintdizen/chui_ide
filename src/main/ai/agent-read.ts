@@ -428,12 +428,9 @@ async function readHead(
     ok: true,
     summary: `${rel}: первые ${prefix.last} строк из ${total}`,
     detail: `${prefix.text}\n${tail}`,
-    ...(prefix.last >= 1
-      ? { read: { path: target, from: 1, to: prefix.last, stamp, eof: prefix.last >= total } }
-      : {}),
+    ...(prefix.last >= 1 ? { read: { path: target, from: 1, to: prefix.last, stamp, eof: prefix.last >= total } } : {}),
   };
 }
-
 
 /**
  * Пакетное чтение: 2–5 файлов за один шаг. Каждый файл получает те же номера

@@ -54,9 +54,7 @@ function spendChart(days: readonly SpendDay[]): HTMLElement {
   // Все дни без цены — гистограмма ничего не показывает; говорим словами,
   // а не рисуем семь одинаковых нулей, которые читались бы как «не тратил».
   if (highest <= 0) {
-    chart.append(
-      h('div', { class: 'telemetry-chart-note' }, 'Расхода по дням нет: у прогонов нет цены'),
-    );
+    chart.append(h('div', { class: 'telemetry-chart-note' }, 'Расхода по дням нет: у прогонов нет цены'));
     return chart;
   }
   const now = Date.now();

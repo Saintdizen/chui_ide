@@ -5,7 +5,13 @@ import { join } from 'node:path';
 import type { ApplyEditsHostResult } from '../src/shared/api';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
-import { condenseAppliedCalls, condenseCallArguments, condenseHistoryCalls, findCondenseMarker, isCondenseMarker } from '../src/shared/context-fit';
+import {
+  condenseAppliedCalls,
+  condenseCallArguments,
+  condenseHistoryCalls,
+  findCondenseMarker,
+  isCondenseMarker,
+} from '../src/shared/context-fit';
 
 const MARKER = '[применено: 57 стр. — текст в файле]';
 // Собираем в рантайме: в исходнике такая строка выглядит как порча, и статический

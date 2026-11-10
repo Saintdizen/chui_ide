@@ -27,8 +27,7 @@ function findAll(root: any, predicate: (node: any) => boolean): any[] {
   return found;
 }
 
-const withRole = (root: any, role: string): any[] =>
-  findAll(root, (node) => node.getAttribute?.('role') === role);
+const withRole = (root: any, role: string): any[] => findAll(root, (node) => node.getAttribute?.('role') === role);
 
 const COMMANDS = [
   { id: 'a.save', title: 'Сохранить файл', category: 'Файл', keybinding: null },

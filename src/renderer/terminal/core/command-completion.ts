@@ -5,7 +5,18 @@ import { nameOf, parentOf } from '../../../shared/paths';
  * первом запуске. Список намеренно короткий — это не справочник, а старт.
  */
 export const COMPLETION_COMMANDS: readonly string[] = [
-  'cd', 'cp', 'git', 'ls', 'mkdir', 'mv', 'npm', 'pnpm', 'rm', 'sudo', 'touch', 'yarn',
+  'cd',
+  'cp',
+  'git',
+  'ls',
+  'mkdir',
+  'mv',
+  'npm',
+  'pnpm',
+  'rm',
+  'sudo',
+  'touch',
+  'yarn',
 ];
 
 /**

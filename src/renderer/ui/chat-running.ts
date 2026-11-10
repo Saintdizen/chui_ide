@@ -154,9 +154,7 @@ export function createChatRunning(deps: ChatRunningDeps): ChatRunningView {
    */
   let shownKey = '';
   function paintTools(snapshot: RunningSnapshot): void {
-    const entries = snapshot.tools.flatMap((run) =>
-      run.names.map((name) => ({ callId: run.callId, name })),
-    );
+    const entries = snapshot.tools.flatMap((run) => run.names.map((name) => ({ callId: run.callId, name })));
     // Список скрыт — не строим вовсе. Иначе на каждый опрос (раз в секунду)
     // создавались бы узлы, которые никто не видит.
     if (!expanded || entries.length === 0) {

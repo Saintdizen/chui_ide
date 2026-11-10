@@ -85,16 +85,7 @@ describe('search', () => {
   it('принимает регистр, режим «только файлы», контекст и предел выдачи', () => {
     const props = byName.get('search')!.inputSchema.properties;
     // `snippets` — тела найденных объявлений под задачу (п.66).
-    expect(Object.keys(props)).toEqual([
-      'action',
-      'query',
-      'flags',
-      'glob',
-      'path',
-      'context',
-      'limit',
-      'snippets',
-    ]);
+    expect(Object.keys(props)).toEqual(['action', 'query', 'flags', 'glob', 'path', 'context', 'limit', 'snippets']);
     expect(byName.get('search')!.inputSchema.required).toEqual(['query']);
     // Контекст — как -A/-B у grep: без него результат остаётся одной строкой.
     expect(props.context?.type).toBe('number');
@@ -173,7 +164,14 @@ describe('file', () => {
     const tool = byName.get('file')!;
     expect(tool.side).toBe('main');
     expect(tool.inputSchema.required).toEqual(['action']);
-    expect(tool.inputSchema.properties.action?.enum).toEqual(['move', 'copy', 'mkdir', 'delete', 'format', 'organizeImports']);
+    expect(tool.inputSchema.properties.action?.enum).toEqual([
+      'move',
+      'copy',
+      'mkdir',
+      'delete',
+      'format',
+      'organizeImports',
+    ]);
     expect(tool.inputSchema.properties.contents).toBeUndefined();
   });
 });

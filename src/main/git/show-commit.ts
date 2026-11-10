@@ -15,11 +15,9 @@ export async function commitShow(ctx: RepositoryContext, hash: string): Promise<
 
   // `--format=%s` — только заголовок; без `--no-patch` и без `-p`, чтобы не
   // тянуть весь текст правки: он нужен при клике, а не для списка файлов.
-  const result = await execGit(
-    ['show', '--numstat', '--format=%s', '--no-renames', hash],
-    repoRoot,
-    { allowFailure: true },
-  );
+  const result = await execGit(['show', '--numstat', '--format=%s', '--no-renames', hash], repoRoot, {
+    allowFailure: true,
+  });
   const lines = result.stdout.split('\n');
   const summary = (lines[0] ?? '').trim();
 

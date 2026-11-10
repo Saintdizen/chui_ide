@@ -14,12 +14,7 @@ import { showPopupMenu, type PopupMenuItem } from './popup-menu';
  * в фокусе» (правый клик фокус не даёт — он может остаться на `body`), а сам элемент,
  * по которому кликнули. Без него после `Esc` клавиатура терялась в теле окна.
  */
-export function showContextMenu(
-  items: readonly PopupMenuItem[],
-  x: number,
-  y: number,
-  owner?: Element | null,
-): void {
+export function showContextMenu(items: readonly PopupMenuItem[], x: number, y: number, owner?: Element | null): void {
   // Владелец решается в самой панели (`resolveOwner`) — и до отрисовки: меню забирает
   // фокус сразу, как только появится.
   showPopupMenu(items, x, y, owner === undefined ? {} : { owner });

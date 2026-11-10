@@ -85,7 +85,9 @@ describe('полоса долгой работы говорит читалке, 
     // В живом окне подпись строит `symbolIndexChip`: «читаю проект: 3 из 10».
     // Шкала при этом в процентах (`aria-valuenow`), но слышит человек иное:
     // файлы, не проценты. Поэтому подпись важна и должна нести числа.
-    bar.update({ symbols: { text: 'читаю проект: 3 из 10', title: 'Карта символов', progress: { done: 3, total: 10 } } });
+    bar.update({
+      symbols: { text: 'читаю проект: 3 из 10', title: 'Карта символов', progress: { done: 3, total: 10 } },
+    });
 
     expect(meter.getAttribute('aria-valuenow')).toBe('30');
     expect(meter.getAttribute('aria-valuetext')).toBe('читаю проект: 3 из 10');

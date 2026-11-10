@@ -130,7 +130,9 @@ describe('папка дерева говорит, раскрыта ли она',
     // Место активной строки не ищется на каждой прокрутке: `renderWindow` зовётся
     // на каждый кадр колеса, а `findIndex` по 26 000 строк там — лишняя работа.
     // Индекс с мемо: пересчёт только по смене набора или выделения.
-    expect(EXPLORER).toMatch(/if \(indexCache === flatRows && indexCacheSelected === selected\) return indexCacheValue;/);
+    expect(EXPLORER).toMatch(
+      /if \(indexCache === flatRows && indexCacheSelected === selected\) return indexCacheValue;/,
+    );
   });
 
   it('`Ctrl+Enter` на файле открывает в соседнюю панель', () => {

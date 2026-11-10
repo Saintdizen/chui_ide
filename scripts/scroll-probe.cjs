@@ -58,7 +58,10 @@ app.whenReady().then(async () => {
   serveRenderer();
   const settings = new SettingsStore(path.join(dir, 'settings.json'));
   const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
-  const gitService = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
+  const gitService = new GitService(
+    () => workspace.rootPath(),
+    (topic, payload) => pushToRenderers(topic, payload),
+  );
   const ai = new AiService(settings, workspace);
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
   registerIpc({ settings, workspace, ai, terminals, git: gitService, host: new HostClient() });
@@ -69,11 +72,17 @@ app.whenReady().then(async () => {
   console.log('SCROLLERS', JSON.stringify(await ask(ide, PROBE), null, 1));
   console.log(
     'ACTIVE',
-    await ask(ide, `String((document.activeElement && (document.activeElement.className || document.activeElement.tagName)) || '')`),
+    await ask(
+      ide,
+      `String((document.activeElement && (document.activeElement.className || document.activeElement.tagName)) || '')`,
+    ),
   );
   console.log(
     'BODY',
-    await ask(ide, `JSON.stringify({ sh: document.documentElement.scrollHeight, ch: document.documentElement.clientHeight })`),
+    await ask(
+      ide,
+      `JSON.stringify({ sh: document.documentElement.scrollHeight, ch: document.documentElement.clientHeight })`,
+    ),
   );
   app.quit();
 });

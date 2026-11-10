@@ -404,7 +404,6 @@ export class LspFeatures {
     return this.sourceActions(path, ['source.organizeImports']);
   }
 
-
   /**
    * Рефакторинг выделения или символа под кареткой: извлечение («вынести в переменную»)
    * или разворачивание (inline). Сам рефакторинг делает сервер — мы лишь называем

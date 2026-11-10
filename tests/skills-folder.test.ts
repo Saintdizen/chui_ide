@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  byFolderThenName,
-  findSkill,
-  formatSkillCatalog,
-  joinFolder,
-  type SkillEntry,
-} from '../src/shared/skills';
+import { byFolderThenName, findSkill, formatSkillCatalog, joinFolder, type SkillEntry } from '../src/shared/skills';
 
 /**
  * Навык из `src/.chui/skills` — сценарий для `src`. Если показать его везде, он
@@ -17,12 +11,7 @@ function skill(name: string, folder: string, description = 'когда нуже�
   return { name, description, path: `/p/${folder}/.chui/skills/${name}/SKILL.md`, scope: 'workspace', folder };
 }
 
-const all = [
-  skill('release', ''),
-  skill('lint-rules', 'src'),
-  skill('deep', 'src/core'),
-  skill('tests', 'tests'),
-];
+const all = [skill('release', ''), skill('lint-rules', 'src'), skill('deep', 'src/core'), skill('tests', 'tests')];
 
 describe('навыки подпапок', () => {
   it('в корне — только корневые', () => {

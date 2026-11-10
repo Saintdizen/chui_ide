@@ -1037,7 +1037,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     renderTabs();
     syncSessionInfo();
 
-
     // Занятость общая: прогон в окне один, поэтому и поле одно на все вкладки.
     input.disabled = busy;
     // К низу — только на первом показе. Дальше позиция у каждой беседы своя
@@ -2727,8 +2726,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       // о беседах, и место ему — в окне поверх, а не в истории одной из них.
       showForkCompare(
         {
-          sessions: () =>
-            sessions.map((item) => ({ title: item.title, transcript: item.transcript })),
+          sessions: () => sessions.map((item) => ({ title: item.title, transcript: item.transcript })),
           open: (title) => {
             const target = sessions.find((item) => item.title === title);
             if (target) activate(target.id);

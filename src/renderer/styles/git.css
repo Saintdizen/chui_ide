@@ -1506,7 +1506,7 @@
   color: var(--text_color_tertiary);
 }
 
-.notice-log-kind[data-kind='error'] {
+.notice-log-kind[data-kind="error"] {
   color: var(--text_color_error);
 }
 

@@ -270,7 +270,15 @@ function small(index: number): ChatMessage {
 
 describe('свёртка по возрасту (minStaleChars)', () => {
   it('мелкое вне окна сворачивается, хотя ни один размерный порог его не берёт', () => {
-    const messages = [small(1), small(2), small(3), long(4), long(5), long(6), ...Array.from({ length: 6 }, (_, i) => small(10 + i))];
+    const messages = [
+      small(1),
+      small(2),
+      small(3),
+      long(4),
+      long(5),
+      long(6),
+      ...Array.from({ length: 6 }, (_, i) => small(10 + i)),
+    ];
     const outcome = ageStaleResults(messages, {
       keepRecent: 2,
       minChars: 1_500,
@@ -285,18 +293,44 @@ describe('свёртка по возрасту (minStaleChars)', () => {
   });
 
   it('без minStaleChars мелкое не трогается — ступень включается по требованию', () => {
-    const messages = [small(1), small(2), small(3), long(4), long(5), long(6), ...Array.from({ length: 6 }, (_, i) => small(10 + i))];
-     // Ступень 1 и 2 выключены намеренно (пороги больше любой строки): мерим
-     // ровно третью ступень — без `minStaleChars` она не должна срабатывать.
-     const outcome = ageStaleResults(messages, { keepRecent: 2, minChars: 99_999, restMinChars: 99_999, spillDir: spillDir() });
-     expect(messages[0]?.content).toContain('короткий итог');
-     expect(outcome.aged).toBe(0);
+    const messages = [
+      small(1),
+      small(2),
+      small(3),
+      long(4),
+      long(5),
+      long(6),
+      ...Array.from({ length: 6 }, (_, i) => small(10 + i)),
+    ];
+    // Ступень 1 и 2 выключены намеренно (пороги больше любой строки): мерим
+    // ровно третью ступень — без `minStaleChars` она не должна срабатывать.
+    const outcome = ageStaleResults(messages, {
+      keepRecent: 2,
+      minChars: 99_999,
+      restMinChars: 99_999,
+      spillDir: spillDir(),
+    });
+    expect(messages[0]?.content).toContain('короткий итог');
+    expect(outcome.aged).toBe(0);
   });
 
   it('пустое тело не сворачивается: порог 70 означает "непустое", а не "любое"', () => {
     const empty: ChatMessage = { role: 'tool', toolCallId: 'call-0', name: 'read_file', content: '' };
-    const messages = [empty, small(2), long(4), long(5), long(6), ...Array.from({ length: 6 }, (_, i) => small(10 + i))];
-    ageStaleResults(messages, { keepRecent: 2, minChars: 1_500, restMinChars: 700, minStaleChars: 70, spillDir: spillDir() });
+    const messages = [
+      empty,
+      small(2),
+      long(4),
+      long(5),
+      long(6),
+      ...Array.from({ length: 6 }, (_, i) => small(10 + i)),
+    ];
+    ageStaleResults(messages, {
+      keepRecent: 2,
+      minChars: 1_500,
+      restMinChars: 700,
+      minStaleChars: 70,
+      spillDir: spillDir(),
+    });
     expect(messages[0]?.content).toBe('');
   });
 });

@@ -33,11 +33,7 @@ export const MAX_SAVED_LAYOUTS = 12;
  * рабочих положений, и упор в «больше нельзя» без выхода хуже тихой потери
  * того, чем давно не пользовались.
  */
-export function saveLayout(
-  layouts: readonly SavedLayout[],
-  name: string,
-  layout: LayoutSettings,
-): SavedLayout[] {
+export function saveLayout(layouts: readonly SavedLayout[], name: string, layout: LayoutSettings): SavedLayout[] {
   const trimmed = name.trim();
   if (trimmed.length === 0) return [...layouts];
   const rest = layouts.filter((entry) => entry.name.toLowerCase() !== trimmed.toLowerCase());

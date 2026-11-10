@@ -32,10 +32,7 @@ export function compactionFacts(
 ): CompactionFacts {
   const asked = history.filter((message) => message.role === 'user');
   const files = options.files ?? 0;
-  const tokensBefore = history.reduce(
-    (sum, message) => sum + estimateTextTokens(message.content ?? ''),
-    0,
-  );
+  const tokensBefore = history.reduce((sum, message) => sum + estimateTextTokens(message.content ?? ''), 0);
   // После сжатия в истории остаются резюме и последние ходы — `history` здесь
   // уже сжатая, поэтому считаем по ней же, а не по `before`.
   const tokensAfter = options.compacted

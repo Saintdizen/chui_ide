@@ -130,9 +130,7 @@ describe('bindingDisputes: кто победил и почему (п.2)', () => 
   });
 
   it('без столкновений споров нет', () => {
-    expect(bindingDisputes([row({ id: 'a', combo: 'Ctrl+K' }), row({ id: 'b', combo: 'Ctrl+J' })])).toEqual(
-      [],
-    );
+    expect(bindingDisputes([row({ id: 'a', combo: 'Ctrl+K' }), row({ id: 'b', combo: 'Ctrl+J' })])).toEqual([]);
   });
 
   it('пустые сочетания не спорят', () => {
@@ -159,10 +157,7 @@ describe('bindingDisputes: кто победил и почему (п.2)', () => 
   });
 
   it('своё бьёт встроенное в одном доме', () => {
-    const rows = [
-      row({ id: 'a', combo: 'Ctrl+K' }),
-      row({ id: 'b', combo: 'Ctrl+K', isCustom: true }),
-    ];
+    const rows = [row({ id: 'a', combo: 'Ctrl+K' }), row({ id: 'b', combo: 'Ctrl+K', isCustom: true })];
     expect(bindingDisputes(rows)[0]!.winner.id).toBe('b');
   });
 
@@ -192,10 +187,7 @@ describe('bindingDisputes: кто победил и почему (п.2)', () => 
   });
 
   it('снятие отдаёт пустое сочетание проигравшим, победителя не трогает', () => {
-    const rows = [
-      row({ id: 'menu:a', combo: 'Ctrl+K', origin: 'menu' }),
-      row({ id: 'b', combo: 'Ctrl+K' }),
-    ];
+    const rows = [row({ id: 'menu:a', combo: 'Ctrl+K', origin: 'menu' }), row({ id: 'b', combo: 'Ctrl+K' })];
     const [dispute] = bindingDisputes(rows);
     expect(bindingResolution(dispute!)).toEqual([{ command: 'b', combo: '' }]);
   });

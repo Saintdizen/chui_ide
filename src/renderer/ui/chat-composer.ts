@@ -469,7 +469,16 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     presetSelect.element,
     modelButton,
     effortField,
-    h('div', { class: 'composer-actions' }, contextButton, attachFile, attachSelection, attachProblems, pauseButton, actionButton),
+    h(
+      'div',
+      { class: 'composer-actions' },
+      contextButton,
+      attachFile,
+      attachSelection,
+      attachProblems,
+      pauseButton,
+      actionButton,
+    ),
   );
 
   syncMode();

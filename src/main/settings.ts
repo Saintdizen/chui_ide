@@ -355,7 +355,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
     recentWindowHours: 24,
     // Игнорируемое приглушаем: это подсказка, а не запрет — файл остаётся виден.
     dimIgnored: true,
-     // Привычное поведение: двойной клик открывает, одинарный — выделяет.
+    // Привычное поведение: двойной клик открывает, одинарный — выделяет.
     // Файл из вкладки находим в дереве сами: иначе его ищут глазами.
     revealActiveFile: true,
     confirmDelete: true,
@@ -629,7 +629,7 @@ export class SettingsStore {
   rememberRoots(roots: readonly string[], activeRoot: string | null): void {
     const clean = roots.filter((item) => typeof item === 'string' && item.length > 0);
     // Активный обязан быть из набора — то же правило, что при чтении с диска.
-    const active = activeRoot !== null && clean.includes(activeRoot) ? activeRoot : clean[0] ?? null;
+    const active = activeRoot !== null && clean.includes(activeRoot) ? activeRoot : (clean[0] ?? null);
     this.data.workspace.roots = [...clean];
     this.data.workspace.activeRoot = active;
     this.persist();

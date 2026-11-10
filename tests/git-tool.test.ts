@@ -113,7 +113,11 @@ describe('git инструментом', () => {
     const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-nogit-'));
     const other = new WorkspaceService(() => undefined);
     await other.open(outside);
-    const outcome = await runTool({ workspace: other } as unknown as ToolContext, 'git', JSON.stringify({ action: 'status' }));
+    const outcome = await runTool(
+      { workspace: other } as unknown as ToolContext,
+      'git',
+      JSON.stringify({ action: 'status' }),
+    );
     expect(outcome.ok).toBe(false);
     expect(String(outcome.summary)).toContain('не репозиторий');
     other.dispose();

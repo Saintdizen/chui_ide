@@ -318,12 +318,7 @@ export interface ChatHostBridge {
  * даёт похожие ответы, а `run_tests` дважды подряд — один и тот же. Правки
  * (`edit`/`write`) сбрасывают счётчик: после них «ничего не изменилось» — ложь.
  */
-function collapseRepeat(
-  tracker: RepeatTracker,
-  name: string,
-  args: string,
-  outcome: ToolOutcome,
-): ToolOutcome {
+function collapseRepeat(tracker: RepeatTracker, name: string, args: string, outcome: ToolOutcome): ToolOutcome {
   // Ответы-отказы не сворачиваем: их мало и каждое объясняет свою ошибку.
   if (outcome.ok === false) return outcome;
   const key = `${name}\u0000${args}`;
@@ -491,7 +486,6 @@ export class AiService {
   attachSpillDir(dir: string): void {
     this.spillDir = dir;
   }
-
 
   /** Подключить терминалы: включает инструменты terminal_start/read/write/stop. */
   attachTerminals(terminals: TerminalAgent): void {
@@ -2042,15 +2036,17 @@ export class AiService {
               }
             }
             await Promise.all(
-              rest.filter((item) => !results.has(item.id)).map(async (item) => {
-                const at = Date.now();
-                if (callId) this.running.toolStart(callId, item.name, at);
-                try {
-                  results.set(item.id, { at, outcome: await runTool(toolContext, item.name, item.arguments) });
-                } finally {
-                  if (callId) this.running.toolFinish(callId, item.name);
-                }
-              }),
+              rest
+                .filter((item) => !results.has(item.id))
+                .map(async (item) => {
+                  const at = Date.now();
+                  if (callId) this.running.toolStart(callId, item.name, at);
+                  try {
+                    results.set(item.id, { at, outcome: await runTool(toolContext, item.name, item.arguments) });
+                  } finally {
+                    if (callId) this.running.toolFinish(callId, item.name);
+                  }
+                }),
             );
             for (const [id, done] of results) {
               prefetched.set(id, done.outcome);
@@ -2196,7 +2192,10 @@ export class AiService {
             }
           }
         }
-        const wholeHint = !wholeHinted && wholeReads === 2 ? '\n(целиком 2 раза — у read есть startLine/endLine: меньше текста, тот же файл)' : '';
+        const wholeHint =
+          !wholeHinted && wholeReads === 2
+            ? '\n(целиком 2 раза — у read есть startLine/endLine: меньше текста, тот же файл)'
+            : '';
         if (wholeHint) wholeHinted = true;
         // Счётчик `wholeReads` считает только чтения ПОДРЯД и обнуляется любым другим
         // вызовом. 65 ответов из замера — не подряд: подсказка молчала весь прогон.
@@ -2226,7 +2225,13 @@ export class AiService {
           name: call.name,
           // Единая точка сжатия для всех инструментов: в контекст модели уходит
           // текст без оформления, а человек в карточке (событие выше) видит полный.
-          content: (compressOutput ? compressToolOutput(result) : result) + widenedNote + shellReadNote + pathsNote + wholeHint + wholeLate,
+          content:
+            (compressOutput ? compressToolOutput(result) : result) +
+            widenedNote +
+            shellReadNote +
+            pathsNote +
+            wholeHint +
+            wholeLate,
         };
         countOutput(toolMessage.content ?? '');
         messages.push(toolMessage);
@@ -2697,7 +2702,11 @@ function parsePlanSteps(raw: string): PlanStep[] {
     .filter((step): step is PlanStep => step !== null);
 }
 
-function limitNote(steps: readonly { text: string; status: string }[], touched: readonly string[], limit: number): string {
+function limitNote(
+  steps: readonly { text: string; status: string }[],
+  touched: readonly string[],
+  limit: number,
+): string {
   const parts = [`\n\n[агент остановлен: исчерпано ${limit} шагов]`];
   const left = steps.filter((step) => step.status !== 'done');
   if (left.length > 0) {

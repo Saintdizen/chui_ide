@@ -183,9 +183,7 @@ export function indentationTree(
 
   const from = Math.max(1, options.offset ?? 1);
   const slice = picked.slice(from - 1, from - 1 + maxLines);
-  const text = slice
-    .map((row) => `${'  '.repeat(Math.max(0, row.depth))}${row.line} | ${row.text}`)
-    .join('\n');
+  const text = slice.map((row) => `${'  '.repeat(Math.max(0, row.depth))}${row.line} | ${row.text}`).join('\n');
   return { text, total: picked.length, shown: slice.length };
 }
 
@@ -226,9 +224,7 @@ export function importsBlock(lines: readonly string[]): { text: string; count: n
     // Продолжение: объявление ещё открыто (счёт скобок в нём плюсовой) и строка —
     // либо его закрытие (`} from './b';`), либо имя в списке (`  b,`).
     const isTail =
-      kept.length > 0 &&
-      bracketBalance(kept.join('\n')) > 0 &&
-      /^[}\]]|^[A-Za-z_$][\w$]*,?$/.test(trimmed);
+      kept.length > 0 && bracketBalance(kept.join('\n')) > 0 && /^[}\]]|^[A-Za-z_$][\w$]*,?$/.test(trimmed);
     if (isImport || isTail) kept.push(`${index + 1} | ${raw}`);
   }
   return { text: kept.join('\n'), count: kept.length };

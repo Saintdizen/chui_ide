@@ -5,10 +5,10 @@ import type {
   DebugLaunchOptions,
   SessionState,
   UnsavedBuffer,
-} from "./api";
-import { sanitizeBookmarks } from "./bookmarks";
-import { sanitizeNotes } from "./notes";
-import { rawMacroSteps } from "./macro";
+} from './api';
+import { sanitizeBookmarks } from './bookmarks';
+import { sanitizeNotes } from './notes';
+import { rawMacroSteps } from './macro';
 
 /**
  * Проверка и границы сессии — в `shared`, а не в main: это чистая логика без
@@ -60,7 +60,7 @@ export function emptySession(): SessionState {
  * есть среди открытых, — иначе она бессмысленна.
  */
 export function sanitizeSession(raw: unknown): SessionState {
-  if (typeof raw !== "object" || raw === null) return emptySession();
+  if (typeof raw !== 'object' || raw === null) return emptySession();
   const value = raw as Record<string, unknown>;
 
   const tabs = stringList(value.tabs, MAX_TABS);
@@ -80,20 +80,18 @@ export function sanitizeSession(raw: unknown): SessionState {
   const roots = stringList(value.roots, MAX_ROOTS);
   if (roots.length > 1) state.roots = roots;
 
-  if (typeof value.activeTab === "string" && tabs.includes(value.activeTab)) {
+  if (typeof value.activeTab === 'string' && tabs.includes(value.activeTab)) {
     state.activeTab = value.activeTab;
   }
   // Порядок использования — только по нынешним вкладкам: путь закрытого файла в
   // переборе `Ctrl+Tab` был бы дырой, ведущей в никуда.
-  const mru = stringList(value.mru, MAX_TABS).filter((path) =>
-    tabs.includes(path),
-  );
+  const mru = stringList(value.mru, MAX_TABS).filter((path) => tabs.includes(path));
   if (mru.length > 0) state.mru = mru;
-  if (typeof value.dockActive === "string" && value.dockActive) {
+  if (typeof value.dockActive === 'string' && value.dockActive) {
     state.dockActive = value.dockActive.slice(0, MAX_PATH_CHARS);
   }
   // Группа вкладок: допустимы два значения, всё прочее равносильно «редактору».
-  if (value.activeTabGroup === "terminal") state.activeTabGroup = "terminal";
+  if (value.activeTabGroup === 'terminal') state.activeTabGroup = 'terminal';
 
   const launch = launchOptions(value.debugLaunch);
   if (launch) state.debugLaunch = launch;
@@ -103,10 +101,7 @@ export function sanitizeSession(raw: unknown): SessionState {
     state.terminalTabs = terminalTabs;
     const active = Math.round(Number(value.terminalActive));
     // Какая из них была на экране: индекс за пределами списка ничего не значит.
-    state.terminalActive =
-      Number.isFinite(active) && active >= 0 && active < terminalTabs.length
-        ? active
-        : 0;
+    state.terminalActive = Number.isFinite(active) && active >= 0 && active < terminalTabs.length ? active : 0;
   }
   const watch = stringList(value.debugWatch, MAX_WATCH);
   if (watch.length > 0) state.debugWatch = watch;
@@ -127,10 +122,7 @@ export function sanitizeSession(raw: unknown): SessionState {
   if (Object.keys(scrollTops).length > 0) state.scrollTops = scrollTops;
   // Прокрутка дерева: ноль — значит «сверху», и писать его незачем. Кривое
   // значение (строка, минус, `NaN`) равносильно отсутствию.
-  if (
-    typeof value.explorerScroll === "number" &&
-    Number.isFinite(value.explorerScroll)
-  ) {
+  if (typeof value.explorerScroll === 'number' && Number.isFinite(value.explorerScroll)) {
     const top = Math.max(0, Math.round(value.explorerScroll));
     if (top > 0) state.explorerScroll = top;
   }
@@ -149,9 +141,7 @@ export function sanitizeSession(raw: unknown): SessionState {
  * потолка. Порядок сохраняется (он же порядок вкладок) — так файл сессии
  * предсказуем, а возврат правок повторяем. Дубли по пути отбрасываются.
  */
-export function selectUnsavedBuffers(
-  candidates: readonly { path: string; text: string }[],
-): UnsavedBuffer[] {
+export function selectUnsavedBuffers(candidates: readonly { path: string; text: string }[]): UnsavedBuffer[] {
   const result: UnsavedBuffer[] = [];
   const seen = new Set<string>();
   let total = 0;
@@ -176,10 +166,10 @@ export function unsavedBuffers(raw: unknown): UnsavedBuffer[] {
   if (!Array.isArray(raw)) return [];
   const candidates: { path: string; text: string }[] = [];
   for (const item of raw) {
-    if (typeof item !== "object" || item === null) continue;
+    if (typeof item !== 'object' || item === null) continue;
     const value = item as Record<string, unknown>;
-    if (typeof value.path !== "string" || !value.path) continue;
-    if (typeof value.text !== "string") continue;
+    if (typeof value.path !== 'string' || !value.path) continue;
+    if (typeof value.text !== 'string') continue;
     candidates.push({
       path: value.path.slice(0, MAX_PATH_CHARS),
       text: value.text,
@@ -193,23 +183,17 @@ export function unsavedBuffers(raw: unknown): UnsavedBuffer[] {
  * (у остальных она мертва), и только целые положительные числа: битый файл сессии
  * не должен уронить редактор в неверную позицию.
  */
-function cursorPositions(
-  raw: unknown,
-  tabs: readonly string[],
-): Record<string, CursorPosition> {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+function cursorPositions(raw: unknown, tabs: readonly string[]): Record<string, CursorPosition> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
   const open = new Set(tabs);
   const result: Record<string, CursorPosition> = {};
-  for (const [path, position] of Object.entries(
-    raw as Record<string, unknown>,
-  )) {
+  for (const [path, position] of Object.entries(raw as Record<string, unknown>)) {
     if (Object.keys(result).length >= MAX_CURSORS) break;
     if (!open.has(path)) continue;
-    if (typeof position !== "object" || position === null) continue;
+    if (typeof position !== 'object' || position === null) continue;
     const value = position as Record<string, unknown>;
     if (!Number.isInteger(value.line) || (value.line as number) < 1) continue;
-    if (!Number.isInteger(value.column) || (value.column as number) < 1)
-      continue;
+    if (!Number.isInteger(value.column) || (value.column as number) < 1) continue;
     result[path] = {
       line: value.line as number,
       column: value.column as number,
@@ -222,11 +206,8 @@ function cursorPositions(
  * Верхние строки файлов из сессии. Как и курсоры — только для открытых файлов и только
  * целые положительные числа: битый файл сессии не должен прокрутить редактор в никуда.
  */
-function scrollTopsByFile(
-  raw: unknown,
-  tabs: readonly string[],
-): Record<string, number> {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+function scrollTopsByFile(raw: unknown, tabs: readonly string[]): Record<string, number> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
   const open = new Set(tabs);
   const result: Record<string, number> = {};
   for (const [path, line] of Object.entries(raw as Record<string, unknown>)) {
@@ -247,24 +228,22 @@ function breakpointRecords(raw: unknown): BreakpointRecord[] {
   if (!Array.isArray(raw)) return [];
   const result: BreakpointRecord[] = [];
   for (const item of raw) {
-    if (typeof item !== "object" || item === null) continue;
+    if (typeof item !== 'object' || item === null) continue;
     const value = item as Record<string, unknown>;
-    if (typeof value.path !== "string" || !value.path) continue;
+    if (typeof value.path !== 'string' || !value.path) continue;
     if (!Number.isInteger(value.line) || (value.line as number) < 1) continue;
 
     const record: BreakpointRecord = {
       path: value.path.slice(0, MAX_PATH_CHARS),
       line: value.line as number,
     };
-    for (const key of ["condition", "hitCondition"] as const) {
+    for (const key of ['condition', 'hitCondition'] as const) {
       const text = value[key];
-      if (typeof text === "string" && text.trim())
-        record[key] = text.trim().slice(0, MAX_SETTING_CHARS);
+      if (typeof text === 'string' && text.trim()) record[key] = text.trim().slice(0, MAX_SETTING_CHARS);
     }
     // Сообщение журнала не обрезаем по краям: пробелы в нём — часть формата.
     const log = value.logMessage;
-    if (typeof log === "string" && log.length > 0)
-      record.logMessage = log.slice(0, MAX_SETTING_CHARS);
+    if (typeof log === 'string' && log.length > 0) record.logMessage = log.slice(0, MAX_SETTING_CHARS);
 
     result.push(record);
     if (result.length >= MAX_BREAKPOINTS) break;
@@ -277,7 +256,7 @@ function breakpointRecords(raw: unknown): BreakpointRecord[] {
  * так в файле не копятся `{args: []}` и `{env: {}}` — они значат «настройки нет».
  */
 function launchOptions(raw: unknown): DebugLaunchOptions | undefined {
-  if (typeof raw !== "object" || raw === null) return undefined;
+  if (typeof raw !== 'object' || raw === null) return undefined;
   const value = raw as Record<string, unknown>;
   const options: DebugLaunchOptions = {};
 
@@ -285,8 +264,7 @@ function launchOptions(raw: unknown): DebugLaunchOptions | undefined {
   if (args.length > 0) options.args = args;
   const env = stringMap(value.env, MAX_ENV_ENTRIES);
   if (Object.keys(env).length > 0) options.env = env;
-  if (typeof value.cwd === "string" && value.cwd)
-    options.cwd = value.cwd.slice(0, MAX_PATH_CHARS);
+  if (typeof value.cwd === 'string' && value.cwd) options.cwd = value.cwd.slice(0, MAX_PATH_CHARS);
 
   return Object.keys(options).length > 0 ? options : undefined;
 }
@@ -297,8 +275,7 @@ function launchOptions(raw: unknown): DebugLaunchOptions | undefined {
  * «настройки нет», и адаптер не трогают раньше времени.
  */
 function exceptionFilters(raw: unknown): DebugExceptionFilters | undefined {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw))
-    return undefined;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
   const value = raw as Record<string, unknown>;
   const uncaught = value.uncaught === true;
   const caught = value.caught === true;
@@ -307,10 +284,10 @@ function exceptionFilters(raw: unknown): DebugExceptionFilters | undefined {
 
 /** Именованные строки (переменные окружения): ключ и значение — строки. */
 function stringMap(raw: unknown, limit: number): Record<string, string> {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!key || typeof value !== "string") continue;
+    if (!key || typeof value !== 'string') continue;
     result[key.slice(0, MAX_PATH_CHARS)] = value.slice(0, MAX_ENV_VALUE_CHARS);
     if (Object.keys(result).length >= limit) break;
   }
@@ -321,10 +298,8 @@ function stringList(raw: unknown, limit: number): string[] {
   if (!Array.isArray(raw)) return [];
   const result: string[] = [];
   for (const item of raw) {
-    if (typeof item !== "string" || !item) continue;
-    result.push(
-      item.length > MAX_PATH_CHARS ? item.slice(0, MAX_PATH_CHARS) : item,
-    );
+    if (typeof item !== 'string' || !item) continue;
+    result.push(item.length > MAX_PATH_CHARS ? item.slice(0, MAX_PATH_CHARS) : item);
     if (result.length >= limit) break;
   }
   return result;

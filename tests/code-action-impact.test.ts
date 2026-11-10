@@ -21,7 +21,10 @@ describe('actionImpact: что будет сделано до выбора', () 
     const edit = (path: string, n: number) => ({
       path,
       edits: Array.from({ length: n }, (_, i) => ({
-        startLine: i, startColumn: 0, endLine: i, endColumn: 2,
+        startLine: i,
+        startColumn: 0,
+        endLine: i,
+        endColumn: 2,
         newText: 'x',
       })),
     });

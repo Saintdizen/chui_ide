@@ -60,7 +60,10 @@ export function parseEditorConfig(text: string): EditorConfigFile {
     const eq = line.indexOf('=');
     if (eq < 0) continue;
     const key = line.slice(0, eq).trim().toLowerCase();
-    const value = line.slice(eq + 1).trim().toLowerCase();
+    const value = line
+      .slice(eq + 1)
+      .trim()
+      .toLowerCase();
     if (key.length === 0) continue;
 
     // `root` имеет смысл только до первой секции.
@@ -135,10 +138,7 @@ export interface ResolvedEditorConfig {
  * Свести правила для файла. `relativePath` — путь от корня проекта с прямыми
  * слэшами; `layers` идут от дальнего `.editorconfig` к ближнему (ближний важнее).
  */
-export function resolveEditorConfig(
-  relativePath: string,
-  layers: readonly EditorConfigFile[],
-): ResolvedEditorConfig {
+export function resolveEditorConfig(relativePath: string, layers: readonly EditorConfigFile[]): ResolvedEditorConfig {
   const path = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
   const base = path.slice(path.lastIndexOf('/') + 1);
   const result: ResolvedEditorConfig = {};
@@ -172,11 +172,7 @@ export type EditorConfigValues = ResolvedEditorConfig;
  * Если в шаблоне нет слэша, он сверяется с именем файла: `*.py` ловит
  * `src/x.py`. Со слэшем — с путём от корня проекта. `**` перекрывает папки.
  */
-export function matchPattern(
-  pattern: string,
-  path: string,
-  base = path.slice(path.lastIndexOf('/') + 1),
-): boolean {
+export function matchPattern(pattern: string, path: string, base = path.slice(path.lastIndexOf('/') + 1)): boolean {
   const source = pattern.replace(/\\/g, '/').replace(/^\/+/, '');
   const target = source.includes('/') ? path : base;
   return patternToRegExp(source).test(target);

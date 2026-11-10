@@ -130,8 +130,7 @@ export class Minimap {
    */
   setBookmarks(lines: readonly number[]): void {
     const next = [...lines].sort((a, b) => a - b);
-    const same =
-      next.length === this.bookmarks.length && next.every((line, index) => line === this.bookmarks[index]);
+    const same = next.length === this.bookmarks.length && next.every((line, index) => line === this.bookmarks[index]);
     if (same) return;
     this.bookmarks = next;
     this.render();
@@ -149,8 +148,7 @@ export class Minimap {
    */
   setChanges(lines: readonly number[]): void {
     const next = [...lines].sort((a, b) => a - b);
-    const same =
-      next.length === this.changes.length && next.every((line, index) => line === this.changes[index]);
+    const same = next.length === this.changes.length && next.every((line, index) => line === this.changes[index]);
     if (same) return;
     this.changes = next;
     this.render();

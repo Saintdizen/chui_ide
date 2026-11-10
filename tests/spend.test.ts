@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  describeDay,
-  describeSpend,
-  startOfDay,
-  summarizeSpend,
-} from '../src/shared/spend';
+import { describeDay, describeSpend, startOfDay, summarizeSpend } from '../src/shared/spend';
 import type { RunTelemetryRecord } from '../src/shared/telemetry';
 
 /**

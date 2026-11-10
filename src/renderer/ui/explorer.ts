@@ -185,7 +185,7 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   folderChangeDot: true,
   recentChanges: true,
   recentWindowHours: 24,
-   dimIgnored: true,
+  dimIgnored: true,
   // Автораскрытие — включено: так ведёт себя Zed, и без него файл из вкладки
   // приходится искать глазами по всему дереву.
   revealActiveFile: true,
@@ -381,7 +381,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         const dir =
           anchor === null
             ? (deps.workspace.roots[0]?.root ?? '')
-            : (findEntry(anchor) !== undefined && entryIsDirectory(findEntry(anchor)!))
+            : findEntry(anchor) !== undefined && entryIsDirectory(findEntry(anchor)!)
               ? anchor
               : parentOf(anchor);
         void pasteInto(dir);
@@ -1135,10 +1135,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             ? [
                 { label: 'Кто ссылается на файл', onSelect: () => void showImporters(entry, event) },
                 {
-                  label:
-                    deps.notesOf && noteOf(deps.notesOf(), entry.path)
-                      ? 'Изменить заметку…'
-                      : 'Заметка…',
+                  label: deps.notesOf && noteOf(deps.notesOf(), entry.path) ? 'Изменить заметку…' : 'Заметка…',
                   onSelect: () => void deps.commands.execute('explorer.note', entry.path),
                 },
                 ...(deps.peekFiles
@@ -1275,7 +1272,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   };
 
   /**
-   * Вставить буфер в папку. Имена, которые уже есть, не перезаписываются: 
+   * Вставить буфер в папку. Имена, которые уже есть, не перезаписываются:
    * перезапись файла без вопроса — потеря, которую человек не заметит.
    */
   const pasteInto = async (targetDir: string): Promise<void> => {
@@ -1506,9 +1503,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       h('span', { class: 'tree-name' }, ...nameWithHits(flags.chain ?? entry.name)),
       // Заметка — значок с текстом в подсказке: сама заметка длиннее строки,
       // и рисовать её в дереве значило бы превратить список в простыню.
-      entryNote
-        ? h('span', { class: 'tree-note-mark', title: `Заметка: ${entryNote.text}` }, '✎')
-        : null,
+      entryNote ? h('span', { class: 'tree-note-mark', title: `Заметка: ${entryNote.text}` }, '✎') : null,
       // Метка — цветной ярлык: первая среди правых отметок, если она есть.
       label ? h('span', { class: `tree-label is-${label}`, title: `Метка: ${fileLabelName(label)}` }) : null,
       badge
@@ -2212,7 +2207,6 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   // меняются только вместе с набором, а не с прокруткой: считать их в `renderWindow`
   // значило бы перебирать все 26 000 строк на каждый кадр колеса.
 
-
   const renderWindow = (): void => {
     const host = rowsHost;
     const scroller = treeEl;
@@ -2466,8 +2460,6 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     if (inlineEdit) return;
     paint();
   };
-
-
 
   const paint = (): void => {
     clear(element);

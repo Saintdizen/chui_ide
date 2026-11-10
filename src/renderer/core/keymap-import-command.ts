@@ -36,8 +36,7 @@ export function registerKeymapImportCommands(define: DefineCommand, deps: Keymap
       if (picked.path === null) return;
 
       const file = await deps.rpc.request('workspace.readFile', { path: picked.path });
-      const result =
-        kind === 'vscode' ? importVsCodeKeymap(file.text) : importIdeaKeymap(file.text);
+      const result = kind === 'vscode' ? importVsCodeKeymap(file.text) : importIdeaKeymap(file.text);
       if (result.error) {
         deps.notify(`Не разобрал файл: ${result.error}`, 'error');
         return;
@@ -63,12 +62,6 @@ export function registerKeymapImportCommands(define: DefineCommand, deps: Keymap
     }
   };
 
-  define(
-    { id: 'keymap.importVsCode', title: 'Импорт карты клавиш VS Code…', category: 'Вид' },
-    () => run('vscode'),
-  );
-  define(
-    { id: 'keymap.importIdea', title: 'Импорт карты клавиш IDEA…', category: 'Вид' },
-    () => run('idea'),
-  );
+  define({ id: 'keymap.importVsCode', title: 'Импорт карты клавиш VS Code…', category: 'Вид' }, () => run('vscode'));
+  define({ id: 'keymap.importIdea', title: 'Импорт карты клавиш IDEA…', category: 'Вид' }, () => run('idea'));
 }

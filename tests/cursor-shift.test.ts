@@ -2,8 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { shiftCursor } from '../src/shared/cursor-shift';
 import type { TextEdit } from '../src/shared/edits';
 
-const edit = (startLine: number, startColumn: number, endLine: number, endColumn: number, newText: string): TextEdit => ({
-  startLine, startColumn, endLine, endColumn, newText,
+const edit = (
+  startLine: number,
+  startColumn: number,
+  endLine: number,
+  endColumn: number,
+  newText: string,
+): TextEdit => ({
+  startLine,
+  startColumn,
+  endLine,
+  endColumn,
+  newText,
 });
 
 /**
@@ -35,7 +45,10 @@ describe('сдвиг курсора при правке за кадром', () =
 
   it('несколько правок считаются по порядку', () => {
     // '+1' от первой правки, '+2' от второй; курсор не должен считать одну из них дважды.
-    expect(shiftCursor({ line: 8, column: 1 }, [edit(1, 1, 1, 1, 'a\nb'), edit(3, 1, 3, 1, 'c\nd\ne')])).toEqual({ line: 11, column: 1 });
+    expect(shiftCursor({ line: 8, column: 1 }, [edit(1, 1, 1, 1, 'a\nb'), edit(3, 1, 3, 1, 'c\nd\ne')])).toEqual({
+      line: 11,
+      column: 1,
+    });
   });
 
   it('правка на первой строке не уводит курсор в нулевую', () => {

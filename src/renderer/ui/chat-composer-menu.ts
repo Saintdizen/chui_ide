@@ -293,26 +293,22 @@ export function createComposerMenu(deps: ComposerMenuDeps): ComposerMenuView {
     const hash = value.lastIndexOf('#');
     if (hash >= 0 && /(^|\s)#[\w./-]*$/.test(value)) {
       const query = value.slice(hash + 1).toLowerCase();
-      const commands = CONTEXT_COMMANDS.filter((item) => item.id.slice(1).startsWith(query)).map(
-        (item) => ({
-          title: `${item.id} — ${item.title}`,
-          hint: costHint(item.kind, item.hint),
-          run: () => {
-            // Убираем набранный `#…`: он был только способом открыть список.
-            deps.input.value = `${value.slice(0, hash).trimEnd()} `.trimStart();
-            deps.onContext(item.kind);
-            deps.input.focus();
-          },
-        }),
-      );
+      const commands = CONTEXT_COMMANDS.filter((item) => item.id.slice(1).startsWith(query)).map((item) => ({
+        title: `${item.id} — ${item.title}`,
+        hint: costHint(item.kind, item.hint),
+        run: () => {
+          // Убираем набранный `#…`: он был только способом открыть список.
+          deps.input.value = `${value.slice(0, hash).trimEnd()} `.trimStart();
+          deps.onContext(item.kind);
+          deps.input.focus();
+        },
+      }));
       // Путь, набранный после `#`, ищем по вхождению: помнят «app.ts», а не
       // «src/main/app.ts». Слэш в набранном значит, что человек уже идёт по
       // папкам, — тогда сужаем по началу пути, чтобы не мешать вложенные.
       const paths = (deps.mentionPaths() ?? [])
         .filter((path) =>
-          query.includes('/')
-            ? path.toLowerCase().startsWith(query)
-            : path.toLowerCase().includes(query),
+          query.includes('/') ? path.toLowerCase().startsWith(query) : path.toLowerCase().includes(query),
         )
         .slice(0, MAX_MENTION_PATHS)
         .map((path) => ({

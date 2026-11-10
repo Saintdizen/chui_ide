@@ -21,10 +21,7 @@ describe('importsOf: ссылки на файл', () => {
   });
 
   it('видит реэкспорт и динамический import', () => {
-    const text = [
-      `export { b } from '../shared/util';`,
-      `const m = await import('../shared/util');`,
-    ].join('\n');
+    const text = [`export { b } from '../shared/util';`, `const m = await import('../shared/util');`].join('\n');
     expect(importsOf(text, { file: 'src/main/x.ts', target })).toHaveLength(2);
   });
 
@@ -39,9 +36,7 @@ describe('importsOf: ссылки на файл', () => {
   });
 
   it('ссылки на папку: любой файл внутри неё', () => {
-    expect(importsOf(`import './shared'`, { file: 'src/app.ts', target: 'src/shared' })).toEqual([
-      './shared',
-    ]);
+    expect(importsOf(`import './shared'`, { file: 'src/app.ts', target: 'src/shared' })).toEqual(['./shared']);
   });
 
   it('питон: from . import и from пакет import', () => {

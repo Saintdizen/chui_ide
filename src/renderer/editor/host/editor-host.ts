@@ -1005,7 +1005,7 @@ export class EditorHost {
           debounceMs: () => inlineSource.debounceMs(),
           // Сначала своей подсказки: она мгновенная и бесплатная. Не нашлось
           // строки в открытых файлах — тогда спрашиваем модель.
-          fullLine: (prefix) => bestFullLine(prefix, (this.fullLineCorpusSource?.() ?? []))?.insert ?? null,
+          fullLine: (prefix) => bestFullLine(prefix, this.fullLineCorpusSource?.() ?? [])?.insert ?? null,
           complete: (prefix, suffix) =>
             inlineSource.complete({ path: this.path ?? '', language: this.languageId, prefix, suffix }),
         })
@@ -2655,11 +2655,7 @@ export class EditorHost {
   foldSelection(): boolean {
     const { anchor, active } = this.controller.selection;
     const buffer = this.controller.bufferRef;
-    const region = selectionRegion(
-      buffer.lineAt(anchor),
-      buffer.lineAt(active),
-      this.view.foldRanges,
-    );
+    const region = selectionRegion(buffer.lineAt(anchor), buffer.lineAt(active), this.view.foldRanges);
     // Границы выравниваем по строкам: свёртка живёт на строках, а выделение — на
     // позициях, и регион с границей посреди строки скрыл бы её половину.
     if (!region) return false;

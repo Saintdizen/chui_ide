@@ -52,7 +52,7 @@ describe('диапазон от якоря до курсора', () => {
 describe('вид действительно зовёт диапазон по `Shift+стрелке`', () => {
   const EXPLORER = readFileSync(resolve(process.cwd(), 'src/renderer/ui/explorer.ts'), 'utf8');
 
-  it('есть ветка `Shift+↑/↓`, и она доходит до `clickSelection(..., \'range\')`', () => {
+  it("есть ветка `Shift+↑/↓`, и она доходит до `clickSelection(..., 'range')`", () => {
     expect(EXPLORER).toMatch(/if \(event\.shiftKey && \(walkKey === 'ArrowUp' \|\| walkKey === 'ArrowDown'\)\)/);
     expect(EXPLORER).toMatch(/clickSelection\([\s\S]{0,200}'range'/);
   });

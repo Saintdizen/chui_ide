@@ -53,7 +53,9 @@ function setup(options: { autoReveal?: () => boolean } = {}) {
       : [{ name: 'a.ts', path: `${ROOT}/src/a.ts`, directory: false }];
   });
   const readDir = (dir: string): boolean =>
-    request.mock.calls.some(([method, params]) => method === 'workspace.readDir' && (params as { path?: string }).path === dir);
+    request.mock.calls.some(
+      ([method, params]) => method === 'workspace.readDir' && (params as { path?: string }).path === dir,
+    );
   // Дерево смотрит на `workspace.current`, а модель берёт корень у rpc —
   // проще применить ответ `workspace.open`, чем подделывать модель целиком.
   const workspace = new WorkspaceModel({
@@ -141,4 +143,3 @@ describe('файл из вкладки находится в дереве сам
     view.render();
   });
 });
-

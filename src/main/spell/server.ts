@@ -11,10 +11,10 @@
 import type { LspDiagnostic } from '../../shared/api/lsp';
 
 /** Одна находка cSpell — как её объявляет сам пакет. */
-type SpellIssue = import('cspell-lib', { with: { 'resolution-mode': 'import' } }).ValidationIssue;
+type SpellIssue = import('cspell-lib', { with: { 'resolution-mode': 'import' }}).ValidationIssue;
 
 /** Что нам нужно от настроек cSpell: свои слова сверху словарей пакета. */
-type Cspell = typeof import('cspell-lib', { with: { 'resolution-mode': 'import' } });
+type Cspell = typeof import('cspell-lib', { with: { 'resolution-mode': 'import' }});
 type CSpellUserSettings = Record<string, unknown> & { words?: string[] };
 
 async function loadCspell(): Promise<Cspell> {
@@ -87,9 +87,7 @@ function toDiagnostic(issue: SpellIssue, text: string): LspDiagnostic {
     message: issue.message || `Неизвестное слово: «${issue.text}»`,
     source: 'cspell',
     // Подсказки замен — в саму пометку: быстрое исправление покажет их списком.
-    ...(issue.suggestions && issue.suggestions.length > 0
-      ? { code: issue.suggestions.slice(0, 5).join(' ') }
-      : {}),
+    ...(issue.suggestions && issue.suggestions.length > 0 ? { code: issue.suggestions.slice(0, 5).join(' ') } : {}),
   };
 }
 
@@ -99,10 +97,7 @@ function toDiagnostic(issue: SpellIssue, text: string): LspDiagnostic {
  * Смещение в тексте → строка и колонка (обе с нуля, как у LSP).
  * Считаем шагом, а не `split('\n')`: на большом файле массив строк дороже одного прохода.
  */
-export function offsetToPosition(
-  text: string,
-  offset: number,
-): { line: number; column: number } {
+export function offsetToPosition(text: string, offset: number): { line: number; column: number } {
   const clamped = Math.max(0, Math.min(offset, text.length));
   let line = 0;
   let lastBreak = -1;

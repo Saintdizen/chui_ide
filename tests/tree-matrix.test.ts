@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { DirEntry, TreeSort } from '../src/shared/api';
 import { matrixSections, matrixVisible } from '../src/renderer/core/tree-matrix';
 
-const dir = (name: string, mtimeMs = 0): DirEntry => ({ name, path: `/p/${name}`, kind: 'directory', size: 0, mtimeMs });
+const dir = (name: string, mtimeMs = 0): DirEntry => ({
+  name,
+  path: `/p/${name}`,
+  kind: 'directory',
+  size: 0,
+  mtimeMs,
+});
 const file = (name: string, mtimeMs = 0): DirEntry => ({ name, path: `/p/${name}`, kind: 'file', size: 0, mtimeMs });
 
 const SORTS: readonly TreeSort[] = ['name', 'type', 'modified', 'git'];
@@ -74,8 +80,12 @@ describe('матрица: порядок × группировка × скрыт
 
   it('foldersFirst решает, идут ли папки выше файлов — во всех режимах сортировки', () => {
     for (const sort of SORTS) {
-      const first = matrixVisible(matrixSections(SET, { foldersFirst: true, sort, groupByType: false, showHidden: false }));
-      const mixed = matrixVisible(matrixSections(SET, { foldersFirst: false, sort, groupByType: false, showHidden: false }));
+      const first = matrixVisible(
+        matrixSections(SET, { foldersFirst: true, sort, groupByType: false, showHidden: false }),
+      );
+      const mixed = matrixVisible(
+        matrixSections(SET, { foldersFirst: false, sort, groupByType: false, showHidden: false }),
+      );
       expect(first.slice(0, 2).sort()).toEqual(['docs', 'src']);
       // Без foldersFirst порядок зависит от режима — но папки уже не обязаны быть сверху.
       expect(mixed).toHaveLength(first.length);
@@ -129,7 +139,14 @@ describe('независимость от скорости чтения ФС', (
     // от того, с какой скоростью ФС отдала записи.
     const combo = { foldersFirst: false, sort: 'modified' as TreeSort, groupByType: false, showHidden: false };
     const same = SET.map((entry) => ({ ...entry, mtimeMs: 0 }));
-    expect(matrixVisible(matrixSections(same, combo))).toEqual(matrixVisible(matrixSections(SET.map((e) => ({ ...e, mtimeMs: 0 })), combo)));
+    expect(matrixVisible(matrixSections(same, combo))).toEqual(
+      matrixVisible(
+        matrixSections(
+          SET.map((e) => ({ ...e, mtimeMs: 0 })),
+          combo,
+        ),
+      ),
+    );
   });
 
   it('перестановка входа при sort=name не меняет порядка', () => {

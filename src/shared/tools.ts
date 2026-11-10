@@ -308,8 +308,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'git',
     side: 'main',
-    description:
-      'Read-only git: status, diff, log, blame, show. Writing to history stays in terminal.',
+    description: 'Read-only git: status, diff, log, blame, show. Writing to history stays in terminal.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -629,7 +628,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Files and folders inside the workspace: move, copy, mkdir, delete, format, organizeImports. A whole new ' +
-        'file is edit ({path, contents}); changing many files at once is search + edit.',
+      'file is edit ({path, contents}); changing many files at once is search + edit.',
     inputSchema: {
       type: 'object',
       properties: {

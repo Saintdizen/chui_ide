@@ -46,16 +46,13 @@ export function registerSearchCommands(define: DefineCommand, deps: SearchDeps):
    * сам запрос. Без этого «искать в папке» пришлось бы делать руками — чистить
    * лишние попадания глазами по всему проекту.
    */
-  define(
-    { id: 'search.inFolder', title: 'Найти в этой папке', category: 'Поиск' },
-    (raw?: unknown) => {
-      const path = typeof raw === 'string' && raw.length > 0 ? raw : null;
-      // Область сбрасываем явно: без пути ищем по проекту, а не в прошлой папке.
-      deps.searchView.setScope(path);
-      deps.dock.show('search');
-      deps.searchView.focus();
-    },
-  );
+  define({ id: 'search.inFolder', title: 'Найти в этой папке', category: 'Поиск' }, (raw?: unknown) => {
+    const path = typeof raw === 'string' && raw.length > 0 ? raw : null;
+    // Область сбрасываем явно: без пути ищем по проекту, а не в прошлой папке.
+    deps.searchView.setScope(path);
+    deps.dock.show('search');
+    deps.searchView.focus();
+  });
 
   // TODO/FIXME — тот же поиск по проекту, только запрос готовый: регулярка ловит
   // пометки одним проходом, а результаты открываются как обычно — панелью поиска.
