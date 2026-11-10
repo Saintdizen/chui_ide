@@ -164,8 +164,24 @@ function rewriteArguments(
   }
 }
 
+/** `run`: `task` → `script` — поле было переименовано в схеме, обработчик читает старое. */
+function runScript(args: Record<string, unknown>): Record<string, unknown> {
+  if (!('task' in args)) return args;
+  const { task, ...rest } = args;
+  if (typeof task !== 'string' || task.trim().length === 0) return rest;
+  if (typeof rest.script === 'string' && rest.script.trim().length > 0) return rest;
+  return { ...rest, script: task };
+}
+
 /** Незнакомое имя возвращается как есть: чужие (MCP) не наше дело. */
 export function canonicalCall(name: string, rawArguments: string): CanonicalCall {
+  // `run`: `task` — имя поля из старых вызовов, схема объявляет `script`.
+  // Без перекладывания вызовы с `task` теряли скрипт и исполняли умолчание молча.
+  if (name === 'run') {
+    const fixed = rewriteArguments(rawArguments, runScript);
+    return { name, arguments: fixed, renamed: fixed !== rawArguments };
+  }
+
   // Своё имя `edit`: схема возит только `edits[]`, а плоская форма
   // (`path`+`oldText`+`newText`) ещё живёт в старых вызовах и в привычке модели.
   if (name === 'edit') {

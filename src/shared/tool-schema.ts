@@ -138,6 +138,50 @@ export function wrongArguments(schema: JsonSchema, args: Record<string, unknown>
   return wrong;
 }
 
+/** Поле, которого в схеме нет: где лежит, что пришло, какие имена схема знает. */
+export interface UnknownArgument {
+  /** Путь лишнего поля: `command`, `edits[0].body`. */
+  path: string;
+  /** Что схема объявляет на этом уровне — среди этого и надо выбирать. */
+  known: readonly string[];
+}
+
+/**
+ * Поля, которых в схеме нет, — чтобы они не терялись молча.
+ *
+ * Пока их никто не проверял, чужое имя пропадало в реализации: `run` с полем
+ * `command` (а оно называется `script`) исполнял команду по умолчанию —
+ * и модель получала чужой прогон, ни слова о том, что аргумент не дошёл.
+ * Такой промах хуже «не хватает аргумента»: тот хотя бы называет поле.
+ *
+ * Вложенность обходится только по известным объектам и массивам: внутрь
+ * необъявленного поля не спускаемся, иначе `data: {...}` у `run` дал бы
+ * лавину путей вместо одной строки.
+ */
+export function unknownArguments(schema: JsonSchema, args: Record<string, unknown>, prefix = ''): UnknownArgument[] {
+  const known = Object.keys(schema.properties ?? {});
+  const unknown: UnknownArgument[] = [];
+  for (const name of Object.keys(args)) {
+    const property = schema.properties?.[name];
+    if (!property) {
+      unknown.push({ path: `${prefix}${name}`, known });
+      continue;
+    }
+    const value = args[name];
+    if (property.type === 'object' && property.properties && isPlainObject(value)) {
+      unknown.push(...unknownArguments(objectSchema(property.properties, property.required), value, `${prefix}${name}.`));
+    }
+    if (property.type === 'array' && property.items?.properties && Array.isArray(value)) {
+      const itemSchema = objectSchema(property.items.properties, property.items.required);
+      value.forEach((item, index) => {
+        if (!isPlainObject(item)) return;
+        unknown.push(...unknownArguments(itemSchema, item, `${prefix}${name}[${index}].`));
+      });
+    }
+  }
+  return unknown;
+}
+
 /**
  * Отказ по пропущенным полям: только они, с путём и формой — без всей схемы.
  *

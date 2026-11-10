@@ -119,6 +119,28 @@ describe('что псевдоним не трогает', () => {
   });
 });
 
+describe('run: поле переименовали в схеме, старые вызовы шлют task', () => {
+  it('task переезжает в script', () => {
+    // Схема объявляет `script`, а старые вызовы (и привычка модели) шлют `task`.
+    // Без перекладывания скрипт терялся и запуск исполнял умолчание — молча.
+    const call = canonicalCall('run', '{"task":"npm test"}');
+    expect(call.name).toBe('run');
+    expect(call.renamed).toBe(true);
+    expect(JSON.parse(call.arguments)).toEqual({ script: 'npm test' });
+  });
+
+  it('свой script не отменяется старым task', () => {
+    const call = canonicalCall('run', '{"script":"npm run build","task":"npm test"}');
+    expect(JSON.parse(call.arguments)).toEqual({ script: 'npm run build' });
+  });
+
+  it('пустой task выбрасывается, поля-соседи целы', () => {
+    const raw = '{"task":"   ","cwd":"/tmp"}';
+    const got = JSON.parse(canonicalCall('run', raw).arguments);
+    expect(got).toEqual({ cwd: '/tmp' });
+  });
+});
+
 describe('слияния с действием: терминал', () => {
   it('run_terminal, run_output, run_stop — три действия одного terminal', () => {
     // 47 вызовов `run_terminal` в трёх беседах: имя живёт в истории, и модель его
