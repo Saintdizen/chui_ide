@@ -291,6 +291,29 @@ describe('отказ — одним словом', () => {
     expect(asked).toEqual(['npm run lint']);
   });
 
+  /**
+   * `command` — имя поля из соседнего инструмента `terminal`, и модель тянет
+   * его в `run` по аналогии. Обработчик такое поле не читает, `script` остаётся
+   * пустым — и `run` молча исполняет умолчание сборки. Вызов выглядит
+   * выполненным, а сделан не он: отчёт отличается только командой.
+   */
+  it('run не теряет команду, названную полем command', async () => {
+    const asked: string[] = [];
+    const ctx = {
+      workspace: workspace(),
+      sandbox: sandbox(),
+      confirmCommand: async (command: string) => {
+        asked.push(command);
+        return true;
+      },
+    } as unknown as ToolContext;
+
+    const outcome = await runTool(ctx, 'run', JSON.stringify({ command: 'lint' }));
+
+    expect(outcome.ok).toBe(true);
+    expect(asked).toEqual(['npm run lint']);
+  });
+
   it('run понимает старое имя поля — task', async () => {
     const asked: string[] = [];
     const ctx = {

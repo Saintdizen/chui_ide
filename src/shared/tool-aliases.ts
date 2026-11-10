@@ -164,14 +164,29 @@ function rewriteArguments(
   }
 }
 
-/** `run`: `task` → `script` — поле было переименовано в схеме, обработчик читает старое. */
+/** `run`: старое имя поля → `script`. Обработчик читает только `script`. */
 function runScript(args: Record<string, unknown>): Record<string, unknown> {
-  if (!('task' in args)) return args;
-  const { task, ...rest } = args;
-  if (typeof task !== 'string' || task.trim().length === 0) return rest;
-  if (typeof rest.script === 'string' && rest.script.trim().length > 0) return rest;
-  return { ...rest, script: task };
+  // `task` — переименованное поле из старых вызовов и сохранённых бесед.
+  // `command`/`cmd` — привычка от `terminal`, где команда называется именно так.
+  // Пустое имя скрипта уронит `run` в умолчание сборки — и вызов с чужой командой
+  // молча исполнит `npm run build`. Ошибка невидимая: ответ выглядит как успех.
+  let alias: string | undefined;
+  const cleaned: Record<string, unknown> = { ...args };
+  for (const key of ALIAS_SCRIPT_FIELDS) {
+    const value = cleaned[key];
+    delete cleaned[key];
+    if (typeof alias === 'undefined' && typeof value === 'string' && value.trim().length > 0) {
+      alias = value;
+    }
+  }
+  if (typeof alias === 'undefined') return cleaned;
+  // Свой `script` сильнее любого старого имени — его не затираем.
+  if (typeof cleaned.script === 'string' && cleaned.script.trim().length > 0) return cleaned;
+  return { ...cleaned, script: alias };
 }
+
+/** Поля, под которыми модель называла имя скрипта. Первое непустое — `script`. */
+const ALIAS_SCRIPT_FIELDS = ['task', 'command', 'cmd'] as const;
 
 /** Незнакомое имя возвращается как есть: чужие (MCP) не наше дело. */
 export function canonicalCall(name: string, rawArguments: string): CanonicalCall {

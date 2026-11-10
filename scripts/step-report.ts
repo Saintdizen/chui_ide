@@ -103,6 +103,39 @@ if (flagged.size > 0) {
       `  ${flag.padEnd(12)} ${String(count).padStart(4)}  (${Math.round((count / calls.length) * 100)}% вызовов)`,
     );
   }
+
+  // Доля пометок по дням — единственный способ увидеть, сработала ли правка
+  // инструмента или промпта: старые записи не переписываются, и без разреза по
+  // дате `cd` ×1000 из прошлого спрячет эффект сегодняшней правки.
+  const days = new Map<string, { calls: number; flags: Map<string, number> }>();
+  for (const run of runs) {
+    const day = new Date(run.at).toISOString().slice(0, 10);
+    const entry = days.get(day) ?? { calls: 0, flags: new Map<string, number>() };
+    for (const step of run.steps) {
+      for (const call of step.calls) {
+        entry.calls += 1;
+        for (const flag of call.flags ?? []) entry.flags.set(flag, (entry.flags.get(flag) ?? 0) + 1);
+      }
+    }
+    days.set(day, entry);
+  }
+  // Только дни, где пометка вообще есть, — иначе таблица тонет в нулях.
+  const named = [...flagged.keys()];
+  const rows = [...days.entries()]
+    .filter(([, entry]) => named.some((flag) => (entry.flags.get(flag) ?? 0) > 0))
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  if (rows.length > 0) {
+    console.log('');
+    console.log('Пометки по дням (доля от вызовов дня):');
+    for (const [day, entry] of rows) {
+      const parts = named
+        .map((flag) => [flag, entry.flags.get(flag) ?? 0] as const)
+        .filter(([, n]) => n > 0)
+        .sort((a, b) => b[1] - a[1])
+        .map(([flag, n]) => `${flag} ${Math.round((n / entry.calls) * 100)}%`);
+      console.log(`  ${day}  ${String(entry.calls).padStart(5)} выз.  ${parts.join(', ')}`);
+    }
+  }
 }
 
 // Пересечения инструментов в одном шаге: модель могла попросить то же самое дважды.
