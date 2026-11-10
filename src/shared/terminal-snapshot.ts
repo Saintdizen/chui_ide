@@ -1,4 +1,17 @@
-import type { Line } from '../renderer/terminal/core/screen';
+/**
+ * Что этой функции нужно от ячейки экрана терминала. Полный `Line` живёт в
+ * renderer, а shared на renderer смотреть не вправе — поэтому тип структурный:
+ * подходит и настоящая строка экрана, и подделка из тестов.
+ */
+export interface SnapshotCell {
+  readonly chars: string;
+  readonly width: number;
+}
+
+/** Строка экрана в том виде, в каком её видит выгрузка (см. `SnapshotCell`). */
+export interface SnapshotLine {
+  readonly cells: readonly SnapshotCell[];
+}
 
 /**
  * Текст терминала для модели.
@@ -15,7 +28,7 @@ export interface TerminalSnapshot {
 }
 
 /** Строка экрана в текст: без хвостовых пробелов, перенос склеивается. */
-export function lineText(line: Line): string {
+export function lineText(line: SnapshotLine): string {
   let text = '';
   for (const cell of line.cells) {
     // Пустая ячейка ширины 0 — продолжение широкого знака, а не пробел.
@@ -32,7 +45,7 @@ export function lineText(line: Line): string {
  * прокрутку истории она не станет. Пустые строки в конце отбрасываются —
  * так экран выглядит после команды, а в контексте они бессмысленны.
  */
-export function terminalSnapshot(lines: readonly Line[], limit = 80): TerminalSnapshot {
+export function terminalSnapshot(lines: readonly SnapshotLine[], limit = 80): TerminalSnapshot {
   const texts = lines.map(lineText);
   // Обрезаем хвост из пустых строк: курсор обычно стоит на них.
   let end = texts.length;
