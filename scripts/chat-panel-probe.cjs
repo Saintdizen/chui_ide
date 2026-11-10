@@ -830,11 +830,26 @@ app.whenReady().then(async () => {
         const надПанелью = Boolean(
           panel && x >= panel.left && x <= panel.right && y >= panel.top && y <= panel.bottom,
         );
+        // Колонки цифр должны совпадать во всех строках состава, иначе проценты
+        // прыгают по горизонтали вслед за длиной подписи.
+        const rows = [...popup.querySelectorAll('.session-info-row')];
+        const уникальных = (значения) => [...new Set(значения.map((v) => Math.round(v)))];
+        const края = (sel, край) =>
+          уникальных(
+            rows
+              .map((r) => r.querySelector(sel)?.getBoundingClientRect())
+              .filter(Boolean)
+              .map((b) => b[край]),
+          );
         return {
           открыто: true,
           сверху: popup.contains(top),
           надПанелью,
           чейСлой: top ? top.className || top.tagName : null,
+          строк: rows.length,
+          процентСлева: края('.session-info-share', 'left').length,
+          процентСправа: края('.session-info-share', 'right').length,
+          токеныСправа: края('.session-info-tokens', 'right').length,
         };
       })()`,
     );
@@ -860,7 +875,20 @@ app.whenReady().then(async () => {
   );
   await clickRing();
 
-  /* ── надстройки композера живут в его карточке ──────────────────────────── */
+  // Выравнивание колонок проверяем по одной левой кромке у процентов и одной
+  // правой у токенов. Порог >1 значит «цифры поехали»: раньше строки
+  // раскладывались `space-between`-ом, и процент сдвигался вслед за длиной
+  // подписи, а колонка токенов прыгала на каждой цифре.
+  check(
+    'в окне сессии проценты стоят в одной колонке',
+    popupInPanel.строк > 1 && popupInPanel.процентСлева === 1 && popupInPanel.процентСправа === 1,
+    popupInPanel,
+  );
+  check(
+    'в окне сессии токены прижаты к одной правой кромке',
+    popupInPanel.строк > 1 && popupInPanel.токеныСправа === 1,
+    popupInPanel,
+  );
 
   // Регрессия: план агента, изменённые файлы и чипы приложенного контекста стояли
   // отдельными строками в футере — то есть ВНЕ карточки композера, хотя относятся к

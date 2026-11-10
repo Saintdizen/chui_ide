@@ -137,6 +137,9 @@
 
 .session-info-sub {
   margin-bottom: 4px;
+  /* 4px — тот же отступ, что у строк состава: левый край заголовка встаёт
+     над точками цветов, а не левее их. */
+  padding: 0 4px;
   color: var(--text_color_tertiary);
   font-size: var(--font_small_size);
 }
@@ -147,6 +150,7 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
+  padding: 0 4px;
 }
 
 .session-info-value {
@@ -192,8 +196,20 @@
   background: var(--context_seg_files);
 }
 
+.context-bar {
+  display: flex;
+  height: 6px;
+  overflow: hidden;
+  /* Ширина полосы = внешний край строк: строки внутри окна тоже упираются
+     в него своими 4px поля. */
+  margin: 0 4px;
+  border-radius: var(--radius_pill);
+  background: var(--sunken_background);
+}
+
 .session-info-reserved {
   margin-top: 5px;
+  padding: 0 4px;
   color: var(--text_color_tertiary);
   font-size: var(--font_small_size);
 }
@@ -236,7 +252,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin: 2px 0 4px 14px;
+  /* Рельс выноски — под текстом подписи (4px поля строки + точка 8px + 6px). */
+  margin: 2px 0 4px 18px;
   padding-left: 8px;
   border-left: 1px solid var(--border_subtle, rgba(128, 128, 128, 0.25));
 }
@@ -290,6 +307,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* Подпись забирает остаток ширины, иначе свободное место уходило в оба
+     промежутка space-between и колонки чисел съезжали от строки к строке. */
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -305,6 +325,10 @@
 
 .session-info-share {
   flex: 0 0 auto;
+  /* 6ch — под «100.0%»: колонка одна на все строки, поэтому процент
+     прижат к правому краю своей ширины, а не к концу подписи. */
+  min-width: 6ch;
+  text-align: right;
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
   font-size: var(--font_small_size);
@@ -313,7 +337,9 @@
 /* Токены части — числом рядом с долей: процент говорит о доле, а не о размере. */
 .session-info-tokens {
   flex: 0 0 auto;
-  min-width: 4.5ch;
+  /* 6ch — под «999.9K»: короче колонка обрезала бы длинные числа, и они
+     пачкой уезжали влево. */
+  min-width: 6ch;
   text-align: right;
   color: var(--text_color_secondary);
   font-family: var(--font_mono);
