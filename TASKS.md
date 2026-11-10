@@ -54,9 +54,60 @@ Xcode — JSON-API справки: source-editor (coding intelligence), debuggin
     адресов, не тексты: поиск лежит (404), читаются лишь точные URL. Пункт:
     пройти по каталогам поштучно и записать, что взято. Без этого «собрать всё
     по всем IDE» — обещание, а не работа.
-51. JetBrains: 64 инструмента MCP и `inlay-hints` — сверить поимённо
-    (inlay-hints в нашем коде не видел вовсе).
-52. Zed: 16 инструментов агента (`ai/tools`) — сверить поимённо с нашими 40+.
+51. JetBrains MCP — ЗАКРЫТ 10.11 СВЕРКОЙ (не догадкой).
+    Источник: https://www.jetbrains.com/help/idea/mcp-server.html.md
+    (curl), секции `### ` + имена строк целиком.
+    Наших инструментов РОВНО 28 (src/shared/tools.ts, `name:`): browser,
+    checks, debug, edit, file, git, history, list, lsp, mcp, mind, open_files,
+    project_map, read, read_image, run, run_tests, search, show, skill,
+    spawn, terminal, terminalList, terminalOpen, terminalOutput,
+    terminalStop, terminalWrite, todo, web. (Прежние «23» и «40+» — обе
+    неверны, это были мои оценки.)
+    Расхождение мнимое: из 64 инструментов JB 24 — дебаггер и БД, которых
+    у нас нет и не должно быть. Остальные 40 сверены поимённо, ВСЕ покрыты:
+      get_file_problems     → checks (и `file` action=diagnostics/lint)
+      get_symbol_info / rename_refactoring / analyze_*_usages → lsp
+                                 (action=rename/info/references, agent-lsp.ts)
+      replace_text_in_file  → edit
+      create_new_file_with_text → file action=create
+      reformat_code         → file action=format (agent-edit.ts:633)
+      build_project / run_configuration → run (команду выбирает сам)
+      get_debugger_breakpoints / toggle_breakpoint → debug
+                                 (action=breakpoints, agent-debug.ts:290)
+      search_in_files_by_regex / _by_text → search
+      list_directory / find_path / move_path / copy_path / delete_path
+                                 → list + file
+    НЕ проверено кодом, но и не наша зона: execute_action_by_id,
+    get_project_modules/dependencies, create_new_project, work with
+    databases. Пункт `optimize_imports` закрыт фактом:
+    `source.organizeImports` уже обрабатывается (src/main/lsp/lsp.ts:1918).
+    inlay-hints — это НЕ инструмент агента и в этом же доке их нет; мой
+    прежний упрёк смешивал фичу UI с инструментом. Вынесено отдельной
+    задачей — см. п.53.
+52. Zed — ЗАКРЫТ 10.11. По https://zed.dev/docs/ai/tools у Zed своего
+    набора 16 инструментов, все покрыты: edit_file/write_file → edit+file,
+    read_file → read, grep/find_path/list_directory → search+list,
+    create_directory/delete_path/move_path/copy_path → file,
+    fetch/web_search → web, diagnostics → checks, run_command/terminal
+    → run + terminal*, spawn_agent → spawn (алиас, tool-aliases.ts),
+    update_plan/create_thread/edit_thread → mind (steps/goal/exit_plan).
+53. inlay-hints — ЗАКРЫТ 10.11, дыры не было. Есть целиком:
+    src/shared/lsp-inlay-hints.ts (логика),
+    src/renderer/editor/host/lsp-features.ts (подключка),
+    настройка lsp.inlayHintsOff по языкам, тесты
+    editor-inlay-hints.test.ts + lsp-inlay-hints.test.ts.
+54. `file action=organizeImports` — СДЕЛАНО 10.11.
+    Обработчик `source.organizeImports` был (src/main/lsp/lsp.ts:1918),
+    агенту не отдан. Добавлено:
+    - LspService.organizeImports(path) — textDocument/codeAction c kind
+      source.organizeImports, разворачивает edit у самого действия, правит
+      только этот файл;
+    - ToolContext.organizeImports + проброс в service.ts рядом с formatFile;
+    - действие 'organizeImports' в схеме tools.ts и диспетчере agent-edit.ts
+      (образец — formatFile).
+    Тестов на текст нет — как и у format: юнит-тест требует живого LSP;
+    покрыто типом и двумя обновлёнными enum-тестами. 8486 зелёных.
+
 
 ## Правила
 

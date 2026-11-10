@@ -400,6 +400,7 @@ export async function fileAction(ctx: ToolContext, args: Record<string, unknown>
   if (action === 'copy') return await copyPath(ctx.workspace, args);
   if (action === 'mkdir') return await makeDirectory(ctx.workspace, args);
   if (action === 'format') return await formatFile(ctx, args);
+  if (action === 'organizeImports') return await organizeImports(ctx, args);
   // `replace` тоже снят: его заменял `search` + `edit`. Не документированное действие
   // в приёмнике — второй способ делать то же самое; остаются только имена файлов.
   if (action === 'replace')
@@ -411,7 +412,7 @@ export async function fileAction(ctx: ToolContext, args: Record<string, unknown>
         'правь их `edit {edits: [{path, edits: [{oldText, newText}]}]}`. Файл целиком — ' +
         'тот же `edit` без `oldText`. file оставлен для move и delete.',
     };
-  return unknownAction(action, 'file: move, copy, mkdir, delete, format.');
+  return unknownAction(action, 'file: move, copy, mkdir, delete, format, organizeImports.');
 }
 
 /**
@@ -649,6 +650,25 @@ export async function formatFile(ctx: ToolContext, args: Record<string, unknown>
   };
 }
 
+export async function organizeImports(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const target = requireString(args, 'path');
+  if (!ctx.organizeImports) {
+    return { ok: false, summary: 'Языковой сервер не подключён: сортировать импорты нечем' };
+  }
+  const organized = await ctx.organizeImports(target);
+  if (organized === null) {
+    return { ok: false, summary: 'Сервер не умеет сортировать импорты в этом файле' };
+  }
+  if (organized === '') return { ok: true, summary: 'Импорты уже в порядке', detail: '' };
+  const root = ctx.workspace.rootPath();
+  return {
+    ok: true,
+    summary: `${relative(target, root)}: импорты приведены в порядок`,
+    detail: organized,
+    changes: [{ path: target, kind: 'modified' }],
+  };
+}
+
 /**
 
  * Обязательные поля каждого действия `file`. Их называет не только разбор, но и
@@ -663,6 +683,8 @@ const FILE_ARGS: Record<string, readonly string[]> = {
   move: ['from', 'to'],
 
   delete: ['path'],
+
+  organizeImports: ['path'],
 
   replace: ['query', 'replacement'],
 

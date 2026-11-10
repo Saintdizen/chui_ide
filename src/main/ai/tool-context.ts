@@ -422,6 +422,12 @@ export interface ToolContext {
    * Возвращает новый текст (целиком), `null` — форматировать нечем.
    */
   formatFile?(path: string): Promise<string | null>;
+  /**
+   * Привести импорты в порядок языковым сервером (source.organizeImports):
+   * действие `organizeImports` инструмента `file`. Возвращает новый текст
+   * (целиком), `null` — сервер такого действия не предлагает.
+   */
+  organizeImports?(path: string): Promise<string | null>;
   /** Терминальные сессии (pty): нужны инструментам terminal_*. */
   terminals?: TerminalAgent;
   /** Символы проекта и скелет файла (языковой сервер): lsp (action references|definition|outline). */

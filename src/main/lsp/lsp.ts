@@ -2179,6 +2179,41 @@ export class LspService {
   }
 
   /**
+   * Организация импортов (code action `source.organizeImports`): убрать
+   * неиспользованные и рассортировать. Правки приходят в `edit` у самого
+   * действия, а не отдельным ответом — поэтому разворачиваем их здесь и
+   * отдаем тем же `TextEdit[]`, что и форматирование. Сервер без поддержки —
+   * пустой список.
+   */
+  async organizeImports(path: string): Promise<TextEdit[]> {
+    const runtime = this.runtimeForPath(path);
+    if (!runtime) return [];
+    await runtime.initialized.catch(() => undefined);
+    // Позиция ничего не значит для source-действия, но сервер ее требует.
+    const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
+    try {
+      const result = await runtime.connection.request('textDocument/codeAction', {
+        textDocument: { uri: pathToFileURL(path).toString() },
+        range,
+        context: { diagnostics: [], only: ['source.organizeImports'] },
+      });
+      const actions = (Array.isArray(result) ? result : []) as Array<{
+        kind?: string;
+        edit?: { changes?: Record<string, TextEdit[]>; documentChanges?: unknown[] };
+      }>;
+      const uri = pathToFileURL(path).toString();
+      for (const action of actions) {
+        if (action.kind !== 'source.organizeImports') continue;
+        const edits = action.edit?.changes?.[uri];
+        if (edits) return edits;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Форматирование нескольких кусков разом (rangesFormatting). Шлём один запрос
    * вместо пачки `rangeFormatting`: сервер видит куски вместе и не разъезжается
    * на стыках.

@@ -173,7 +173,7 @@ describe('file', () => {
     const tool = byName.get('file')!;
     expect(tool.side).toBe('main');
     expect(tool.inputSchema.required).toEqual(['action']);
-    expect(tool.inputSchema.properties.action?.enum).toEqual(['move', 'copy', 'mkdir', 'delete', 'format']);
+    expect(tool.inputSchema.properties.action?.enum).toEqual(['move', 'copy', 'mkdir', 'delete', 'format', 'organizeImports']);
     expect(tool.inputSchema.properties.contents).toBeUndefined();
   });
 });

@@ -337,7 +337,7 @@ export class AiService {
   /** Поиск символов проекта: без него search (action code) ищет только текстом. */
   private symbols?: SymbolSearch;
   /** Серверы языков: нужны действию `format` инструмента `file`. */
-  private lsp?: Pick<LspService, 'formatDocument'>;
+  private lsp?: Pick<LspService, 'formatDocument' | 'organizeImports'>;
   /** Открытые документы: несохранённый текст, который сервер ещё не видел. */
   private documentText?: (path: string) => Promise<string | null>;
   /** Линтер проекта: без него действие lint инструмента checks модели не предлагаем. */
@@ -504,7 +504,7 @@ export class AiService {
    * Подключить серверы языков: включает действие `format` инструмента `file`.
    * Без него действие отвечает `null` — «форматировать нечем», а не молчит.
    */
-  attachLsp(lsp: Pick<LspService, 'formatDocument'>): void {
+  attachLsp(lsp: Pick<LspService, 'formatDocument' | 'organizeImports'>): void {
     this.lsp = lsp;
   }
 
@@ -1006,6 +1006,21 @@ export class AiService {
       if (!text) return null;
       const edits = await lsp.formatDocument(path);
       if (edits.length === 0) return '';
+      return applyTextEdits(text, edits);
+    };
+    // Организация импортов: тот же путь, что у форматирования — LSP правит
+    // файл целиком, а текст до и после читаем сами.
+    toolContext.organizeImports = async (path: string) => {
+      if (!lsp) return null;
+      const edits = await lsp.organizeImports(path);
+      if (edits.length === 0) return '';
+      let text: string;
+      try {
+        text = await readFileText(path);
+      } catch {
+        return null;
+      }
+      if (!text) return null;
       return applyTextEdits(text, edits);
     };
     if (this.sessions) toolContext.sessions = this.sessions;
