@@ -124,6 +124,14 @@ interface RootState {
  */
 const MASS_CHANGE_LIMIT = 5;
 
+/** Сколько ждём тишины, прежде чем уведомить об изменении. */
+const CHANGE_QUIET_MS = 120;
+/**
+ * Предел откладывания: поток, который не кончается (сборка, чужой наблюдатель),
+ * не должен держать уведомление вечно — раз в секунду отдаём, что накопилось.
+ */
+const CHANGE_MAX_WAIT_MS = 1000;
+
 /**
  * Сколько миллисекунд после нашей собственной записи событие наблюдателя о том же
  * пути считаем эхом. Дольше — это уже чужая правка.
@@ -140,6 +148,8 @@ export class WorkspaceService {
   private active: string | null = null;
   /** Схлопывание потока изменений в одно уведомление — общее для всей области. */
   private watchTimer: NodeJS.Timeout | null = null;
+  /** Когда открылось текущее окно: по нему видно, не пора ли отдать накопленное. */
+  private watchFirst = 0;
   private pendingChange: string | null = null;
   /**
    * Сколько РАЗНЫХ путей изменилось в текущем окне. Один путь в уведомлении — это
@@ -1491,7 +1501,16 @@ export class WorkspaceService {
     // Запоздавшее эхо наблюдателя путь не подменяет: событие по старому имени
     // приходит уже после нашего `rename`, и уведомление уезжало бы со старым именем.
     if (named || !this.selfWritten(changedPath)) this.pendingChange = changedPath;
-    if (this.watchTimer) return;
+    // Окно закрывается не по первому событию, а по тишине: `git checkout` сотен
+    // файлов тянется секундами, и жёсткое окно давало уведомление раз в 120 мс
+    // (12 уведомлений на поток в 1.2 с), а каждое массовое — общий пересчёт карты
+    // символов. Продлеваем окно, но не дальше CHANGE_MAX_WAIT_MS.
+    if (this.watchTimer) {
+      if (Date.now() - this.watchFirst >= CHANGE_MAX_WAIT_MS) return;
+      clearTimeout(this.watchTimer);
+    } else {
+      this.watchFirst = Date.now();
+    }
     this.watchTimer = setTimeout(() => {
       this.watchTimer = null;
       const changed = this.pendingChange ?? this.active;
@@ -1510,7 +1529,7 @@ export class WorkspaceService {
         : { root, path: changed ?? this.active };
       this.onChange(PushTopic.WorkspaceChanged, payload);
       this.onFilesChanged?.(batch.length > 0 ? batch : [[changed ?? root, 2]]);
-    }, 120);
+    }, CHANGE_QUIET_MS);
   }
 
   /**
