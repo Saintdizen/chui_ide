@@ -821,11 +821,20 @@ app.whenReady().then(async () => {
         const popup = document.querySelector('.session-info');
         if (!popup || popup.hidden) return { открыто: false };
         const box = popup.getBoundingClientRect();
-        const top = document.elementFromPoint(Math.round(box.left + box.width / 2), Math.round(box.top + 8));
+        const x = Math.round(box.left + box.width / 2);
+        const y = Math.round(box.top + 8);
+        const top = document.elementFromPoint(x, y);
+        // Проверка бессмысленна, если окно ни с чем не пересекается: тогда сверху
+        // оно по определению. Поэтому отдельно говорим, лежит ли точка над панелью.
+        const panel = document.querySelector('.right-panel')?.getBoundingClientRect();
+        const надПанелью = Boolean(
+          panel && x >= panel.left && x <= panel.right && y >= panel.top && y <= panel.bottom,
+        );
         return {
           открыто: true,
           сверху: popup.contains(top),
-          чейСлой: top ? (top.closest('.chat-editor') ? 'чат в редакторе' : top.className || top.tagName) : null,
+          надПанелью,
+          чейСлой: top ? top.className || top.tagName : null,
         };
       })()`,
     );
@@ -846,7 +855,7 @@ app.whenReady().then(async () => {
   const popupInPanel = await popupState();
   check(
     'окно «Информация о сессии» видно над панелью ассистента',
-    popupInPanel.открыто === true && popupInPanel.сверху === true,
+    popupInPanel.открыто === true && popupInPanel.надПанелью === true && popupInPanel.сверху === true,
     popupInPanel,
   );
   await clickRing();
