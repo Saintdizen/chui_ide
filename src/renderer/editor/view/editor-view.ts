@@ -286,6 +286,10 @@ export class EditorView {
   /** Миникарта: холст со сжатыми строками и ползунком видимой части. */
   private readonly minimap: Minimap;
   private minimapVisible = false;
+  /** Версия буфера, для которой нарисован растр миникарты: на прокрутке она та же. */
+  private minimapVersion = -1;
+  /** Что уже записано в style полотна: на прокрутке размер тот же, писать нечего. */
+  private contentSize = { width: -1, height: -1 };
   private readonly overview: OverviewRuler;
   private overviewVisible = false;
   /** Подсказки-вставки по строкам (inlay hints): место, текст, ширина и класс. */
@@ -1427,7 +1431,14 @@ export class EditorView {
     this.updateCaretAndSelection();
     // Миникарта рисуется по ВСЕМУ файлу и едет вместе с прокруткой: перерисовываем
     // её тем же кадром, что и строки, — иначе ползунок отставал бы от прокрутки.
-    if (this.minimapVisible) this.minimap.render();
+    // Растр — только когда текст/украшения изменились: на прокрутке он тот же.
+    if (this.minimapVisible) {
+      if (this.minimapVersion !== this.buffer.version) {
+        this.minimapVersion = this.buffer.version;
+        this.minimap.invalidate();
+      }
+      this.minimap.render();
+    }
     // Полоса меток едет вместе с прокруткой так же: её рамочка видимой части
     // должна совпадать с тем, что сейчас на экране.
     this.renderOverview();
@@ -1437,8 +1448,16 @@ export class EditorView {
   private sizeContent(viewportWidth: number, viewportHeight: number): void {
     const height = Math.max(contentHeight(this.rowCount(), this.metrics.lineHeight), viewportHeight);
     const width = Math.max(this.widest, viewportWidth);
-    this.content.style.height = `${height}px`;
-    this.content.style.width = `${width}px`;
+    // Пишем стиль только когда размер правда другой: на прокрутке он не меняется,
+    // а каждая запись в style — это повод браузеру пересчитать раскладку.
+    if (this.contentSize.height !== height) {
+      this.contentSize.height = height;
+      this.content.style.height = `${height}px`;
+    }
+    if (this.contentSize.width !== width) {
+      this.contentSize.width = width;
+      this.content.style.width = `${width}px`;
+    }
   }
 
   /** Слой видимых строк: пересобираем только когда сменилась версия, границы или украшения. */

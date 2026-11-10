@@ -105,6 +105,8 @@ export class OverviewRuler {
   readonly element: HTMLElement;
   private readonly marks: HTMLElement;
   private readonly slider: HTMLElement;
+  /** Что уже нарисовано в слое меток: на прокрутке не меняется. */
+  private painted: { marks: readonly OverviewInput[]; lineCount: number; height: number } | null = null;
   private state: OverviewState = {
     marks: [],
     lineCount: 0,
@@ -132,18 +134,28 @@ export class OverviewRuler {
 
   render(): void {
     const height = this.element.clientHeight;
-    const marks = computeOverviewMarks(this.state.marks, this.state.lineCount, height);
-    // Метки пересоздаются целиком: их десятки, а не тысячи, и столько же было бы
-    // операций сравнения при точечном обновлении — проще и не медленнее.
-    this.marks.replaceChildren(
-      ...marks.map((mark) => {
-        const node = document.createElement('div');
-        node.className = `own-editor-overview-mark is-${mark.kind}`;
-        node.style.top = `${mark.top}px`;
-        node.style.height = `${mark.height}px`;
-        return node;
-      }),
-    );
+    // Метки — только по изменению меток, числа строк или высоты полосы; на
+    // прокрутке едет одна рамка (ниже). Раньше на каждый кадр создавались
+    // заново все узлы меток — на прокрутке это была работа впустую.
+    const painted = this.painted;
+    if (
+      !painted ||
+      painted.marks !== this.state.marks ||
+      painted.lineCount !== this.state.lineCount ||
+      painted.height !== height
+    ) {
+      this.painted = { marks: this.state.marks, lineCount: this.state.lineCount, height };
+      const marks = computeOverviewMarks(this.state.marks, this.state.lineCount, height);
+      this.marks.replaceChildren(
+        ...marks.map((mark) => {
+          const node = document.createElement('div');
+          node.className = `own-editor-overview-mark is-${mark.kind}`;
+          node.style.top = `${mark.top}px`;
+          node.style.height = `${mark.height}px`;
+          return node;
+        }),
+      );
+    }
     const fractions = viewportFractions(this.state.scrollTop, this.state.viewportHeight, this.state.contentHeight);
     this.slider.style.top = `${fractions.top * 100}%`;
     this.slider.style.height = `${fractions.height * 100}%`;

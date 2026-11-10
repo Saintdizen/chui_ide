@@ -133,6 +133,7 @@ export class Minimap {
     const same = next.length === this.bookmarks.length && next.every((line, index) => line === this.bookmarks[index]);
     if (same) return;
     this.bookmarks = next;
+    this.invalidate();
     this.render();
   }
 
@@ -151,15 +152,51 @@ export class Minimap {
     const same = next.length === this.changes.length && next.every((line, index) => line === this.changes[index]);
     if (same) return;
     this.changes = next;
+    this.invalidate();
     this.render();
   }
+
+  /**
+   * Что уже лежит на холсте. Пока это не меняется, растр не трогаем.
+   *
+   * Почему: draw() читает текст КАЖДОГО образца строки и льёт fillRect по всему
+   * файлу, а render() зовут из каждой перерисовки редактора — в том числе на
+   * кадр прокрутки, хотя сама карта на прокрутке не меняется вовсе. На файле в
+   * десятки тысяч строк это была единственная работа кадра, которая росла
+   * вместе с длиной файла.
+   */
+  private painted: { width: number; height: number; rowCount: number; dpr: number; color: string } | null = null;
 
   /** Перерисовать черты и переставить ползунок: зовётся из перерисовки редактора. */
   render(): void {
     const height = this.element.clientHeight;
     const rowCount = this.options.rowCount();
-    this.draw(height, rowCount);
+    this.paint(height, rowCount);
     this.positionSlider(height, rowCount);
+  }
+
+  /** Текст или украшения изменились при том же числе рядов: растр устарел. */
+  invalidate(): void {
+    this.painted = null;
+  }
+
+  private paint(height: number, rowCount: number): void {
+    const dpr = window.devicePixelRatio || 1;
+    const color = this.options.color();
+    const { width } = this;
+    const painted = this.painted;
+    if (
+      painted &&
+      painted.width === width &&
+      painted.height === height &&
+      painted.rowCount === rowCount &&
+      painted.dpr === dpr &&
+      painted.color === color
+    ) {
+      return;
+    }
+    this.painted = { width, height, rowCount, dpr, color };
+    this.draw(height, rowCount);
   }
 
   private draw(height: number, rowCount: number): void {

@@ -125,6 +125,7 @@
     "smoke:proxy": "npm run build:main && node scripts/proxy-smoke.cjs",
     "usage": "tsx scripts/agent-usage.ts",
     "census": "tsx scripts/call-census.ts",
+    "probe:scroll-bench": "npm run build && electron scripts/editor-scroll-bench.cjs",
     "probe:quick-open": "npm run build && electron scripts/quick-open-probe.cjs"
   },
   "engines": {
