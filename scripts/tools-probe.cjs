@@ -9,9 +9,43 @@
  *
  *   node scripts/tools-probe.cjs
  */
-const { mkdtemp, mkdir, writeFile, rm } = require('node:fs/promises');
+const { mkdtemp, mkdir, writeFile, rm, readFile } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+
+/**
+ * Лежит ли путь на tmpfs — от этого зависит, есть ли у него корзина.
+ *
+ * На Linux смотрим `/proc/mounts` и берём самое длинное совпадение точки
+ * монтирования: `/tmp` может быть вложен в `/`, и тогда короткое совпадение
+ * назвало бы диск памятью. В контейнере `/proc/mounts` бывает пуст — тогда
+ * честно `false` (не знаем), и отказ остаётся отказом. Вне Linux — `false`:
+ * там пробу не гоняют.
+ */
+async function isTmpfs(target) {
+  if (process.platform !== 'linux') return false;
+  let mounts;
+  try {
+    mounts = await readFile('/proc/mounts', 'utf8');
+  } catch {
+    return false;
+  }
+  let best = '';
+  let fsType = '';
+  for (const line of mounts.split('\n')) {
+    // Порядок в /proc/mounts: устройство, точка, тип. Не наоборот.
+    const [, mountPoint, type] = line.split(' ');
+    // Пустой mountPoint матчится в `startsWith('')` — не даём ему стать ответом.
+    if (!mountPoint || !type) continue;
+    const point = mountPoint.replace(/\\040/g, ' ');
+    if (!target.startsWith(point)) continue;
+    if (point.length >= best.length) {
+      best = point;
+      fsType = type;
+    }
+  }
+  return fsType === 'tmpfs';
+}
 
 /**
  * Аргументы под конкретное действие — руками, потому что схема знает только
@@ -111,6 +145,11 @@ const ARGS = (root) => {
 
 async function main() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'chui-probe-'));
+  // Корзина — понятие ФС, а не приложения: на tmpfs (обычно /tmp) её нет, и
+  // `shell.trashItem` там падает на любом файле. Это свойство стенда, а не
+  // дефект инструмента, и его надо назвать отдельно: иначе «ОТКАЗ» будет
+  // каждый прогон, и красный результат перестанут читать.
+  const tmpFs = await isTmpfs(os.tmpdir());
   await mkdir(path.join(root, 'src'), { recursive: true });
   await writeFile(path.join(root, 'a.txt'), 'hello\nworld\n');
   await writeFile(path.join(root, 'src', 'b.ts'), 'export const b = 1;\n');
@@ -146,7 +185,8 @@ async function main() {
         const noEnv =
           /не поддерж|недоступ|не подключ|не настроен|нет доступа|нет хранилищ|не репозиторий|нечего|не включён|нет$/i.test(
             text,
-          );
+          ) ||
+          (name === 'file' && args.action === 'delete' && tmpFs);
         const kind = result.ok ? 'ok' : `${noEnv ? 'нет окружения' : 'ОТКАЗ'}: ${text.slice(0, 60)}`;
         verdict = `${kind} (${ms} мс)`;
         if (!result.ok && !noEnv) {
@@ -163,8 +203,11 @@ async function main() {
     // toolActions — единственный источник правды о под-действиях (та же
     // таблица, по которой строится описание для модели).
     const { AGENT_TOOLS, toolActions } = require('../dist/shared/tools.js');
-    // В чистом Node нет electron.shell — удаление в корзину не проверить.
-    // Это не провал и не «всё хорошо»: просто не проверено здесь.
+    // Почему `file:delete` может не проверяться: в чистом Node нет
+    // `electron.shell`, а под Electron — есть. Поэтому не список «только в
+    // приложении», а проверка по факту: инструмент соврал про окружение только
+    // когда корзина действительно недоступна (tmpfs — например `TMPDIR` на
+    // `/tmp`). В остальных случаях отказ — провал, а не оправдание.
     const ONLY_IN_APP = new Set(['file:delete']);
     for (const key of ONLY_IN_APP) {
       const verdict = String(rows.find(([n]) => n === key)?.[1] ?? '');
@@ -191,7 +234,7 @@ async function main() {
     console.log(`${name.padEnd(12)} ${verdict}`);
   }
   if (unverified.length > 0) {
-    console.log(`\nНе проверено здесь (нужен Electron): ${unverified.join(', ')}`);
+    console.log(`\nНе проверено: окружение без корзины (tmpfs) — ${unverified.join(', ')}`);
   }
   if (failures.length > 0) {
     console.log(`\nПровалов: ${failures.length}`);

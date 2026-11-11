@@ -14,9 +14,8 @@ import type { ApplyEditsHostResult } from '../../shared/api';
 import type { ApplyFailure, ApplyReport } from '../../shared/edits';
 import type { ParsedEdits } from './edit-parsing';
 
-const MAX_REPLACE_SUMMARY_FILES = 20;
 import type { WorkspaceService } from '../workspace/workspace';
-import { missingForAction, optionalBoolean, optionalString, requireString } from './tool-args';
+import { missingForAction, requireString } from './tool-args';
 import { relative } from './agent-terminal';
 import { unknownAction } from './agent-present';
 export { editFiles, editAction } from './agent-edit-core';
@@ -423,102 +422,6 @@ export async function fileAction(ctx: ToolContext, args: Record<string, unknown>
         'тот же `edit` без `oldText`. file оставлен для move и delete.',
     };
   return unknownAction(action, 'file: move, copy, mkdir, delete, format, organizeImports.');
-}
-
-/**
-
- * Массовая замена по файлам проекта. Идёт в main, как и остальные файловые
-
- * операции: логика замены чистая (`shared/replace.ts`) и уже проверена.
-
- * Изменённые файлы возвращаются в `changes` — панель изменений чата их покажет.
-
- */
-
-export async function replaceInFiles(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
-  const query = requireString(args, 'query');
-
-  const isRegex = optionalBoolean(args, 'isRegex') ?? false;
-
-  const glob = optionalString(args, 'glob');
-
-  // Предохранитель после аварии: `.*` без glob прошёлся по всем 1047 файлам и
-
-  // превратил дерево в «x», а откатить это было нечем. Шаблон, который совпадает
-
-  // с пустой строкой (`.`, `.*`, `^`, `\b`), без маски — это не «заменить», это
-
-  // «переписать всё»: сначала маска, потом замена.
-
-  if (isRegex && !glob) {
-    let matchesEmpty = false;
-
-    try {
-      matchesEmpty = new RegExp(query).test('');
-    } catch {
-      matchesEmpty = false;
-    }
-
-    if (matchesEmpty) {
-      return {
-        ok: false,
-
-        summary: 'шаблон слишком широкий',
-
-        detail:
-          `Регулярка «${query}» совпадает с пустой строкой — под неё попадёт почти весь проект. ` +
-          'Сузь её или добавь `glob` (например, `src/**/*.ts`); для одной строки — `edit` с `oldText`.',
-      };
-    }
-  }
-
-  const replacement = typeof args.replacement === 'string' ? args.replacement : '';
-
-  const result = await workspace.replace({
-    query,
-
-    replacement,
-
-    isRegex,
-
-    caseSensitive: optionalBoolean(args, 'caseSensitive') ?? false,
-
-    glob,
-  });
-
-  if (result.replaced === 0) {
-    return {
-      ok: true,
-
-      summary: 'ничего не заменено',
-
-      detail: `Вхождений «${query}» не найдено${args.glob ? ` по маске ${args.glob}` : ''}.`,
-    };
-  }
-
-  const root = workspace.rootPath();
-
-  const shown = result.files.slice(0, MAX_REPLACE_SUMMARY_FILES);
-
-  const lines = shown.map((file) => relative(file, root));
-
-  if (result.files.length > shown.length) lines.push(`… ещё файлов: ${result.files.length - shown.length}`);
-
-  return {
-    ok: true,
-
-    summary: `заменено вхождений: ${result.replaced} · файлов: ${result.files.length}`,
-
-    detail: lines.join('\n'),
-
-    changes: result.files.map((file) => ({
-      path: file,
-
-      kind: 'modified' as const,
-
-      replaced: result.replaced,
-    })),
-  };
 }
 
 /** Новый файл. Существующий не перетираем — для этого есть правка. */
