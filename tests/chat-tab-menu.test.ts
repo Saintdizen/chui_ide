@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatTabMenuPlan } from '../src/renderer/ui/chat';
+import { chatTabMenuPlan } from '../src/renderer/ui/chat-tab-menu';
 
 /**
  * П.9: «Контекстное меню: группы и подменю».

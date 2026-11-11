@@ -95,7 +95,8 @@ import { segmentsOf } from '../../shared/chat-find';
 import { promptNeighbour } from '../../shared/chat-nav';
 import { createChatFindBar } from './chat-find-bar';
 import { showContextMenu } from './context-menu';
-import { isPopupOpen, type PopupMenuItem } from './popup-menu';
+import { chatTabMenuPlan } from './chat-tab-menu';
+import { isPopupOpen } from './popup-menu';
 import { showToast } from './toast';
 import {
   announceMessage,
@@ -278,40 +279,12 @@ const COMPACT_CONTINUE_PROMPT = [
  * доступны и что подтверждается у пользователя.
  */
 /**
- * План меню вкладки беседы (TASKS 9) — чистая, поэтому проверяема.
+ * План меню вкладки беседы — вынесен в `chat-tab-menu.ts`.
  *
- * Было три пункта подряд без единого разделителя: два экспорта-близнеца и
- * закрытие стояли вплотную, подменю не было ни одного. Теперь вывод — в
- * подменю «Экспорт» (два формата одного действия), затем отдельно закрытие:
- * одну, другие, все — последствия разные, и места им по группе.
- *
- * `enabled: false`, а не исчезающие пункты: нулевой пункт двигал бы остальные
- * под курсором ровно в момент клика.
+ * Чистая функция жила здесь и тянула в знаменатель покрытия весь DOM-файл
+ * (4.8k строк) ради одного теста. Переэкспорт — чтобы не трогать вызовы.
  */
-export function chatTabMenuPlan(
-  state: { empty: boolean; others: boolean },
-  actions: {
-    exportAs(format: ChatExportFormat): void;
-    close(): void;
-    closeOthers(): void;
-    closeAll(): void;
-  },
-): PopupMenuItem[] {
-  return [
-    {
-      label: 'Экспорт',
-      enabled: !state.empty,
-      submenu: [
-        { label: 'В Markdown…', onSelect: () => actions.exportAs('markdown') },
-        { label: 'В JSON…', onSelect: () => actions.exportAs('json') },
-      ],
-    },
-    { separator: true },
-    { label: 'Закрыть беседу', onSelect: () => actions.close() },
-    { label: 'Закрыть другие беседы', enabled: state.others, onSelect: () => actions.closeOthers() },
-    { label: 'Закрыть все беседы', enabled: state.others, onSelect: () => actions.closeAll() },
-  ];
-}
+export { chatTabMenuPlan } from './chat-tab-menu';
 
 export function createChatPanel(deps: ChatDeps): ChatView {
   let settings = deps.settings;
