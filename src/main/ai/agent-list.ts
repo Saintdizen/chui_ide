@@ -6,7 +6,7 @@
  */
 import type { WorkspaceService } from '../workspace/workspace';
 import { describe, relative } from './agent-terminal';
-import { optionalString } from './tool-args';
+import { optionalInteger, optionalString } from './tool-args';
 import { collectTree, treeDepth, treeLines, treeMaxLines, treeTail, treeTitle } from './agent-tree';
 import { MAX_DIR_ENTRIES } from './tool-rules';
 import type { ToolOutcome } from './tool-context';
@@ -61,6 +61,8 @@ async function listTree(
 
 /** Просили ли глубину явно: без неё остаётся прежний плоский список. */
 function treeDepthArg(args: Record<string, unknown>): boolean {
-  const depth = args.depth;
-  return typeof depth === 'number' ? depth > 1 : false;
+  // Разбираем тем же optionalInteger, что и treeDepth, иначе модель прислала бы
+  // "2" строкой — ветка дерева не выбралась бы, а глубина тихо осталась 1.
+  const depth = optionalInteger(args, 'depth');
+  return depth !== undefined && depth > 1;
 }

@@ -79,12 +79,23 @@ describe('list с depth', () => {
     expect(names.slice(0, 2)).toEqual(['app', 'lib']);
   });
 
+  it('depth строкой — тоже дерево, а не молчаливый плоский список', async () => {
+    // Модель присылает числа строкой чаще, чем кажется: treeDepth умеет их
+    // разбирать, но ветку выбирал сырой typeof — и "2" проваливалось в плоский
+    // список молча. Тест держит ветвление согласованным с разбором.
+    const outcome = await list({ path: path.join(dir, 'src'), depth: '2' });
+    expect(String(outcome.summary)).toContain('дерево');
+    expect(String(outcome.detail)).toContain('src/app/main.ts');
+  });
+
   it('depth и maxLines держатся в разумных рамках', () => {
     expect(treeDepth({})).toBe(3);
     expect(treeDepth({ depth: 99 })).toBe(8);
     expect(treeDepth({ depth: 0 })).toBe(3);
+    expect(treeDepth({ depth: '5' })).toBe(5);
     expect(treeMaxLines({})).toBe(400);
     expect(treeMaxLines({ maxLines: 10_000 })).toBe(2000);
+    expect(treeMaxLines({ maxLines: '120' })).toBe(120);
   });
 
   it('хвост молчит, когда всё показано', () => {
