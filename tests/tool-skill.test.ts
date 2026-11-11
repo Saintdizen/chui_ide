@@ -59,3 +59,44 @@ describe('tool skill: успешный путь', () => {
     expect(r.summary).toBeTruthy();
   });
 });
+
+describe('tool: внутренний сбой не выходит сырым в агент', () => {
+  it('сбой `app.getPath` переводится в понятную причину', async () => {
+    // Так падает любая подсистема, которая живёт в Electron: вне приложения
+    // `app` — undefined. Агент не должен видеть «reading \'getPath\'» — это
+    // читается как баг IDE, а не как «нужен редактор».
+    const boom = new Error("Cannot read properties of undefined (reading 'getPath')");
+    const r = await runTool(
+      {
+        workspaceRoot: '/w',
+        skills: {
+          list: async () => {
+            throw boom;
+          },
+        },
+      } as unknown as ToolContext,
+      'skill',
+      '{}',
+    );
+    expect(r.ok).toBe(false);
+    expect(r.summary).not.toContain('getPath');
+    expect(r.summary).toMatch(/редактор/i);
+  });
+
+  it('свой внятный текст отказа не подменяется', async () => {
+    const boom = new Error('Путь вне рабочей папки');
+    const r = await runTool(
+      {
+        workspaceRoot: '/w',
+        skills: {
+          list: async () => {
+            throw boom;
+          },
+        },
+      } as unknown as ToolContext,
+      'skill',
+      '{}',
+    );
+    expect(r.summary).toBe('Путь вне рабочей папки');
+  });
+});

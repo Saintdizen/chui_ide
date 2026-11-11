@@ -563,9 +563,27 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
   } catch (error) {
     return {
       ok: false,
-      summary: error instanceof Error ? error.message : String(error),
+      summary: explainToolFailure(error),
     };
   }
+}
+
+/**
+ * Перевод внутреннего сбоя в причину, понятную агенту.
+ *
+ * `error.message` дословно отдавать нельзя: когда подсистема живёт в
+ * Electron (`app.getPath` для каталога настроек, кэша, сессий), вне
+ * приложения падает `Cannot read properties of undefined (reading 'getPath')`.
+ * Агент читает это как баг IDE и бросает работу, хотя дело в том, что
+ * инструменту нечем работать. Остальные ошибки оставляем как есть —
+ * это уже наши собственные внятные тексты, и подменять их нельзя.
+ */
+function explainToolFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/reading '(getPath|paths|isPackaged)'/.test(message)) {
+    return 'Инструмент недоступен: нужен редактор, а он не запущен';
+  }
+  return message;
 }
 
 /* ── браузер ────────────────────────────────────────────────────────────── */
