@@ -687,9 +687,19 @@ export class WorkspaceService {
       await this.onBeforeChange?.(resolved, 'delete');
       // Своя копия — потому что `shell.trashItem` ручки не возвращает, и
       // «Вернуть» из системной корзины кроссплатформенно нечем.
+      // Проверяем сам `shell`, а не только ошибку вызова: в среде без Electron
+      // (тесты, headless) `shell` — `undefined`, и падение дало бы «Cannot read
+      // properties of undefined (reading 'trashItem')» — правду о реализации,
+      // но не ответ на вопрос, почему файл на месте. Проверка ДО `keep`: иначе
+      // отказ оставлял бы в истории снимок файла, который никуда не делся.
+      if (typeof shell?.trashItem !== 'function') {
+        throw new RpcFailure(RpcErrorCode.Internal, 'Корзина недоступна: приложение запущено без Electron');
+      }
       undo = await this.trashUndo.keep(resolved, signal);
       await shell.trashItem(resolved);
     } catch (error) {
+      // Своё сообщение уже объясняет причину — не оборачиваем второй раз.
+      if (error instanceof RpcFailure) throw error;
       throw new RpcFailure(
         RpcErrorCode.Internal,
         `Не удалось переместить в корзину: ${error instanceof Error ? error.message : String(error)}`,

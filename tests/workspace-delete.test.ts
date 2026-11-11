@@ -88,6 +88,35 @@ describe('удаление в корзину', () => {
     await expect(fs.readFile(path.join(root, 'a.ts'), 'utf8')).resolves.toBe('x\n');
   });
 
+  it('нет корзины вовсе — причина понятна, а не «reading trashItem»', async () => {
+    // Случай не экзотический: в чистом Node `electron.shell` — undefined,
+    // и раньше отказ выглядел как TypeError из недр реализации. Тест держит
+    // границу: сообщение называет причину, файл цел, снимок для undo не записан.
+    const root = await makeRoot();
+    const file = path.join(root, 'a.ts');
+    await fs.writeFile(file, 'x\n', 'utf8');
+    const ws = service();
+    await ws.open(root);
+
+    const { shell } = await import('electron');
+    const saved = (shell as unknown as { trashItem?: unknown }).trashItem;
+    (shell as unknown as Record<string, unknown>).trashItem = undefined;
+    try {
+      const failure = await ws.trash(file).then(
+        () => null,
+        (error: Error) => error.message,
+      );
+      expect(failure, 'удаление без корзины должно отказать').not.toBeNull();
+      expect(failure).toMatch(/корзин/i);
+      expect(failure, 'внутренний TypeError не должен доходить до человека').not.toMatch(
+        /reading 'trashItem'|trashItem is not a function/,
+      );
+    } finally {
+      (shell as unknown as Record<string, unknown>).trashItem = saved;
+    }
+    await expect(fs.readFile(file, 'utf8')).resolves.toBe('x\n');
+  });
+
   it('вне проекта не удаляет, даже если путь выглядит своим', async () => {
     const root = await makeRoot();
     const outside = await makeRoot();
