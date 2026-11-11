@@ -93,4 +93,19 @@ describe('имя файла как запрос', () => {
     const outcome = await search({ query: 'нет-такого.ts' });
     expect(String(outcome.detail)).not.toContain('совпал с именем файла');
   });
+
+  it('limit больше потолка не обещает «увеличьте limit» впустую', async () => {
+    // Потолок держит workspace (MAX_SEARCH_RESULTS), агент передаёт limit как
+    // есть. Сравнивать files.length с н е з а ж а т ы м limit — значит советовать
+    // «увеличьте limit» там, где увеличивать уже нечего.
+    const outcome = await search({ query: 'util', filesOnly: true, limit: 5000 });
+    const detail = String(outcome.detail);
+    expect(detail).not.toContain('увеличьте limit');
+  });
+
+  it('limit строкой — тот же лимит, а не вежливое игнорирование', async () => {
+    const wide = await search({ query: 'util', filesOnly: true, limit: '1' });
+    const narrow = await search({ query: 'util', filesOnly: true, limit: 1 });
+    expect(String(wide.detail)).toBe(String(narrow.detail));
+  });
 });
