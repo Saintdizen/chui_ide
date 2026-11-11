@@ -391,4 +391,32 @@ describe('команды иерархии исполняются', () => {
       expect(toast).toHaveBeenCalledWith('Моникер скопирован');
     });
   });
+
+  it('список экспортов: каждый вид подписан по-русски', async () => {
+    // exportKindLabel — мелкие ветки, до которых отказы не доходят;
+    // неизвестный вид не должен давать undefined в подписи.
+    const built = build({
+      request: async () => ({
+        total: 4,
+        files: [
+          {
+            path: '/p/a.ts',
+            entries: [
+              { line: 1, kind: 'default' },
+              { line: 2, kind: 'star' },
+              { line: 3, kind: 'named' },
+              { line: 4, kind: 'что-то' },
+            ],
+          },
+        ],
+      }),
+    });
+
+    built.commands.get('search.findExports')?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Неизвестный вид не должен давать undefined: иначе в списке пустая подпись.
+    const items = shown.mock.calls[0]?.[0] as { hint: string }[];
+    expect(items.map((item) => item.hint)).toEqual(['по умолчанию', 'звёздочкой', 'списком', 'объявлением']);
+  });
 });
