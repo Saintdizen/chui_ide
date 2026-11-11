@@ -11,6 +11,30 @@ Linux и macOS.
 
 Разделы ниже описывают, что приложение умеет и как этим пользоваться.
 
+## Запуск из исходников на Linux
+
+Electron на Linux спотыкается о собственную песочницу: `chrome-sandbox` после `npm ci`
+лежит без бита SUID и без владельца root, и приложение абортится с
+`The SUID sandbox helper binary was found, but is not configured correctly` и SIGTRAP.
+Лечится один раз на клон (и повторяется после каждой переустановки зависимостей —
+`npm ci` сбрасывает права):
+
+```sh
+sudo chown root:root node_modules/electron/dist/chrome-sandbox
+sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+```
+
+То же самое без sudo и без выдачи прав — флагом на запуск:
+
+```sh
+npm run dev -- --no-sandbox
+npm start -- --no-sandbox
+```
+
+На дистрибутивах, где AppArmor запрещает непривилегированные user namespaces
+(Ubuntu 24.04 и новее, `kernel.apparmor_restrict_unprivileged_userns=1`), первый способ
+может не помочь — там нужен именно `--no-sandbox`.
+
 ## Начало работы
 
 **Стартовое окно.** При запуске открывается окно с тремя действиями — «Открыть проект»,
