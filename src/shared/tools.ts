@@ -59,6 +59,38 @@ export function toolActions(name: AgentToolName): string[] {
   return spec?.inputSchema.properties.action?.enum ?? [];
 }
 
+/**
+ * Поля, которые разбор понимает, а схема не объявляет.
+ *
+ * Валидация идёт до реализации, и без списка верный вызов упирается
+ * в «неизвестный аргумент». Схемы поэтому не расширяем: `merged-tools` держит
+ * «у `terminal` нет `action`» (диспетчеризация по имени), а `search` — «флаги
+ * строкой». Причина у каждого имени своя, и раньше все три жили одной ветвистой
+ * функцией в `agent-tools.ts` — рядом с валидатором, но вдали от схем, которые
+ * прощают. Таблица держит причину рядом с именем: при следующей правке схемы
+ * видно, что `search.isRegex` без неё сломается (`tests/merged-tools.test.ts`).
+ *
+ * `false` — не раскладка, а повод дать подсказку: разбор таких имён отвечает
+ * «зови edit»/«зови terminalOutput», и отказ «неизвестный аргумент» заслонил бы
+ * адрес, куда идти. `edit.action` — третья причина: старые беседы так зовут
+ * `create`/`move`/`replace`, и `edit` делегирует их в `file`.
+ */
+export const TOLERATED_ARGUMENTS: Readonly<Record<string, readonly string[]>> = {
+  // Старые имена и синонимы из прошлых бесед: разбор сам скажет, куда идти,
+  // либо поле уже читается рядом с новым именем.
+  terminal: ['action'],
+  file: ['action', 'path', 'contents'],
+  edit: ['action', 'path', '*.edits'],
+  search: ['isRegex', 'caseSensitive', 'filesOnly'],
+};
+
+/** Прощает ли инструмент поле, которого нет в его схеме. */
+export function isToleratedArgument(name: string, path: string): boolean {
+  const rules = TOLERATED_ARGUMENTS[name];
+  if (!rules) return false;
+  return rules.some((rule) => rule === '*' || rule === path || (rule.startsWith('*.') && path.endsWith(rule.slice(1))));
+}
+
 export type AgentToolName =
   | 'list'
   | 'read'

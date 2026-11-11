@@ -382,7 +382,7 @@ export function describeUnwritten(reason: string | undefined): string {
  */
 export async function fileAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const action = requireString(args, 'action').trim();
-  const missing = missingForAction(args, FILE_ARGS[action] ?? []);
+  const missing = missingForAction(args, FILE_ARGS[action] ?? RETIRED_FILE_ARGS[action] ?? []);
   if (missing) return missing;
   // Смысл каждого действия — в его полях, а не в шапке: шапку модель читает один
   // раз, а поле — ровно перед тем, как его заполнить. `contents` у `create` и
@@ -690,8 +690,18 @@ const FILE_ARGS: Record<string, readonly string[]> = {
   // Два способа создать файл — папку под него и текст в файл — раньше собирали
   // через терминал: `mkdir` без подтверждения, `cp` тоже. Имена свои.
   mkdir: ['path'],
-  // Снятые действия остаются в таблице ради подсказки: их всё ещё пробуют
-  // вызвать, и отказ должен называть поля, а не просто «нельзя».
+};
+
+/**
+ * Снятые действия — не живые, а подсказка для старых бесед.
+ *
+ * `create` и `replace` больше не объявлены в схеме `file` (их заменили `edit` и
+ * `search`+`edit`), но старые беседы зовут их по имени и получают отказ. Отказ
+ * называет поля — поэтому имена остались. В общей таблице они читались как
+ * живые: два ключа из семи были снятыми и из кода это не следовало. Теперь
+ * отдельная таблица — добавка сюда сразу видна и не тонет в живых действиях.
+ */
+const RETIRED_FILE_ARGS: Record<string, readonly string[]> = {
   create: ['path', 'contents'],
   replace: ['query', 'replacement'],
 };

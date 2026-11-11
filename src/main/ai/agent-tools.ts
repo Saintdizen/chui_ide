@@ -10,7 +10,7 @@
 import { confirmFile, coveredRequest, uncoverFiles } from '../../shared/read-coverage';
 import { isMcpToolName } from '../../shared/mcp';
 import { actionClassOf, runModeDenied, type RunModes } from '../../shared/permissions';
-import { parseToolArguments } from '../../shared/tools';
+import { isToleratedArgument, parseToolArguments } from '../../shared/tools';
 import {
   CHARS_PER_TOKEN,
   CHARS_PER_TOKEN_WIDE,
@@ -194,30 +194,12 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     // и отчитывался успехом). `unknownArguments` была написана давно, но не
     // вызывалась — молчала ровно в том случае, ради которого её завели.
     //
-    // `tolerated` — для раскладок, которые разбор понимает, а схема не
-    // объявляет: валидация идёт ДО реализации, и без этого верный вызов
-    // упирается в «неизвестный аргумент». Схемы при этом не расширяем:
-    // `merged-tools` держит «у `terminal` нет `action`» (разведён по именам),
-    // а `search` — «флаги строкой». Список исключений — долг, см. TASKS п.95.
-    const tolerated = (issuePath: string): boolean => {
-      if (name === 'edit' && (issuePath === 'action' || issuePath === 'path')) return false;
-      if (name === 'edit' && issuePath.endsWith('.edits')) return false;
-      // `terminal.action` и `file.action` — не раскладка, а повод дать подсказку:
-      // диспетчеризация идёт по имени, а разборы этих инструментов отвечают
-      // «зови edit»/«зови terminalOutput». Пропускаем до разбора именно ради этой
-      // подсказки: грубое «неизвестный аргумент» не сказало бы, куда идти.
-      // `edit.action` — третья причина: старые беседы так зовут `create`/`move`/
-      // `replace`, и `edit` делегирует их в `file` (см. merged-tools.test.ts).
-      // Замер 11.11 по 127 живым вызовам: `run` с `command` — 1, `file.action` —
-      // из старых бесед (30.10: 12); молча они терялись, пока валидатор спал.
-      if (name === 'terminal' && issuePath === 'action') return false;
-      if (name === 'file' && (issuePath === 'action' || issuePath === 'path')) return false;
-      if (name === 'file' && issuePath === 'contents') return false;
-      if (name === 'search' && (issuePath === 'isRegex' || issuePath === 'caseSensitive')) return false;
-      if (name === 'search' && issuePath === 'filesOnly') return false;
-      return true;
-    };
-    const unknown = unknownArguments(spec.inputSchema, parsed.value).filter((issue) => tolerated(issue.path));
+    // Что прощается и почему — в `TOLERATED_ARGUMENTS` (`src/shared/tools.ts`),
+    // рядом со схемами. Здесь раньше жила ветвистая функция из девяти условий,
+    // и причину каждого приходилось держать в голове.
+    const unknown = unknownArguments(spec.inputSchema, parsed.value).filter(
+      (issue) => !isToleratedArgument(name, issue.path),
+    );
     if (unknown.length > 0) {
       const paths = unknown.map((issue) => issue.path).join(', ');
       return {

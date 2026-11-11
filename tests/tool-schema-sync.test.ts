@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
-import { AGENT_TOOLS, toolActions, type JsonSchema, type JsonSchemaProperty } from '../src/shared/tools';
+import {
+  AGENT_TOOLS,
+  TOLERATED_ARGUMENTS,
+  toolActions,
+  type JsonSchema,
+  type JsonSchemaProperty,
+} from '../src/shared/tools';
 
 /**
  * Сверка схемы с реализацией: каждое объявленное поле должно дойти до разбора.
@@ -76,8 +82,8 @@ const READENS: { tool: string; fields: string[]; why: string }[] = [
   },
   {
     tool: 'edit',
-    fields: ['action'],
-    why: 'старая раскладка `action: old|create|replace`, разбор в stillLegacyAction',
+    fields: ['action', 'path', '*.edits'],
+    why: 'старая раскладка: `action: create|replace` берёт `path` и `*.edits` (FILE_ARGS в agent-edit)',
   },
   {
     tool: 'terminal',
@@ -90,6 +96,26 @@ const READENS: { tool: string; fields: string[]; why: string }[] = [
     why: 'старые беседы: `create`/`replace`, `path` вместо `name`, тело в `contents`',
   },
 ];
+
+/**
+ * Два списка прощённого — это уже разъезд в зачатке.
+ *
+ * READENS описывает поля для проверки, TOLERATED_ARGUMENTS решает по ним в
+ * рантайме. Сейчас они совпадают лишь потому, что перенесены дословно. Стоит
+ * добавить поле в одно место — и тест продолжит проверять не то, что живёт.
+ */
+describe('прощённые поля описаны один раз', () => {
+  it('TOLERATED_ARGUMENTS и READENS называют один набор полей', () => {
+    const fromCode: Record<string, string[]> = {};
+    for (const [tool, rules] of Object.entries(TOLERATED_ARGUMENTS)) {
+      fromCode[tool] = rules.filter((rule): rule is string => typeof rule === 'string').sort();
+    }
+    const fromTest: Record<string, string[]> = {};
+    for (const { tool, fields } of READENS) fromTest[tool] = [...fields].sort();
+
+    expect(fromCode).toEqual(fromTest);
+  });
+});
 
 describe('читаемое объявлено или осознанно пропущено', () => {
   for (const { tool, fields, why } of READENS) {
