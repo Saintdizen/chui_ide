@@ -47,6 +47,18 @@ export const WEB_ACTION_FIELDS: Record<'search' | 'fetch', readonly string[]> = 
  */
 export const LINE_NUMBERING = 'Lines and columns are 1-based, the same as read prints them.';
 
+/**
+ * Список действий инструмента — из его же схемы, а не из второй копии рядом.
+ *
+ * Подсказки в отказах (`agent-browser`, `agent-debug`) держали перечень руками,
+ * и он уже разошёлся со схемой: в браузере был забыт `screenshot`. Модель читала
+ * схему целиком, а в отказе — огрызок. Теперь источник один.
+ */
+export function toolActions(name: AgentToolName): string[] {
+  const spec = AGENT_TOOLS.find((tool) => tool.name === name);
+  return spec?.inputSchema.properties.action?.enum ?? [];
+}
+
 export type AgentToolName =
   | 'list'
   | 'read'

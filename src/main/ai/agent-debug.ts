@@ -11,6 +11,7 @@
  */
 
 import type { DebugFrame, DebugScope, DebugVariable } from '../../shared/api';
+import { toolActions } from '../../shared/tools';
 import { relativePath } from './agent-terminal';
 import { optionalInteger, requireString } from './tool-args';
 import { unknownAction } from './agent-present';
@@ -179,9 +180,14 @@ async function perform(ctx: ToolContext, args: Record<string, unknown>): Promise
     case 'stepOut':
       await ctx.debug.step('out');
       break;
-    default:
+    case 'stop':
       ctx.debug.stop();
       return { ok: true, summary: 'Отладчик остановлен' };
+    default:
+      // Сюда не попасть: debugAction фильтрует действия до вызова. Но `default`
+      // с остановкой был ловушкой — при любой рассинхронизации опечатка молча
+      // убила бы сессию и отчиталась об успехе.
+      return unknownAction(action, `debug: ${toolActions('debug').join(', ')}.`);
   }
 
   // Остановка приходит событием адаптера, а не к моменту возврата вызова: кадры
@@ -317,9 +323,6 @@ export async function debugAction(ctx: ToolContext, args: Record<string, unknown
     case 'set':
       return await setValue(ctx, args);
     default:
-      return unknownAction(
-        action,
-        'debug: status, breakpoints, start, continue, pause, stepOver, stepInto, stepOut, stop, stack, variables, evaluate, set.',
-      );
+      return unknownAction(action, `debug: ${toolActions('debug').join(', ')}.`);
   }
 }

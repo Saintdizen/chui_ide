@@ -158,6 +158,24 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
   // У внешних (MCP) схемы нет в `AGENT_TOOLS`, их проверяет сам сервер.
   const spec = toolSpec(name);
   if (spec) {
+    // Значение — раньше наличия: при опечатке в `action` модель получала «не хватает
+    // аргумента: query», потому что `query` проверялся первым, а `switch` ниже до
+    // проверки действия не доходил. Отказ вёл не туда — чинили не то.
+    const wrong = wrongArguments(spec.inputSchema, parsed.value).filter(
+      (issue) =>
+        !(name === 'file' && issue.path === 'action' && (issue.value === 'create' || issue.value === 'replace')),
+    );
+    if (wrong.length > 0) {
+      // Сначала значение, которое пришло от модели (иначе отказ не объясняет, что
+      // не так), потом перечень — он же в `detail`.
+      const values = wrong.map((issue) => `${issue.path} «${issue.value}»`).join(', ');
+      const allowed = wrong.map((issue) => issue.allowed.join(', ')).join('; ');
+      return {
+        ok: false,
+        summary: `Неизвестное значение аргумента: ${values}`,
+        detail: `Допустимые значения: ${allowed}.\nАргументы ${name}: ${argumentsShape(spec.inputSchema)}`,
+      };
+    }
     const missing = missingArguments(spec.inputSchema, parsed.value);
     if (missing.length > 0) {
       // Форма — в том же отказе: без неё потерянное поле ищут в неверном месте
@@ -206,26 +224,6 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         ok: false,
         summary: `Неизвестный аргумент: ${paths}`,
         detail: `Аргументы ${name}: ${argumentsShape(spec.inputSchema)}`,
-      };
-    }
-    // Значение мимо `enum` — тот же класс ошибки, что забытое поле: `switch` ниже
-    // ответит «действие неизвестно» и не назовёт варианты, а модель потратит шаг.
-    // Схема `file` больше не объявляет `create`/`replace` (дубли `edit` и `search`+`edit`),
-    // но старые беседы зовут их по имени — реализация жива, поэтому мимо `enum`
-    // пропускаем ровно эти два действия.
-    const wrong = wrongArguments(spec.inputSchema, parsed.value).filter(
-      (issue) =>
-        !(name === 'file' && issue.path === 'action' && (issue.value === 'create' || issue.value === 'replace')),
-    );
-    if (wrong.length > 0) {
-      // Как и у нехватки поля: сначала значение, которое пришло от модели (иначе
-      // отказ не объясняет, что не так), потом перечень — он же в `detail`.
-      const values = wrong.map((issue) => `${issue.path} «${issue.value}»`).join(', ');
-      const allowed = wrong.map((issue) => issue.allowed.join(', ')).join('; ');
-      return {
-        ok: false,
-        summary: `Неизвестное значение аргумента: ${values}`,
-        detail: `Допустимые значения: ${allowed}.\nАргументы ${name}: ${argumentsShape(spec.inputSchema)}`,
       };
     }
   }

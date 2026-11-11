@@ -8,6 +8,7 @@
  */
 
 import { formatBrowserSnapshot, type BrowserSnapshot } from '../../shared/browser';
+import { toolActions } from '../../shared/tools';
 import { missingForAction, optionalBoolean, requireString } from './tool-args';
 import type { ToolContext, ToolOutcome } from './tool-context';
 
@@ -79,7 +80,7 @@ export async function browserAction(ctx: ToolContext, args: Record<string, unkno
       return {
         ok: false,
         summary: `Неизвестное действие браузера: ${action}`,
-        detail: 'Допустимые: open, snapshot, click, type, evaluate, zoom, close.',
+        detail: `Допустимые: ${toolActions('browser').join(', ')}.`,
       };
   }
 }

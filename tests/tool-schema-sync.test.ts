@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
-import { AGENT_TOOLS, type JsonSchema, type JsonSchemaProperty } from '../src/shared/tools';
+import { AGENT_TOOLS, toolActions, type JsonSchema, type JsonSchemaProperty } from '../src/shared/tools';
 
 /**
  * Сверка схемы с реализацией: каждое объявленное поле должно дойти до разбора.
@@ -101,6 +101,37 @@ describe('читаемое объявлено или осознанно проп
       const outcome = await runTool(ctx, tool, JSON.stringify(args));
       // Не отбито как опечатка — значит реализация поле не теряет.
       expect(outcome.summary, `${tool}: ${why}`).not.toContain('Неизвестный аргумент');
+    });
+  }
+});
+
+/**
+ * Подсказка в отказе не может расходиться со схемой.
+ *
+ * Каждый инструмент с `action` отвечает на опечатку текстом «допустимые такие-то».
+ * Когда этот текст писан руками, он отстаёт: у `browser` в подсказке не было
+ * `screenshot`, и модель, поверив отказу, переставала искать в верном
+ * направлении. Поэтому набор берём из `toolActions`, а тест сторожит, что ни у
+ * кого нет своей копии: подсказка обязана называть ровно действия схемы.
+ */
+describe('подсказка об отказе называет ровно действия схемы', () => {
+  const withAction = AGENT_TOOLS.filter((spec) => 'action' in (spec.inputSchema.properties ?? {}));
+
+  it('инструменты с действием нашлись', () => {
+    expect(withAction.length).toBeGreaterThan(5);
+  });
+
+  for (const spec of withAction) {
+    it(`${spec.name}: каждое действие из схемы названо`, async () => {
+      const actions = toolActions(spec.name);
+      expect(actions.length, `${spec.name}: scheme without actions`).toBeGreaterThan(0);
+      // Заведомо неверное действие ведёт в ветку отказа, откуда и берём текст.
+      const outcome = await runTool(ctx, spec.name, JSON.stringify({ action: '__nope__' }));
+      expect(outcome.ok).toBe(false);
+      const said = `${outcome.summary}\n${outcome.detail ?? ''}`;
+      for (const action of actions) {
+        expect(said, `${spec.name}: в подсказке нет «${action}»`).toContain(action);
+      }
     });
   }
 });
