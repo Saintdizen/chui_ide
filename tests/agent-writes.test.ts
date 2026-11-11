@@ -4,6 +4,7 @@ import type { ApplyEditsHostResult } from '../src/shared/api';
 import type { PatchFile } from '../src/shared/patch';
 import { mergePatchResult } from '../src/renderer/ui/chat-patches';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
+import { mergeDecisions } from '../src/main/ai/agent-edit';
 import type { WorkspaceService } from '../src/main/workspace/workspace';
 
 /**
@@ -362,5 +363,52 @@ describe('edit — формы, которые модель шлёт на сам�
     // Файл уже есть: угадывать «заменить целиком» или «дописать» нельзя.
     expect(outcome.summary).toContain('oldText');
     expect(createFile).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Свод нескольких ответов renderer в один — по файлам и по пачке параллельных
+ * правок. Смысл проверки: агент узнаёт о нелёгших правках только из этой сводки,
+ * поэтому причины отказа в ней теряться не должны.
+ */
+describe('mergeDecisions — сводка причин', () => {
+  it('одиночный ответ отдаётся как есть, без копирования', () => {
+    const only: ApplyEditsHostResult = {
+      rejected: false,
+      result: { reports: [], failed: [] },
+      unwritten: ['/proj/a.ts'],
+      unwrittenReasons: { '/proj/a.ts': 'нет доступа' },
+    };
+    // Без копии: свод из одного ответа — это тот же ответ, а не его клон.
+    expect(mergeDecisions([only])).toBe(only);
+  });
+
+  it('отказы и ошибки склеиваются', () => {
+    const merged = mergeDecisions([
+      { rejected: false, result: { reports: [], failed: [{ path: '/proj/a.ts', message: 'м' }] } },
+      { rejected: true, result: { reports: [], failed: [] } },
+    ]);
+    expect(merged.rejected).toBe(true);
+    expect(merged.result?.failed).toHaveLength(1);
+  });
+
+  it('причины нелёгших правок не теряются при склейке', () => {
+    // Баг: причина говорит агенту «почему», без неё следующий круг — догадки.
+    const merged = mergeDecisions([
+      {
+        rejected: false,
+        result: { reports: [], failed: [] },
+        unwritten: ['/proj/a.ts'],
+        unwrittenReasons: { '/proj/a.ts': 'нет доступа' },
+      },
+      {
+        rejected: false,
+        result: { reports: [], failed: [] },
+        unwritten: ['/proj/b.ts'],
+        unwrittenReasons: { '/proj/b.ts': 'конфликт' },
+      },
+    ]);
+    expect(merged.unwritten).toEqual(['/proj/a.ts', '/proj/b.ts']);
+    expect(merged.unwrittenReasons).toEqual({ '/proj/a.ts': 'нет доступа', '/proj/b.ts': 'конфликт' });
   });
 });

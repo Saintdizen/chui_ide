@@ -354,6 +354,9 @@ export const EDIT_CONTEXT_LINES = 4;
 export function mergeDecisions(decisions: readonly ApplyEditsHostResult[]): ApplyEditsHostResult {
   const [only] = decisions;
   if (decisions.length === 1 && only) return only;
+  // Причины склеиваем так же, как сам список: без них `describeUnwritten`
+  // остаётся без «почему», и следующий круг агент делает догадками.
+  const reasons = decisions.flatMap((decision) => Object.entries(decision.unwrittenReasons ?? {}));
   return {
     rejected: decisions.some((decision) => decision.rejected),
     result: {
@@ -361,6 +364,7 @@ export function mergeDecisions(decisions: readonly ApplyEditsHostResult[]): Appl
       failed: decisions.flatMap((decision) => decision.result?.failed ?? []),
     },
     unwritten: decisions.flatMap((decision) => decision.unwritten ?? []),
+    ...(reasons.length > 0 ? { unwrittenReasons: Object.fromEntries(reasons) } : {}),
   };
 }
 
