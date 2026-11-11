@@ -57,3 +57,32 @@ describe('макет рабочей области проекта', () => {
     expect((await store.loadLayout(root))?.dockSize).toBe(260);
   });
 });
+
+describe('sanitizeLayout: края настроек', () => {
+  it('пустые настройки целиком дают умолчания', () => {
+    // `value ?? {}` — ветка для проекта без сохранённого макета: без неё
+    // чтение падало бы на `undefined.sidebarSize`.
+    expect(sanitizeLayout(undefined)).toEqual(DEFAULT_LAYOUT);
+  });
+
+  it('поле со значением undefined заменяется умолчанием, а не стирается', () => {
+    // JSON из старой версии может не знать поля; `?? ` возвращает умолчание
+    // только при null/undefined — здесь и проверяется вторая половина.
+    const layout = sanitizeLayout({ sidebarSize: undefined });
+    expect(layout.sidebarSize).toBe(DEFAULT_LAYOUT.sidebarSize);
+  });
+
+  it('панель инструментов может стоять справа', () => {
+    // `bottom/right` — равноправные значения; раньше проверялась только
+    // `sidebarPosition`, а `dockPosition` оставался непроверенным.
+    expect(sanitizeLayout({ dockPosition: 'right' }).dockPosition).toBe('right');
+    // Файл настроек — JSON с диска, там может быть любая строка;
+    // приведение в тесте — это и есть имитация такого ввода.
+    const junk = { dockPosition: 'сбоку' as unknown as 'bottom' };
+    expect(sanitizeLayout(junk).dockPosition).toBe('bottom');
+  });
+
+  it('правая сторона панели остаётся правой', () => {
+    expect(sanitizeLayout({ sidebarPosition: 'right' }).sidebarPosition).toBe('right');
+  });
+});
