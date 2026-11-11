@@ -16,9 +16,24 @@ describe('mind', () => {
 
     expect(ask).toHaveBeenCalledWith('Какой подход?', undefined);
     expect(outcome.ok).toBe(true);
-    // Ответ идёт модели тем же текстом, что уходит в карточку: без правок и меток.
+    // Модель получает ответ без правок и меток.
     expect(outcome.detail).toBe('вариант А');
     expect(outcome.summary).toBe('вариант А');
+  });
+
+  // Ответ человека — до 2000 символов, а summary — карточка в UI: раньше туда
+  // ехал весь текст, и карточка раздувалась на каждой реплике.
+  it('длинный ответ не раздувает карточку, но доходит до модели целиком', async () => {
+    const long = `${'а'.repeat(300)}\nвторая строка`;
+    const outcome = await runTool(
+      context(async () => long),
+      'mind',
+      JSON.stringify({ action: 'ask', question: 'Какой подход?' }),
+    );
+
+    expect(outcome.detail).toBe(long);
+    expect(outcome.summary.length).toBeLessThanOrEqual(121);
+    expect(outcome.summary.endsWith('…')).toBe(true);
   });
 
   it('готовые варианты уходят человеку списком, лишние отсечены', async () => {

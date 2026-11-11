@@ -150,5 +150,9 @@ export async function ask(ctx: ToolContext, args: Record<string, unknown>): Prom
         'продолжай доступными средствами или заверши с тем, что уже есть.',
     };
   }
-  return { ok: true, summary: answer, detail: answer };
+  // Ответ человека бывает до 2000 символов, а summary — карточка в UI: у
+  // остальных инструментов она короткая. В detail едет полный текст для модели.
+  const firstLine = answer.split('\n', 1)[0] ?? answer;
+  const summary = firstLine.length > 120 ? `${firstLine.slice(0, 120)}…` : firstLine;
+  return { ok: true, summary, detail: answer };
 }
