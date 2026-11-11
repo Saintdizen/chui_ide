@@ -23,11 +23,20 @@ export function isAbsent(value: unknown): boolean {
 /**
  * Число из аргумента: принимаем и число, и строку с числом («2» → 2).
  * `undefined` — разобрать не удалось (тогда решает вызывающий: отказать или молчать).
+ * Строка — только десятичная запись: `Number()` сам по себе шире («0x10» → 16,
+ * «1e3» → 1000, «0b11» → 3). Для `startLine: "1e3"` это не «примерно строка
+ * тысяча», а молчаливый промах того же сорта, от которого модуль и защищает: модель
+ * просила одно, получила другое. Поэтому строка допускается только такой, какой
+ * её пишет человек: минус, цифры, точка с дробной частью.
  */
+const DECIMAL = /^-?\d+(\.\d+)?$/;
+
 export function numericArg(value: unknown): number | undefined {
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value.trim());
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (text === '' || !DECIMAL.test(text)) return undefined;
+    const parsed = Number(text);
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;

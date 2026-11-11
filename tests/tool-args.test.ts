@@ -38,6 +38,18 @@ describe('numericArg', () => {
     expect(numericArg(Number.NaN)).toBeUndefined();
     expect(numericArg(Number.POSITIVE_INFINITY)).toBeUndefined();
   });
+
+  // Репро (2026-11-11): `Number()` умеет больше, чем ждёшь от номера строки.
+  // Модель с `startLine: "1e3"` получала строку 1000 вместо отказа — тихий
+  // промах, которого модуль и должен не допускать.
+  it('запись числа не по-людски не принимается', () => {
+    expect(numericArg('1e3')).toBeUndefined();
+    expect(numericArg('0x10')).toBeUndefined();
+    expect(numericArg('0b11')).toBeUndefined();
+    expect(numericArg('0o17')).toBeUndefined();
+    expect(numericArg('1_000')).toBeUndefined();
+    expect(numericArg('Infinity')).toBeUndefined();
+  });
 });
 
 describe('integerArg', () => {
