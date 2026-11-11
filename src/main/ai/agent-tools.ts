@@ -180,7 +180,7 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     // объявляет: валидация идёт ДО реализации, и без этого верный вызов
     // упирается в «неизвестный аргумент». Схемы при этом не расширяем:
     // `merged-tools` держит «у `terminal` нет `action`» (разведён по именам),
-    // а `search` — «флаги строкой». Список исключений — долг, см. TASKS п.92–96.
+    // а `search` — «флаги строкой». Список исключений — долг, см. TASKS п.95.
     const tolerated = (issuePath: string): boolean => {
       if (name === 'edit' && (issuePath === 'action' || issuePath === 'path')) return false;
       if (name === 'edit' && issuePath.endsWith('.edits')) return false;
