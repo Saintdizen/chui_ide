@@ -90,6 +90,15 @@ describe('todo инструментом', () => {
     expect(String(outcome.detail)).not.toContain('TODO');
   });
 
+  it('kind не теряет пометки, когда до лимита их много', async () => {
+    // 200 TODO съедают limit=50 до того, как дойдём до FIXME в том же файле.
+    const many = Array.from({ length: 200 }, (_, i) => `// TODO: ${i}`).join('\n');
+    await fs.writeFile(path.join(dir, 'src/many.ts'), `${many}\n// FIXME: последний\n`, 'utf8');
+    const outcome = await todo({ kind: 'FIXME' });
+    expect(String(outcome.summary)).toContain('2 пометок');
+    expect(String(outcome.detail)).toContain('src/many.ts:201');
+  });
+
   it('пусто — говорит прямо и не выдумывает', async () => {
     await fs.writeFile(path.join(dir, 'clean.ts'), 'export const c = 3;\n', 'utf8');
     const outcome = await todo({ path: 'clean.ts' });

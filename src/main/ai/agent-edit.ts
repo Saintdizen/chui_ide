@@ -44,6 +44,9 @@ export function readEditsOutcome(
   const failed = decision.result?.failed ?? [];
   const unwritten = decision.unwritten ?? [];
   const reasons = decision.unwrittenReasons ?? {};
+  // Отказ (ревью, кнопка «отклонить») — это не успех: правок нет, а `failed`
+  // пуст, и прежнее условие возвращало `ok: true`. Модель считала, что записала.
+  const rejected = decision.rejected === true;
   const lines = [
     ...applied.map((report) => `ok ${label(report.path)}: применено правок — ${report.applied}`),
     ...failed.map((failure) => `ошибка ${label(failure.path)}: ${failure.message}`),
@@ -57,7 +60,10 @@ export function readEditsOutcome(
     failed,
     tail: unwritten.length > 0 ? `, не записано на диск: ${unwritten.length}` : '',
     detail: lines.join('\n') || 'Правки не применены',
-    ok: failed.length === 0,
+    // «Применено» — хотя бы один файл, без провалов и без отказа. Раньше условие
+    // смотрело только на `failed`: пустой `applied` с пустым `failed` проходил
+    // как успех — модель получала «готово» там, где не записано ничего.
+    ok: !rejected && failed.length === 0 && applied.length > 0,
   };
 }
 
@@ -670,29 +676,24 @@ export async function organizeImports(ctx: ToolContext, args: Record<string, unk
 }
 
 /**
-
  * Обязательные поля каждого действия `file`. Их называет не только разбор, но и
-
  * ответ на опечатку в `action`: модель тогда видит, каких аргументов не хватало.
-
  */
-
 const FILE_ARGS: Record<string, readonly string[]> = {
-  create: ['path', 'contents'],
-
   move: ['from', 'to'],
-
+  // `copy` не было в таблице: вызов без `from`/`to` проходил проверку и падал
+  // исключением из глубины — модель не видела, каких полей не хватило.
+  copy: ['from', 'to'],
   delete: ['path'],
-
   organizeImports: ['path'],
-
-  replace: ['query', 'replacement'],
-
   format: ['path'],
-  // Два способа создать файл — создать папку под него и записать текст — раньше
-
-  // собирали через терминал: `mkdir` без подтверждения, `cp` тоже. Имена свои.
+  // Два способа создать файл — папку под него и текст в файл — раньше собирали
+  // через терминал: `mkdir` без подтверждения, `cp` тоже. Имена свои.
   mkdir: ['path'],
+  // Снятые действия остаются в таблице ради подсказки: их всё ещё пробуют
+  // вызвать, и отказ должен называть поля, а не просто «нельзя».
+  create: ['path', 'contents'],
+  replace: ['query', 'replacement'],
 };
 
 /**

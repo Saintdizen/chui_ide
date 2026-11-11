@@ -27,8 +27,17 @@ export function changeKindLabel(kind: ChangeKind): string {
   return 'правка';
 }
 
-/** Вид изменения по действию слитого инструмента `file`. */
-const FILE_KINDS: Record<string, ChangeKind> = { create: 'created', delete: 'deleted', move: 'moved' };
+/**
+ * Вид изменения по действию слитого инструмента `file`. `copy` — тоже «создан»:
+ * рядом с исходником появился файл. `create` в таблице не было уже давно — файл
+ * создают через `edit`, но старые беседы его помнят, поэтому `create` остаётся.
+ */
+const FILE_KINDS: Record<string, ChangeKind> = {
+  create: 'created',
+  copy: 'created',
+  delete: 'deleted',
+  move: 'moved',
+};
 
 /** Имя файла без пути: пути приходят и с `/`, и с `\`. */
 export function fileName(target: string): string {
@@ -57,8 +66,8 @@ export function touchedFiles(name: string, args: string, changes?: readonly Tool
     };
     const kind: ChangeKind | undefined = name === 'edit' ? 'edited' : FILE_KINDS[String(value.action)];
     if (!kind) return [];
-    // У переноса файл — в `to`: `path` в его аргументах и не значится.
-    const single = value.action === 'move' ? value.to : value.path;
+    // У переноса и копии файл — в `to`: `path` в их аргументах и не значится.
+    const single = value.action === 'move' || value.action === 'copy' ? value.to : value.path;
     // `edit` правит пачкой, и форма зависит от действия: по якорю файлы лежат в
     // `patches[].path`, по позициям — в `edits[].path`. Один файл может
     // встретиться дважды — в ряду он должен быть один раз.

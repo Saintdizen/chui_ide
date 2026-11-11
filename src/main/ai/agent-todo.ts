@@ -92,10 +92,18 @@ export async function todoAction(ctx: ToolContext, args: Record<string, unknown>
     }
     if (text.includes('\u0000')) continue;
     scanned += 1;
-    for (const hit of scanTodoText(file, text, limit - hits.length)) {
+    // Сканируем файл целиком, без остатка лимита: иначе `kind` фильтрует уже
+    // обрезанную пачку и редкие пометки теряются, если выше их много. Лимит
+    // применяется ниже, когда отбор по виду уже сделан.
+    for (const hit of scanTodoText(file, text, Number.POSITIVE_INFINITY)) {
       if (kindFilter && hit.kind !== kindFilter) continue;
       hits.push(hit);
+      if (hits.length >= limit) {
+        cut = true;
+        break;
+      }
     }
+    if (cut) break;
   }
 
   if (hits.length === 0) {

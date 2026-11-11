@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readEditsOutcome } from '../src/main/ai/agent-edit';
 import { applyTextEdits, fromOffset, toOffset, type TextEdit } from '../src/shared/edits';
 
 /** Короткая обёртка: правка в одной строке. */
@@ -12,6 +13,32 @@ function edit(line: number, startColumn: number, endColumn: number, newText: str
     ...(oldText !== undefined ? { oldText } : {}),
   };
 }
+
+describe('readEditsOutcome', () => {
+  // Применённых файлов нет, а провал есть — это провал: до правки `ok` смотрел
+  // только на `failed` и пустой `applied` считал удачей.
+  it('ни одного файла — провал', () => {
+    const outcome = readEditsOutcome(
+      { rejected: false, result: { reports: [], failed: [{ path: 'a.ts', message: 'файл не сошёлся' }] } },
+      (file) => file,
+    );
+    expect(outcome.ok).toBe(false);
+  });
+
+  // Отказ пользователя раньше проходил как успех: `rejected` не читался вовсе.
+  it('пользователь отказался — не успех', () => {
+    const outcome = readEditsOutcome({ rejected: true, result: { reports: [], failed: [] } }, (file) => file);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it('файл записан — успех', () => {
+    const outcome = readEditsOutcome(
+      { rejected: false, result: { reports: [{ path: 'a.ts', applied: 1, version: 2 }], failed: [] } },
+      (file) => file,
+    );
+    expect(outcome.ok).toBe(true);
+  });
+});
 
 describe('applyTextEdits', () => {
   it('без правок возвращает тот же текст', () => {
