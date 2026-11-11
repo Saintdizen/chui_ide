@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
+import { unknownTool } from '../src/main/ai/agent-show';
 import {
   AGENT_TOOLS,
   TOLERATED_ARGUMENTS,
@@ -160,4 +164,36 @@ describe('подсказка об отказе называет ровно де�
       }
     });
   }
+});
+
+/**
+ * Промах именем — единственный сигнал, что модель искала несуществующее.
+ *
+ * В ответе она получает список инструментов, но сам факт «спрашивала `git`»
+ * нигде не оставался. Потом гадаешь: модель не умеет или не знает, что есть.
+ * Теперь каждое такое имя — строка в diagnostics-логе.
+ *
+ * `vi.mock` поднимается хойстом, поэтому путь к логу задаётся переменной
+ * модуля, а не замыканием теста: иначе подмена не успеет после импорта.
+ */
+let userDataDir = '';
+vi.mock('electron', () => ({
+  app: { getPath: (name: string) => (name === 'userData' ? userDataDir : join(userDataDir, name)) },
+}));
+
+describe('промах именем инструмента доходит до лога', () => {
+  it('unknownTool пишет имя и ближайший вариант в diagnostics', () => {
+    userDataDir = mkdtempSync(join(tmpdir(), 'chui-loud-miss-'));
+    try {
+      const outcome = unknownTool('serch');
+      expect(outcome.summary).toContain('serch');
+
+      const written = readFileSync(join(userDataDir, 'logs', 'diagnostics.log'), 'utf8');
+      expect(written).toContain('ai/tool-miss');
+      expect(written).toContain('serch');
+      expect(written).toContain('search');
+    } finally {
+      rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
 });
