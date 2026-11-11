@@ -129,6 +129,20 @@ describe('debug', () => {
     expect(debug.setBreakpoints).not.toHaveBeenCalled();
   });
 
+  // Опечатка в действии раньше попадала в `default`, который останавливает
+  // отладчик — и отвечала `ok: true`. Модель просила шаг, теряла сессию и
+  // читала, что всё хорошо. Тест на `restart` это не ловил: там фазы `idle`, и
+  // отказ приходил до разбора действия.
+  it('неизвестное действие в живой сессии — отказ, сессия жива', async () => {
+    const { ctx: context, debug } = ctx({ phase: 'stopped' });
+    const result = await debugAction(context, { action: 'step_over' });
+    expect(result.ok).toBe(false);
+    expect(debug.stop).not.toHaveBeenCalled();
+    // Подсказка обязана называть верное имя: по ней модель исправляется.
+    // Список лежит в `detail`, а `summary` — только «Неизвестное действие: …».
+    expect(result.detail).toContain('stepOver');
+  });
+
   it('повторный start при живой сессии не поднимает второй адаптер', async () => {
     const { ctx: context, debug } = ctx({ phase: 'stopped' });
     const result = await debugAction(context, { action: 'start', program: 'src/a.ts' });

@@ -98,11 +98,17 @@ export async function diagnostics(
   if (result.items.length > items.length) lines.push(`… ещё пометок: ${result.items.length - items.length}`);
 
   const errors = result.items.filter((item) => item.severity === 'error').length;
-  const warnings = result.items.length - errors;
+  // Считалось «всё, что не error» — и `info`/`hint` из языкового сервера шли в
+  // предупреждения. Модель видела три проблемы там, где была одна.
+  const warnings = result.items.filter((item) => item.severity === 'warning').length;
+  // `info`/`hint` попадают в `lines` — без счётчика сводка не сходилась с выдачей.
+  const others = result.items.length - errors - warnings;
+  const tally = `ошибок: ${errors}, предупреждений: ${warnings}`;
+  const summary = others > 0 ? `${tally}, прочих пометок: ${others}` : tally;
 
   return {
     ok: true,
-    summary: `ошибок: ${errors}, предупреждений: ${warnings}`,
+    summary,
     detail: lines.join('\n'),
   };
 }

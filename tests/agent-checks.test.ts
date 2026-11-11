@@ -133,6 +133,21 @@ describe('checks: diagnostics', () => {
     expect(outcome.detail).toContain('[warning] мелочь');
   });
 
+  // `info` — не ошибка и не предупреждение, но арифметика считала
+  // предупреждением всё, что не `error`: модель видела ненулевой счёт и шла
+  // чинить то, что чинить не надо.
+  it('info не считается ни ошибкой, ни предупреждением', async () => {
+    const items = [
+      item(),
+      item({ severity: 'warning', message: 'мелочь' }),
+      item({ severity: 'info', message: 'к сведению' }),
+    ];
+    const outcome = await diagnostics(ctx({ items }), { path: '/проект/src/a.ts' });
+    // Сводка может добавлять «прочих пометок», но не вправе называть их предупреждениями.
+    expect(outcome.summary).toContain('ошибок: 1, предупреждений: 1');
+    expect(outcome.summary).not.toContain('предупреждений: 2');
+  });
+
   it('обрезает длинный список и говорит, сколько осталось', async () => {
     const items = Array.from({ length: 75 }, (_, i) => item({ line: i + 1 }));
     const outcome = await diagnostics(ctx({ items }), { path: '/проект/src/a.ts' });
