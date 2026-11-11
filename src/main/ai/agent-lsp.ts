@@ -241,7 +241,7 @@ export async function renameSymbol(ctx: ToolContext, args: Record<string, unknow
       summary: `объявление «${name}» не найдено`,
       detail:
         'Языковой сервер не нашёл объявления с таким именем. Уточни имя либо посмотри search (action code). ' +
-        'Для массовой замены подстроки есть `file` (action replace), но он не знает семантики.',
+        'Для замены подстроки по проекту есть `edit` с `edits[]`, но он не знает семантики.',
     };
   }
 
@@ -254,7 +254,7 @@ export async function renameSymbol(ctx: ToolContext, args: Record<string, unknow
       ok: false,
       summary: `${target.name}: сервер этого языка не умеет переименование`,
       detail:
-        'Языковой сервер не поддерживает `textDocument/rename`. Для замены подстроки используй `file` (action replace).',
+        'Языковой сервер не поддерживает `textDocument/rename`. Для замены подстроки используй `edit` с `edits[]`.',
     };
   }
   if (edits.length === 0) {

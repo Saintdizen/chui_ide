@@ -133,7 +133,10 @@ describe('эхо команды в ответе', () => {
       const long = `echo ${'x'.repeat(4100)}`;
       const out = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: long }));
       // Пять шагов потеряно на heredoc в живом прогоне: ошибка обязана называть выход.
-      expect(out.summary).toContain('`file` (action create)');
+      // Прежний совет — `file` (action create) — вёл в тупик: действие `create`
+      // намеренно отвечает отказом, и модель ходила по кругу. Выход — `edit`.
+      expect(out.summary).toContain('`edit`');
+      expect(out.summary).not.toContain('action create');
     } finally {
       workspace.dispose();
     }

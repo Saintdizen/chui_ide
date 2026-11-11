@@ -186,7 +186,16 @@ async function blameOutcome(root: string, args: Record<string, unknown>): Promis
   const to = optionalInteger(args, 'endLine');
   // `-L` — только нужный диапазон: blame всего файла бесполезен, а стоит дорого.
   const gitArgs = ['blame', '--date=short'];
-  if (from && to) gitArgs.push('-L', `${from},${to}`);
+  // Проверка была `if (from && to)` — нулевая строка ложно-ложна в JS, и `0..0`
+  // молча отбрасывал диапазон: blame шёл по всему файлу. Заданного конца
+  // хватает: второй берём от фиксации.
+  if (from !== undefined || to !== undefined) {
+    // git считает строки с единицы и на `-L 0,0` падает с `fatal: invalid line
+    // number`. Ноль от модели — обычное «с начала», поэтому поднимаем до 1.
+    const start = Math.max(1, from ?? 1);
+    const stop = Math.max(start, to ?? start);
+    gitArgs.push('-L', `${start},${stop}`);
+  }
   gitArgs.push('--', relative);
   const result = await execGit(gitArgs, root, { allowFailure: true });
   if (!result.ok || !result.stdout.trim()) {
@@ -217,7 +226,9 @@ async function showOutcome(root: string, args: Record<string, unknown>): Promise
     };
   }
   const lines = result.stdout.split('\n');
-  const cap = Math.min(lines.length, DIFF_DEFAULT_LINES);
+  // Схема давно обещала `maxLines`, а потолок был жёстким: совет в обрезке
+  // («сузь maxLines») выполнить было нечем — любой коммит резался на 200.
+  const cap = Math.min(lines.length, optionalInteger(args, 'maxLines') ?? DIFF_DEFAULT_LINES);
   return {
     ok: true,
     summary: `git show ${ref}: ${(lines[0] ?? '').slice(0, 60)}`,

@@ -89,6 +89,29 @@ describe('git инструментом', () => {
     expect(String(outcome.detail)).toContain('первый коммит');
   });
 
+  // `startLine: 0` — истинно-ложное: проверка `if (from && to)` его глотала, и
+  // blame шёл по всему файлу вместо одной строки.
+  it('blame: нулевая строка — тоже диапазон', async () => {
+    const outcome = await call({ action: 'blame', path: path.join(dir, 'file.ts'), startLine: 0, endLine: 0 });
+    expect(String(outcome.summary)).toContain('1 строк');
+  });
+
+  // Один конец диапазона без другого тоже не должен пропадать молча.
+  it('blame: только startLine — от этой строки и дальше', async () => {
+    const outcome = await call({ action: 'blame', path: path.join(dir, 'file.ts'), startLine: 2 });
+    expect(outcome.ok).toBe(true);
+  });
+
+  // Схема объявляет `maxLines` для show, а обработчик его не читал: совет в
+  // обрезке звучал, но выполнить его было нечем — любой коммит резался на 200.
+  it('show: maxLines укорачивает выдачу', async () => {
+    const outcome = await call({ action: 'show', maxLines: 3 });
+    const shown = String(outcome.detail ?? '')
+      .split('\n')
+      .filter((line) => !line.startsWith('…'));
+    expect(shown.length).toBeLessThanOrEqual(3);
+  });
+
   it('blame: называет коммит и строки', async () => {
     const outcome = await call({ action: 'blame', path: path.join(dir, 'file.ts'), startLine: 1, endLine: 1 });
     expect(outcome.ok).toBe(true);
