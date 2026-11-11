@@ -48,6 +48,14 @@ jobs:
       - name: Собрать main и renderer
         run: npm run build
 
+      # Проба поднимает Electron и читает вычисленные стили значка состояния.
+      # Без дисплея Electron не стартует — потому xvfb-run. Шаг добавлен после
+      # случая 11.11: проба не грузила chat.css и молча отдавала «нет анимации,
+      # все значки белые», при этом выходила с кодом 0.
+      # Локально обе AI-пробы подряд: `npm run smoke:ai`.
+      - name: Проба — состояния инструментов
+        run: xvfb-run -a npm run probe:toolstate
+
       # Проверка правок с не-ASCII: чистый Node, без Electron и дисплея.
       - name: Smoke — правки текста
         run: npm run smoke:edits

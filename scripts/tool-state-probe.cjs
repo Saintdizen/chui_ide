@@ -33,7 +33,13 @@ function pageStyles() {
     const absolute = path.resolve(PROJECT, 'src/renderer/styles', href);
     return `url("${pathToFileURL(absolute).href}")`;
   });
-  return [fonts, read('src/renderer/styles/theme.css'), read('src/renderer/styles/main.css')].join('\n');
+  // main.css подключает chat.css через @import, но в <style> этот путь не
+  // разрешается: файл берём явно, иначе состояния инструментов остаются без цвета.
+  const main = read('src/renderer/styles/main.css').replace(/@import\s+url\(([^)]+)\);?/g, (_m, href) => {
+    const absolute = path.resolve(PROJECT, 'src/renderer/styles', href.replace(/['"]/g, ''));
+    return readFileSync(absolute, 'utf8');
+  });
+  return [fonts, read('src/renderer/styles/theme.css'), main, read('src/renderer/styles/chat.css')].join('\n');
 }
 
 function pageHtml(styles) {
@@ -86,12 +92,15 @@ async function shot(win, name) {
 }
 
 app.whenReady().then(async () => {
+  let failure = null;
   try {
     await main();
   } catch (error) {
+    failure = error;
     console.error('[проба] сбой:', error);
   } finally {
-    app.exit(0);
+    // Код выхода важен: в CI «отчёт напечатан» ещё не значит «всё хорошо».
+    app.exit(failure ? 1 : 0);
   }
 });
 
@@ -110,8 +119,10 @@ async function main() {
       const box = node.getBoundingClientRect();
       const style = getComputedStyle(node);
       const icon = node.querySelector('.icon');
+      // Текст состояния живёт в aria-label/title: у значка разметки нет. Поэтому
+      // пустой textContent — норма, а не повод считать состояние без подписи.
       return {
-        текст: node.textContent,
+        текст: (node.getAttribute('aria-label') ?? '').trim(),
         значок: icon ? icon.tagName.toLowerCase() : null,
         цвет: style.color,
         анимация: getComputedStyle(icon ?? node).animationName,
@@ -146,11 +157,26 @@ async function main() {
   );
   report.снимок_группы = await shot(win, 'group');
   report.текст_найден_в_разметке = await win.webContents.executeJavaScript(
-    `document.body.textContent.includes('готово') || document.body.textContent.includes('ошибка')`,
+    `[...document.querySelectorAll('.tool-state')].every(
+       (node) => (node.getAttribute('aria-label') ?? '').trim() !== '',
+     )`,
   );
+
+  // В CI проба должна падать, а не только печатать отчёт: иначе «не подъехали
+  // стили» проходит незамеченным. Проверяем ровно то, что ломалось вживую.
+  const проблемы = [];
+  if (report.строка_выполняется?.анимация === 'none') {
+    проблемы.push('у «идёт» нет анимации: не загружены стили чата');
+  }
+  if (report.строка_ошибка?.цвет === report.строка_готово?.цвет) {
+    проблемы.push('цвет «ошибки» и «готово» совпадает');
+  }
+  if (!report.текст_найден_в_разметке) проблемы.push('у состояния нет aria-label');
+  report.проверки = проблемы.length === 0 ? 'ok' : проблемы;
 
   await fs.writeFile(REPORT, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   console.log(JSON.stringify(report, null, 2));
   console.log(`\n[проба] отчёт: ${REPORT}`);
   console.log(`[проба] снимок: ${report.снимок_группы}`);
+  if (проблемы.length > 0) throw new Error(`инварианты не выполнены: ${проблемы.join('; ')}`);
 }
