@@ -209,6 +209,7 @@ import { createRecentFiles } from './core/recent-files';
 import { activeTabId, createTabs, type PagesTabSource } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
 import { createPortsPanel } from './ui/ports-panel';
+import { describeError } from '../shared/diagnostics';
 import { createDebugPanel } from './ui/debug-panel';
 import { createTestPanel } from './ui/test-panel';
 import { createTodoPanel } from './ui/todo-panel';
@@ -2514,6 +2515,11 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
   const palette = createPalette({
     commands,
     recent: recentCommands,
+    // Команда может упасть: у `git.tags` и `git.reflog` ошибки git не ловятся
+    // внутри, и без этого они уходили в unhandled rejection — бесшумно.
+    onCommandError: (error, command) => {
+      showToast(`Команда «${command}» не выполнена: ${describeError(error).message}`, 'error');
+    },
     onBeforeShow: () => {
       const known = new Set(commands.list().map((descriptor) => descriptor.id));
       const recent = recentCommands.ids().filter((id) => known.has(id));

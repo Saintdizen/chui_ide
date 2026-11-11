@@ -67,6 +67,26 @@ export function paletteEmptyReason(total: number, query: string): string {
  * Палитра команд (Ctrl+Shift+P). Работает поверх реестра команд,
  * поэтому любая новая команда появляется здесь автоматически.
  */
+/**
+ * Отказ команды из палитры — наружу, а не в unhandled rejection.
+ *
+ * Палитра закрывается до выполнения, и если промис никому не передан,
+ * ошибка уходит в никуда: человек видит, что «ничего не произошло».
+ * Отдельной функцией, потому что `run` живёт в DOM-замыкании, а это
+ * решение проверяется без DOM.
+ */
+export function runCommand(
+  pending: Promise<unknown>,
+  commandId: string,
+  onCommandError?: (error: unknown, commandId: string) => void,
+): void {
+  if (!onCommandError) {
+    void pending;
+    return;
+  }
+  void pending.catch((error: unknown) => onCommandError(error, commandId));
+}
+
 export function createPalette(deps: {
   commands: CommandRegistry;
   /** История запусков: недавние команды показываются сверху. Нет — порядок регистрации. */
@@ -81,6 +101,12 @@ export function createPalette(deps: {
    * и вернуть признак «успели до того, как человек дописал запрос».
    */
   openKeybindingSettings?: (command: string) => boolean;
+  /**
+   * Куда девать отказ команды. Палитра закрывается сразу после выбора, так что
+   * показать ошибку самой ей негде. Не задан — отказ не глотаем (unhandled
+   * rejection виден в консоли и в тестах), но и не показываем.
+   */
+  onCommandError?: (error: unknown, command: string) => void;
 }): PaletteView {
   const input = h('input', {
     class: 'palette-input',
@@ -117,7 +143,10 @@ export function createPalette(deps: {
     if (!deps.commands.isEnabled(descriptor.id)) return;
     deps.recent?.remember(descriptor.id);
     close();
-    void deps.commands.execute(descriptor.id);
+    // Было `void execute(...)`: палитра закрывалась, а отказ команды (у git
+    // это, например, упавший `git tag`) терялся в unhandled rejection, и
+    // человек видел, что «ничего не произошло».
+    runCommand(deps.commands.execute(descriptor.id), descriptor.id, deps.onCommandError);
   };
 
   /**

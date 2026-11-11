@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { keyHintLabel, keyHintPlan } from '../src/renderer/ui/palette';
+import { keyHintLabel, keyHintPlan, runCommand } from '../src/renderer/ui/palette';
 
 /**
  * П.1: «сочетание в подсказке кликабельно и ведёт в настройки клавиш».
@@ -18,6 +18,25 @@ import { keyHintLabel, keyHintPlan } from '../src/renderer/ui/palette';
  */
 const command = (id: string, keybinding?: string) =>
   ({ id, title: id, category: 'Файл', ...(keybinding ? { keybinding } : {}) }) as const;
+
+describe('отказ команды из палитры', () => {
+  it('доходит до обработчика, а не тонет в промпсе', async () => {
+    const seen: [unknown, string][] = [];
+    runCommand(Promise.reject(new Error('git tag упал')), 'git.tags', (e, id) => seen.push([e, id]));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen).toHaveLength(1);
+    const [error, id] = seen[0]!;
+    expect(id).toBe('git.tags');
+    expect((error as Error).message).toBe('git tag упал');
+  });
+
+  it('удачный запуск не тревожит обработчик', async () => {
+    let called = 0;
+    runCommand(Promise.resolve(), 'git.tags', () => called++);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(called).toBe(0);
+  });
+});
 
 describe('решение по клику на сочетание', () => {
   it('свежий клик после показа окна — это «отойди», а не выбор', () => {
