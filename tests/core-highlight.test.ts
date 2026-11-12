@@ -16,6 +16,19 @@ import { installMiniDom } from './helpers/mini-dom';
 // (разбор модуля), дальше — из кеша. Ждём с запасом, иначе тест проверяет не то.
 const settled = () => new Promise((resolve) => setTimeout(resolve, 400));
 
+/**
+ * Ждать именно разметку, а не фиксированный срок: в полном прогоне (все файлы
+ * параллельно) загрузка грамматики выходит за 400 мс, и проверка «цвета есть»
+ * падала не из-за кода, а из-за нагрузки на машину.
+ */
+const colored = async (node: { innerHTML: string }): Promise<void> => {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    if (node.innerHTML.includes('<span')) return;
+  }
+};
+
 /** Узел блока кода. Мини-DOM не хранит `innerHTML`, поэтому помним его сами. */
 function codeNode() {
   const element = document.createElement('div') as unknown as {
@@ -50,7 +63,7 @@ describe('подсветка блоков кода в чате', () => {
     const element = codeNode();
 
     highlightInto(element as never, 'const a = 1;', 'js');
-    await settled();
+    await colored(element);
 
     expect(element.innerHTML).toContain('<span style=');
     expect(element.innerHTML).toContain('const');
@@ -62,7 +75,7 @@ describe('подсветка блоков кода в чате', () => {
     const element = codeNode();
 
     highlightInto(element as never, 'const html = "<b>&</b>";', 'js');
-    await settled();
+    await colored(element);
 
     expect(element.innerHTML).toContain('&lt;b&gt;');
     expect(element.innerHTML).toContain('&amp;');
@@ -81,7 +94,7 @@ describe('подсветка блоков кода в чате', () => {
       const element = codeNode();
 
       highlightInto(element as never, code, label);
-      await settled();
+      await colored(element);
 
       expect(element.innerHTML, `язык ${label}`).toContain('<span');
     }
@@ -101,7 +114,7 @@ describe('подсветка блоков кода в чате', () => {
     // Лента пересобирает блоки на каждом кадре стрима: без кеша разбор шёл бы заново.
     const first = codeNode();
     highlightInto(first as never, 'const a = 1;', 'js');
-    await settled();
+    await colored(first);
     const markup = first.innerHTML;
 
     const second = codeNode();
@@ -119,7 +132,7 @@ describe('подсветка блоков кода в чате', () => {
 
     highlightInto(asJs as never, 'def f(): pass', 'js');
     highlightInto(asPy as never, 'def f(): pass', 'python');
-    await settled();
+    await colored(asPy);
 
     expect(asJs.innerHTML).not.toBe(asPy.innerHTML);
     expect(asPy.innerHTML).toContain('def');
@@ -128,7 +141,7 @@ describe('подсветка блоков кода в чате', () => {
   it('смена темы перекрашивает уже подсвеченное', async () => {
     const element = codeNode();
     highlightInto(element as never, 'const a = 1;', 'js');
-    await settled();
+    await colored(element);
 
     refreshHighlight();
     await settled();
@@ -139,7 +152,7 @@ describe('подсветка блоков кода в чате', () => {
   it('самопроверка рассказывает про каждый язык-образец', async () => {
     const element = codeNode();
     highlightInto(element as never, 'const a = 1;', 'js');
-    await settled();
+    await colored(element);
 
     const report = diagnoseHighlighting();
 

@@ -229,6 +229,35 @@ function toolSection(title: string, text: string, body?: HTMLElement): HTMLEleme
   return section;
 }
 
+/** Сколько строк вывода видно сразу: простыня в панели не читается. */
+const RAW_PREVIEW_LINES = 24;
+
+/**
+ * Вывод инструмента: первые строки сразу, остаток — по кнопке. Логи и большие
+ * файлы приходят на сотни строк; разворачивать их целиком — значит утопить в них
+ * ответ в ленте, а кнопка сразу говорит, сколько ещё скрыто.
+ */
+function rawOutput(detail: string, language: string): HTMLElement {
+  const lines = detail.split('\n');
+  const wrap = h('div', { class: 'tool-raw-wrap' });
+  const piece = (text: string): HTMLElement => {
+    const code = h('code', {});
+    highlightInto(code, text, language);
+    return h('pre', { class: 'tool-raw' }, code);
+  };
+  wrap.appendChild(piece(lines.slice(0, RAW_PREVIEW_LINES).join('\n')));
+  const rest = lines.length - RAW_PREVIEW_LINES;
+  if (rest <= 0) return wrap;
+  const more = h('button', { class: 'tool-raw-more', type: 'button' });
+  more.textContent = `ещё ${rest} ${plural(rest, 'строка', 'строки', 'строк')}`;
+  more.addEventListener('click', () => {
+    wrap.insertBefore(piece(lines.slice(RAW_PREVIEW_LINES).join('\n')), more);
+    more.remove();
+  });
+  wrap.appendChild(more);
+  return wrap;
+}
+
 /** Заголовок секции с действием «Копировать». */
 function toolSectionHead(title: string, text: string): HTMLElement {
   const copy = h(
@@ -275,6 +304,8 @@ function argsBlock(raw: string): { text: string; body: HTMLElement } | null {
 export interface ToolCardView {
   card: HTMLElement;
   finish(result: ChatToolResultPayload): void;
+  /** Ход прервали, не дождавшись результата: строка не должна врать спиннером. */
+  cancel(): void;
 }
 
 /**
@@ -301,20 +332,24 @@ function toolDetailLanguage(call: ChatToolStartPayload): string {
   }
 }
 
-/** Состояние вызова: идёт работа, готово или ошибка. */
-type ToolState = 'running' | 'ok' | 'fail';
+/** Состояние вызова: идёт работа, готово, ошибка или ход прерван. */
+type ToolState = 'running' | 'ok' | 'fail' | 'cancel';
 
 /** Что значит каждый значок — словами: нужны подсказке и озвучке. */
 const TOOL_STATE_LABEL: Record<ToolState, string> = {
   running: 'выполняется',
   ok: 'готово',
   fail: 'ошибка',
+  // Ход остановил человек, результат так и не пришёл: это не ошибка инструмента,
+  // и красным его красить нельзя — инструмент виноват не был.
+  cancel: 'прервано',
 };
-/** Какой значок отвечает состоянию: галочка в круге, крест в круге, круг «идёт». */
+/** Какой значок отвечает состоянию: галочка в круге, крест в круге, круг «идёт», стоп. */
 const TOOL_STATE_ICON: Record<ToolState, IconName> = {
   running: 'spinner',
   ok: 'checkCircle',
   fail: 'xCircle',
+  cancel: 'stop',
 };
 
 /**
@@ -367,6 +402,8 @@ export interface ReasoningRowView {
 interface ToolGroupView {
   add(call: ChatToolStartPayload): ToolCardView;
   reasoning(): ReasoningRowView;
+  /** Закрыть строки, оставшиеся в работе: их ход уже не дождётся. */
+  abandon(): void;
   seal(): void;
 }
 
@@ -426,6 +463,11 @@ function createToolGroup(
    * ведёт туда, где видны остальные.
    */
   let lastTouched: string | undefined;
+  /**
+   * Строки, которые ещё в работе. Только они ждут результата: если ход
+   * прервут, им нечего больше ждать, и спиннер превратился бы в ложь.
+   */
+  const liveCards: ToolCardView[] = [];
   /**
    * Раскрыта ли группа. По умолчанию свёрнута: в шапке видно ЧТО делал агент и
    * сколько, а десяток строк под ней — шум, который мешает читать ответ. Открыть
@@ -776,11 +818,9 @@ function createToolGroup(
           toolSectionHead('Результат', [outcome.summary, outcome.detail ?? ''].filter(Boolean).join('\n\n')),
         );
         result.appendChild(h('div', { class: 'tool-summary' }, outcome.summary));
-        if (outcome.detail) {
-          const raw = h('code', {});
-          highlightInto(raw, outcome.detail, detailLanguage);
-          result.appendChild(h('pre', { class: 'tool-raw' }, raw));
-        }
+        // Логи и большие файлы приходят на сотни строк: панель держим короткой,
+        // остаток — по кнопке, но человек сразу видит, сколько всего.
+        if (outcome.detail) result.appendChild(rawOutput(outcome.detail, detailLanguage));
         panel.appendChild(result);
         // Картинка, которую посмотрел агент: без неё карточка говорит «смотрел
         // макет», а человек не знает, какой. Ссылку на подпись не даём — data-URL
@@ -831,10 +871,25 @@ function createToolGroup(
     body.appendChild(card);
     sync();
 
-    return {
+    const view: ToolCardView = {
       card,
+      /**
+       * Ход остановлен человеком, результат так и не пришёл. Без этого строка
+       * обещала бы «выполняется» до конца жизни ленты — спиннер врал бы про
+       * работу, которой уже никто не ждёт. Ошибкой не считаем: инструмент не виноват.
+       */
+      cancel: () => {
+        // Результат пришёл раньше — он и есть правда о вызове.
+        if (outcome || card.classList.contains('tool-cancelled')) return;
+        card.classList.add('tool-cancelled');
+        paintToolState(cardState, 'tool-state', 'cancel');
+        pending -= 1;
+        sync();
+      },
       finish: (result) => {
         outcome = result;
+        // Результат всё-таки пришёл (гонка с отменой) — он и есть правда, метку отмены снимаем.
+        card.classList.remove('tool-cancelled');
         setToolState(cardState, result.ok, result.failed);
         // Файлы-результаты показываем сразу и вне раскрытия: это то, ради чего
         // вызов и делался. Место — между шапкой и панелью, чтобы кнопки были видны.
@@ -865,6 +920,23 @@ function createToolGroup(
         sync();
       },
     };
+    // В работе — только до результата: закрытые строки прерывать нечего.
+    const finishResult = view.finish;
+    view.finish = (result) => {
+      const at = liveCards.indexOf(view);
+      // indexOf может дать -1 (повторный finish) — splice(-1) снёс бы соседа.
+      if (at >= 0) liveCards.splice(at, 1);
+      finishResult(result);
+    };
+    liveCards.push(view);
+    return view;
+  };
+
+  /**
+   * Прервать все открытые строки: ход остановлен, ответ не придёт.
+   */
+  const abandon = (): void => {
+    for (const view of [...liveCards]) view.cancel();
   };
 
   /**
@@ -892,7 +964,7 @@ function createToolGroup(
     }
   };
 
-  return { add, reasoning: () => reasoning, seal };
+  return { add, reasoning: () => reasoning, abandon, seal };
 }
 
 /**
@@ -919,6 +991,7 @@ export function createToolFeed(
 ): {
   add(call: ChatToolStartPayload): ToolCardView;
   reasoning(): ReasoningRowView;
+  abandon(): void;
   seal(): void;
 } {
   let current: ToolGroupView | null = null;
@@ -930,6 +1003,8 @@ export function createToolFeed(
     // Размышления открывают ту же группу, что и вызовы: в ленте это соседние
     // строки одного шага работы, а не отдельный блок над сообщением.
     reasoning: () => ensure().reasoning(),
+    // Группу не создаём: прерывать нечего, если вызовов в этом ходе не было.
+    abandon: () => current?.abandon(),
     seal: () => {
       current?.seal();
       current = null;

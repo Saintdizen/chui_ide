@@ -599,6 +599,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       tools.seal();
       host.closeApprovals();
       if (error instanceof RpcError && error.cancelled) {
+        // Строки, которые не дождались результата, не должны остаться спиннером:
+        // ход остановлен и результата уже не будет.
+        tools.abandon();
         outcome = 'stopped';
         segment.appendChild(h('div', { class: 'field-hint' }, 'генерация остановлена'));
         // Оборвали с самого начала — текста нет, и пустой реплике в истории не место.

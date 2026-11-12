@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
  * проверить это иначе, чем по коду, нечем.
  */
 const TOOLS = readFileSync(resolve(process.cwd(), 'src/renderer/ui/chat-tools.ts'), 'utf8');
+const CHAT_STREAM = readFileSync(resolve(process.cwd(), 'src/renderer/ui/chat-stream.ts'), 'utf8');
 
 describe('состояние группы вызовов', () => {
   it('отрицательный итог отделён от поломки в счёте', () => {
@@ -35,6 +36,28 @@ describe('состояние группы вызовов', () => {
     // Ищем в исходнике подстроку: `$` + `{` — ставим через склейку, чтобы биом
     // не принял строку за случайный шаблон.
     expect(TOOLS).toContain(`с отрицательным итогом: $` + '{negative}');
+  });
+});
+
+describe('прерванный ход', () => {
+  it('строки без результата закрываются словом «прервано», а не спиннером', () => {
+    // Отмену узнаёт chat-stream и досылает до карточек: без этого спиннер
+    // крутится вечно — хода, который бы принёс результат, больше нет.
+    expect(CHAT_STREAM).toContain('tools.abandon();');
+    expect(TOOLS).toContain("paintToolState(cardState, 'tool-state', 'cancel');");
+    expect(TOOLS).toContain("cancel: 'stop',");
+  });
+
+  it('прерванный вызов не считается поломкой инструмента', () => {
+    const body = TOOLS.slice(TOOLS.indexOf('cancel: () => {'), TOOLS.indexOf('finish: (result)'));
+    expect(body).not.toContain('failed += 1');
+  });
+});
+
+describe('длинный вывод инструмента', () => {
+  it('режется по кнопке, а не вываливается простынёй', () => {
+    expect(TOOLS).toContain('RAW_PREVIEW_LINES');
+    expect(TOOLS).toContain("class: 'tool-raw-more'");
   });
 });
 

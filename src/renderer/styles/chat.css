@@ -1759,6 +1759,12 @@
   color: var(--text_color_error);
 }
 
+/* Ход остановили до результата: значок тот же, что у кнопки «Стоп» — приглушённый,
+   не красный (инструмент не падал) и не зелёный (работы не было). */
+.tool-state.is-cancel {
+  color: var(--text_color_tertiary);
+}
+
 /* Инструмент отработал, но результат отрицательный: упавший тест — это данные,
    а не поломка. Значок тот же «готово», цвет предупреждающий, не красный. */
 .tool-state.is-ok.is-failed {
@@ -1858,6 +1864,32 @@
   display: block;
   font: inherit;
   color: inherit;
+}
+
+/* «Ещё N строк»: длинный вывод не разматывается целиком, но и не пропадает. */
+.tool-raw-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tool-raw-more {
+  margin-top: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: transparent;
+  color: var(--text_color_secondary);
+  font-family: inherit;
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.tool-raw-more:hover {
+  color: var(--text_color);
+  border-color: var(--border_color_strong, var(--border_color));
 }
 
 /* Картинка, которую посмотрел агент: в раскрытой карточке — уменьшенный кадр,
