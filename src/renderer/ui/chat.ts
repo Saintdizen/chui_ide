@@ -51,7 +51,8 @@ import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createAttachments } from './chat-attachments';
-import { clearQueuedPrompts, dropQueuedPrompt, enqueuePrompt, moveQueuedPrompt, takeNextPrompt } from './chat-queue';
+import { enqueuePrompt, takeNextPrompt } from './chat-queue';
+import { createChatQueueView } from './chat-queue-view';
 import {
   addCheckpointFile,
   beginCheckpoint,
@@ -92,8 +93,8 @@ import { createRunInspector } from './run-inspector';
 import { createChatPersistence, newChatUid } from './chat-persistence';
 import { type ChatExportFormat, chatExportFileName, chatToJson, chatToMarkdown } from '../../shared/chat-export';
 import { segmentsOf } from '../../shared/chat-find';
-import { promptNeighbour } from '../../shared/chat-nav';
 import { createChatFindBar } from './chat-find-bar';
+import { createChatPromptNav } from './chat-prompt-nav';
 import { showContextMenu } from './context-menu';
 import { chatTabMenuPlan } from './chat-tab-menu';
 import { isPopupOpen } from './popup-menu';
@@ -2113,44 +2114,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     findBar.open();
   });
 
-  /**
-   * `Alt+↑/↓` — переход по СВОИМ вопросам.
-   *
-   * Где сейчас стоим, помним явно (`promptCursor`), а не выводим из прокрутки.
-   * Выводить казалось честнее, но в короткой ленте прокручивать нечего —
-   * `scrollIntoView` ничего не сдвигает, `current` остаётся тем же, и второе
-   * нажатие топчется на месте. Прокрутка нужна только чтобы ПОКАЗАТЬ вопрос.
-   *
-   * Курсор — индекс в ленте; -1 значит «не выбрано».
-   */
-  let promptCursor = -1;
-
-  function jumpToPrompt(delta: number): void {
-    const session = active();
-    const nodes = [...session.thread.querySelectorAll<HTMLElement>('.msg')];
-    if (nodes.length === 0) return;
-    const roles = nodes.map((node) => ({ role: node.classList.contains('msg-user') ? 'user' : 'assistant' }));
-
-    // Курсор мог остаться от прошлой ленты (беседа перерисована) — тогда его
-    // нет: `promptNeighbour` сам начнёт с края в нужную сторону.
-    const from = promptCursor >= 0 && promptCursor < nodes.length ? promptCursor : -1;
-    const target = promptNeighbour(roles, from, delta);
-    if (target < 0) return;
-
-    promptCursor = target;
-    const node = nodes[target]!;
-    node.scrollIntoView({ block: 'start', behavior: 'auto' });
-    for (const other of session.thread.querySelectorAll('.is-prompt-current')) {
-      other.classList.remove('is-prompt-current');
-    }
-    node.classList.add('is-prompt-current');
-
-    // Проговорить для скринридера: обводка — единственный признак, что прыжок
-    // состоялся, а её не видят.
-    const index = roles.slice(0, target + 1).filter((message) => message.role === 'user').length;
-    const total = roles.filter((message) => message.role === 'user').length;
-    node.setAttribute('aria-label', `Вопрос ${index} из ${total}`);
-  }
+  const promptNav = createChatPromptNav({ active });
+  const jumpToPrompt = promptNav.jumpToPrompt;
 
   /**
    * На `document`, а не на корне панели: прыгать хочется и когда фокус в поле
@@ -2312,106 +2277,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return content;
   }
 
-  /**
-   * Очередь вопросов в ленте, в самом низу.
-   *
-   * Рисуем отдельно от истории и перерисовываем целиком при каждом изменении: так
-   * проще всего не расходиться с `session.queue`, а строк в ней мало (человек
-   * пишет во время ответа несколько, а не сотни).
-   */
-  function renderQueue(session: ChatSession): void {
-    session.queueNode?.remove();
-    session.queueNode = undefined;
-    const queued = session.queue ?? [];
-    if (queued.length === 0) return;
-    const list = h('ol', { class: 'queue-list' });
-    queued.forEach((item, index) => {
-      const text = item.text.length > 120 ? `${item.text.slice(0, 119)}…` : item.text;
-      list.appendChild(
-        h(
-          'li',
-          { class: 'queue-item' },
-          h('span', { class: 'queue-index' }, String(index + 1)),
-          h('span', { class: 'queue-text' }, text),
-          h('button', {
-            class: 'queue-move',
-            type: 'button',
-            title: 'Выше',
-            'aria-label': `Переставить вопрос ${index + 1} выше`,
-            // Край серый, а не спрятан: пропавшая кнопка ломает навигацию с экрана,
-            // а серая говорит, что ход есть, но отсюда нельзя.
-            disabled: index === 0,
-            'aria-disabled': String(index === 0),
-            onClick: () => moveQueued(session, index, -1),
-          }),
-          h('button', {
-            class: 'queue-move',
-            type: 'button',
-            title: 'Ниже',
-            'aria-label': `Переставить вопрос ${index + 1} ниже`,
-            disabled: index === queued.length - 1,
-            'aria-disabled': String(index === queued.length - 1),
-            onClick: () => moveQueued(session, index, 1),
-          }),
-          h('button', {
-            class: 'queue-drop',
-            type: 'button',
-            title: 'Снять с очереди',
-            'aria-label': `Снять с очереди вопрос ${index + 1}`,
-            onClick: () => dropQueued(session, index),
-          }),
-        ),
-      );
-    });
-    session.queueNode = h(
-      'div',
-      { class: 'chat-queue' },
-      h(
-        'div',
-        { class: 'chat-queue-head' },
-        `В очереди: ${queued.length}`,
-        h('button', { class: 'chat-queue-clear', type: 'button', onClick: () => clearQueue(session) }, 'Снять все'),
-      ),
-      list,
-    );
-    session.thread.appendChild(session.queueNode);
-    // Лента скроллится снаружи: очередь дописана снизу, и без протяжки её не видно.
-    if (session.id === activeId) scrollToEnd(session);
-  }
-
-  /** Убрать один отложенный вопрос: вложения возвращаются в поле, чтобы не пропали. */
-  function dropQueued(session: ChatSession, index: number): void {
-    // Вложения возвращаются всегда, а поле чипов показывает только открытая беседа —
-    // закрытой они не нужны, и перерисовка не вредит.
-    if (dropQueuedPrompt(session, index) && session.id === activeId) attachments.render();
-    renderQueue(session);
-  }
-
-  /**
-   * Переставить отложенный вопрос и вернуть фокус на ту же кнопку.
-   *
-   * `renderQueue` перерисовывает список целиком, поэтому головы строки после
-   * перестановки уже нет в документе — фокус упал бы в `body` (в начало ленты для
-   * того, кто идёт с клавиатуры). Поэтому ищем новую строку по номеру и ставим
-   * фокус на кнопку того же направления.
-   *
-   * `scrollToEnd` тут не нужен (и `renderQueue` его зовёт только для активной
-   * беседы): порядок в ЛЕНТЕ не изменился, двигается только очередь.
-   */
-  function moveQueued(session: ChatSession, index: number, delta: number): void {
-    if (!moveQueuedPrompt(session, index, delta)) return;
-    renderQueue(session);
-    const node = session.queueNode;
-    if (!node || session.id !== activeId) return;
-    const row = node.querySelectorAll('.queue-item')[index + delta];
-    const button = row?.querySelectorAll('.queue-move')[delta < 0 ? 0 : 1];
-    (button as HTMLElement | undefined)?.focus({ preventScroll: true });
-  }
-
-  function clearQueue(session: ChatSession): void {
-    if (clearQueuedPrompts(session) && session.id === activeId) attachments.render();
-    renderQueue(session);
-  }
+  const queueView = createChatQueueView({
+    activeId: () => activeId,
+    renderAttachments: () => attachments.render(),
+    scrollToEnd,
+  });
+  const renderQueue = queueView.renderQueue;
 
   function renderIntro(session: ChatSession): void {
     clear(session.thread);
