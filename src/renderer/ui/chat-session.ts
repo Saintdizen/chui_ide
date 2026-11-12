@@ -210,6 +210,53 @@ export function scrollTargetFor(next: ChatSession): number | 'end' {
 }
 
 /**
+ * Сколько в переписке ходов — вопросов человека, без служебных достроев.
+ *
+ * Нужно для порционного раскрытия: лента держит открытыми только последние
+ * `revealLimit` ходов, а остальные убирает в «показать ещё». Считаем здесь, а
+ * не в рисовании, потому что признак хода — фильтр по роли и тексту, и его надо
+ * держать в одном месте с отрисовкой.
+ *
+ * `CONTINUE_PROMPT` — служебное продолжение, а не ход: человек его не писал, и
+ * отдельная кнопка «показать ещё» на него не приходится.
+ */
+export function countTurns(transcript: readonly ChatMessage[], continuePrompt: string): number {
+  let turns = 0;
+  for (const message of transcript) {
+    if (message.role === 'user' && message.content !== continuePrompt) turns += 1;
+  }
+  return turns;
+}
+
+/**
+ * Показать всё, во что вложен `element` и что свернуто кнопкой «показать раньше».
+ *
+ * Лента режет длинную беседу: старые ходы остаются в DOM, но с `data-hidden`
+ * (CSS прячет их целиком). Поиск по беседе читает текст из DOM — он эти ходы
+ * находит и ставит подсветку. А `scrollIntoView` внутри `display: none` ничего
+ * не двигает: совпадение «найдено», но что его нашли — не видно. Поэтому перед
+ * прокруткой снимаем `data-hidden` со всех спрятанных предков целиком.
+ *
+ * Возвращает число раскрытых узлов, чтобы вызывающий мог понять, изменилось ли
+ * что-то (и не дёргать перерисовку зря). Без DOM-API, кроме `closest`, — это
+ * позволяет проверить поведение тестом.
+ */
+export function revealAncestors(element: Element): number {
+  let revealed = 0;
+  for (let cursor: Element | null = element; cursor; cursor = cursor.parentElement) {
+    // Проверяем наличие `dataset`, а не `instanceof HTMLElement`: в mini-dom
+    // (и в тестах вообще) глобального `HTMLElement` нет, а поле есть — и
+    // `instanceof` там падает раньше, чем что-то проверено.
+    const displayable = cursor as Element & { dataset?: Record<string, string> };
+    if (displayable.dataset?.hidden === 'true') {
+      delete displayable.dataset.hidden;
+      revealed += 1;
+    }
+  }
+  return revealed;
+}
+
+/**
  * Где в контексте (`history`) лежит вопрос, который в ленте (`transcript`) стоит
  * на позиции `index`. `-1` — этого вопроса в контексте нет.
  *

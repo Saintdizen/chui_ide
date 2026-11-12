@@ -511,6 +511,29 @@
   gap: 6px;
 }
 
+/* Свёрнутый ход остаётся в DOM, но не в разметке: раскрытие — это переключение
+   атрибута, а не пересборка истории (пересборка съедала бы якоря прокрутки). */
+.chat-turn[data-hidden="true"] {
+  display: none;
+}
+
+.chat-unfold {
+  align-self: center;
+  margin: 4px 0 8px;
+  padding: 4px 12px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font: inherit;
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.chat-unfold:hover {
+  color: var(--text_color);
+}
+
 .thread-summary {
   border-radius: var(--radius_sm);
   background: var(--sunken_background);

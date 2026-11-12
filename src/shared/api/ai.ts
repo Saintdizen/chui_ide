@@ -17,6 +17,12 @@ export interface ChatToolCall {
 }
 
 export interface ChatMessage {
+  /**
+   * Стабильный ключ сообщения в ленте. По нему адресуют одно сообщение,
+   * не перерисовывая остальные: так режется длинная сессия (`VISIBLE_TURNS`)
+   * и так же будет разворачиваться окно вокруг найденного хода.
+   */
+  id?: string;
   role: ChatRole;
   content: string;
   name?: string;

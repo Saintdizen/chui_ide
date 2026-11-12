@@ -66,6 +66,7 @@
     "probe:keyleak": "npm run build:main && electron scripts/key-leak-probe.cjs",
     "probe:todo": "npm run build && electron scripts/todo-panel-probe.cjs",
     "probe:chat": "npm run build && electron scripts/chat-panel-probe.cjs",
+    "probe:chatload": "npm run build && electron scripts/chat-probe.cjs",
     "probe:chatcompact": "npm run build && electron scripts/chat-compact-probe.cjs",
     "probe:override": "npm run build && electron scripts/override-probe.cjs",
     "probe:coverage": "npm run build && electron scripts/node-coverage-probe.cjs",

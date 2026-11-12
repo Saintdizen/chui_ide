@@ -439,6 +439,9 @@ function createToolGroup(
   const state = h('span', { class: 'tool-group-state' });
   paintToolState(state, 'tool-group-state', 'running');
   const body = h('div', { class: 'tool-group-body' });
+  // Связка кнопка-панель: в ленте несколько групп, и без `aria-controls`
+  // скринридер не знает, какую именно раскрывает `aria-expanded`.
+  body.id = `tool-group-body-${Math.random().toString(36).slice(2, 10)}`;
   const chevron = svgIcon('chevronDown', 12);
   chevron.classList.add('tool-chevron');
 
@@ -462,11 +465,19 @@ function createToolGroup(
   };
 
   /** Строка заводится по первому фрагменту и садится первой в ленте: думание — до действий. */
+  // Ссылка на головку живёт в области видимости `reasoning`: её правят и клик
+  // (внутри `ensureReasoning`), и программный `collapse`.
+  let reasoningHead: HTMLButtonElement | null = null;
+
   const ensureReasoning = (): void => {
     if (reasoningCard) return;
     reasoningText = h('div', { class: 'reasoning-text' });
     reasoningCount = h('span', { class: 'reasoning-count' });
     reasoningPanel = h('div', { class: 'tool-panel', hidden: true }, reasoningText);
+    // `id` нужен для `aria-controls`: скринридер должен знать, какую именно
+    // панель разворачивает кнопка — панелей в ленте много.
+    const reasoningPanelId = `reasoning-panel-${Math.random().toString(36).slice(2, 10)}`;
+    reasoningPanel.id = reasoningPanelId;
     const rowChevron = svgIcon('chevronDown', 12);
     rowChevron.classList.add('tool-chevron');
     const card = h(
@@ -478,10 +489,17 @@ function createToolGroup(
           class: 'tool-head',
           type: 'button',
           title: 'Размышления — показать',
+          'aria-expanded': 'false',
+          'aria-controls': reasoningPanelId,
           onClick: () => {
             if (!reasoningPanel) return;
             reasoningPanel.hidden = !reasoningPanel.hidden;
-            card.classList.toggle('is-open', !reasoningPanel.hidden);
+            const open = !reasoningPanel.hidden;
+            card.classList.toggle('is-open', open);
+            // Подсказка и `aria-expanded` идут следом за раскрытием: подпись
+            // «показать» над уже раскрытой панелью обманывает и глаз, и скринридер.
+            reasoningHead?.setAttribute('title', `Размышления — ${open ? 'скрыть' : 'показать'}`);
+            reasoningHead?.setAttribute('aria-expanded', String(open));
           },
         },
         svgIcon('bulb', 13),
@@ -492,6 +510,9 @@ function createToolGroup(
       ),
       reasoningPanel,
     );
+    // Головка — первый потомок карточки; ссылка нужна, чтобы клик и `collapse`
+    // одинаково правили подсказку и `aria-expanded`.
+    reasoningHead = card.querySelector<HTMLButtonElement>('.tool-head');
     reasoningCard = card;
     body.prepend(card);
   };
@@ -522,6 +543,9 @@ function createToolGroup(
       flushReasoning();
       if (reasoningPanel) reasoningPanel.hidden = true;
       reasoningCard?.classList.remove('is-open');
+      // Свернули программно — состояние кнопки тоже должно вернуться.
+      reasoningHead?.setAttribute('title', 'Размышления — показать');
+      reasoningHead?.setAttribute('aria-expanded', 'false');
     },
   };
 
@@ -536,6 +560,7 @@ function createToolGroup(
       class: 'tool-group-head',
       type: 'button',
       'aria-expanded': String(expanded),
+      'aria-controls': body.id,
       onClick: () => {
         expanded = !expanded;
         head.setAttribute('aria-expanded', String(expanded));
@@ -730,6 +755,10 @@ function createToolGroup(
 
     let outcome: ChatToolResultPayload | null = null;
     const detailLanguage = toolDetailLanguage(call);
+    // Связь головки с панелью для проверки доступности: `id` уникален, потому
+    // что карточек в ленте десятки.
+    const panelId = `tool-panel-${Math.random().toString(36).slice(2, 10)}`;
+    panel.id = panelId;
 
     /**
      * Раскрытая карточка — это разбор вызова, а не одна простыня: чем инструмент
@@ -769,29 +798,36 @@ function createToolGroup(
       }
       panel.hidden = !panel.hidden;
       card.classList.toggle('is-open', !panel.hidden);
+      // Подсказка и состояние должны идти следом за раскрытием: иначе после
+      // «показать» кнопка так и обещает показать, а скринридер молчит о том,
+      // что содержимое уже развёрнуто.
+      const open = !panel.hidden;
+      head.title = `${label} — ${open ? 'скрыть вывод' : 'показать вывод'}`;
+      head.setAttribute('aria-expanded', String(open));
     };
 
-    card.append(
-      h(
-        'button',
-        {
-          class: 'tool-head',
-          type: 'button',
-          title: `${label} — показать вывод`,
-          onClick: togglePanel,
-        },
-        toolIconNode(call.name, call.args),
-        h('span', { class: 'tool-name' }, label),
-        // Путь — ссылкой, а не текстом: в ленте «read src/main/app.ts:120»
-        // бесполезен, пока в него нельзя прыгнуть.
-        pathLink(call),
-        h('span', { class: 'tool-args' }, summarizeArgs(call.args)),
-        time,
-        cardState,
-        rowChevron,
-      ),
-      panel,
+    const head = h(
+      'button',
+      {
+        class: 'tool-head',
+        type: 'button',
+        title: `${label} — показать вывод`,
+        'aria-expanded': 'false',
+        'aria-controls': panelId,
+        onClick: togglePanel,
+      },
+      toolIconNode(call.name, call.args),
+      h('span', { class: 'tool-name' }, label),
+      // Путь — ссылкой, а не текстом: в ленте «read src/main/app.ts:120»
+      // бесполезен, пока в него нельзя прыгнуть.
+      pathLink(call),
+      h('span', { class: 'tool-args' }, summarizeArgs(call.args)),
+      time,
+      cardState,
+      rowChevron,
     );
+
+    card.append(head, panel);
     body.appendChild(card);
     sync();
 
