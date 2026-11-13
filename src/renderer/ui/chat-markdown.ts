@@ -283,7 +283,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
   function inlineMarkdown(text: string): Child[] {
     const nodes: Child[] = [];
     const pattern =
-      /(`[^`]+`|\$\$(?!\s)[\s\S]+?(?<!\s)\$\$|(?<![\w$])\$(?!\s)[^$\n]+?(?<!\s)\$|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g;
+      /(`[^`]+`|\$\$(?!\s)[\s\S]+?(?<!\s)\$\$|(?<![\w$])\$(?!\s)[^$\n]+?(?<!\s)\$|\*\*[^*]+\*\*|~~[^~]+~~|\[[^\]]+\]\([^)]+\))/g;
     let last = 0;
 
     for (const match of text.matchAll(pattern)) {
@@ -303,6 +303,10 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
         nodes.push(mathNode(token.slice(1, -1), false));
       } else if (token.startsWith('**')) {
         nodes.push(h('strong', {}, token.slice(2, -2)));
+      } else if (token.startsWith('~~')) {
+        // Зачёркивание — GFM. Внутрь не разбираем: `~~**жит~~**` модели пишут
+        // редко, а вложенный разбор здесь дал бы лишний повод для багов.
+        nodes.push(h('del', {}, token.slice(2, -2)));
       } else {
         const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
         if (link) nodes.push(h('span', { class: 'md-link', title: link[2] ?? '' }, link[1] ?? ''));

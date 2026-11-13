@@ -122,10 +122,10 @@
 - [ ] 110. Reasoning отдельным блоком: свёрнут по умолчанию, длительность,
   «показать полностью». `MAX_REASONING_CHARS` оставить усечением по умолчанию.
 
-- [ ] 111. Markdown до GFM: таблицы, зачёркивание, task-lists, подсветка кода
-  (ленивый шаренный highlighter). Ссылки `path:line` → чип, клик ведёт в
-  файл (у `createMarkdownRenderer` уже есть `openPath`). «Used references»
-  над ответом.
+- [ ] 111. Markdown до GFM. Сделано: таблицы (`markdownBlocks:219`),
+  task-lists (`:240`), подсветка кода (`highlightInto`), чипы `path:line`
+  с `openPath` (`:332-400`), зачёркивание `~~текст~~` — `del` в
+  `inlineMarkdown`. Осталось: «Used references» над ответом — его нет.
 
 - [x] 112. Замер ленты до правок производительности: `scripts/chat-probe.cjs`,
   `npm run probe:chatload`. Снятые числа: 4505 узлов на 200 сообщений

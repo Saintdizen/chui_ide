@@ -153,6 +153,7 @@ const SAMPLES: Record<string, string> = {
   абзацы: 'первый абзац\nвторая строка\n\nвторой',
   'горизонтальная линия': '---\n\n***\n\ntext',
   смесь: '## Заголовок\n\nтекст **жир** и `код`\n\n- пункт\n\n---\n\n## Второй',
+  'зачёркивание в тексте': 'было ~~так~~ стало так',
 };
 
 describe('разметка ленты чата', () => {
@@ -188,6 +189,25 @@ describe('разметка ленты чата', () => {
       expect(diverged).toEqual([]);
     });
   }
+
+  it('зачёркивание становится del, а не остаётся тильдами', () => {
+    // GFM-разметка: модели пишут `~~старое~~`, ожидая зачёркнутый текст.
+    // Проверяем именно тег: если ветку убрать, парсер вернёт голый текст
+    // с тильдами и тест упадёт на подстроке «так».
+    const renderer = createMarkdownRenderer({ insertCode: () => false });
+    const box = (fakeDocument() as { createElement: (tag: string) => FakeElement }).createElement('div');
+    renderer.renderInto(box as never, 'было ~~так~~ стало');
+
+    const tags: string[] = [];
+    const walk = (node: FakeElement): void => {
+      if (node.tag === 'del') tags.push(node.textContent ?? '');
+      for (const child of node.children) if (child.tag !== '#text') walk(child);
+    };
+    for (const child of box.children) if (child.tag !== '#text') walk(child);
+
+    expect(tags).toEqual(['так']);
+    expect(box.textContent).not.toContain('~~');
+  });
 
   it('второй заголовок дорисовывается, а не застывает первым', () => {
     const renderer = createMarkdownRenderer({ insertCode: () => false });
