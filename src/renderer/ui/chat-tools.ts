@@ -17,8 +17,18 @@ import type { RunFold } from './run-fold';
  * иначе агент за шаг заливает ленту десятком строк.
  */
 
-/** Размышления показываются целиком, но без предела одна строка съест ленту. */
-const MAX_REASONING_CHARS = 20_000;
+/**
+ * Размышления показываются целиком, но без предела одна строка съест ленту.
+ * Это же число — точка очистки: сверх него в панели остаётся только «показать полностью».
+ */
+export const MAX_REASONING_CHARS = 20_000;
+
+/**
+ * Сколько размышлений держим в памяти: вдесятеро больше показанного.
+ * Без потолка длинное размышление (сотни килобайт) копилось бы в строке
+ * ленты навсегда, а вдесятеро хватает, чтобы «показать полностью» имело смысл.
+ */
+const KEEP_REASONING_CHARS = MAX_REASONING_CHARS * 10;
 
 const TOOL_LABELS: Record<string, string> = {
   // Старые имена остаются: в истории бесед трассы прошлых прогонов уже записаны.
@@ -394,7 +404,7 @@ export interface ReasoningRowView {
   push(chunk: string): void;
   /** Начать новую часть: следующая врезка станет отдельным абзацем. */
   part(): void;
-  /** Свернуть строку — ответ начался или закончился. */
+  /** Свернуть строку — ответ начался или закончился. В шапке появляется длительность. */
   collapse(): void;
 }
 
@@ -496,13 +506,29 @@ function createToolGroup(
   let reasoningPanel: HTMLElement | null = null;
   let reasoningText: HTMLElement | null = null;
   let reasoningCount: HTMLElement | null = null;
+  let reasoningTime: HTMLElement | null = null;
+  let reasoningLimit = MAX_REASONING_CHARS;
+  /** Когда пришёл первый фрагмент: длительность считаем от него, а не от вызова. */
+  let reasoningStartedAt = 0;
   const reasoningParts: string[] = [];
   /** Открыта ли текущая часть: следующая врезка начнёт новую (см. part). */
   let reasoningOpen = false;
   let reasoningFrame = 0;
 
+  /** «4 с» — довольно, чтобы объяснить ожидание, и места в шапке почти не берёт. */
+  const reasoningDuration = (ms: number): string => {
+    const seconds = Math.max(1, Math.round(ms / 1000));
+    if (seconds < 60) return `${seconds} с`;
+    return `${Math.floor(seconds / 60)} мин ${seconds % 60} с`;
+  };
+
   const flushReasoning = (): void => {
-    if (reasoningText) reasoningText.textContent = reasoningParts.join('\n\n');
+    const full = reasoningParts.join('\n\n').slice(0, KEEP_REASONING_CHARS);
+    const clipped = full.length > reasoningLimit;
+    // Хвост сверх лимита в панель не кладём: одна такая строка съела бы ленту.
+    if (reasoningText) reasoningText.textContent = full.slice(0, reasoningLimit);
+    // Не влезло — только тогда и есть что «показать полностью».
+    if (reasoningMore) reasoningMore.hidden = !clipped;
     if (reasoningCount) reasoningCount.textContent = reasoningParts.length > 1 ? String(reasoningParts.length) : '';
   };
 
@@ -510,12 +536,31 @@ function createToolGroup(
   // Ссылка на головку живёт в области видимости `reasoning`: её правят и клик
   // (внутри `ensureReasoning`), и программный `collapse`.
   let reasoningHead: HTMLButtonElement | null = null;
+  let reasoningMore: HTMLButtonElement | null = null;
 
   const ensureReasoning = (): void => {
     if (reasoningCard) return;
     reasoningText = h('div', { class: 'reasoning-text' });
     reasoningCount = h('span', { class: 'reasoning-count' });
-    reasoningPanel = h('div', { class: 'tool-panel', hidden: true }, reasoningText);
+    reasoningTime = h('span', { class: 'reasoning-time' });
+    // «Показать полностью» — внутри панели, а не в шапке: она расширяет панель,
+    // а не раскрывает её. Два разных «показать» рядом путали бы.
+    const more = h(
+      'button',
+      {
+        class: 'reasoning-more',
+        type: 'button',
+        hidden: true,
+        onClick: () => {
+          reasoningLimit = Number.POSITIVE_INFINITY;
+          more.hidden = true;
+          flushReasoning();
+        },
+      },
+      'Показать полностью',
+    );
+    reasoningMore = more;
+    reasoningPanel = h('div', { class: 'tool-panel', hidden: true }, reasoningText, more);
     // `id` нужен для `aria-controls`: скринридер должен знать, какую именно
     // панель разворачивает кнопка — панелей в ленте много.
     const reasoningPanelId = `reasoning-panel-${Math.random().toString(36).slice(2, 10)}`;
@@ -547,6 +592,7 @@ function createToolGroup(
         svgIcon('bulb', 13),
         h('span', { class: 'tool-name' }, 'Размышления'),
         reasoningCount,
+        reasoningTime,
         h('span', { class: 'tool-args' }),
         rowChevron,
       ),
@@ -562,13 +608,17 @@ function createToolGroup(
   const reasoning: ReasoningRowView = {
     push: (chunk) => {
       ensureReasoning();
+      if (!reasoningStartedAt) reasoningStartedAt = Date.now();
       if (!reasoningOpen) {
         reasoningParts.push('');
         reasoningOpen = true;
       }
       const index = reasoningParts.length - 1;
-      const current = reasoningParts[index] ?? '';
-      if (current.length + chunk.length <= MAX_REASONING_CHARS) reasoningParts[index] = current + chunk;
+      // Копим целиком, без усечения: предел — это сколько показать, а не сколько
+      // сохранить. С усечением здесь «показать полностью» нечего было показать —
+      // хвост терялся ещё до отрисовки.
+      const joined = (reasoningParts[index] ?? '') + chunk;
+      if (joined.length <= KEEP_REASONING_CHARS) reasoningParts[index] = joined;
       if (reasoningFrame) return;
       reasoningFrame = requestAnimationFrame(() => {
         reasoningFrame = 0;
@@ -583,6 +633,12 @@ function createToolGroup(
       if (reasoningFrame) cancelAnimationFrame(reasoningFrame);
       reasoningFrame = 0;
       flushReasoning();
+      // Длительность — итог, а не тикающие часы: во время стрима она дёргала бы
+      // вёрстку на каждом кадре, а смотрят на неё всё равно в конце.
+      if (reasoningTime && reasoningStartedAt) {
+        reasoningTime.textContent = reasoningDuration(Date.now() - reasoningStartedAt);
+      }
+      reasoningStartedAt = 0;
       if (reasoningPanel) reasoningPanel.hidden = true;
       reasoningCard?.classList.remove('is-open');
       // Свернули программно — состояние кнопки тоже должно вернуться.

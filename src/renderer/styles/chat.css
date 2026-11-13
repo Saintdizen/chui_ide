@@ -979,6 +979,30 @@
   color: var(--text_color_tertiary);
 }
 
+/* Сколько модель думала: видно в свёрнутом виде, а без него сорок секунд
+   ожидания выглядят как зависание. */
+.reasoning-time:not(:empty) {
+  margin-left: 6px;
+  font-size: var(--font_micro_size);
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Продолжение усечённого: кнопка внутри панели, не путать с раскрытием строки. */
+.reasoning-more {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--font_micro_size);
+  color: var(--text_color_tertiary);
+  cursor: pointer;
+}
+
+.reasoning-more:hover {
+  text-decoration: underline solid;
+}
+
 /* Читаемый тон в обеих схемах: берём `--text_color_secondary`
    (70 % белого / 50 % чёрного) — вторичный, но различимый текст; для
    рассуждения тихой ступени tertiary уже мало. */
