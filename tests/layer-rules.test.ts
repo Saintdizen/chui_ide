@@ -33,6 +33,16 @@ describe('граница общего слоя', () => {
     expect(check('../shared/lsp-status', '/repo/src/shared/api.ts')).toBeNull();
   });
 
+  it('пути Windows с `\\` — та же граница', () => {
+    // Регрессия: сторож резал путь по `'/'`, и на Windows любой `./x` из shared
+    // выглядел выходом из слоя — 263 ложных срабатывания в CI.
+    const win = { ...CONTEXT, sharedDir: 'C:\\repo\\src\\shared' };
+    const winFile = 'C:\\repo\\src\\shared\\api\\ai.ts';
+    expect(checkSharedImport(winFile, './settings', win)).toBeNull();
+    expect(checkSharedImport(winFile, '../permissions', win)).toBeNull();
+    expect(checkSharedImport(winFile, '../../main/ai/service', win)).toContain('main или renderer');
+  });
+
   it('модуль Node — нельзя, с префиксом и без', () => {
     expect(check('node:fs')).toContain('модуль Node');
     expect(check('fs')).toContain('модуль Node');

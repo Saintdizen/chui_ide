@@ -72,29 +72,35 @@ export function checkSharedImport(file: string, specifier: string, context: Laye
 }
 
 /**
- * Склейка пути и спецификатора без `node:path`: общий код не имеет права тянуть
- * модуль Node, даже ради проверки, которая как раз это и запрещает.
- * Достаточно разрешить `.` и `..` — символических ссылок в `src` нет.
+ * Склейка пути и спецификатора своим разбором, а не `node:path`: общий слой
+ * проверяется ещё и сборкой renderer, где типов Node нет — импорт `node:path`
+ * валил бы `tsconfig.renderer.json`.
+ * Разделители — и `\`, и `/`: на Windows пути приходят с `\`, и деление по `'/'`
+ * склеивало весь путь в один сегмент — тогда любой `./x` выглядел как выход из слоя.
+ * Регистр диска и корень при этом не трогаем: сравнение идёт по сегментам.
  */
-function pathResolve(fromFile: string, specifier: string): string[] {
-  const segments = fromFile.split('/');
+function pathResolve(fromFile: string, specifier: string): string {
+  const segments = fromFile.split(/[\\/]/).filter((segment) => segment !== '' && segment !== '.');
   segments.pop();
-  // Корень `/` в начале — тоже сегмент: без него относительный путь сравнивался бы
-  // с `sharedDir` со сдвигом на один уровень, и `./x` считался бы выходом из слоя.
-  for (const part of specifier.split('/')) {
-    if (part === '' || part === '.') continue;
-    if (part === '..') segments.pop();
-    else segments.push(part);
+  for (const segment of specifier.split(/[\\/]/)) {
+    if (segment === '..') segments.pop();
+    else if (segment !== '' && segment !== '.') segments.push(segment);
   }
-  return segments;
+  return segments.join('/');
 }
 
 /**
- * Лежит ли разрешённый путь внутри `dir`. `target` — сегменты абсолютного пути,
- * `dir` — абсолютный путь как строка; сравниваем по сегментам.
+ * Лежит ли разрешённый путь внутри `dir`.
+ * Равенство путей нарушением не считается: импорт самой папки нам не нужен.
  */
-function isInside(dir: string, target: readonly string[]): boolean {
-  const base = dir.split('/');
-  if (target.length <= base.length) return false;
-  return base.every((segment, index) => target[index] === segment);
+function isInside(dir: string, target: string): boolean {
+  const dirSegments = dir.split(/[\\/]/).filter((segment) => segment !== '' && segment !== '.');
+  const targetSegments = target.split('/');
+  if (targetSegments.length <= dirSegments.length) return false;
+  // На Windows регистр в путях не значим. Признак платформы берём из самого пути —
+  // `process` в общем слое недоступен (рендерер собирается без типов Node).
+  // Заглавная «C» диска под правило не попадает: колонка с `:` в имена папок не входит.
+  const caseInsensitive = target.includes('\\');
+  const normalize = (segment: string) => (caseInsensitive && !segment.endsWith(':') ? segment.toLowerCase() : segment);
+  return dirSegments.every((segment, index) => normalize(segment) === normalize(targetSegments[index] ?? ''));
 }
