@@ -48,6 +48,11 @@ async function withFakeRg(body: string): Promise<void> {
   // голая `--` без версии идёт позиционным аргументом и ломает поиск файла).
   await fs.writeFile(file, `#!${process.execPath} --\n${body}\n`, 'utf8');
   await fs.chmod(file, 0o755);
+  // На Windows заглушку без расширения никто не запустит: файл ищется по PATHEXT.
+  // Кладём рядом `rg.cmd`, зовущий тот же Node с тем же телом — его найдёт `execFile`.
+  const jsFile = path.join(dir, 'rg-stub.js');
+  await fs.writeFile(jsFile, `${body}\n`, 'utf8');
+  await fs.writeFile(path.join(dir, 'rg.cmd'), `@echo off\r\n"${process.execPath}" "${jsFile}" %*\r\n`, 'utf8');
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   // Возврат PATH — через afterEach неудобно: сохраняем в замыкании хука.

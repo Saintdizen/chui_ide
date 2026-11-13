@@ -37,7 +37,10 @@ export function resolveCommand(command: string, cwd: string, pathEnv: string = p
   for (const candidate of candidates) {
     try {
       if (!statSync(candidate).isFile()) continue;
-      accessSync(candidate, constants.X_OK);
+      // На Windows бит исполнения не проверяется: X_OK там смотрит только на
+      // существование, а `chmod 644` в тестах и «не исполняемый» `.cmd` после
+      // перебора суффиксов — вещи разные. Признак — есть файл.
+      if (process.platform !== 'win32') accessSync(candidate, constants.X_OK);
       return candidate;
     } catch {
       // Каталога нет, файла нет, прав нет — следующий кандидат.

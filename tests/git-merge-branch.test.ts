@@ -54,7 +54,9 @@ describe('mergeBranch: вернуть задачу из отдельной ве�
 
     expect(result.ok).toBe(true);
     expect(result.conflict).toBe(false);
-    expect(await fs.readFile(path.join(root, 'a.txt'), 'utf8')).toBe('два\n');
+    // git на Windows по умолчанию переводит файл в CRLF при checkout — это
+    // настройка core.autocrlf, а не ошибка слияния. Сравниваем по строкам.
+    expect((await fs.readFile(path.join(root, 'a.txt'), 'utf8')).replaceAll('\r\n', '\n')).toBe('два\n');
     const log = await new Promise<string>((resolve) => {
       execFile('git', ['log', '--format=%s'], { cwd: root, windowsHide: true }, (_e, stdout) =>
         resolve(String(stdout)),

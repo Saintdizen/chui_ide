@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { TaskWorkspace } from '../src/main/ai/task-workspace';
 
@@ -37,14 +38,16 @@ describe('каталог задачи поверх общего сервиса',
     const svc = service('/main');
     const task = new TaskWorkspace(svc as never, '/main/.worktrees/task');
     await task.readFile('src/a.ts');
-    expect(svc.calls).toEqual(['readFile:/main/.worktrees/task/src/a.ts']);
+    expect(svc.calls).toEqual([`readFile:${path.join('/main/.worktrees/task', 'src/a.ts')}`]);
   });
 
   it('абсолютный путь остаётся собой', async () => {
     const svc = service('/main');
     const task = new TaskWorkspace(svc as never, '/main/.worktrees/task');
     await task.readFile('/main/.worktrees/task/b.ts');
-    expect(svc.calls).toEqual(['readFile:/main/.worktrees/task/b.ts']);
+    // Корень на Windows получает диск и обратные слэши: сравниваем с тем же
+    // путём, собранным платформенным join, а не литералом POSIX.
+    expect(svc.calls).toEqual([`readFile:${path.resolve('/main/.worktrees/task/b.ts')}`]);
   });
 
   it('выход за свой каталог — не путь этой задачи', () => {

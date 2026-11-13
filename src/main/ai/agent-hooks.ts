@@ -115,10 +115,16 @@ function runHook(
       resolve({ code, timedOut, stdout, stderr });
     };
 
-    const child = spawn('/bin/sh', ['-c', hook.command], {
+    // Шелл — платформенный: на Windows `/bin/sh` нет, `spawn` молча падал в ENOENT,
+    // и раннер считал, что хук промолчал, — то есть все проверки тихо разрешали вызов.
+    // `timeout` у spawn не используем: убийство дерева процессов ниже — наше, и два
+    // таймера спорили бы, какой из них первый.
+    const child = spawn(hook.command, {
       cwd: options.cwd,
       env: { ...process.env, CHUI_HOOK: hook.name, CHUI_HOOK_EVENT: event },
       stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true,
+      windowsHide: true,
     });
 
     const timer = setTimeout(() => {

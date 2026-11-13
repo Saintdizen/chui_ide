@@ -21,11 +21,27 @@ async function tmpDir(): Promise<string> {
   return dir;
 }
 
-/** Скрипт-пустышка: печатает то, что попросили, и выходит с заданным кодом. */
+/**
+ * Скрипт-пустышка: печатает то, что попросили, и выходит с заданным кодом.
+ * Тело — POSIX-шелл, поэтому запускаем его через `sh` из PATH: на Windows
+ * настоящего `/bin/sh` нет, а тест должен проверять поиск команды, а не
+ * наличие шелла. Файл остаётся помеченным исполняемым — `X_OK` на не-Windows.
+ */
+const shell = process.platform === 'win32' ? 'sh' : '/bin/sh';
+
 async function script(dir: string, name: string, body: string): Promise<string> {
   const file = path.join(dir, name);
-  await fs.writeFile(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  await fs.writeFile(file, `${shell}\n${body}\n`, { mode: 0o755 });
   return file;
+}
+
+/**
+ * Запуск скрипта-пустышки: имя и args — как из настроек LSP.
+ * Через шелл запускаем только на Windows (там у файла нет `/bin/sh` в первой
+ * строке, а есть `sh` из PATH); на прочих платформах команда идёт как есть.
+ */
+function viaShell(file: string, args: string[] = ['--version']): { command: string; args: string[] } {
+  return process.platform === 'win32' ? { command: shell, args: [file, ...args] } : { command: file, args };
 }
 
 afterEach(async () => {
@@ -51,7 +67,7 @@ describe('resolveCommand', () => {
     const bin = path.join(dir, 'bin');
     await fs.mkdir(bin, { recursive: true });
     const file = await script(bin, 'pyright-langserver', 'exit 0');
-    expect(resolveCommand('pyright-langserver', dir, `${path.join(dir, 'nope')}:${bin}`)).toBe(file);
+    expect(resolveCommand('pyright-langserver', dir, `${path.join(dir, 'nope')}${path.delimiter}${bin}`)).toBe(file);
   });
 
   it('неисполняемый файл — не находка: «есть» и «запустится» — разные вещи', async () => {
@@ -72,9 +88,10 @@ describe('checkLspCommand', () => {
   it('живая команда: ok, путь и версия из --version', async () => {
     const dir = await tmpDir();
     await script(dir, 'gopls', 'echo "gopls version v0.15.0"');
-    const result = await checkLspCommand({ command: './gopls', cwd: dir });
+    const run = viaShell(path.join(dir, 'gopls'));
+    const result = await checkLspCommand({ command: run.command, args: run.args, cwd: dir });
     expect(result.ok).toBe(true);
-    expect(result.resolved).toBe(path.join(dir, 'gopls'));
+    expect(result.resolved).toBe(process.platform === 'win32' ? null : path.join(dir, 'gopls'));
     expect(result.version).toBe('gopls version v0.15.0');
     expect(result.error).toBe('');
   });
@@ -82,7 +99,8 @@ describe('checkLspCommand', () => {
   it('версия пишется в stderr — всё равно версия', async () => {
     const dir = await tmpDir();
     await script(dir, 'gopls', 'echo "gopls v1" >&2');
-    const result = await checkLspCommand({ command: './gopls', cwd: dir });
+    const run = viaShell(path.join(dir, 'gopls'));
+    const result = await checkLspCommand({ command: run.command, args: run.args, cwd: dir });
     expect(result.ok).toBe(true);
     expect(result.version).toBe('gopls v1');
   });
@@ -90,9 +108,10 @@ describe('checkLspCommand', () => {
   it('нашлась, но упала — код выхода в ответе, а не молчание', async () => {
     const dir = await tmpDir();
     await script(dir, 'gopls', 'echo "не хватает node" >&2; exit 3');
-    const result = await checkLspCommand({ command: './gopls', cwd: dir });
+    const run = viaShell(path.join(dir, 'gopls'));
+    const result = await checkLspCommand({ command: run.command, args: run.args, cwd: dir });
     expect(result.ok).toBe(false);
-    expect(result.resolved).toBe(path.join(dir, 'gopls'));
+    if (process.platform !== 'win32') expect(result.resolved).toBe(path.join(dir, 'gopls'));
     expect(result.error).toContain('кодом 3');
     expect(result.error).toContain('не хватает node');
   });
@@ -116,7 +135,8 @@ describe('checkLspCommand', () => {
   it('аргументы из настроек идут вместо --version', async () => {
     const dir = await tmpDir();
     await script(dir, 'echoer', 'echo "$@"');
-    const result = await checkLspCommand({ command: './echoer', args: ['--stdio', '--verbose'], cwd: dir });
+    const run = viaShell(path.join(dir, 'echoer'), ['--stdio', '--verbose']);
+    const result = await checkLspCommand({ command: run.command, args: run.args, cwd: dir });
     expect(result.ok).toBe(true);
     expect(result.version).toBe('--stdio --verbose');
   });

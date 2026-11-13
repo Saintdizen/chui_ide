@@ -156,6 +156,8 @@ describe('search action: code со snippets', () => {
       'search',
       JSON.stringify({ action: 'code', query: 'other', snippets: true }),
     );
+    // Контекст без `symbols`: объявления берутся из текста, а сервер нужен только
+    // для тел. Их не прочитать — так и сказано, а совпадение остаётся видно.
     expect(String(outcome.detail)).toContain('Языкового сервера нет');
     // Совпадение в тексте — `other()`, и его тело взято целиком.
     expect(String(outcome.detail)).toContain('return 2;');

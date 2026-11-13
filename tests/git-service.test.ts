@@ -66,6 +66,10 @@ async function withStubCommand(name: string, ok: boolean): Promise<() => void> {
     const js = path.join(dir, `${name}-stub.js`);
     await fs.writeFile(js, body, 'utf8');
     await fs.writeFile(path.join(dir, `${name}.cmd`), `@echo off\r\n"${process.execPath}" "${js}" %*\r\n`, 'utf8');
+    // `git-lfs` на Windows живёт как `git-lfs.exe`: `.cmd` ищется на каждый
+    // вызов через PATHEXT, а `git-lfs` — это подкоманда, и `git` ищет её файлом
+    // `git-lfs` без учёта PATHEXT. Копия под этим именем покрывает оба случая.
+    await fs.copyFile(path.join(dir, `${name}.cmd`), path.join(dir, name));
   } else {
     const file = path.join(dir, name);
     await fs.writeFile(file, `#!/bin/sh\nexit ${code}\n`, 'utf8');

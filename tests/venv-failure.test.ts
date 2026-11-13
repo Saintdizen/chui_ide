@@ -99,13 +99,33 @@ const [mode, ...rest] = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_LOG, [mode, ...rest].join(' ') + '\\n');
 if (mode === '-m' && rest[0] === 'venv') {
   const dir = path.resolve(rest[1]);
-  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+  // Подпапку и имя интерпретатора решает платформа: на Windows createVenv ждёт
+  // Scripts\\python.exe, на прочих — bin/python.
+  const win = process.platform === 'win32';
+  const envDir = win ? path.join(dir, 'Scripts') : path.join(dir, 'bin');
+  fs.mkdirSync(envDir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'pyvenv.cfg'), 'version = 3.12.3\\n');
   // Кладём сам скрипт, а не оболочку: созданному python нужен исполняемый
-  // файл, который умеет запуститься без оболочки и без расширения.
-  fs.writeFileSync(path.join(dir, 'bin', 'python'), '#!/usr/bin/env node\\n' + process.env.FAKE_SOURCE);
-  fs.chmodSync(path.join(dir, 'bin', 'python'), 0o755);
-  process.exit(0);
+  // файл, который умеет запускаться сам.
+  // На Windows расширение решает всё: файл без него не запустится, а имя
+  // python.exe — то, которое вернёт venvPythonPath. Шебанг там не работает,
+  // поэтому python.exe — обычный JS-файл, зовущий node через spawnSync.
+  const envPython = win ? path.join(envDir, 'python.exe') : path.join(envDir, 'python');
+  const source = process.env.FAKE_SOURCE ?? '';
+  if (win) {
+    fs.writeFileSync(path.join(envDir, 'python-stub.cjs'), source);
+    fs.writeFileSync(
+      envPython,
+      [
+        "const { spawnSync } = require('node:child_process');",
+        "const { join } = require('node:path');",
+        "spawnSync(process.execPath, [join(__dirname, 'python-stub.cjs'), ...process.argv.slice(2)], { stdio: 'inherit' });",
+      ].join(''),
+    );
+  } else {
+    fs.writeFileSync(envPython, ['#!', process.execPath, String.fromCharCode(10), source].join(''));
+    fs.chmodSync(envPython, 0o755);
+  }
 }
 if (mode === '-m' && rest[0] === 'pip' && rest[1] === 'check') {
   const lines = process.env.FAKE_PIP_OUT ?? '';

@@ -13,7 +13,10 @@ import path from 'node:path';
 /** Путь лежит внутри корня проекта. Считается до обращения к диску. */
 export function isInsideRoot(root: string, target: string): boolean {
   const resolved = path.resolve(target);
-  return resolved === root || resolved.startsWith(root + path.sep);
+  // Корень приводим к той же форме: иначе `/p` и `/p/` или `C:\\a` и `c:\\a`
+  // сравниваются как разные, и файл внутри проекта считается чужим.
+  const base = path.resolve(root);
+  return resolved === base || resolved.startsWith(base + path.sep);
 }
 
 /**

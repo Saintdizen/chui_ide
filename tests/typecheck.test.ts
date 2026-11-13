@@ -126,7 +126,8 @@ describe('typecheckProject: называет причину, а не молчи�
     expect(result.tool).toBe('tsc');
     const problem = result.problems.find((entry) => entry.path.endsWith('bad.ts'));
     expect(problem, `вывод tsc: ${result.note}`).toBeDefined();
-    expect(problem?.path).toBe(path.join(dir, 'bad.ts'));
+    // tsc печатает путь со `/` даже на Windows — сравниваем по файлу, а не по строке.
+    expect(problem?.path && path.normalize(problem.path)).toBe(path.join(dir, 'bad.ts'));
     expect(problem?.severity).toBe('error');
     expect(problem?.message).toContain('string');
     expect(problem?.code).toBe('TS2322');

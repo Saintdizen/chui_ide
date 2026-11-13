@@ -4,6 +4,8 @@
  * сайтом, поэтому общего с поиском по проекту только формы аргументов.
  */
 
+import path from 'node:path';
+
 import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
 import { formatMcpResources } from '../../shared/mcp';
 import { missingForAction, optionalInteger, optionalString, requireString } from './tool-args';
@@ -179,7 +181,7 @@ async function savePageToFile(
   try {
     // Путь модели — проект-относительный, а `writeFile` проверяет от корня.
     const root = ctx.workspace.rootPath();
-    const absolute = !root || saveTo.startsWith('/') ? saveTo : `${root}/${saveTo}`;
+    const absolute = !root || path.isAbsolute(saveTo) ? saveTo : path.join(root, saveTo);
     await ctx.workspace.writeFile(absolute, text);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

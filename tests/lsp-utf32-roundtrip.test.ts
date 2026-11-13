@@ -1,3 +1,4 @@
+import { removeTemp } from './temp';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,7 +15,7 @@ const dirs: string[] = [];
 
 afterEach(async () => {
   for (const service of services.splice(0)) service.dispose();
-  for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
+  await removeTemp(dirs);
 });
 
 const FAKE = [

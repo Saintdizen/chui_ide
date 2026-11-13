@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { removeTemp } from './temp';
 
 const dirs: string[] = [];
 const services: { dispose(): void }[] = [];
@@ -91,7 +92,7 @@ function makeService(root: string, argsOf: () => string[], enabledOf: () => bool
 afterEach(async () => {
   for (const service of services) service.dispose();
   services.length = 0;
-  for (const dir of dirs) await fs.rm(dir, { recursive: true, force: true });
+  await removeTemp(dirs);
   dirs.length = 0;
 });
 

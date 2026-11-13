@@ -110,7 +110,9 @@ describe('resolveRealTarget — файла ещё нет', () => {
   it('новый файл внутри проекта остаётся внутри', async () => {
     const created = path.join(root, 'sub', 'new.txt');
     const real = resolveRealTarget(root, created, null);
-    expect(real.startsWith(await fs.realpath(root))).toBe(true);
+    // Сравниваем не строками, а путь с путём: на Windows `realpath` приводит
+    // диск и регистр к своим правилам, и `startsWith` портится сам по себе.
+    expect(isInsideRoot(await fs.realpath(root), real)).toBe(true);
   });
 
   it('НОВЫЙ файл в папке-симлинке наружу не считается своим', async () => {
@@ -119,8 +121,8 @@ describe('resolveRealTarget — файла ещё нет', () => {
     const created = path.join(root, 'link', 'secret.txt');
     const real = resolveRealTarget(root, created, null);
     // Раскрыт предок: путь обязан выйти за корень, а не притвориться своим.
-    expect(real.startsWith(await fs.realpath(outside))).toBe(true);
-    expect(real.startsWith(await fs.realpath(root))).toBe(false);
+    expect(isInsideRoot(await fs.realpath(outside), real)).toBe(true);
+    expect(isInsideRoot(await fs.realpath(root), real)).toBe(false);
   });
 
   it('папка, которой ещё нет, не ломает создание', async () => {

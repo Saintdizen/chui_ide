@@ -36,9 +36,12 @@ export async function withRipgrep(output: string, name = 'rg'): Promise<RipgrepS
   await writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
   await chmod(file, 0o755);
   // Windows не запускает файл без расширения: спавн ищет `rg` по PATHEXT и
-  // находит только `rg.cmd`, запуская его через cmd.exe.
+  // находит только `rg.cmd`, запуская его через cmd.exe. Поэтому `rx.cmd` и
+  // `rg.bat` идут рядом: патч `execFile` на Windows зовёт cmd /c через шелл, и
+  // тогда `.cmd` виден и без PATHEXT.
   const cmd = join(dir, `${name}.cmd`);
   await writeFile(cmd, `@echo off\r\n"${process.execPath}" "${file}" %*\r\n`, 'utf8');
+  await writeFile(join(dir, `${name}.bat`), `@echo off\r\n"${process.execPath}" "${file}" %*\r\n`, 'utf8');
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${delimiter}${previous}`;
   return {

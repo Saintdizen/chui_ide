@@ -57,31 +57,22 @@ async function withGhScript(body: string): Promise<{ restore: () => void; calls:
   roots.push(dir);
   const calls = path.join(dir, 'calls.txt');
   const file = path.join(dir, 'gh');
-  // На POSIX — sh-скрипт; на Windows — модуль node и `.cmd`, который его зовёт.
-  // `execFile('gh')` на Windows ищет по PATHEXT и sh-скрипт без
-  // расширения не исполняет вовсе — на этой платформе тесты и снимались.
+  // Заглушка пишет аргументы в `envKey`; `body` дописывает ответ, каким его
+  // увидел бы настоящий клиент. Тело — на Node, а не на sh: `/bin/sh` есть не
+  // везде, а `node` есть всегда, поэтому заглушка одинаково живёт на обеих
+  // платформах. Имя файла без расширения — POSIX-путь; на Windows ключ настроек
+  // идёт через `gh.cmd`, который `execFile` находит по PATHEXT.
   const envKey = 'gh_stub_calls';
-  const bodyFile = path.join(dir, 'gh-body.sh');
-  await fs.writeFile(
-    bodyFile,
-    `echo "$@" >> "$${envKey}"
-${body}
-`,
-    'utf8',
-  );
+  const script =
+    `require('node:fs').appendFileSync(process.env.${envKey}, process.argv.slice(2).join(' ') + '\\n');\n` + body;
   process.env[envKey] = calls;
-  const mjs = path.join(dir, 'gh-stub.mjs');
-  await fs.writeFile(
-    mjs,
-    "import { spawnSync } from 'node:child_process';\n" +
-      'spawnSync("sh", [' +
-      JSON.stringify(bodyFile) +
-      ', ...process.argv.slice(2)], { stdio: "inherit" });\n',
-    'utf8',
-  );
-  await fs.writeFile(file, `#!/bin/sh\n${await fs.readFile(bodyFile, 'utf8')}`, 'utf8');
+  const jsFile = path.join(dir, 'gh-stub.cjs');
+  await fs.writeFile(jsFile, script, 'utf8');
+  await fs.writeFile(file, `#!/bin/sh\nexec "${process.execPath}" "${jsFile}" "$@"\n`, 'utf8');
   await fs.chmod(file, 0o755);
-  await fs.writeFile(path.join(dir, 'gh.cmd'), `@echo off\r\n"${process.execPath}" "${mjs}" %*\r\n`, 'utf8');
+  const cmd = `@echo off\r\n"${process.execPath}" "${jsFile}" %*\r\n`;
+  await fs.writeFile(path.join(dir, 'gh.cmd'), cmd, 'utf8');
+  await fs.writeFile(path.join(dir, 'gh.bat'), cmd, 'utf8');
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   return {
@@ -154,11 +145,15 @@ describe('площадка: успешные пути', () => {
   it('forgeInfo(): список запросов разобран, а не просто «клиент есть»', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript(`printf '%s' '${LIST_JSON}'`);
+    const stub = await withGhScript(`process.stdout.write(${JSON.stringify(LIST_JSON)});`);
     try {
       const info = await serviceFor(work).forgeInfo();
       expect(info.requests).toHaveLength(1);
-      expect(info.requests[0]).toMatchObject({ number: 7, title: 'Починить сборку', author: 'octocat' });
+      expect(info.requests[0]).toMatchObject({
+        number: 7,
+        title: 'Починить сборку',
+        author: 'octocat',
+      });
       expect(info.note ?? '').toBe('');
     } finally {
       stub.restore();
@@ -169,10 +164,14 @@ describe('площадка: успешные пути', () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
     const stub = await withGhScript(
-      `case "$1 $2" in\n  "pr create") exit 0;;\n  "pr list") printf '%s' '${LIST_JSON}';;\n  *) exit 0;;\nesac`,
+      // Ответ выбирается по первым двум аргументам: `pr create` молчит, `pr list` отдаёт JSON.
+      `const key = process.argv.slice(2, 4).join(' ');\nif (key === 'pr create') process.exit(0);\nif (key === 'pr list') process.stdout.write(${JSON.stringify(LIST_JSON)});`,
     );
     try {
-      const info = await serviceFor(work).forgeCreate({ title: '  Новая  ', body: 'текст' });
+      const info = await serviceFor(work).forgeCreate({
+        title: '  Новая  ',
+        body: 'текст',
+      });
       const calls = await fs.readFile(stub.calls, 'utf8');
       expect(calls).toContain('pr create --title Новая --body текст');
       expect(calls).not.toContain('--title   Новая');
@@ -185,7 +184,7 @@ describe('площадка: успешные пути', () => {
   it('forgeCreate(): пустой заголовок — отказ ДО запуска клиента', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript('exit 0');
+    const stub = await withGhScript('');
     try {
       await expect(serviceFor(work).forgeCreate({ title: '   ' })).rejects.toThrow(/заголовок/i);
       // Клиент до сбора запроса не доходит: проверка стоит до него.
@@ -198,7 +197,7 @@ describe('площадка: успешные пути', () => {
   it('forgeCheckout(): неверный номер — отказ без запуска', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript('exit 0');
+    const stub = await withGhScript('');
     try {
       await expect(serviceFor(work).forgeCheckout(0)).rejects.toThrow(/номер/i);
       expect(await fs.readFile(stub.calls, 'utf8')).not.toContain('pr checkout');
@@ -210,7 +209,7 @@ describe('площадка: успешные пути', () => {
   it('forgeCheckout(): зовёт pr checkout и обновляет состояние', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript('exit 0');
+    const stub = await withGhScript('');
     try {
       const status = await serviceFor(work).forgeCheckout(7);
       expect(status).toBeTruthy();
@@ -224,7 +223,7 @@ describe('площадка: успешные пути', () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
     const stub = await withGhScript(
-      `printf '%s' '{"comments":[{"author":{"login":"ann"},"body":"гляну","createdAt":"2026-01-01T00:00:00Z"}]}'`,
+      `process.stdout.write(${JSON.stringify(JSON.stringify({ comments: [{ author: { login: 'ann' }, body: 'гляну', createdAt: '2026-01-01T00:00:00Z' }] }))});`,
     );
     try {
       const comments = await serviceFor(work).forgeComments(7);
@@ -238,7 +237,7 @@ describe('площадка: успешные пути', () => {
   it('forgeComment(): пустой текст — отказ до запуска клиента', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript('exit 0');
+    const stub = await withGhScript('');
     try {
       await expect(serviceFor(work).forgeComment(7, '  ')).rejects.toThrow(/комментарий/i);
     } finally {
@@ -250,7 +249,7 @@ describe('площадка: успешные пути', () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
     const stub = await withGhScript(
-      `case "$1 $2" in\n  "pr comment") exit 0;;\n  *) printf '%s' '{"comments":[{"author":{"login":"ann"},"body":"готово"}]}';;\nesac`,
+      `const key = process.argv.slice(2, 4).join(' ');\nif (key === 'pr comment') process.exit(0);\nprocess.stdout.write(${JSON.stringify(JSON.stringify({ comments: [{ author: { login: 'ann' }, body: 'готово' }] }))});`,
     );
     try {
       const comments = await serviceFor(work).forgeComment(7, 'готово');
@@ -267,7 +266,7 @@ describe('площадка: успешные пути', () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
     const stub = await withGhScript(
-      `printf '%s' '[{"number":3,"title":"Течь","author":{"login":"ann"},"state":"OPEN","labels":[],"url":"https://github.com/acme/web/issues/3"}]'`,
+      `process.stdout.write(${JSON.stringify(JSON.stringify([{ number: 3, title: 'Течь', author: { login: 'ann' }, state: 'OPEN', labels: [], url: 'https://github.com/acme/web/issues/3' }]))});`,
     );
     try {
       const issues = await serviceFor(work).forgeIssues();
@@ -282,10 +281,12 @@ describe('площадка: успешные пути', () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
     const stub = await withGhScript(
-      `case "$1 $2 $3" in\n  "issue create --title") exit 0;;\n  "issue list --limit") printf '[]';;\n  *) printf '[]';;\nesac`,
+      `const key = process.argv.slice(2, 5).join(' ');\nif (key === 'issue create --title') process.exit(0);\nprocess.stdout.write('[]');`,
     );
     try {
-      const issues = await serviceFor(work).forgeIssueCreate({ title: '  Течь  ' });
+      const issues = await serviceFor(work).forgeIssueCreate({
+        title: '  Течь  ',
+      });
       const calls = await fs.readFile(stub.calls, 'utf8');
       expect(calls).toContain('issue create --title Течь --body');
       // Без тела тело всё равно передаётся пустой строкой: иначе клиент спросит интерактивно.
@@ -299,7 +300,7 @@ describe('площадка: успешные пути', () => {
   it('forgeIssueCreate(): пустой заголовок — отказ после узнавания площадки, но до создания', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript('exit 0');
+    const stub = await withGhScript('');
     try {
       await expect(serviceFor(work).forgeIssueCreate({ title: ' ' })).rejects.toThrow(/заголовок задачи/i);
       expect(await fs.readFile(stub.calls, 'utf8')).not.toContain('issue create');
@@ -311,7 +312,7 @@ describe('площадка: успешные пути', () => {
   it('forgeIssueClose(): номер проверен до запуска, затем список перечитан', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript("printf '[]'");
+    const stub = await withGhScript(`process.stdout.write('[]');`);
     try {
       await expect(serviceFor(work).forgeIssueClose(0)).rejects.toThrow(/номер/i);
       expect(await fs.readFile(stub.calls, 'utf8')).not.toContain('issue close');
@@ -325,7 +326,7 @@ describe('площадка: успешные пути', () => {
   it('forgeIssueComments(): пустой комментарий не отправляется', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript('exit 0');
+    const stub = await withGhScript('');
     try {
       await expect(serviceFor(work).forgeIssueComment(3, '   ')).rejects.toThrow(/пустой комментарий/i);
       expect(await fs.readFile(stub.calls, 'utf8')).not.toContain('issue comment');
@@ -338,7 +339,7 @@ describe('площадка: успешные пути', () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
     const stub = await withGhScript(
-      `case "$1 $2" in\n  "issue comment") exit 0;;\n  *) printf '%s' '{"comments":[{"author":{"login":"ann"},"body":"да"}]}';;\nesac`,
+      `const key = process.argv.slice(2, 4).join(' ');\nif (key === 'issue comment') process.exit(0);\nprocess.stdout.write(${JSON.stringify(JSON.stringify({ comments: [{ author: { login: 'ann' }, body: 'да' }] }))});`,
     );
     try {
       const comments = await serviceFor(work).forgeIssueComment(3, 'да');
@@ -355,7 +356,7 @@ describe('площадка: успешные пути', () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
     const stub = await withGhScript(
-      `printf '%s' '[{"databaseId":42,"displayTitle":"CI","status":"completed","conclusion":"success","headBranch":"main","event":"push","createdAt":"2026-01-01T00:00:00Z","url":"https://x"}]'`,
+      `process.stdout.write(${JSON.stringify(JSON.stringify([{ databaseId: 42, displayTitle: 'CI', status: 'completed', conclusion: 'success', headBranch: 'main', event: 'push', createdAt: '2026-01-01T00:00:00Z', url: 'https://x' }]))});`,
     );
     try {
       const runs = await serviceFor(work).forgePipelines();
@@ -370,7 +371,7 @@ describe('площадка: успешные пути', () => {
   it('forgePipelineRerun(): номер проверен до запуска', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript("printf '[]'");
+    const stub = await withGhScript(`process.stdout.write('[]');`);
     try {
       await expect(serviceFor(work).forgePipelineRerun(0)).rejects.toThrow(/номер/i);
       expect(await fs.readFile(stub.calls, 'utf8')).not.toContain('run rerun');
@@ -384,7 +385,7 @@ describe('площадка: успешные пути', () => {
   it('forgeNotifications(): идёт в api своего репозитория и отдаёт пустой список без падения', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript("printf '[]'");
+    const stub = await withGhScript(`process.stdout.write('[]');`);
     try {
       const list = await serviceFor(work).forgeNotifications();
       const calls = await fs.readFile(stub.calls, 'utf8');
@@ -398,7 +399,7 @@ describe('площадка: успешные пути', () => {
   it('forgeNotificationRead(): пустой id отвергнут до запроса', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript("printf '[]'");
+    const stub = await withGhScript(`process.stdout.write('[]');`);
     try {
       await expect(serviceFor(work).forgeNotificationRead('   ')).rejects.toThrow(/уведомлен/i);
       expect(await fs.readFile(stub.calls, 'utf8')).not.toContain('PATCH');

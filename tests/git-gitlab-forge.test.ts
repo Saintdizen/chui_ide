@@ -51,31 +51,24 @@ async function withGlabScript(body: string): Promise<{ restore: () => void; call
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-glab-stub-'));
   roots.push(dir);
   const calls = path.join(dir, 'calls.txt');
-  // На POSIX — sh-скрипт; на Windows — модуль node и `.cmd`, который его зовёт.
-  // `execFile('glab')` на Windows ищет по PATHEXT и sh-скрипт без
-  // расширения не исполняет вовсе — на этой платформе тесты и снимались.
   const envKey = 'glab_stub_calls';
-  const bodyFile = path.join(dir, 'glab-body.sh');
+  // Тело — на Node, а не на sh: `/bin/sh` есть не везде (на Windows его нет),
+  // а `node` есть всегда. Имя без расширения — POSIX-путь, `glab.cmd` —
+  // Windows-путь: `execFile` находит его по PATHEXT. Аргументы пишутся отдельно
+  // от ответа, чтобы «клиента не звали» проверялось наличием файла.
+  const jsFile = path.join(dir, 'glab-stub.cjs');
   await fs.writeFile(
-    bodyFile,
-    `echo "$@" >> "$${envKey}"
-${body}
-`,
+    jsFile,
+    `require('node:fs').appendFileSync(process.env.${envKey}, process.argv.slice(2).join(' ') + '\\n');\n${body}`,
     'utf8',
   );
   process.env[envKey] = calls;
-  const mjs = path.join(dir, 'glab-stub.mjs');
-  await fs.writeFile(
-    mjs,
-    "import { spawnSync } from 'node:child_process';\n" +
-      'spawnSync("sh", [' +
-      JSON.stringify(bodyFile) +
-      ', ...process.argv.slice(2)], { stdio: "inherit" });\n',
-    'utf8',
-  );
-  await fs.writeFile(path.join(dir, 'glab'), `#!/bin/sh\n${await fs.readFile(bodyFile, 'utf8')}`, 'utf8');
-  await fs.chmod(path.join(dir, 'glab'), 0o755);
-  await fs.writeFile(path.join(dir, 'glab.cmd'), `@echo off\r\n"${process.execPath}" "${mjs}" %*\r\n`, 'utf8');
+  const glabFile = path.join(dir, 'glab');
+  await fs.writeFile(glabFile, `#!/bin/sh\nexec "${process.execPath}" "${jsFile}" "$@"\n`, 'utf8');
+  await fs.chmod(glabFile, 0o755);
+  const cmd = `@echo off\r\n"${process.execPath}" "${jsFile}" %*\r\n`;
+  await fs.writeFile(path.join(dir, 'glab.cmd'), cmd, 'utf8');
+  await fs.writeFile(path.join(dir, 'glab.bat'), cmd, 'utf8');
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   return {
@@ -142,7 +135,9 @@ describe('GitLab: ветка glab', () => {
   it('forgeInfo(): mr list разобран — iid, ветки, черновик', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGlabScript(`printf '%s' '${MR_JSON}'`);
+    const stub = await withGlabScript(
+      `const key = process.argv.slice(2, 4).join(' ');\nif (key === 'mr list') process.stdout.write(${JSON.stringify(MR_JSON)});`,
+    );
     try {
       const info = await serviceFor(work).forgeInfo();
       expect(info.cli).toBe('glab');
@@ -166,7 +161,7 @@ describe('GitLab: ветка glab', () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
     const stub = await withGlabScript(
-      `case "$1" in\n  "mr") printf '%s' '${MR_JSON}';;\n  "api") printf '%s' '[{"author":{"username":"ivan"},"body":"беру","created_at":"2026-01-01T00:00:00Z"}]';;\n  *) exit 0;;\nesac`,
+      `const key = process.argv[2];\nif (key === 'mr') process.stdout.write(${JSON.stringify(MR_JSON)});\nelse if (key === 'api') process.stdout.write(${JSON.stringify(JSON.stringify([{ author: { username: 'ivan' }, body: 'беру', created_at: '2026-01-01T00:00:00Z' }]))});`,
     );
     try {
       const comments = await serviceFor(work).forgeComments(9);
@@ -184,7 +179,7 @@ describe('GitLab: ветка glab', () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
     const stub = await withGlabScript(
-      `case "$1" in\n  "mr") printf '%s' '${MR_JSON}';;\n  *) printf '%s' '[{"iid":4,"title":"Течь","author":{"username":"ivan"},"state":"opened","labels":["bug"],"web_url":"https://gitlab.com/acme/web/-/issues/4"}]';;\nesac`,
+      `const key = process.argv[2];\nif (key === 'mr') process.stdout.write(${JSON.stringify(JSON.stringify(MR_JSON))});\nelse process.stdout.write(${JSON.stringify(JSON.stringify([{ iid: 4, title: 'Течь', author: { username: 'ivan' }, state: 'opened', labels: ['bug'], web_url: 'https://gitlab.com/acme/web/-/issues/4' }]))});`,
     );
     try {
       const issues = await serviceFor(work).forgeIssues();

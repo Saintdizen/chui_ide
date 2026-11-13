@@ -1714,6 +1714,16 @@ function clipLine(line: string): string {
 const ABORTED_RG = 'поиск прерван';
 
 /**
+ * Как звать ripgrep. На Windows имя без расширения `spawn` не находит: расширения
+ * подбираются только с `shell`, а он ломает кавычки в шаблонах. Поэтому зовём
+ * `rg.cmd` — это либо настоящая обёртка из PATH (пакет ripgrep, VS Code), либо
+ * заглушка на Node: оба варианта видны системе по PATHEXT.
+ */
+function rgCommand(): string {
+  return process.platform === 'win32' ? 'rg.cmd' : 'rg';
+}
+
+/**
  * Запустить ripgrep и собрать вывод. `null` — команды в системе нет; вывод
  * отдаётся и при пустом результате (код 1), потому что это ответ, а не сбой.
  * Сбой запуска (команды нет, прервали) летит исключением, чтобы вызывающий
@@ -1728,7 +1738,7 @@ export function runRipgrep(args: readonly string[], cwd: string, signal?: AbortS
   // убить, незачем. Заодно это делает ответ определённым.
   if (signal?.aborted) return Promise.reject(new Error(ABORTED_RG));
   return new Promise((resolve, reject) => {
-    const child = spawn('rg', [...args], { cwd, windowsHide: true });
+    const child = spawn(rgCommand(), [...args], { cwd, windowsHide: true });
     // Вывод собираем целиком: он ограничен числом совпадений, а склеивать
     // поток частями пришлось бы всё равно — запись рвётся посредине.
     let out = '';

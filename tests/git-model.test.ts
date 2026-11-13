@@ -132,8 +132,11 @@ describe('состояние git', () => {
 
     await git.refresh();
 
-    expect(git.changeInside(`/p/src${SEP}deep`)).toBeDefined();
-    expect(git.changeInside('/p')).toBeDefined();
+    // Ключ папки собирается родным разделителем пути, а не платформенным:
+    // на Windows `/p/src/deep` и `/p\\src\\deep` — разные ключи.
+    const sep = `a.ts`.includes('/') ? '/' : SEP;
+    expect(git.changeInside(['', 'p', 'src', 'deep'].join(sep))).toBeDefined();
+    expect(git.changeInside(['', 'p'].join(sep))).toBeDefined();
   });
 
   it('удалённые файлы папки видны, хотя на диске их уже нет', async () => {
