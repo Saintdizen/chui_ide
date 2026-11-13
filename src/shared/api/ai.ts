@@ -48,7 +48,27 @@ export interface ChatMessage {
   reasoning?: string;
   /** Оценка ответа пользователем: помогает понять, какие ответы были полезны. */
   rating?: 'up' | 'down';
+  /**
+   * Порядок частей сообщения для отрисовки.
+   *
+   * Почему отдельно от плоских полей. В ленте «текст → вызов → текст» — три
+   * узла в своём порядке, и восстановить его по `content` + `toolCalls`
+   * нельзя: оба поля копят своё, не зная друг о друге. Поле опционально и
+   * выводится из плоских (`partsOfMessage`) — старые беседы и весь код,
+   * пишущий в историю, продолжают работать без изменений.
+   */
+  parts?: readonly ChatPart[];
 }
+
+/** Одна часть сообщения в том порядке, в котором её прислала модель. */
+export type ChatPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'reasoning'; text: string }
+  | { kind: 'image'; url: string }
+  /** `status` ведёт лента: в работе — спиннер, после ответа — галочка или крестик. */
+  | { kind: 'tool'; call: ChatToolCall; status: ChatToolStatus };
+
+export type ChatToolStatus = 'pending' | 'running' | 'done' | 'failed';
 
 export type ChatAttachmentKind =
   | 'file'

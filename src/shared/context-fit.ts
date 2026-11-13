@@ -52,6 +52,14 @@ export const MAX_ANSWER_RESERVE = 32_000;
 const ANSWER_RESERVE_SHARE = 0.25;
 
 /**
+ * Сколько символов аргументов вызова оставлять в нарезанной истории.
+ *
+ * В транскрипт идёт только имя инструмента и начало аргументов: по имени и пути
+ * видно, что уже сделано, а полный `newText` стоит столько же, сколько сам файл.
+ */
+const TOOL_CALL_ARGS_CHARS = 300;
+
+/**
  * Сколько окна резервировать под ответ модели.
  *
  * `maxTokens` из настроек — не «сколько ответ займёт», а предел, который провайдер
@@ -502,7 +510,18 @@ export function splitTranscript(history: readonly ChatMessage[], budgetChars: nu
   };
 
   for (const message of history) {
-    const line = `${message.role}: ${message.content ?? ''}`;
+    // Вызовы инструментов пишем в строку целиком: без них нарезанная история почти
+    // бесполезна — выживают ответы, а что именно вызывали и с какими путями, видно
+    // только здесь. Аргументы обрезаем: они бывают длиной в целый файл, а модели
+    // для сводки хватает начала.
+    const calls = (message.toolCalls ?? []).map((call) => {
+      const args =
+        call.arguments.length > TOOL_CALL_ARGS_CHARS
+          ? `${call.arguments.slice(0, TOOL_CALL_ARGS_CHARS)}…`
+          : call.arguments;
+      return `[вызов ${call.name} ${args}]`;
+    });
+    const line = [`${message.role}: ${message.content ?? ''}`, ...calls].join(' ').trimEnd();
     if (line.length > budget) {
       flush();
       for (let at = 0; at < line.length; at += budget) blocks.push(line.slice(at, at + budget));

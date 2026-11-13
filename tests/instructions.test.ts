@@ -108,6 +108,15 @@ describe('битые ссылки в правилах', () => {
     expect(findBrokenLinks('src/gone.ts', { files: [] })).toEqual([]);
   });
 
+  it('обрезанный потолком список не обвиняет живые пути', () => {
+    // Замер: сканер на дереве из 20000 файлов отдаёт ровно MAX_SCAN_FILES
+    // записей и не доходит до каталогов в конце. Существующий путь в такой
+    // список не попадает, и без флага объявлялся битым. Охрана по длине
+    // (`> MAX`) не спасала: 20000 > 20000 — ложь. Знать может только сканер.
+    const cut = { files: ['d00/f0.ts'], dirs: ['d00'], truncated: true };
+    expect(findBrokenLinks('Смотри `zzz-last/a.ts`.', cut)).toEqual([]);
+  });
+
   it('предупреждение называет файл правил и сами ссылки', () => {
     const out = describeBrokenLinks('AGENTS.md', ['src/gone.ts']);
     expect(out).toContain('AGENTS.md');

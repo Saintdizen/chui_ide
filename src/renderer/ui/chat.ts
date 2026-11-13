@@ -20,22 +20,22 @@ import { sessionAttachment } from '../../shared/session-context';
 import { leaveQuestion, type RunLeaving } from '../../shared/run-keep';
 import { composerAction, feedAction, focusAfterCard, recallStep, type ComposerAction } from '../../shared/run-keys';
 import { isAutoTitle } from '../../shared/chat-title';
+import { messageParts } from '../../shared/chat-sanitize';
 import { addEditGrant, type EditGrant, matchingEditGrant, rememberedEditGrant } from '../../shared/agent-grants';
 import { parentOf } from '../../shared/paths';
 import { CHAT_ACTIONS, type ChatAction, parseChatAction } from '../../shared/chat-actions';
-import { type CompactionFacts, compactionFacts, compactionLines } from '../../shared/compaction-facts';
+import { type CompactionFacts, compactionLines } from '../../shared/compaction-facts';
 import { forkPlan } from './chat-fork';
 import { showForkCompare } from './chat-fork-compare';
 import { resolvePatches } from '../../shared/patch';
 import { turnsSinceCompact } from './compact-turns';
-import { keptContextMessage, restoreSent } from '../../shared/chat-attachments';
+import { restoreSent } from '../../shared/chat-attachments';
 import {
   answerReserve,
   compactionBudgetChars,
   compactionMessage,
   needsCompaction,
   contextUsage,
-  splitTranscript,
 } from '../../shared/context-fit';
 import { contextWindow, maxOutputTokens, modelCapabilities } from '../../shared/providers';
 import type { CommandRegistry } from '../core/commands';
@@ -48,7 +48,7 @@ import type { GitModel } from '../core/git-model';
 import { createChatBranchSpace } from './chat-branch-space';
 import { createChatRunning } from './chat-running';
 import { describeThread } from '../../shared/chat-threads';
-import { type RpcClient, RpcError } from '../core/rpc';
+import type { RpcClient } from '../core/rpc';
 import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createAttachments } from './chat-attachments';
@@ -91,6 +91,7 @@ import { countLines, plural, snippetFor, titleFrom } from './chat-text';
 import { formatChatDate } from '../../shared/chat-date';
 import { createChatTabs, type ChatSearchHit } from './chat-tabs';
 import { createRunInspector } from './run-inspector';
+import { createChatCompact } from './chat-compact';
 import { createChatPersistence, newChatUid } from './chat-persistence';
 import { type ChatExportFormat, chatExportFileName, chatToJson, chatToMarkdown } from '../../shared/chat-export';
 import { segmentsOf } from '../../shared/chat-find';
@@ -253,26 +254,6 @@ export interface ChatDeps {
 }
 
 /**
- * Сжатие беседы: старая история заменяется резюме. Пересказ просим у модели сжатия —
- * по умолчанию той же, что и беседа, но её можно задать в настройках (`ai.compactModel`).
- */
-const COMPACT_PROMPT = [
-  'Сожми нашу беседу в краткое резюме, чтобы продолжить работу с ним вместо истории.',
-  'Сохрани: что просил пользователь, какие файлы менялись, принятые решения, найденные ошибки',
-  'и что осталось сделать. Пиши по пунктам, без вступлений и без кода целиком.',
-].join('\n');
-
-/**
- * Второй проход и дальше: продолжаем уже начатое резюме, а не начинаем заново —
- * иначе каждый блок вытеснял бы из резюме предыдущий, и середина беседы терялась
- * ровно так же, как при старом «сжимаем только хвост».
- */
-const COMPACT_CONTINUE_PROMPT = [
-  'Дополни существующее резюме с учётом новой части беседы. Не пересказывай заново,',
-  'добавь только то, что в резюме ещё нет: запросы пользователя, изменённые файлы,',
-  'принятые решения, найденные ошибки, что осталось сделать. Пиши по пунктам, без кода целиком.',
-].join('\n');
-/**
  * Панель ассистента — правый «остров» в стиле панели инструментов.
  *
  * Сама панель только ведёт беседу: отправляет запрос потоком (`rpc.stream`),
@@ -331,7 +312,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // начинает обход страницы с начала — мимо чата.
   const body = h('div', { class: 'chat-body', tabindex: '-1' });
 
-  /** Кнопка возврата к низу: появляется, когда лента прокручена вверх. */
   const jumpButton = h(
     'button',
     {
@@ -1384,22 +1364,31 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           const sources = referencesBlock(usedReferences(session.history.slice(0, index + 1)));
           if (sources) el.appendChild(sources);
         }
-        if (message.content) {
-          // Текст, за которым последовал вызов инструмента, — промежуточный:
-          // показываем пузырём, чтобы он не сливался со строками действий.
-          const content = h('div', { class: message.toolCalls?.length ? 'msg-body msg-note' : 'msg-body' });
-          markdown.renderInto(content, message.content);
-          el.appendChild(content);
-        }
-        if (message.toolCalls?.length) {
-          const feed = createToolFeed(el, null, undefined, async (path) => {
-            await revealFile(path);
-          });
-          for (const call of message.toolCalls) {
-            cards.set(call.id, feed.add({ id: call.id, name: call.name, args: call.arguments }));
+        // Рисуем по партам, а не по полям: так вызов стоит в ленте там, где он
+        // был между текстами, а не свален в кучу в конце ответа. Старые беседы
+        // без `parts` проходят через тот же путь — `messageParts` выводит их из
+        // плоских полей.
+        const parts = messageParts(message);
+        const hasTool = parts.some((part) => part.kind === 'tool');
+        const feed = hasTool
+          ? createToolFeed(el, null, undefined, async (path) => {
+              await revealFile(path);
+            })
+          : undefined;
+        for (const [index, part] of parts.entries()) {
+          if (part.kind === 'text') {
+            // Текст, за которым последовал вызов инструмента, — промежуточный:
+            // пузырём, чтобы он не сливался со строками действий. Смотрим на
+            // следующий парт, а не на наличие вызовов вообще.
+            const interim = parts.slice(index + 1).some((next) => next.kind !== 'text');
+            const content = h('div', { class: interim ? 'msg-body msg-note' : 'msg-body' });
+            markdown.renderInto(content, part.text);
+            el.appendChild(content);
+          } else if (part.kind === 'tool' && feed) {
+            cards.set(part.call.id, feed.add({ id: part.call.id, name: part.call.name, args: part.call.arguments }));
           }
-          feed.seal();
         }
+        feed?.seal();
         // «Повторить» — только у последнего ответа: повторять середину беседы нечем.
         if (message.content) {
           const text = message.content;
@@ -1428,9 +1417,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       }
     });
     // Сжатая беседа: отметка после переписки — видно, что модель работает по резюме.
+    // `tail` обязателен: выше `thread` пересобирается, и в `session.thread` уже новый узел.
     if (session.compacted) appendCompactedNote(session, session.thread);
     // Очередь — последней: она всегда под историей, а не внутри неё.
     renderQueue(session);
+    windowTurns(session);
     scrollToEnd(session);
   }
 
@@ -1592,103 +1583,38 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /**
-   * Сжать указанную беседу: вернуть true, если резюме получено и история заменена.
-   *
-   * Длинную историю сжимаем каскадом: режем на части (см. `splitTranscript`) и ведём
-   * одно резюме, достраивая его на каждой части. Так в резюме попадает вся беседа, а
-   * не только хвост, — раньше на сжатие уезжал лишь последний кусок, и всё, что было
-   * до него, пропадало бесследно.
+   * Сжатие беседы — отдельным модулем: нарезка истории, каскадная достройка
+   * резюме и замена `history` держатся вместе. Пока они лежали прямо здесь,
+   * любой проход по файлу грозил снести одно из двух — так уже случалось.
    */
-  async function compactSession(session: ChatSession): Promise<boolean> {
-    const provider = currentProvider();
-    const model = compactionModel();
-    if (!provider || !model) {
-      showToast('Провайдер не настроен', 'error');
-      return false;
-    }
-
-    const blocks = splitTranscript(session.history, compactBudget());
-    if (blocks.length === 0) {
-      showToast('Беседа пуста — сжимать нечего');
-      return false;
-    }
-
-    sessionInfo.hide();
-    setBusy(true, session);
-    if (blocks.length > 1) {
-      showToast(`Сжимаю беседу: ${blocks.length} ${plural(blocks.length, 'этап', 'этапа', 'этапов')}`);
-    }
-    try {
-      let summary = '';
-      for (let index = 0; index < blocks.length; index += 1) {
-        // Первый проход — резюме с нуля; дальше достраиваем накопленное, чтобы
-        // каждая новая часть не вытесняла предыдущие.
-        const prompt =
-          index === 0
-            ? `${COMPACT_PROMPT}\n\n---\n${blocks[index]}`
-            : `${COMPACT_CONTINUE_PROMPT}\n\n---\nТекущее резюме:\n${summary}\n\n---\nНовая часть беседы:\n${blocks[index]}`;
-
-        let streamed = '';
-        const done = await deps.rpc.stream(
-          'ai.chat',
-          {
-            providerId: provider.id,
-            model,
-            messages: [{ role: 'user', content: prompt }],
-            useTools: false,
-          },
-          (event, payload) => {
-            if (event === ChatStreamEvent.Delta) streamed += (payload as ChatDeltaPayload).text;
-          },
-        );
-
-        summary = (done.text || streamed).trim();
-        if (!summary) {
-          showToast('Модель не вернула резюме', 'error');
-          return false;
-        }
-      }
-
-      const before = session.history.length;
-      // «Что вошло в сводку» считаем ДО замены: после неё останется только резюме,
-      // а человек хочет видеть, из чего оно получилось.
-      const forFacts = [...session.history];
-      // Меняем ТОЛЬКО контекст: `transcript` (то, что человек читает) остаётся целым,
-      // и после перезапуска лента соберётся из него же.
-      session.history = [
-        { role: 'user', content: `Контекст сжатой беседы:\n\n${summary}` },
-        { role: 'assistant', content: 'Принято, продолжаем с этим контекстом.' },
-      ];
-      // Резюме пересказывает разговор, но не присланные файлы. Вопрос снова
-      // прикладывает их сам (history его не несёт), поэтому кладём приложения
-      // служебным сообщением сразу за резюме — в конец, где кеш их и оставит.
-      const kept = keptContextMessage(session.kept);
-      if (kept) session.history.push(kept);
-      // Факты — теперь, когда видно и «до», и «после»: токены освободились
-      // именно на этой разнице, а не на длине истории до сжатия.
-      const facts = compactionFacts(forFacts, {
-        files: session.touched.size,
-        compacted: session.history,
-      });
-      session.usage = undefined;
-      // Сжатие само перестроило префикс: старое попадание в кеш больше ничего не
-      // говорит, а расписание начинается заново.
-      session.usageFresh = false;
-      session.turnsSinceCompact = 0;
-      renderCompacted(session, before, summary, facts);
-      showToast(`Беседа сжата: ${before} ${plural(before, 'сообщение', 'сообщения', 'сообщений')} → краткое резюме`);
-      return true;
-    } catch (error) {
-      if (error instanceof RpcError && error.cancelled) showToast('Сжатие отменено');
-      else showToast(errorText(error), 'error');
-      return false;
-    } finally {
-      setBusy(false, session);
+  const compact = createChatCompact({
+    target: () => ({ providerId: currentProvider()?.id ?? null, model: compactionModel() }),
+    budget: () => compactBudget(),
+    complete: async ({ providerId, model, prompt }) => {
+      let streamed = '';
+      const done = await deps.rpc.stream(
+        'ai.chat',
+        { providerId, model, messages: [{ role: 'user', content: prompt }], useTools: false },
+        (event, payload) => {
+          if (event === ChatStreamEvent.Delta) streamed += (payload as ChatDeltaPayload).text;
+        },
+      );
+      return done.text || streamed;
+    },
+    notify: (text, kind) => showToast(text, kind),
+    setBusy: (value) => setBusy(value),
+    beforeStart: () => sessionInfo.hide(),
+    save: () => {},
+    renderSummary: (session, before, summary, facts) => renderCompacted(session, before, summary, facts),
+    afterFinally: () => {
       renderTabs();
       syncSessionInfo();
       scheduleSave();
-    }
-  }
+    },
+  });
+
+  /** Сжатие беседы: подпись сохраняет прежние места вызова. */
+  const compactSession = (session: ChatSession): Promise<boolean> => compact.compactSession(session);
 
   /** Сжатие по кнопке: с проверками «идёт генерация» и «есть что сжимать». */
   async function compactActive(): Promise<void> {
@@ -1782,35 +1708,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (session.id === activeId) note.scrollIntoView({ block: 'nearest' });
   }
 
-  /**
-   * Отметка о сжатии для восстановленной беседы.
-   *
-   * Ставится перед ПЕРВЫМ последним ходом, а не в начало ленты: отметка
-   * относится к последнему сжатию, а лента растёт вниз. Раньше её вешали
-   * в конец при восстановлении (`appendCompactedNote`), и на границе
-   * «восстановлено из файла → сжали снова» в ленте оказывалось две отметки в
-   * двух разных местах — одна у конца, другая там, где сжали на самом деле.
-   * `tail` — лента после первого кадра `renderHistory`: тот очищает `thread`.
-   */
-  function appendCompactedNote(session: ChatSession, tail: HTMLElement | null = null): void {
-    const summary = session.history[0]?.content ?? '';
-    const note = h(
-      'details',
-      { class: 'thread-summary' },
-      h('summary', { class: 'thread-summary-head' }, svgIcon('collapse', 12), 'Контекст беседы сжат'),
-      h(
-        'div',
-        { class: 'thread-summary-text' },
-        'Выше — вся переписка, её можно перечитать. Модель дальше получает только это резюме:',
-        h('div', { class: 'thread-summary-body' }, summary),
-      ),
-    );
-    // Последний ход ленты — тот, с которого беседа продолжается. Нет ходов
-    // (сжали сразу после сводки) — отметке место в ленте.
-    const last = tail?.lastElementChild instanceof HTMLElement ? tail.lastElementChild : null;
-    const host = last?.classList.contains('chat-turn') ? last : (tail ?? session.thread);
-    host.appendChild(note);
-  }
+  /** Отметка о сжатии — в `chat-compact`: правило одно для потока и для восстановленной беседы. */
+  const appendCompactedNote = (session: ChatSession, tail: HTMLElement | null = null): void =>
+    compact.appendCompactedNote(session, tail);
 
   /** Подпись кнопки модели — «Провайдер - Модель»: где и чем спрашиваем, видно сразу. */
   function syncModelLabel(): void {
@@ -2285,6 +2185,40 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Пользователь читает выше — не дёргаем ленту под ним.
     if (!autoScroll && !force) return;
     body.scrollTop = body.scrollHeight;
+  }
+
+  /**
+   * Окно отрисовки: сколько последних ходов показываем сразу. Всю беседу
+   * в DOM держать дорого, а читают её обычно с конца. Важно: это не замена
+   * `MAX_MESSAGES` — тот режет сохранённую историю, этот только видимость.
+   */
+  const VISIBLE_TURNS = 20;
+
+  /**
+   * Спрятать старые ходы и повесить кнопку «показать раньше». Прячем
+   * атрибутом `data-hidden`, а не удалением: за ним же ходят
+   * `revealAncestors` и поиск по ленте.
+   */
+  function windowTurns(session: ChatSession): void {
+    const turns = Array.from(session.thread.querySelectorAll<HTMLElement>('.chat-turn'));
+    const stale = turns.slice(0, Math.max(0, turns.length - VISIBLE_TURNS));
+    if (stale.length === 0) return;
+    session.thread.querySelector('.chat-earlier')?.remove();
+    let hidden = 0;
+    for (const turn of stale) {
+      if (turn.dataset.hidden === 'true') continue;
+      turn.dataset.hidden = 'true';
+      hidden += 1;
+    }
+    if (hidden === 0) return;
+    const count = stale.length;
+    const button = h('button', { class: 'chat-earlier', type: 'button' }, `Показать раньше (${count})`);
+    button.addEventListener('click', () => {
+      for (const turn of stale) delete turn.dataset.hidden;
+      button.remove();
+      scrollToEnd(session, true);
+    });
+    session.thread.prepend(button);
   }
 
   /**

@@ -21,25 +21,45 @@ export async function scanProject(root: string): Promise<ProjectScan> {
 }
 
 /**
- * Все файлы проекта (относительные POSIX-пути) и число каталогов.
+ * Все файлы проекта (относительные POSIX-пути), имена каталогов и их число.
  *
  * Отдельно от сводки, потому что сводку видят и renderer, и агент, а полный список
  * путей им не нужен и стоит тысяч строк в ответе. Здесь же его берёт карта символов:
  * ей нужны файлы, а не сводка.
+ *
+ * `truncated` — обход упёрся в `MAX_SCAN_FILES`, списки неполны. Флаг нужен
+ * проверке ссылок: по обрезанному списку существующий путь выглядит как
+ * несуществующий, и правило с верным адресом объявляется битым. Считать это по
+ * длине нельзя: на ровно `MAX_SCAN_FILES` записей охрана `>` молчит, хотя список
+ * уже обрезан.
  */
-export async function listProjectFiles(root: string): Promise<{ files: string[]; dirCount: number }> {
+export async function listProjectFiles(
+  root: string,
+): Promise<{ files: string[]; dirs: string[]; dirCount: number; truncated: boolean }> {
   const files: string[] = [];
+  const dirs: string[] = [];
   let dirCount = 0;
+  let truncated = false;
 
   const walk = async (dir: string): Promise<void> => {
-    if (files.length >= MAX_SCAN_FILES) return;
+    if (files.length >= MAX_SCAN_FILES) {
+      truncated = true;
+      return;
+    }
     const dirents = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const dirent of dirents) {
-      if (files.length >= MAX_SCAN_FILES) return;
+      if (files.length >= MAX_SCAN_FILES) {
+        truncated = true;
+        return;
+      }
       const full = path.join(dir, dirent.name);
       if (dirent.isDirectory()) {
         if (isIgnoredDirectory(dirent.name)) continue;
         dirCount += 1;
+        // Имена каталогов нужны проверке ссылок в правилах: `src/shared` —
+        // такая же ссылка, как `src/main/index.ts`, и без списка она ложно
+        // объявляется битой.
+        dirs.push(path.relative(root, full).split(path.sep).join('/'));
         await walk(full);
         continue;
       }
@@ -49,5 +69,6 @@ export async function listProjectFiles(root: string): Promise<{ files: string[];
   };
 
   await walk(root);
-  return { files, dirCount };
+  // Файлов набрали меньше потолка — значит обошли всё, и `dirs` тоже полон.
+  return { files, dirs, dirCount, truncated };
 }

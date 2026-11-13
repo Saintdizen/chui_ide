@@ -183,11 +183,16 @@ function foldPicked(messages: ChatMessage[], picked: readonly number[], spillDir
     const content = typeof message.content === 'string' ? message.content : '';
     freed += tokensOf(message) - 12;
     const heading = `### ${message.name ?? 'tool'} · ${index + 1}`;
+    // Адрес клика ведёт на первую строку содержимого: в списке `blocks` перед
+    // ней лежит только заголовок.
     starts.set(index, line + 1);
+    const lines = content.split('\n').length;
     blocks.push(heading);
     blocks.push(content);
     blocks.push('');
-    line += 3 + content.split('\n').length;
+    // Заголовок + строки содержимого + пустая строка между блоками. Раньше здесь
+    // стояло `3 + lines`, и адрес каждого следующего блока съезжал вниз на строку.
+    line += 2 + lines;
   }
   const file = spillText(spillDir, AGED_KIND, blocks.join('\n'));
 
@@ -204,13 +209,25 @@ function foldPicked(messages: ChatMessage[], picked: readonly number[], spillDir
       messages[index] = { ...message, images: [], content: `[свёрнуто: картинка — ${caption}; вернёт read_image]` };
       continue;
     }
+    // Ссылку на файл обещаем только тогда, когда spillText её вернул: без
+    // `where` файла нет и прочитать его нечем. Раньше вторая ветка звала
+    // «перечитать инструментом», хотя перечитывать было нечего — модель шла
+    // по кругу, повторяя тот же вызов.
+    // Совет обязан различать два случая. Если инструмент и так звали с
+    // диапазоном, повтор — тупик: тот же диапазон даст ту же свёртку. Поэтому
+    // учим открыть файл по адресу, а не повторять прежний вызов.
     const reason = where
-      ? `${size} симв. — текст в ${where}, читайте read с диапазоном`
-      : `${size} симв. — перечитайте инструментом, если нужно`;
+      ? `${size} симв. — текст в ${where}; вызовите read по этому пути с новым диапазоном, повтор прежнего вызова даст ту же свёртку`
+      : `${size} симв. — вытеснено, в файл не попало; вызовите инструмент заново, если нужно`;
     const stub = `${STALE_RESULT_PREFIX} ${message.name ?? 'tool'}, ${reason}]`;
+    // Голый путь не дает решить, нужен ли дочит: модель платит шагом за попытку
+    // вслепую. Пара первых строк - это дешевле любого описания.
+    const current = typeof message.content === 'string' ? message.content : '';
+    const head = where ? current.split('\n').slice(0, 2).join(' ').trim().slice(0, 120) : '';
+    const shown = head ? `${stub}\n${head}…` : stub;
     // Заменяем объект, а не содержимое: ту же ссылку держит `produced` — то,
     // что человек видит в карточке и что ложится в файл беседы.
-    messages[index] = { ...message, content: stub };
+    messages[index] = { ...message, content: shown };
   }
 
   return { aged: picked.length, freedTokens: Math.max(0, freed), file };

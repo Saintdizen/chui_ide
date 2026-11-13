@@ -9,6 +9,7 @@ import {
   formatInstructionFile,
   instructionFoldersFor,
   type AppliedInstruction,
+  type ProjectPaths,
 } from '../../shared/instructions';
 import { formatMemory } from '../../shared/memory';
 import { formatSkillCatalog } from '../../shared/skills';
@@ -71,7 +72,7 @@ export class WorkspaceContext {
    * обхода. `null` в `files` — обход не удался или путей нет: тогда ссылки не сверяем,
    * а не объявляем их битыми (§ «неполный список = подсказка врёт»).
    */
-  private pathsCache: { root: string; files: string[] } | null = null;
+  private pathsCache: (ProjectPaths & { root: string }) | null = null;
 
   /**
    * Что из правил проекта ушло в последний `build`. Запоминаем здесь, а не
@@ -85,16 +86,18 @@ export class WorkspaceContext {
     return this.applied;
   }
 
-  /** Файлы проекта относительно корня: для проверки ссылок в правилах. */
-  async projectFiles(root: string): Promise<string[]> {
-    if (this.pathsCache?.root === root) return this.pathsCache.files;
+  /** Файлы и каталоги проекта относительно корня: для проверки ссылок в правилах. */
+  async projectFiles(root: string): Promise<ProjectPaths & { root: string }> {
+    if (this.pathsCache?.root === root) return this.pathsCache;
     try {
-      const { files } = await listProjectFiles(root);
-      this.pathsCache = { root, files };
-      return files;
+      const { files, dirs, truncated } = await listProjectFiles(root);
+      this.pathsCache = { root, files, dirs, truncated };
+      return this.pathsCache;
     } catch {
-      this.pathsCache = { root, files: [] };
-      return [];
+      // Прочитать не смогли — проверять ссылки нельзя: пустой список выглядел бы
+      // как «в проекте ничего нет», и все адреса в правилах стали бы битыми.
+      this.pathsCache = { root, files: [], dirs: [], truncated: true };
+      return this.pathsCache;
     }
   }
 
@@ -155,7 +158,7 @@ export class WorkspaceContext {
     // Пути проекта — один раз на все файлы правил: сверка ссылок нужна в каждом,
     // а обход дерева — один. Список путей ещё пригодится карте выше — так что берём
     // его здесь, а не до цикла: карта может быть выключена.
-    let projectFiles: string[] | null = null;
+    let projectFiles: (ProjectPaths & { root: string }) | null = null;
 
     // Правила читаются не только из корня: `src/AGENTS.md` действует в `src` и ниже.
     // Набор зависит от рабочей папки — что видит агент, то он и знает.
@@ -189,7 +192,15 @@ export class WorkspaceContext {
           // Битые ссылки ищем по ВСЕМУ файлу, а не по показанной голове: в отброшенный
           // хвост модель всё равно ходит через `read`, и мёртвый адрес там так же врёт.
           projectFiles ??= await this.projectFiles(root);
-          const broken = findBrokenLinks(text, { files: projectFiles });
+          // Каталоги передаём вместе с файлами: в правилах ссылаются и на
+          // `src/shared`, а без `dirs` такой адрес объявлялся бы мёртвым.
+          // `truncated` идёт вместе с путями: по обрезанному потолком списку
+          // проверять нельзя — иначе правило с верным адресом объявляется битым.
+          const broken = findBrokenLinks(text, {
+            files: projectFiles.files,
+            dirs: projectFiles.dirs,
+            truncated: projectFiles.truncated,
+          });
           const warning = describeBrokenLinks(shownAs, broken);
           if (warning) parts.push(warning);
         } catch {

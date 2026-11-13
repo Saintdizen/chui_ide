@@ -12,11 +12,17 @@
  *
  * Лицензия у обоих — SIL Open Font License 1.1: тексты лежат рядом с файлами
  * шрифтов.
+ *
+ * Формат — woff2, а не ttf: те же начертания, но 948 КБ вместо 2335 КБ (−59%),
+ * и Chromium разбирает такой файл быстрее. Конвертация lossless (обратная
+ * распаковка даёт байт-в-байт исходник), сделана через wawoff2. Исходные ttf не
+ * держим: они в истории git и восстанавливаются `decompress` из того же
+ * wawoff2.
  */
 
 @font-face {
   font-family: "Inter";
-  src: url("../assets/fonts/InterVariable.ttf") format("truetype");
+  src: url("../assets/fonts/InterVariable.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
@@ -24,7 +30,7 @@
 
 @font-face {
   font-family: "Inter";
-  src: url("../assets/fonts/InterVariable-Italic.ttf") format("truetype");
+  src: url("../assets/fonts/InterVariable-Italic.woff2") format("woff2");
   font-weight: 100 900;
   font-style: italic;
   font-display: swap;
@@ -32,7 +38,7 @@
 
 @font-face {
   font-family: "JetBrains Mono";
-  src: url("../assets/fonts/JetBrainsMonoVariable.ttf") format("truetype");
+  src: url("../assets/fonts/JetBrainsMonoVariable.woff2") format("woff2");
   font-weight: 100 800;
   font-style: normal;
   font-display: swap;
@@ -40,7 +46,7 @@
 
 @font-face {
   font-family: "JetBrains Mono";
-  src: url("../assets/fonts/JetBrainsMonoVariable-Italic.ttf") format("truetype");
+  src: url("../assets/fonts/JetBrainsMonoVariable-Italic.woff2") format("woff2");
   font-weight: 100 800;
   font-style: italic;
   font-display: swap;

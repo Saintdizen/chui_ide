@@ -53,7 +53,7 @@ describe('ContentCache', () => {
     cache.set('a.ts', 200, 6, 'вторая версия');
 
     expect(cache.stats().entries).toBe(1);
-    expect(cache.stats().bytes).toBe('вторая версия'.length);
+    expect(cache.stats().bytes).toBe(Buffer.byteLength('вторая версия'));
     expect(cache.get('a.ts', 200, 6)).toBe('вторая версия');
   });
 
@@ -71,7 +71,9 @@ describe('ContentCache', () => {
   });
 
   it('обращение отодвигает вытеснение: свежее нужное остаётся', () => {
-    const cache = new ContentCache(20);
+    // `a` — 16 байт (8 кириллических букв по 2), `b` и `c` — по 8.
+    // Потолок 30: все три (32) не влезают, вытеснять придётся именно `b`.
+    const cache = new ContentCache(30);
     cache.set('a.ts', 1, 1, 'аааааааа');
     cache.set('b.ts', 1, 1, 'bbbbbbbb');
 
@@ -89,6 +91,27 @@ describe('ContentCache', () => {
 
     expect(cache.stats().entries).toBe(0);
     expect(cache.get('big.ts', 1, 1)).toBeNull();
+  });
+
+  it('счётчик байтов считает байты UTF-8, а не символы', () => {
+    // Потолок `DEFAULT_CACHE_BYTES` задан в байтах, а `text.length` на кириллице
+    // занижает расход почти вдвое: кириллическая буква — два байта UTF-8, но один
+    // символ. До правки кэш считал 7000 при реальных 14000 и «влезал» в лимит,
+    // расходуя вдвое больше обещанного.
+    const cache = new ContentCache();
+    const text = 'ж'.repeat(7000);
+    cache.set('ru.ts', 1, Buffer.byteLength(text), text);
+
+    expect(cache.stats().bytes).toBe(14000);
+  });
+
+  it('кириллица в потолок не пролезает вдвое', () => {
+    // Потолок 10 000 байт — это 5000 кириллических букв, а не 10 000.
+    const cache = new ContentCache(10000);
+    const text = 'ж'.repeat(6000);
+    cache.set('ru.ts', 1, Buffer.byteLength(text), text);
+
+    expect(cache.stats().entries).toBe(0);
   });
 
   it('clear обнуляет память и содержимое', () => {

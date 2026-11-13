@@ -417,14 +417,19 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Run project tests: the IDE picks the runner (pytest, vitest, jest, node --test). Non-zero exit ' +
-      'code means failing tests. target narrows to a file or a test name. The only way to run tests: ' +
-      'do not hand-roll the runner through terminal.',
+      'code means failing tests. `target` narrows to a file or a test name; `targets` — several at once, ' +
+      'one call instead of three. The only way to run tests: do not hand-roll the runner through terminal.',
     inputSchema: {
       type: 'object',
       properties: {
         target: {
           type: 'string',
           description: 'Test file or test name; default all. After an edit, just its test.',
+        },
+        targets: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Several files or names in one run: files for the same suite are cheaper together.',
         },
       },
     },

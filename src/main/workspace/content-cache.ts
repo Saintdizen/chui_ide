@@ -73,14 +73,15 @@ export class ContentCache {
 
   /** Запомнить содержимое. Файл больше потолка кэша не трогаем: он вытеснит всё. */
   set(filePath: string, mtimeMs: number, size: number, text: string): void {
-    if (text.length > this.maxBytes) return;
+    // Потолок в байтах, а `length` — это UTF-16 единицы: на кириллице файл
+    // весит вдвое больше, чем насчитал бы `length`. Считаем байты UTF-8.
+    const bytes = Buffer.byteLength(text);
+    if (bytes > this.maxBytes) return;
 
-    const previous = this.entries.get(filePath);
-    if (previous) this.bytes -= previous.text.length;
-    else this.entries.delete(filePath);
+    this.bytes -= Buffer.byteLength(this.entries.get(filePath)?.text ?? '');
 
     this.entries.set(filePath, { mtimeMs, size, text });
-    this.bytes += text.length;
+    this.bytes += bytes;
     this.evict();
   }
 
@@ -108,7 +109,7 @@ export class ContentCache {
     const entry = this.entries.get(filePath);
     if (!entry) return;
     this.entries.delete(filePath);
-    this.bytes -= entry.text.length;
+    this.bytes -= Buffer.byteLength(entry.text);
   }
 
   /** Вытеснение: выбрасываем самые старые записи, пока не влезем в потолок. */
@@ -116,7 +117,7 @@ export class ContentCache {
     for (const [key, entry] of this.entries) {
       if (this.bytes <= this.maxBytes) return;
       this.entries.delete(key);
-      this.bytes -= entry.text.length;
+      this.bytes -= Buffer.byteLength(entry.text);
     }
   }
 }

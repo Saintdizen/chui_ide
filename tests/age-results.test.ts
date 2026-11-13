@@ -66,7 +66,8 @@ describe('свёртка старых результатов', () => {
     const stub = String(messages[0]?.content);
     expect(stub).toContain('read_file');
     expect(stub).toContain(String(outcome.file));
-    const where = stub.match(/:(\d+),/);
+    // Адрес — `путь:строка`; превью идёт следом за ним отдельной строкой.
+    const where = stub.match(/:([1-9]\d*)/);
     expect(where).not.toBeNull();
 
     const saved = fs.readFileSync(outcome.file!, 'utf8').split('\n');
@@ -75,6 +76,24 @@ describe('свёртка старых результатов', () => {
 
     // Тот же объект держит `produced` — человек видит полный текст в карточке.
     expect(first.content).toContain('строка 1-0');
+  });
+
+  // Несколько блоков в одном файле: адрес второго и следующих съезжал на строку,
+  // потому что пересчёт номера считал разделительные строки дважды.
+  it('адрес верен для каждого из свёрнутых, а не только для первого', () => {
+    const messages = [long(1), long(2), long(3)];
+    // Порог и батч задаём явно: на умолчаниях сворачивается одно сообщение.
+    // needTokens задаём большим: по умолчанию свёртывать ноль — нечего освобождать.
+    const outcome = ageToolResults(messages, { keepRecent: 0, needTokens: 1e6, minChars: 1, spillDir: spillDir() });
+
+    const saved = fs.readFileSync(outcome.file!, 'utf8').split('\n');
+    for (let index = 0; index < messages.length; index++) {
+      // `where` — это `путь:строка`; парсим без учёта соседних символов.
+      const where = String(messages[index]?.content).match(/:([1-9]\d*)/);
+      expect(where).not.toBeNull();
+      // Адрес ведёт на первую строку своего блока, а не на соседнюю.
+      expect(saved[Number(where?.[1] ?? 1) - 1]).toContain(`строка ${index + 1}-0`);
+    }
   });
 
   it('роль не tool и мелкие результаты не трогаются', () => {
@@ -288,7 +307,10 @@ describe('свёртка по возрасту (minStaleChars)', () => {
     });
     // Порог 70 — фикция: настоящий размер звена ~20 символов и ни один
     // размерный порог его не берёт. Работает только счётчик возраста.
-    expect(messages[3]?.content).not.toContain('строка ');
+    // Превью в заглушке — не полный текст: считаем по числу строк.
+    const stub = String(messages[3]?.content);
+    expect(stub).toContain('[свёрнуто:');
+    expect(stub.split('\n')).toHaveLength(2);
     expect(outcome.aged).toBeGreaterThan(0);
   });
 

@@ -214,6 +214,13 @@
   font-size: var(--font_small_size);
 }
 
+.session-info-soon {
+  margin-top: 5px;
+  padding: 0 4px;
+  color: var(--severity_warning, var(--text_color_secondary));
+  font-size: var(--font_small_size);
+}
+
 .session-info-list {
   display: flex;
   flex-direction: column;

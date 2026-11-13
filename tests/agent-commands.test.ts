@@ -411,3 +411,49 @@ describe('разрешения навсегда', () => {
     expect(granted).toEqual([]);
   });
 });
+
+/**
+ * `run_tests` и его цели. Модель регулярно называет несколько файлов сразу;
+ * один `target` заставлял делать N шагов. Набор `targets` склеивается в один
+ * прогон — иначе витка столько же, сколько файлов.
+ */
+describe('run_tests: цели', () => {
+  function context(probes: string[]): ToolContext {
+    return {
+      workspace: workspace(),
+      // Исполнитель зовёт именно `tests`, а не `sandbox`: подделка сборщика
+      // команд даёт проверку на настоящем контракте `TestRunner`.
+      tests: {
+        // Контракт TestRunner: объект с готовой командой, а не голая строка.
+        command: (target?: string) => {
+          probes.push(target ?? '');
+          return { command: `npx vitest run ${target ?? ''}`, label: 'vitest' };
+        },
+      },
+      sandbox: {
+        label: 'контейнер',
+        available: true,
+        run: async () => ({ code: 0, signal: null, output: 'ок', truncated: false, timedOut: false }) as never,
+      },
+      confirmCommand: async () => ({ allowed: true }),
+    } as unknown as ToolContext;
+  }
+
+  it('несколько целей идут одним прогоном', async () => {
+    const probes: string[] = [];
+    const outcome = await runTool(
+      context(probes),
+      'run_tests',
+      JSON.stringify({ targets: ['tests/a.test.ts', 'tests/b.test.ts'] }),
+    );
+
+    // Раннер принимает одну цель: остальные не запустились, и модель должна
+    // узнать об этом из ответа, а не думать, что прогнала оба.
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    expect(probes).toHaveLength(1);
+    expect(probes[0]).toContain('a.test.ts');
+    expect(probes[0]).not.toContain('b.test.ts');
+    // Лишние цели попадают в summary — молча выбросить нельзя.
+    expect(outcome.summary, JSON.stringify(outcome)).toContain('b.test.ts');
+  });
+});

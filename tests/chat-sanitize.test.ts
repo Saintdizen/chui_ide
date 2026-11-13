@@ -5,6 +5,7 @@ import {
   MAX_MESSAGES,
   MAX_REASONING_CHARS,
   MAX_TOOL_CALLS,
+  messageParts,
   MISSING_TOOL_RESULT,
   repairToolPairs,
   sanitizeConversations,
@@ -302,5 +303,56 @@ describe('sanitizeToolCalls', () => {
   it('число вызовов ограничено', () => {
     const many = Array.from({ length: MAX_TOOL_CALLS + 5 }, () => ({ name: 't', arguments: '{}' }));
     expect(sanitizeToolCalls(many)).toHaveLength(MAX_TOOL_CALLS);
+  });
+});
+
+describe('messageParts', () => {
+  it('текст и вызовы идут в порядке полей, вызов без результата ждёт', () => {
+    const parts = messageParts({
+      role: 'assistant',
+      content: 'здравствуйте',
+      toolCalls: [{ id: 'c1', name: 'read', arguments: '{}' }],
+    });
+    expect(parts.map((part) => part.kind)).toEqual(['text', 'tool']);
+    expect(parts[1]).toMatchObject({ kind: 'tool', status: 'pending' });
+  });
+
+  it('пустое сообщение не даёт пустых партов', () => {
+    const parts = messageParts({ role: 'assistant', content: '   ' });
+    expect(parts).toEqual([]);
+  });
+});
+
+describe('parts переживают сохранение и загрузку', () => {
+  // Без чтения `parts` в sanitizeMessages порядок терялся: при загрузке
+  // сообщение возвращалось только с плоскими полями, и лента
+  // пересобирала порядок заново — уже не тот, что был в стриме.
+  it('порядок текст → вызов → текст сохраняется', () => {
+    const saved = [
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: 'итог',
+        parts: [
+          { kind: 'text', text: 'смотрю файл' },
+          { kind: 'tool', call: { id: 'c1', name: 'read', arguments: '{}' }, status: 'done' },
+          { kind: 'text', text: 'итог' },
+        ],
+      },
+    ];
+    const [loaded] = sanitizeMessages(saved);
+    expect(loaded?.parts?.map((part) => part.kind)).toEqual(['text', 'tool', 'text']);
+  });
+
+  it('битый парт выбрасывается, целые остаются', () => {
+    const [loaded] = sanitizeMessages([
+      {
+        role: 'assistant',
+        content: 'x',
+        parts: [{ kind: 'nonsense' }, { kind: 'text', text: 'живой' }],
+      },
+    ]);
+    expect(loaded?.parts).toHaveLength(1);
+    expect(loaded?.parts?.[0]).toMatchObject({ kind: 'text', text: 'живой' });
   });
 });

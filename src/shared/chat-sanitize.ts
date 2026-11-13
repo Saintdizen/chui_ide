@@ -3,9 +3,11 @@ import type {
   ChatGoal,
   ChatHistory,
   ChatMessage,
+  ChatPart,
   ChatRole,
   ChatRunTrace,
   ChatToolCall,
+  ChatToolStatus,
   ChatUsage,
 } from './api';
 import { sanitizeGoal } from './goal';
@@ -147,6 +149,8 @@ export function sanitizeMessages(raw: unknown): ChatMessage[] {
 
     const toolCalls = sanitizeToolCalls(value.toolCalls);
     if (toolCalls.length > 0) message.toolCalls = toolCalls;
+    const parts = sanitizeParts(value.parts);
+    if (parts.length > 0) message.parts = parts;
 
     messages.push(message);
   }
@@ -250,6 +254,79 @@ export function sanitizeToolCalls(raw: unknown): ChatToolCall[] {
     if (calls.length >= MAX_TOOL_CALLS) break;
   }
   return calls;
+}
+
+/**
+ * Ограничения на парты при загрузке.
+ *
+ * Лимиты те же, что у плоских полей: парт — не второй экземпляр текста,
+ * а тот же текст, разложенный по порядку. Потолок на число партов нужен,
+ * чтобы файл сессии с тысячами пустых частей не превратился в тысячи узлов.
+ */
+const MAX_PARTS = 500;
+const PART_STATUSES: readonly ChatToolStatus[] = ['pending', 'running', 'done', 'failed'];
+
+/**
+ * Разобрать `parts` из сохранённой беседы.
+ *
+ * Почему не доверять файлу. `parts` лежит в JSON рядом с данными, которые
+ * пишет renderer, — значит, файл могут править руками, а старые версии
+ * писали не всё. Неизвестный `kind` пропускается целиком: угадывать, что
+ * имел в виду автор правки, значит показать в ленте мусор. Пустой текст и
+ * пробельный тоже отбрасываются — такой парт ничего не рисует, но занимает
+ * место и ломает соседство.
+ */
+export function sanitizeParts(raw: unknown): ChatPart[] {
+  if (!Array.isArray(raw)) return [];
+  const parts: ChatPart[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const value = item as Record<string, unknown>;
+    if (value.kind === 'text' || value.kind === 'reasoning') {
+      const text = clampString(value.text, '', MAX_CONTENT_CHARS).trim();
+      if (text) parts.push({ kind: value.kind, text });
+    } else if (value.kind === 'image') {
+      const url = clampString(value.url, '', MAX_CONTENT_CHARS);
+      if (url) parts.push({ kind: 'image', url });
+    } else if (value.kind === 'tool') {
+      const call = sanitizeToolCalls([value.call])[0];
+      if (!call) continue;
+      const status = PART_STATUSES.includes(value.status as ChatToolStatus)
+        ? (value.status as ChatToolStatus)
+        : 'pending';
+      parts.push({ kind: 'tool', call, status });
+    }
+    if (parts.length >= MAX_PARTS) break;
+  }
+  return parts;
+}
+
+/**
+ * Собрать парты из плоских полей сообщения.
+ *
+ * Зачем вообще парты. Плоское сообщение держит `content` и `toolCalls` рядом,
+ * и порядок восстановить нельзя: «подумал, сказал, вызвал, сказал ещё» и
+ * «вызвал, потом сказал» выглядят одинаково. А отрисовать ленту надо в том
+ * порядке, в каком ход шёл, — иначе карточка вызова уезжает в конец сообщения.
+ *
+ * Это производная от `content` и `toolCalls`, а не третье поле-источник: файл
+ * истории и IPC остаются как были, парты никому не писаны и не читаются. Пока
+ * их нигде не пишут, вывод детерминирован — текст, потом вызовы, — так что
+ * вызов без партов и вызов с партами дают одно и то же. Когда стрим начнёт
+ * выставлять настоящий порядок, он придёт в `parts` и станет источником.
+ */
+export function messageParts(message: ChatMessage): ChatPart[] {
+  if (message.parts?.length) return [...message.parts];
+  const parts: ChatPart[] = [];
+  if (message.content?.trim()) parts.push({ kind: 'text', text: message.content });
+  for (const call of message.toolCalls ?? []) {
+    // У `ChatToolCall` нет результата — значит и статуса нет. `pending` здесь
+    // честнее, чем `done`: результат приходит отдельным сообщением, и рисовать
+    // галочку там, где её никто не подтверждал, нельзя.
+    parts.push({ kind: 'tool', call, status: 'pending' });
+  }
+  if (message.reasoning?.trim()) parts.push({ kind: 'reasoning', text: message.reasoning });
+  return parts;
 }
 
 /** Расход из файла: числа только там, где они числа; иначе поля просто нет. */

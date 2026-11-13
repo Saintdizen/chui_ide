@@ -280,6 +280,9 @@ export function createSessionInfo(options: {
   const gaugePercent = h('span', { class: 'session-info-percent' });
   const gaugeBar = h('div', { class: 'context-bar' });
   const reservedNote = h('div', { class: 'session-info-reserved' });
+  // Предупреждение до сжатия, а не после: тост «Сжимаю беседу» приходит, когда
+  // решение уже принято, и застаёт врасплох.
+  const soonNote = h('div', { class: 'session-info-soon' });
   // Остаток на счёте у провайдера. Строки нет, пока balance не ответил или
   // провайдер такого не умеет (локальные и большинство OpenAI-совместимых).
   const balanceNote = h('div', { class: 'field-hint session-info-balance', hidden: true });
@@ -299,6 +302,7 @@ export function createSessionInfo(options: {
     contextHead,
     h('div', { class: 'session-info-gauge' }, gaugeValue, gaugePercent),
     gaugeBar,
+    soonNote,
     reservedNote,
     balanceNote,
     list,
@@ -349,6 +353,11 @@ export function createSessionInfo(options: {
 
     reservedNote.textContent = `Зарезервировано для ответа: ${formatTokens(data.reservedTokens)}`;
     reservedNote.hidden = data.reservedTokens <= 0;
+
+    // Запас до сжатия. Сжимаем на 85%: порог 70% оставляет время закончить ход
+    // самому, а не обнаружить посреди работы чужой пересказ истории.
+    soonNote.textContent = 'Контекст близок к сжатию: скоро история беседы будет свёрнута в пересказ.';
+    soonNote.hidden = percent < 70;
 
     // Расход последнего обмена и за всю беседу здесь не показываем: строки
     // «Последний обмен: …» и «За беседу: …» были ценой и скоростью, а не

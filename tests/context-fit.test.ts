@@ -296,6 +296,20 @@ describe('splitTranscript', () => {
     const blocks = splitTranscript([user('текст')], 0);
     expect(blocks.join('')).toContain('текст');
   });
+
+  it('сохраняет имена инструментов и пути из вызовов', () => {
+    // Без этого модель видит только ответы и повторяет те же вызовы вслепую.
+    const history: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'c1', name: 'read_file', arguments: '{"path":"src/main/index.ts"}' }],
+      },
+    ];
+    const joined = splitTranscript(history, 10_000).join('');
+    expect(joined).toContain('read_file');
+    expect(joined).toContain('src/main/index.ts');
+  });
 });
 
 /**

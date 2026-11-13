@@ -277,6 +277,7 @@ const ENTRY_NAMES: ReadonlySet<string> = new Set([
   '__main__.py',
   'main.js',
   'main.mjs',
+  'main.ts',
   'index.js',
   'index.ts',
   'server.js',

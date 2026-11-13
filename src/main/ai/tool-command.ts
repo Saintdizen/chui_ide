@@ -18,7 +18,15 @@ import { ECHO_COMMAND_CHARS } from './tool-rules';
  * начала, а падение (упавший тест — код выхода не 0) это результат, а не сбой.
  */
 export async function runTests(ctx: ToolContext, args: Record<string, unknown> = {}): Promise<ToolOutcome> {
-  const target = optionalString(args, 'target')?.trim();
+  // Несколько целей удобнее одним вызовом: `targets` — массив, `target` —
+  // одиночная строка для старых вызовов. Обещаем в схеме одно поле, но не
+  // ломаем промпты, где уже написан `target`.
+  const many = Array.isArray(args.targets) ? args.targets.filter((item) => typeof item === 'string') : [];
+  const single = optionalString(args, 'target')?.trim();
+  // Раннер принимает только одну цель — поэтому берём первую. Молча выбросить
+  // остальные нельзя: в summary пишем, что именно пойдёт в запуск.
+  const dropped = many.length > 1 ? many.slice(1) : [];
+  const target = (many[0] ?? single)?.trim();
   if (target) {
     const problem = testTargetProblem(target);
     if (problem) return { ok: false, summary: problem };
@@ -81,6 +89,8 @@ export async function runTests(ctx: ToolContext, args: Record<string, unknown> =
     result.timedOut ? 'превышено время' : '',
     result.signal ? `убит сигналом ${result.signal}` : '',
     result.truncated ? 'вывод обрезан' : '',
+    // Про остальные цели говорим вслух: иначе модель решит, что прогнала все.
+    dropped.length ? `пропущено целей: ${dropped.length} (${dropped.join(', ')}) — раннер берёт одну` : '',
   ].filter(Boolean);
   // Ненулевой код — это упавшие тесты, а не ошибка инструмента: ответ ok, но с кодом.
   const passed = result.code === 0 && !result.timedOut;

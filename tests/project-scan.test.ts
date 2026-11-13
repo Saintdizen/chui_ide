@@ -1,4 +1,8 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { listProjectFiles } from '../src/main/project/scan';
 import {
   buildScan,
   countLanguages,
@@ -22,6 +26,13 @@ describe('isIgnoredDirectory', () => {
     for (const name of ['src', 'tests', 'app', 'docs']) {
       expect(isIgnoredDirectory(name)).toBe(false);
     }
+  });
+
+  // `main.ts` — точка входа renderer (vite/webpack-шаблоны). Без неё карта
+  // проекта показывала только main/preload и умалчивала о самом крупном коде.
+  it('точка входа renderer по имени main.ts находится', () => {
+    const found = findEntryPoints(['src/main/index.ts', 'src/preload/index.ts', 'src/renderer/main.ts']);
+    expect(found).toContain('src/renderer/main.ts');
   });
 
   it('стандартная библиотека внутри venv не считается кодом проекта', () => {
@@ -196,4 +207,52 @@ describe('buildScan', () => {
     expect(scan.entryPoints).toEqual([]);
     expect(scan.markers).toEqual([]);
   });
+});
+
+describe('listProjectFiles', () => {
+  // Имена каталогов нужны сборке промпта: без них ссылки вида `src/shared`
+  // в AGENTS.md объявляются битыми, хотя каталог есть. Раньше их никто не
+  // проверял — возвращался только `dirCount`.
+  it('возвращает имена каталогов, а не только их количество', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chui-scan-'));
+    try {
+      fs.mkdirSync(path.join(root, 'src', 'shared'), { recursive: true });
+      fs.mkdirSync(path.join(root, 'tests'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'src', 'shared', 'api.ts'), '');
+      fs.writeFileSync(path.join(root, 'README.md'), '');
+
+      const result = await listProjectFiles(root);
+      expect(result.files.sort()).toEqual(['README.md', 'src/shared/api.ts']);
+      // Пути от корня, разделитель — прямой слэш: так их пишут в AGENTS.md.
+      expect(result.dirs.sort()).toEqual(['src', 'src/shared', 'tests']);
+      expect(result.dirCount).toBe(3);
+      // Маленькое дерево обойдено целиком: списки полные, флага нет.
+      expect(result.truncated).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('упёрся в потолок — говорит об этом флагом', async () => {
+    // Поднимать потолок нельзя: стоимость обхода платится на каждой сборке
+    // промпта. Но и сверять ссылки по обрезанному списку нельзя — нужен
+    // явный сигнал, иначе существующий путь объявляется битым.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chui-scan-cap-'));
+    try {
+      for (let d = 0; d < 20; d++) {
+        const dir = path.join(root, `d${String(d).padStart(2, '0')}`);
+        fs.mkdirSync(dir);
+        for (let f = 0; f < 1000; f++) fs.writeFileSync(path.join(dir, `f${f}.ts`), '');
+      }
+      fs.mkdirSync(path.join(root, 'zzz-last'));
+
+      const result = await listProjectFiles(root);
+      expect(result.files).toHaveLength(20000);
+      // Каталог в конце обхода не попал — ровно поэтому нужен флаг.
+      expect(result.dirs).not.toContain('zzz-last');
+      expect(result.truncated).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
