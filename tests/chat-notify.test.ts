@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { announceMessage, announceTitle, runEnd, shouldRefocus, tailOf } from '../src/renderer/ui/chat-notify';
+import {
+  announceMessage,
+  announceTitle,
+  runEnd,
+  runStatusLine,
+  shouldRefocus,
+  tailOf,
+} from '../src/renderer/ui/chat-notify';
 
 /**
  * Конец прогона: заметка вместо системного окна.
@@ -59,6 +66,26 @@ describe('уведомление о конце прогона', () => {
     ];
     expect(tailOf(history)).toBe('ответ');
     expect(tailOf([])).toBe('');
+  });
+});
+
+describe('статус прогона для диктора', () => {
+  it('говорит, что ассистент думает, пока прогон идёт', () => {
+    expect(runStatusLine(true)).toBe('Ассистент думает');
+  });
+
+  it('называет инструмент, если он известен', () => {
+    expect(runStatusLine(true, 'grep')).toBe('Вызван инструмент: grep');
+  });
+
+  it('пустое или пробельное имя инструмента считает отсутствующим', () => {
+    // Иначе диктор скажет «Вызван инструмент: » с висящим двоеточием.
+    expect(runStatusLine(true, '   ')).toBe('Ассистент думает');
+    expect(runStatusLine(true, '')).toBe('Ассистент думает');
+  });
+
+  it('по концу прогона говорит «Готово», даже если инструмент был', () => {
+    expect(runStatusLine(false, 'grep')).toBe('Готово');
   });
 });
 

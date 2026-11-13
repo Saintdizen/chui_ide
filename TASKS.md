@@ -150,10 +150,11 @@
   Сделано: `runSummaryLine` (`chat-stream.ts:650`) на `describeRun` из
   `shared/run-log`, кнопкой — подробности в окне прогона.
 
-- [ ] 116. Доступность ленты. Сделано: `role="log"`, `aria-live="polite"`,
+- [x] 116. Доступность ленты. `role="log"`, `aria-live="polite"`,
   `aria-relevant="additions"` на ленте (`chat.ts:960`); `aria-label` у кнопок
-  карточек (`chat-tools.ts:269`, `:367`). Осталось: скрытый статус
-  «думаю / вызван инструмент / готово» — его нет.
+  карточек (`chat-tools.ts:269`, `:367`); скрытый статус прогона —
+  `runStatus` (`sr-only`, `role="status"`) обновляется из `setBusy`, фразу
+  собирает `runStatusLine` (`chat-notify.ts`). Тест — `tests/chat-notify.test.ts`.
 
 - [x] 117. Производительность markdown: блоки кэшируются по ключу текста
   (`chat-markdown.ts:77-91`): неизменная шапка переиспользует готовые узлы,

@@ -103,6 +103,7 @@ import {
   announceMessage,
   announceTitle,
   runEnd,
+  runStatusLine,
   shouldRefocus,
   tailOf,
   type RunEnd,
@@ -1406,8 +1407,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   const contextRing = createUsageRing(() => toggleSessionInfo());
   const aiSparkle = h('span', { class: 'status-ai', title: 'AI: готов' }, svgIcon('sparkle', 12));
+  // Живой регион для диктора: искра и её `title` — только зримая отметка, диктор
+  // их не читает. Узел начинаем с «Готово», а не с пустоты: `aria-live` объявляет
+  // ИЗМЕНЕНИЕ текста, и первая фраза в пустом узле может быть сочтена исходным
+  // состоянием — тогда диктор промолчит ровно в первый прогон, когда и нужен.
+  const runStatus = h('span', { class: 'sr-only', role: 'status', 'aria-live': 'polite' }, 'Готово');
   // Значок режима и искра генерации — рядом в начале кнопки, за ними кольцо.
-  contextRing.element.prepend(composer.modeBadge, aiSparkle);
+  contextRing.element.prepend(composer.modeBadge, aiSparkle, runStatus);
 
   /**
    * Статус ассистента живёт в общей полосе окна (статус-баре), а не в композере:
@@ -2792,6 +2798,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Искра в кнопке «Информация о сессии»: цвет говорит, что ассистент работает.
     aiSparkle.classList.toggle('is-busy', busy);
     aiSparkle.title = busy ? 'AI: генерация…' : 'AI: готов';
+    // Тот же факт — диктору. `setBusy` — единственное место, где прогон
+    // начинается и кончается, поэтому регион обновляется только здесь.
+    const spoken = runStatusLine(busy);
+    // Без проверки `aria-live` проговорит «Готово» второй раз после каждого
+    // прогона: текст-то тот же, но узел переписан — для диктора это новое.
+    if (runStatus.textContent !== spoken) runStatus.textContent = spoken;
     // Поле ввода гасит прогон, а он в окне один (см. `rpc.ts`: активный стрим —
     // один). Поэтому блокируем поле разом для всех вкладок: композер ставит
     // `disabled` на общее поле и меняет кнопку отправки на «стоп».
