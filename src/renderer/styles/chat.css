@@ -759,11 +759,6 @@
   color: inherit;
 }
 
-.msg-error {
-  margin: 0;
-  color: var(--text_color_error);
-}
-
 .typing {
   color: var(--text_color_tertiary);
   font-style: italic;
