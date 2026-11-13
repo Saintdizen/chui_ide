@@ -12,6 +12,7 @@ import {
   type Settings,
 } from '../../shared/api';
 import { sanitizeToolPreset, toolPresetSpec, type ToolPresetId } from '../../shared/tool-presets';
+import { fileName, usedReferences, type UsedReferences } from '../../shared/tool-files';
 import type { ApplyFailure, FileEdit } from '../../shared/edits';
 import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectCommand } from '../../shared/commands';
 import { parallelRunNotice } from '../../shared/parallel-runs';
@@ -521,6 +522,48 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     await deps.openFile?.(path);
     deps.revealAt?.(path, { line, column });
   };
+
+  /**
+   * «Источники» над ответом: какие файлы модель читала, пока его готовила.
+   *
+   * Свёрнуты в одну строку с числом: при длинном прогоне их десятки, и
+   * развёрнутый список вытеснил бы сам ответ с экрана. Чипы открывают файл
+   * тем же `revealFile`, что и `path:line` в тексте — одно поведение везде.
+   * `null`, когда читать было нечего: пустая рамка — шум.
+   */
+  function referencesBlock(sources: UsedReferences): HTMLElement | null {
+    if (sources.files.length === 0) return null;
+    const details = h('details', { class: 'msg-references' }) as HTMLDetailsElement;
+    // В счётчике — всё, включая усечённые: «Источники: 3» при пяти без
+    // пометки врало бы о том, сколько файлов модель прочла на самом деле.
+    const total = sources.files.length + sources.omitted;
+    details.append(
+      h('summary', { title: 'Файлы, которые ассистент читал, готовя этот ответ' }, 'Источники: ', String(total)),
+    );
+    const list = h('div', { class: 'msg-reference-list' });
+    for (const file of sources.files) {
+      // Подпись — короткое имя и номер строки: полный путь в чип не влезает,
+      // а нужный файл человек узнаёт по имени. Полный — в подсказке.
+      const label = file.from === undefined ? fileName(file.path) : `${fileName(file.path)}:${file.from}`;
+      list.appendChild(
+        h(
+          'button',
+          {
+            class: 'md-path is-code',
+            type: 'button',
+            title: file.path,
+            onClick: () => void revealFile(file.path, file.from ?? 1),
+          },
+          label,
+        ),
+      );
+    }
+    // Усечённые — отдельной фразой, а не молчанием: иначе счётчик обещает
+    // больше, чем видно в списке, и человек ищет пропавшие файлы.
+    if (sources.omitted > 0) list.appendChild(h('span', { class: 'msg-reference-more' }, `и ещё ${sources.omitted}`));
+    details.appendChild(list);
+    return details;
+  }
 
   /** Кнопка файла-результата в ленте: та же пара, но место — только если агент его назвал. */
   const openPresented = async (path: string, position?: { line?: number; column?: number }): Promise<void> => {
@@ -1333,6 +1376,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
       if (message.role === 'assistant') {
         const el = h('div', { class: 'msg msg-assistant' });
+        // Источники — над ответом, а не под ним: человеку важно, на что
+        // опирается ответ, ДО чтения, а подпись внизу он пролистает.
+        // Только у ответов с содержанием: у промежуточной болтовни перед
+        // вызовом инструмента источников ещё нет.
+        if (message.content) {
+          const sources = referencesBlock(usedReferences(session.history.slice(0, index + 1)));
+          if (sources) el.appendChild(sources);
+        }
         if (message.content) {
           // Текст, за которым последовал вызов инструмента, — промежуточный:
           // показываем пузырём, чтобы он не сливался со строками действий.

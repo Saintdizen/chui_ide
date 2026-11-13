@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ToolFileChange } from '../src/shared/api';
-import { changeKindLabel, fileName, touchedFiles } from '../src/shared/tool-files';
+import { changeKindLabel, fileName, readFiles, touchedFiles, usedReferences } from '../src/shared/tool-files';
 
 /**
  * Файлы вызова агента для ряда чипов в ленте чата.
@@ -16,6 +16,48 @@ const CHANGES: ToolFileChange[] = [
   { path: '/proj/src/a.ts', kind: 'created', lines: 12 },
   { path: '/proj/src/b.ts', kind: 'modified', replaced: 3 },
 ];
+
+describe('readFiles', () => {
+  it('берёт путь и границы из аргументов read', () => {
+    const args = JSON.stringify({ path: '/p/a.ts', startLine: 10, endLine: 40 });
+    expect(readFiles('read', args)).toEqual([{ path: '/p/a.ts', from: 10, to: 40 }]);
+  });
+
+  it('читает пачку paths и не приклеивает к ней границы одного файла', () => {
+    // Границы относятся к одиночному чтению: скопировать их на все пять
+    // файлов значило бы соврать про источники.
+    const args = JSON.stringify({ paths: ['/p/a.ts', '/p/b.ts'], startLine: 3, endLine: 9 });
+    expect(readFiles('read', args)).toEqual([{ path: '/p/a.ts' }, { path: '/p/b.ts' }]);
+  });
+
+  it('на прочих инструментах и на битом JSON молчит', () => {
+    expect(readFiles('edit', JSON.stringify({ path: '/p/a.ts' }))).toEqual([]);
+    expect(readFiles('read', 'не json')).toEqual([]);
+    expect(readFiles('read', JSON.stringify({}))).toEqual([]);
+  });
+});
+
+describe('usedReferences', () => {
+  it('собирает файлы из вызовов и не повторяет один файл дважды', () => {
+    const messages = [
+      { role: 'assistant', toolCalls: [{ name: 'read', arguments: '{"path":"/p/a.ts"}' }] },
+      { role: 'assistant', toolCalls: [{ name: 'read', arguments: '{"path":"/p/a.ts"}' }] },
+      { role: 'assistant', toolCalls: [{ name: 'read', arguments: '{"path":"/p/b.ts"}' }] },
+    ];
+    expect(usedReferences(messages).files.map((file) => file.path)).toEqual(['/p/a.ts', '/p/b.ts']);
+  });
+
+  it('говорит числом, сколько не влезло, а не молчит', () => {
+    const paths = ['a', 'b', 'c'].map((name) => ({ name: 'read', arguments: `{"path":"${name}"}` }));
+    const refs = usedReferences([{ role: 'assistant', toolCalls: paths }], 2);
+    expect(refs.files).toHaveLength(2);
+    expect(refs.omitted).toBe(1);
+  });
+
+  it('пустая история — пустая справка', () => {
+    expect(usedReferences([])).toEqual({ files: [], omitted: 0 });
+  });
+});
 
 describe('touchedFiles', () => {
   it('список из результата инструмента важнее аргументов', () => {

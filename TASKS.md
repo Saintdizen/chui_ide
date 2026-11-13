@@ -122,10 +122,14 @@
 - [ ] 110. Reasoning отдельным блоком: свёрнут по умолчанию, длительность,
   «показать полностью». `MAX_REASONING_CHARS` оставить усечением по умолчанию.
 
-- [ ] 111. Markdown до GFM. Сделано: таблицы (`markdownBlocks:219`),
-  task-lists (`:240`), подсветка кода (`highlightInto`), чипы `path:line`
-  с `openPath` (`:332-400`), зачёркивание `~~текст~~` — `del` в
-  `inlineMarkdown`. Осталось: «Used references» над ответом — его нет.
+- [x] 111. Markdown до GFM: таблицы (`markdownBlocks:219`), task-lists
+  (`:240`), подсветка кода (`highlightInto`), чипы `path:line` с `openPath`
+  (`:332-400`), зачёркивание `~~текст~~` — `del` в `inlineMarkdown`.
+  «Источники» над ответом — `referencesBlock` (`chat.ts:534`): свёрнуты,
+  чипы ведут в файл через `revealFile`. Список собирает `usedReferences`
+  (`shared/tool-files.ts`) по `toolCalls` истории — не по результатам,
+  потому что результат живёт до первого сжатия, а справка нужна и после
+  перезапуска. Тесты — `tests/tool-files.test.ts`.
 
 - [x] 112. Замер ленты до правок производительности: `scripts/chat-probe.cjs`,
   `npm run probe:chatload`. Снятые числа: 4505 узлов на 200 сообщений

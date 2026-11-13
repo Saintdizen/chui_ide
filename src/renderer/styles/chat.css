@@ -922,6 +922,26 @@
   text-decoration: underline dotted;
 }
 
+/* Источники над ответом: одна строка со счётчиком, список — по раскрытию.
+   В развёрнутом виде лента иначе уезжает вбок: десятки файлов длиннее строки. */
+.msg-references {
+  margin: 0 0 6px;
+  font-size: var(--font_small_size);
+  color: var(--text_color_tertiary);
+}
+
+.msg-references summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.msg-reference-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 4px;
+}
+
 /* Путь из ответа модели — кнопка, а не ссылка: ведёт в файл проекта, а не в сеть. */
 .md-path {
   padding: 0;

@@ -18,6 +18,53 @@ export interface TouchedFile {
   kind: ChangeKind;
 }
 
+/** Прочитанный файл — источник ответа. Границы нужны для подписи `путь:12-40`. */
+export interface ReadFile {
+  path: string;
+  from?: number;
+  to?: number;
+}
+
+/** Справка «на чём основан ответ»: источники по ходам истории. */
+export interface UsedReferences {
+  /** Каждый файл один раз, в порядке первого упоминания. */
+  files: ReadFile[];
+  /** Сколько чтений не влезло в список (0 — все на месте). */
+  omitted: number;
+}
+
+/**
+ * Источники ответа: все файлы, что модель прочитала за прогон.
+ *
+ * Считаем по `toolCalls` истории, а не по результатам инструментов: результат
+ * живёт в беседе до первого сжатия, а справка нужна и после перезапуска. Файл,
+ * прочитанный дважды (весь и куском), остаётся одним: в справке нужен список
+ * источников, а не журнал обращений. Границы берём от первого чтения с ними.
+ *
+ * Потолок — чтобы справка не выросла в простыню на длинном прогоне; сколько
+ * не влезло, называется числом, а не обрезается молча.
+ */
+export function usedReferences(
+  messages: readonly { role: string; toolCalls?: readonly { name: string; arguments: string }[] }[],
+  limit = 8,
+): UsedReferences {
+  const files: ReadFile[] = [];
+  const seen = new Set<string>();
+
+  for (const message of messages) {
+    for (const call of message.toolCalls ?? []) {
+      for (const file of readFiles(call.name, call.arguments)) {
+        if (seen.has(file.path)) continue;
+        seen.add(file.path);
+        files.push(file);
+      }
+    }
+  }
+
+  const shown = files.slice(0, Math.max(0, limit));
+  return { files: shown, omitted: files.length - shown.length };
+}
+
 /** Вид операции человеческим словом: одни и те же слова в ленте и в панели. */
 export function changeKindLabel(kind: ChangeKind): string {
   if (kind === 'created') return 'создан';
@@ -43,6 +90,41 @@ const FILE_KINDS: Record<string, ChangeKind> = {
 export function fileName(target: string): string {
   const parts = target.split(/[/\\]/).filter(Boolean);
   return parts[parts.length - 1] ?? target;
+}
+
+/**
+ * Файлы, которые вызов прочитал: путь и необязательные строки диапазона.
+ *
+ * Отдельно от `touchedFiles`: там про изменения, здесь про источники ответа.
+ * Смысл тот же — вытащить пути из аргументов, а не из результата: результат
+ * инструмента живёт в беседе до первого сжатия, а справка «на чём основан
+ * ответ» должна читаться и после перезапуска.
+ *
+ * `paths` — пачечное чтение (`read` умеет 2-5 файлов за шаг), `path` —
+ * один. Границы — только если они есть в аргументах и файл один: без них
+ * подпись просто путь.
+ */
+export function readFiles(name: string, args: string): ReadFile[] {
+  if (name !== 'read') return [];
+
+  try {
+    const value = JSON.parse(args) as { path?: unknown; paths?: unknown; startLine?: unknown; endLine?: unknown };
+    const single = typeof value.path === 'string' && value.path ? [value.path] : [];
+    const batch = Array.isArray(value.paths)
+      ? value.paths.filter((path): path is string => typeof path === 'string' && !!path)
+      : [];
+    // Границы — только для одиночного чтения: при `paths` те же `startLine`
+    // относятся к каждому файлу по-разному или не относятся вовсе, и подписать
+    // все одним диапазоном значило бы соврать.
+    const ranged = batch.length === 0;
+    const from = ranged && typeof value.startLine === 'number' ? value.startLine : undefined;
+    const to = ranged && typeof value.endLine === 'number' ? value.endLine : undefined;
+    // Пути принимаем в одном виде, повторы убираем: `paths` может повторить
+    // `path`, а в справке один файл должен быть один раз.
+    return [...new Set([...single, ...batch])].map((path) => ({ path, from, to }));
+  } catch {
+    return [];
+  }
 }
 
 /**
