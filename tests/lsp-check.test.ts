@@ -32,7 +32,10 @@ const shell = posixOnly ? 'sh' : '/bin/sh';
 
 async function script(dir: string, name: string, body: string): Promise<string> {
   const file = path.join(dir, name);
-  await fs.writeFile(file, `${shell}\n${body}\n`, { mode: 0o755 });
+  // Шебанг обязателен: без него ядро отдаёт ENOEXEC даже при бите X. На
+  // macOS это сторого — Linux спасал `/bin/sh` как fallback при execvp, но
+  // полагаться на это нельзя (и на APFS в `mkdtemp` фоллбека нет).
+  await fs.writeFile(file, `#!${shell}\n${body}\n`, { mode: 0o755 });
   return file;
 }
 
