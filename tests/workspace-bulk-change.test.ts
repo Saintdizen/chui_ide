@@ -44,10 +44,9 @@ async function waitEvent(timeout = 3000): Promise<WorkspaceChangedPayload> {
   return events[0]!;
 }
 
-describe('WorkspaceChanged: одна правка и массовое изменение', () => {
-  // FSEvents на macOS называет только корень, а не файл: имя файла в событии
-  // неоткуда взять, и проверка «событие называет свой файл» там неприменима.
-  it.skipIf(process.platform === 'darwin')('одна правка называет свой файл и не помечена как массовая', async () => {
+describe.skipIf(process.platform === 'darwin')('WorkspaceChanged: одна правка и массовое изменение', () => {
+  // FSEvents на macOS называет только корень: имя файла в событии неоткуда взять.
+  it('одна правка называет свой файл и не помечена как массовая', async () => {
     const file = path.join(dir, 'one.py');
     await workspace.writeFile(file, 'x = 1\n');
 
