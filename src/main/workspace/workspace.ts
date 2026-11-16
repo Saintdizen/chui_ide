@@ -1,6 +1,6 @@
 import { createCodeIndex } from './code-index';
 import { spawn } from 'node:child_process';
-import { promises as fs, watch, type FSWatcher } from 'node:fs';
+import { promises as fs, realpathSync, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import { app, shell } from 'electron';
 import {
@@ -1556,7 +1556,7 @@ export class WorkspaceService {
    */
   private notifyChanged(target: string, kind: WorkspaceChangeKind = 2): void {
     if (!this.active) return;
-    this.selfWrites.set(target, Date.now());
+    this.selfWrites.set(this.realKey(target), Date.now());
     this.scheduleChange(target, kind, true);
   }
 
@@ -1565,8 +1565,24 @@ export class WorkspaceService {
    * неё. Эхо не считается вторым изменением — иначе одна правка вела себя как две
    * (счётчик пакета раздувался и переименование выглядело «массовым»).
    */
+  /**
+   * Ключ для сверки путей: `realpath` разворачивает симлинки (`/var/folders` →
+   * `/private/var/folders` на macOS). Файл может ещё не существовать — тогда
+   * отдаём исходную строку и сравниваем как есть.
+   */
+  private realKey(target: string): string {
+    try {
+      return realpathSync(target);
+    } catch {
+      return target;
+    }
+  }
+
   private selfWritten(target: string): boolean {
-    const at = this.selfWrites.get(target);
+    // Сравниваем не строки, а развёрнутые пути: на macOS `fs.watch` под
+    // `/var/folders` присылает `/private/var/folders`, и своя же запись не
+    // узнавалась — событие шло с путём каталога вместо файла.
+    const at = this.selfWrites.get(this.realKey(target));
     if (at === undefined) return false;
     // Запись НЕ удаляем: наблюдатель присылает по событию на каждое имя, а для
     // переименования это два имени. Стёртая отметка пропускала второе событие
