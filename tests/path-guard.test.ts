@@ -76,15 +76,6 @@ describe('absoluteSearchPath', () => {
   });
 });
 
-/** `realpath`, а если пути нет — он сам. Нужен, чтобы сравнивать в одной форме. */
-async function realpathOrSelf(target: string): Promise<string> {
-  try {
-    return await fs.realpath(target);
-  } catch {
-    return target;
-  }
-}
-
 describe('resolveRealTarget — файла ещё нет', () => {
   /*
    * Дыра, которую эти тесты закрывают: раскрытие симлинка обращалось к диску
@@ -121,10 +112,10 @@ describe('resolveRealTarget — файла ещё нет', () => {
   it('новый файл внутри проекта остаётся внутри', async () => {
     const created = path.join(root, 'sub', 'new.txt');
     const real = resolveRealTarget(root, created, null);
-    // `real` родился из `root`, но через `realpath` существующего предка — на macOS
-    // это уже `/private/var/…`. Самого файла ещё нет, поэтому `realpath` берём только
-    // от корня, а не от пути с несуществующим `sub/`.
-    expect(isInsideRoot(await realpathOrSelf(root), real)).toBe(true);
+    // Самого файла ещё нет; `real` собран от уже существующего корня. Корень
+    // берём в том же виде, в каком его дал `mkdtemp` — без `realpath`: на
+    // Windows тот добавляет префикс `\\?\`, которого в `real` нет.
+    expect(isInsideRoot(root, real)).toBe(true);
   });
 
   // Симлинк на Windows создаётся только из-под администратора или в режиме
