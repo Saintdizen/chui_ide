@@ -121,10 +121,10 @@ describe('resolveRealTarget — файла ещё нет', () => {
   it('новый файл внутри проекта остаётся внутри', async () => {
     const created = path.join(root, 'sub', 'new.txt');
     const real = resolveRealTarget(root, created, null);
-    // Раскрываем обе стороны одним способом. `realOfNearestAncestor` внутри
-    // мог развернуть `/var` → `/private/var` (macOS) или добавить `\\?\`
-    // (Windows), поэтому одного `path.resolve` мало.
-    expect(isInsideRoot(await realpathOrSelf(root), await realpathOrSelf(real))).toBe(true);
+    // `real` родился из `root`, но через `realpath` существующего предка — на macOS
+    // это уже `/private/var/…`. Самого файла ещё нет, поэтому `realpath` берём только
+    // от корня, а не от пути с несуществующим `sub/`.
+    expect(isInsideRoot(await realpathOrSelf(root), real)).toBe(true);
   });
 
   // Симлинк на Windows создаётся только из-под администратора или в режиме
