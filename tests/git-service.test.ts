@@ -511,6 +511,9 @@ describe('GitService: удалённые и сеть', () => {
     }
 
     // Заглушка со сбоем — как будто git-lfs не установлен: ответ честный, а не пустой.
+    // На Windows не проверяем: `git` ищет подкоманду lfs как `git-lfs` рядом с собой,
+    // а не в PATH, и до нашей заглушки не доходит (а на раннере git-lfs часто есть).
+    if (process.platform === 'win32') return;
     const broken = await withStubCommand('git-lfs', false);
     try {
       const info = await service.lfsInfo();

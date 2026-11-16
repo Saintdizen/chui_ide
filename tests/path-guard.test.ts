@@ -115,7 +115,9 @@ describe('resolveRealTarget — файла ещё нет', () => {
     expect(isInsideRoot(await fs.realpath(root), real)).toBe(true);
   });
 
-  it('НОВЫЙ файл в папке-симлинке наружу не считается своим', async () => {
+  // Симлинк на Windows создаётся только из-под администратора или в режиме
+  // разработчика — в CI-раннере прав нет, и тест проверял бы не код, а права.
+  it.skipIf(process.platform === 'win32')('НОВЫЙ файл в папке-симлинке наружу не считается своим', async () => {
     // Папка проекта целиком настоящая; симлинком наружу является её потомок.
     await fs.symlink(outside, path.join(root, 'link'));
     const created = path.join(root, 'link', 'secret.txt');

@@ -95,7 +95,10 @@ async function expectFileToContain(
 }
 
 describe.skipIf(!stubSupported)('сбои rg', () => {
-  it('нет команды — null, а не ошибка и не пустой результат', async () => {
+  // На Windows пустой PATH ничего не доказывает: `shell: true` пускает поиск
+  // через cmd.exe, и тот находит установленный rg где-то в System32/APPDATA, а
+  // не в PATH. Тест проверял бы наличный ripgrep, а не нашу обработку.
+  it.skipIf(process.platform === 'win32')('нет команды — null, а не ошибка и не пустой результат', async () => {
     // PATH без rg: только пустой каталог, чтобы ничего не нашлось случайно.
     const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-empty-'));
     roots.push(empty);

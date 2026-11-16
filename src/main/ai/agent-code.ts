@@ -3,6 +3,7 @@
  * Все три отвечают на вопрос «где это лежит», не отдавая тело файлов.
  */
 
+import path from 'node:path';
 import { formatOutline } from '../../shared/lsp-symbols';
 import { digestHits, formatCodeSearch, rankSymbols } from '../../shared/code-search';
 import type { SearchSymbol } from '../../shared/code-search';
@@ -183,9 +184,12 @@ async function snippetsAnswer(
   for (const [file, symbols] of byFile) {
     let lines: string[];
     try {
-      // Путь ответа относительный, а `readFile` ждёт абсолютный. Корня нет
-      // (папка ещё не открыта) — путь и так полный.
-      const absolute = !root || file.startsWith('/') ? file : `${root}/${file}`;
+      // Путь ответа относительный, а `readFile` ждёт абсолютный. Проверяем
+      // именно `path.isAbsolute`: проверка на ведущий `/` не узнаёт ни
+      // виндовые `D:\…`, ни UNC — на Windows все файлы «не открывались».
+      // `path.resolve`, а не конкатенация со слэшем: на Windows разделитель
+      // в `root` и в ответе сервера может быть разным (`C:/…` vs `C:\…`).
+      const absolute = !root || path.isAbsolute(file) ? file : path.resolve(root, file);
       lines = (await ctx.workspace.readFile(absolute)).text.split('\n');
     } catch {
       continue;

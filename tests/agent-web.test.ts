@@ -439,7 +439,7 @@ describe('web: fetch со сохранением в файл (п.56)', () => {
     const base = ctx({ page: page({ text: fileText, totalChars: fileText.length }) });
     return {
       context: { ...base, workspace, root: dir } as unknown as ToolContext,
-      read: async (name: string) => fs.readFile(path.join(dir, name), 'utf8'),
+      read: async (name: string) => fs.readFile(path.join(dir, ...name.split('/')), 'utf8'),
       dir,
     };
   }
@@ -469,7 +469,7 @@ describe('web: fetch со сохранением в файл (п.56)', () => {
     });
     expect(outcome.ok).toBe(true);
     expect(String(outcome.summary)).toContain('пусто');
-    await expect(fs.stat(path.join(dir, 'docs/empty.txt'))).rejects.toThrow();
+    await expect(fs.stat(path.join(dir, 'docs', 'empty.txt'))).rejects.toThrow();
   });
 
   it('без saveTo — прежний ответ с текстом', async () => {

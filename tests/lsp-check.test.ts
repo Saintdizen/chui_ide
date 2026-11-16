@@ -91,7 +91,12 @@ describe('resolveCommand', () => {
       // битов — находка, а имени `gopls` на диске нет и быть не должно.
       const exeFile = await script(dir, 'gopls.exe', 'exit 0');
       expect(resolveCommand(exeFile, dir)).toBe(exeFile);
-      expect(resolveCommand(path.join(dir, 'gopls'), dir)).toBeNull();
+      // Имя без расширения `resolveCommand` достраивает через Pathext — это и
+      // ловит, что отсев идёт по расширению, а не по существованию файла.
+      expect(resolveCommand('gopls', dir, dir)).toBe(exeFile);
+      // А файла без разрешённого расширения поиск не видит вовсе.
+      const txt = await script(dir, 'gopls.txt', 'exit 0');
+      expect(resolveCommand(txt, dir)).toBeNull();
     } else {
       const file = path.join(dir, 'gopls');
       await fs.writeFile(file, '#!/bin/sh\nexit 0\n', { mode: 0o644 });
