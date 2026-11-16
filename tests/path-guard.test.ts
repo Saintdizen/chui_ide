@@ -112,9 +112,10 @@ describe('resolveRealTarget — файла ещё нет', () => {
   it('новый файл внутри проекта остаётся внутри', async () => {
     const created = path.join(root, 'sub', 'new.txt');
     const real = resolveRealTarget(root, created, null);
-    // Файла ещё нет, но `resolveRealTarget` раскрыл существующего предка — на macOS
-    // это `/private/var/…` вместо `/var/…`. Корень разворачиваем тем же способом:
-    // от самого корня `realpath` работает (он существует).
+    // Файла ещё нет, поэтому `resolveRealTarget` раскрывает ближайшего
+    // существующего предка — на macOS это `/private/var/…` вместо `/var/…`.
+    // Корень раскрываем тем же способом: `fs.realpath` от существующего каталога
+    // даёт ту же форму, что и предок (на macOS — `/private/var/…`).
     expect(isInsideRoot(await fs.realpath(root), real)).toBe(true);
   });
 
