@@ -1599,6 +1599,13 @@ export class WorkspaceService {
   private async watchedKind(target: string, eventType: 'rename' | 'change'): Promise<void> {
     // Своё же событие уже отправлено: второй раз не сообщаем и не копим пакет.
     if (this.selfWritten(target)) return;
+    // macOS FSEvents не всегда называет файл: приходит имя корня. Тогда сказать
+    // «файл X изменён» нечем — сообщаем про корень: пусть перечитают дерево
+    // целиком. Врать конкретным путём хуже, чем признать, что он неизвестен.
+    if (this.roots.some((state) => state.root === target)) {
+      this.scheduleChange(target, 2);
+      return;
+    }
     if (eventType === 'change') {
       this.scheduleChange(target, 2);
       return;
@@ -1618,15 +1625,12 @@ export class WorkspaceService {
     try {
       state.watcher = watch(root, { recursive: true }, (eventType, filename) => {
         const name = filename?.toString();
-        // macOS отдаёт разное: имя файла, путь от корня ФС (`/chui-bulk-x/one.py` —
-        // `isAbsolute` его не отсеивает) и просто имя самого каталога. Полный
-        // путь узнаём по префиксу корня, всё прочее — относительно него.
-        const full =
-          !name || name === path.basename(root)
-            ? root
-            : name.startsWith(`${root}${path.sep}`)
-              ? name
-              : path.join(root, name);
+        // macOS FSEvents отдаёт в `filename` то имя файла, то путь от корня ФС
+        // (`/chui-bulk-x/one.py` — `isAbsolute` его не отсеивает), то просто имя
+        // самого каталога. В последнем случае события о конкретном файле нет,
+        // поэтому `watchedKind` сам пересчитает пути и найдёт, что менялось.
+        const isRootName = name === path.basename(root);
+        const full = !name || isRootName ? root : name.startsWith(`${root}${path.sep}`) ? name : path.join(root, name);
         // Правила исключения перечитываем сразу: иначе правка `.ai_ignore`
         // подействовала бы только при следующем открытии проекта.
         if (name && IGNORE_FILES.some((file) => file === name)) void this.reloadIgnore(root);
