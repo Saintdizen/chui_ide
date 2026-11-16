@@ -114,13 +114,13 @@ function run(
       clearTimeout(timer);
       resolve({ code, output, error });
     };
-    // Не голый spawn: на Windows настоящий бинарь без `.cmd`/`.exe` даёт EINVAL,
-    // а аргумент одной строкой («--stdio --verbose») без shell приходит одним argv.
-    // shell: true — чтобы работали и POSIX-скрипты без shebang (macOS падал
-    // ENOEXEC), и `.cmd` на Windows (иначе EINVAL). Абсолютный путь в кавычках:
-    // на Windows `C:\...` без них шелл отдаёт как команду `C:`.
-    const line = `"${command}" ${args.map((arg) => `"${arg}"`).join(' ')}`.trimEnd();
-    const child = spawn(line, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: true });
+    // Не голый spawn по двум причинам сразу: на Windows `.cmd`-обёртка (или python
+    // из venv) даёт EINVAL, а наш собственный `X_OK` на macOS проверяет только
+    // бит, и скрипт без shebang падает ENOEXEC. Через системный shell (`/bin/sh`
+    // или `cmd`) работают и скрипты, и `.cmd`. Путь в кавычках: на Windows
+    // `C:\...` без них шелл принимает за команду `C:`.
+    const line = [command, ...args].map((part) => `"${part}"`).join(' ');
+    const child = spawn(line, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: true, windowsHide: true });
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       finish(null, 'Команда не ответила за 4 секунды — возможно, это не сервер или она ждёт ввода.');

@@ -23,11 +23,12 @@ async function tmpDir(): Promise<string> {
 
 /**
  * Скрипт-пустышка: печатает то, что попросили, и выходит с заданным кодом.
- * Тело — POSIX-шелл, поэтому запускаем его через `sh` из PATH: на Windows
- * настоящего `/bin/sh` нет, а тест должен проверять поиск команды, а не
- * наличие шелла. Файл остаётся помеченным исполняемым — `X_OK` на не-Windows.
+ * Тело — POSIX-шелл. На Windows настоящего `/bin/sh` нет, поэтому tests ниже
+ * там пропускаются (`skipIf`): проверять надо поиск команды, а не наличие шелла.
+ * Файл помечаем исполняемым — на POSIX этого требует `X_OK` и spawn.
  */
-const shell = process.platform === 'win32' ? 'sh' : '/bin/sh';
+const posixOnly = process.platform === 'win32';
+const shell = posixOnly ? 'sh' : '/bin/sh';
 
 async function script(dir: string, name: string, body: string): Promise<string> {
   const file = path.join(dir, name);
@@ -37,11 +38,12 @@ async function script(dir: string, name: string, body: string): Promise<string> 
 
 /**
  * Запуск скрипта-пустышки: имя и args — как из настроек LSP.
- * Через шелл запускаем только на Windows (там у файла нет `/bin/sh` в первой
- * строке, а есть `sh` из PATH); на прочих платформах команда идёт как есть.
+ * Скрипт POSIX-шелловый, поэтому на Windows через `sh` не пойдёт — такие tests
+ * помечены `skipIf(posixOnly)`. Обёртку оставляю, чтобы не менять каждый test
+ * по отдельности.
  */
 function viaShell(file: string, args: string[] = ['--version']): { command: string; args: string[] } {
-  return process.platform === 'win32' ? { command: shell, args: [file, ...args] } : { command: file, args };
+  return posixOnly ? { command: 'sh', args: [file, ...args] } : { command: file, args };
 }
 
 afterEach(async () => {
@@ -85,18 +87,19 @@ describe('resolveCommand', () => {
 });
 
 describe('checkLspCommand', () => {
-  it('живая команда: ok, путь и версия из --version', async () => {
+  // На Windows нет `/bin/sh`, а `resolved` для `sh`-обёртки и так был null.
+  it.skipIf(posixOnly)('живая команда: ok, путь и версия из --version', async () => {
     const dir = await tmpDir();
     await script(dir, 'gopls', 'echo "gopls version v0.15.0"');
     const run = viaShell(path.join(dir, 'gopls'));
     const result = await checkLspCommand({ command: run.command, args: run.args, cwd: dir });
     expect(result.ok).toBe(true);
-    expect(result.resolved).toBe(process.platform === 'win32' ? null : path.join(dir, 'gopls'));
+    expect(result.resolved).toBe(path.join(dir, 'gopls'));
     expect(result.version).toBe('gopls version v0.15.0');
     expect(result.error).toBe('');
   });
 
-  it('версия пишется в stderr — всё равно версия', async () => {
+  it.skipIf(posixOnly)('версия пишется в stderr — всё равно версия', async () => {
     const dir = await tmpDir();
     await script(dir, 'gopls', 'echo "gopls v1" >&2');
     const run = viaShell(path.join(dir, 'gopls'));
@@ -105,13 +108,13 @@ describe('checkLspCommand', () => {
     expect(result.version).toBe('gopls v1');
   });
 
-  it('нашлась, но упала — код выхода в ответе, а не молчание', async () => {
+  it.skipIf(posixOnly)('нашлась, но упала — код выхода в ответе, а не молчание', async () => {
     const dir = await tmpDir();
     await script(dir, 'gopls', 'echo "не хватает node" >&2; exit 3');
     const run = viaShell(path.join(dir, 'gopls'));
     const result = await checkLspCommand({ command: run.command, args: run.args, cwd: dir });
     expect(result.ok).toBe(false);
-    if (process.platform !== 'win32') expect(result.resolved).toBe(path.join(dir, 'gopls'));
+    expect(result.resolved).toBe(path.join(dir, 'gopls'));
     expect(result.error).toContain('кодом 3');
     expect(result.error).toContain('не хватает node');
   });
@@ -132,7 +135,7 @@ describe('checkLspCommand', () => {
     expect(result.error).toContain('(пусто)');
   });
 
-  it('аргументы из настроек идут вместо --version', async () => {
+  it.skipIf(posixOnly)('аргументы из настроек идут вместо --version', async () => {
     const dir = await tmpDir();
     await script(dir, 'echoer', 'echo "$@"');
     const run = viaShell(path.join(dir, 'echoer'), ['--stdio', '--verbose']);
