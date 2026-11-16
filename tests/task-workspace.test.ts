@@ -62,9 +62,9 @@ describe('каталог задачи поверх общего сервиса',
     await task.replace({ query: 'a', replacement: 'b' });
     await task.searchDocs({ query: 'a' });
     await task.findFiles('*.ts', 10);
-    // Нормализуем обе стороны платформенно: на Windows `path.resolve`
-    // добавит диск и обратные слэши, и литералы POSIX не совпадут.
-    const dir = path.resolve('/main/.worktrees/task');
+    // Корень фасад берёт как есть (не `resolve`): диск и обратные слэши
+    // на Windows не появляются, поэтому и ожидание — без нормализации.
+    const dir = '/main/.worktrees/task';
     expect(svc.calls).toEqual([`replace:${dir}`, `searchDocs:${dir}`, `findFiles:${dir}`]);
   });
 
@@ -72,7 +72,7 @@ describe('каталог задачи поверх общего сервиса',
     const task = new TaskWorkspace(service('/main') as never, '/main/.worktrees/task');
     const names = await task.findFiles('*.ts', 10);
     // Общий сервис вернул бы и файл активного корня — фасад обрезает по своему.
-    // Сравниваем с `path.join`: на Windows разделители станут обратными.
-    expect(names).toEqual([path.join('/main/.worktrees/task', 'a.ts')]);
+    // Корень фасад берёт как есть, так что разделители остаются POSIX.
+    expect(names).toEqual(['/main/.worktrees/task/a.ts']);
   });
 });
