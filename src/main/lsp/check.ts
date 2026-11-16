@@ -44,6 +44,14 @@ export function resolveCommand(command: string, cwd: string, pathEnv: string = p
           .filter(Boolean)
           .map((ext) => ext.toLowerCase())
       : [''];
+  // Windows исполняет только расширения из Pathext: наличие файла иного
+  // расширения (`.txt`, `.js`) — ещё не «команда». На POSIX решает бит X,
+  // его и смотрит `findExecutable`.
+  if (process.platform === 'win32' && suffixes.length === 1 && suffixes[0] === '') {
+    const ext = path.extname(trimmed).toLowerCase();
+    const allowed = (process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').toLowerCase().split(';');
+    if (!allowed.includes(ext)) return null;
+  }
   return findExecutable(candidates, suffixes);
 }
 

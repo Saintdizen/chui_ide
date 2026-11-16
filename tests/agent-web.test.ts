@@ -434,12 +434,15 @@ describe('web: fetch со сохранением в файл (п.56)', () => {
     dir: string;
   }> {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-web-save-'));
+    // `open` разворачивает симлинки (macOS: /var → /private/var), поэтому
+    // читаем от реального корня, а не от того, что дал mkdtemp.
+    const root = await fs.realpath(dir);
     const workspace = new WorkspaceService(() => undefined);
-    await workspace.open(dir);
+    await workspace.open(root);
     const base = ctx({ page: page({ text: fileText, totalChars: fileText.length }) });
     return {
-      context: { ...base, workspace, root: dir } as unknown as ToolContext,
-      read: async (name: string) => fs.readFile(path.join(dir, ...name.split('/')), 'utf8'),
+      context: { ...base, workspace, root } as unknown as ToolContext,
+      read: async (name: string) => fs.readFile(path.join(root, ...name.split('/')), 'utf8'),
       dir,
     };
   }
