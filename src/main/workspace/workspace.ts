@@ -811,7 +811,12 @@ export class WorkspaceService {
   private async hasRipgrep(): Promise<boolean> {
     if (this.ripgrepFound === null) {
       this.ripgrepFound = await new Promise<boolean>((resolve) => {
-        const child = spawn('rg', ['--version'], { windowsHide: true });
+        // Через `rgCommand`, а не голым `rg`: на Windows spawn без шелла голое имя
+        // с `EINVAL` не находит, и проверка врала бы «ripgrep нет» на всякой винде.
+        const child = spawn(rgCommand(), ['--version'], {
+          windowsHide: true,
+          shell: process.platform === 'win32',
+        });
         child.on('error', () => resolve(false));
         child.on('close', (code) => resolve(code === 0));
       }).catch(() => false);
