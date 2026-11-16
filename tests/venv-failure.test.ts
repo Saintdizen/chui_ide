@@ -74,7 +74,9 @@ describe('conflictLines', () => {
  * Заглушка — `.js` под текущим node: шелл-скрипта здесь нет, а `sh` на Windows
  * не поможет.
  */
-describe('createVenv зовёт pip check', () => {
+// На Windows запускаемый `python.exe` не подделать: файл с таким расширением
+// должен быть настоящим PE, иначе система отказывается его запускать.
+describe.skipIf(process.platform === 'win32')('createVenv зовёт pip check', () => {
   const dirs: string[] = [];
 
   afterEach(async () => {

@@ -38,7 +38,8 @@ describe('каталог задачи поверх общего сервиса',
     const svc = service('/main');
     const task = new TaskWorkspace(svc as never, '/main/.worktrees/task');
     await task.readFile('src/a.ts');
-    expect(svc.calls).toEqual([`readFile:${path.join('/main/.worktrees/task', 'src/a.ts')}`]);
+    // Корень `/main` на Windows получает диск и обратные слэши — ждём ровно то, что даёт `path`.
+    expect(svc.calls).toEqual([`readFile:${path.resolve('/main/.worktrees/task/src/a.ts')}`]);
   });
 
   it('абсолютный путь остаётся собой', async () => {
@@ -62,8 +63,8 @@ describe('каталог задачи поверх общего сервиса',
     await task.replace({ query: 'a', replacement: 'b' });
     await task.searchDocs({ query: 'a' });
     await task.findFiles('*.ts', 10);
-    // Корень фасад берёт как есть (не `resolve`): диск и обратные слэши
-    // на Windows не появляются, поэтому и ожидание — без нормализации.
+    // Корень фасад передаёт как есть — без `resolve`: иначе на Windows
+    // появился бы диск и обратные слэши.
     const dir = '/main/.worktrees/task';
     expect(svc.calls).toEqual([`replace:${dir}`, `searchDocs:${dir}`, `findFiles:${dir}`]);
   });
