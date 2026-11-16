@@ -76,6 +76,15 @@ describe('absoluteSearchPath', () => {
   });
 });
 
+/** `realpath`, а если пути нет — он сам. Нужен, чтобы сравнивать в одной форме. */
+async function realpathOrSelf(target: string): Promise<string> {
+  try {
+    return await fs.realpath(target);
+  } catch {
+    return target;
+  }
+}
+
 describe('resolveRealTarget — файла ещё нет', () => {
   /*
    * Дыра, которую эти тесты закрывают: раскрытие симлинка обращалось к диску
@@ -112,10 +121,10 @@ describe('resolveRealTarget — файла ещё нет', () => {
   it('новый файл внутри проекта остаётся внутри', async () => {
     const created = path.join(root, 'sub', 'new.txt');
     const real = resolveRealTarget(root, created, null);
-    // `isInsideRoot` резолвит корень своим `path.resolve`, без `realpath`: на
-    // Windows файла ещё нет — `realpath` ныл бы, и диск `\\?\` в спор не лезет.
-    // Так что реальный предок и корень проекта тут в одной форме.
-    expect(isInsideRoot(root, real)).toBe(true);
+    // Раскрываем обе стороны одним способом. `realOfNearestAncestor` внутри
+    // мог развернуть `/var` → `/private/var` (macOS) или добавить `\\?\`
+    // (Windows), поэтому одного `path.resolve` мало.
+    expect(isInsideRoot(await realpathOrSelf(root), await realpathOrSelf(real))).toBe(true);
   });
 
   // Симлинк на Windows создаётся только из-под администратора или в режиме

@@ -59,7 +59,9 @@ describe('удаление в корзину', () => {
     expect(trashItem.mock.calls[0]?.[0]).toBe(file);
   });
 
-  it('после корзины файл забыт кэшем и о нём сказали дереву', async () => {
+  // FSEvents на macOS не называет файл — только корень. Имя в событии есть
+  // лишь там, где watch его умеет (Linux, Windows).
+  it.skipIf(process.platform === 'darwin')('после корзины файл забыт кэшем и о нём сказали дереву', async () => {
     const root = await makeRoot();
     const file = path.join(root, 'a.ts');
     await fs.writeFile(file, 'x\n', 'utf8');
@@ -76,25 +78,30 @@ describe('удаление в корзину', () => {
     await expect(fs.readFile(file, 'utf8')).resolves.toBe('x\n');
   });
 
-  it('событие о файле приходит, даже если корень открыт через симлинк', async () => {
-    // macOS: временная папка — это `/var/...`, а это симлинк на `/private/var`.
-    // Корень держим как открыли, а наблюдатель и realpath отдают канонический
-    // путь. Пока ownerOf сверял только с `root`, файл считался чужим и
-    // событие говорило про корень вместо файла.
-    const real = await makeRoot();
-    const link = `${real}-link`;
-    await fs.symlink(real, link);
-    roots.push(link);
-    const file = path.join(real, 'a.ts');
-    await fs.writeFile(file, 'x\n', 'utf8');
-    const ws = service();
-    await ws.open(link);
+  // Симлинк и имя файла в событии — вместе только на POSIX-Linux/Windows:
+  // на Windows симлинки требуют администратора, на macOS watch не даёт имени.
+  it.skipIf(process.platform !== 'linux')(
+    'событие о файле приходит, даже если корень открыт через симлинк',
+    async () => {
+      // macOS: временная папка — это `/var/...`, а это симлинк на `/private/var`.
+      // Корень держим как открыли, а наблюдатель и realpath отдают канонический
+      // путь. Пока ownerOf сверял только с `root`, файл считался чужим и
+      // событие говорило про корень вместо файла.
+      const real = await makeRoot();
+      const link = `${real}-link`;
+      await fs.symlink(real, link);
+      roots.push(link);
+      const file = path.join(real, 'a.ts');
+      await fs.writeFile(file, 'x\n', 'utf8');
+      const ws = service();
+      await ws.open(link);
 
-    await ws.trash(file);
-    await vi.waitFor(() => expect(events.length).toBeGreaterThan(0));
-    const payload = JSON.stringify(events);
-    expect(payload).toContain('a.ts');
-  });
+      await ws.trash(file);
+      await vi.waitFor(() => expect(events.length).toBeGreaterThan(0));
+      const payload = JSON.stringify(events);
+      expect(payload).toContain('a.ts');
+    },
+  );
 
   it('отказ корзины не превращается в тихое «удалено»', async () => {
     const root = await makeRoot();
