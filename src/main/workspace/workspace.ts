@@ -1591,6 +1591,20 @@ export class WorkspaceService {
   }
 
   /**
+   * Было ли наше письмо внутри этого каталога только что. Нужно для macOS: FSEvents
+   * на изменение файла часто называет корень, а не файл. Событие с корнем — эхо
+   * нашей же записи, о которой `notifyChanged` уже сообщил; повторять нечего.
+   */
+  private wroteInsideRecently(dir: string): boolean {
+    const now = Date.now();
+    for (const [key, at] of this.selfWrites) {
+      if (now - at > SELF_WRITE_DEDUP_MS) continue;
+      if (key.startsWith(`${dir}${path.sep}`)) return true;
+    }
+    return false;
+  }
+
+  /**
    * Вид события наблюдателя. `fs.watch` говорит только `rename` или `change`, и в
    * `rename` смешаны создание, удаление и переименование. Различить их можно одним
    * способом — спросить диск: файла больше нет — удалён, а если он только что появился
@@ -1599,10 +1613,14 @@ export class WorkspaceService {
   private async watchedKind(target: string, eventType: 'rename' | 'change'): Promise<void> {
     // Своё же событие уже отправлено: второй раз не сообщаем и не копим пакет.
     if (this.selfWritten(target)) return;
-    // macOS FSEvents не всегда называет файл: приходит имя корня. Тогда сказать
-    // «файл X изменён» нечем — сообщаем про корень: пусть перечитают дерево
-    // целиком. Врать конкретным путём хуже, чем признать, что он неизвестен.
-    if (this.roots.some((state) => state.root === target)) {
+    // macOS FSEvents при правке файла сплошь называет корень: имени файла в
+    // событии нет. Если своё письмо только что было внутри — это его эхо,
+    // и о нём уже сказано в `notifyChanged`.
+    const isRoot = this.roots.some((state) => state.root === target);
+    if (isRoot && this.wroteInsideRecently(target)) return;
+    // События о конкретном файле нет — сообщаем про корень и просим пересчёт:
+    // врать конкретным путём хуже, чем признать, что он неизвестен.
+    if (isRoot) {
       this.scheduleChange(target, 2);
       return;
     }
