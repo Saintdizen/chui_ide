@@ -34,16 +34,33 @@ export function resolveCommand(command: string, cwd: string, pathEnv: string = p
         .split(path.delimiter)
         .filter(Boolean)
         .map((dir) => path.join(dir, trimmed));
+  // На Windows в PATH лежат `gopls.exe`/`gopls.cmd`, а в настройках пишут `gopls`:
+  // без перебора Pathext такой поиск не находит ничего. Это и есть то, ради чего
+  // обычно берут `shell: true` — нам нужна только его часть с расширениями.
+  const suffixes =
+    process.platform === 'win32' && !path.extname(trimmed)
+      ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM')
+          .split(';')
+          .filter(Boolean)
+          .map((ext) => ext.toLowerCase())
+      : [''];
+  return findExecutable(candidates, suffixes);
+}
+
+function findExecutable(candidates: string[], suffixes: string[]): string | null {
   for (const candidate of candidates) {
-    try {
-      if (!statSync(candidate).isFile()) continue;
-      // На Windows бит исполнения не проверяется: X_OK там смотрит только на
-      // существование, а `chmod 644` в тестах и «не исполняемый» `.cmd` после
-      // перебора суффиксов — вещи разные. Признак — есть файл.
-      if (process.platform !== 'win32') accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // Каталога нет, файла нет, прав нет — следующий кандидат.
+    for (const suffix of suffixes) {
+      const file = suffix ? `${candidate}${suffix}` : candidate;
+      try {
+        if (!statSync(file).isFile()) continue;
+        // На Windows бит исполнения не проверяется: X_OK там смотрит только на
+        // существование, а `chmod 644` в тестах и «не исполняемый» `.cmd` после
+        // перебора суффиксов — вещи разные. Признак — есть файл.
+        if (process.platform !== 'win32') accessSync(file, constants.X_OK);
+        return file;
+      } catch {
+        // Каталога нет, файла нет, прав нет — следующий кандидат.
+      }
     }
   }
   return null;
@@ -114,13 +131,11 @@ function run(
       clearTimeout(timer);
       resolve({ code, output, error });
     };
-    // Не голый spawn по двум причинам сразу: на Windows `.cmd`-обёртка (или python
-    // из venv) даёт EINVAL, а наш собственный `X_OK` на macOS проверяет только
-    // бит, и скрипт без shebang падает ENOEXEC. Через системный shell (`/bin/sh`
-    // или `cmd`) работают и скрипты, и `.cmd`. Путь в кавычках: на Windows
-    // `C:\...` без них шелл принимает за команду `C:`.
-    const line = [command, ...args].map((part) => `"${part}"`).join(' ');
-    const child = spawn(line, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: true, windowsHide: true });
+    // Запускаем без shell: `resolveCommand` уже вернул абсолютный путь с нужным
+    // расширением (на Windows — `.cmd`/`.exe` из PATHEXT), а `shell: true` там же
+    // ломает две вещи сразу: `cmd` исполняет скрипт без прав/с битым содержимым
+    // вместо EACCES, и путь с пробелами требует своей кавычковой возни.
+    const child = spawn(command, [...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       finish(null, 'Команда не ответила за 4 секунды — возможно, это не сервер или она ждёт ввода.');

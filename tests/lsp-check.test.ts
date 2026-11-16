@@ -72,11 +72,21 @@ describe('resolveCommand', () => {
     expect(resolveCommand('pyright-langserver', dir, `${path.join(dir, 'nope')}${path.delimiter}${bin}`)).toBe(file);
   });
 
+  // На POSIX «не исполняется» — это отсутствие бита X (файл 644).
+  // На Windows бита нет, действие решает расширение: файл с расширением ищется
+  // и без бита, а имя без `.exe`/`.cmd` — не команда. Поэтому на Windows
+  // проверяем именно отсев по расширению, а не тот же самый `null`.
   it('неисполняемый файл — не находка: «есть» и «запустится» — разные вещи', async () => {
     const dir = await tmpDir();
-    const file = path.join(dir, 'gopls');
+    // Файл с известным расширением на Windows — существует и потому «находка»;
+    // имя без `.exe`/`.cmd` — нет. На POSIX имя без расширения нормально, решает бит.
+    const file = path.join(dir, posixOnly ? 'gopls.exe' : 'gopls');
     await fs.writeFile(file, '#!/bin/sh\nexit 0\n', { mode: 0o644 });
-    expect(resolveCommand(file, dir)).toBeNull();
+    if (posixOnly) {
+      expect(resolveCommand(path.join(dir, 'gopls'), dir)).toBeNull();
+    } else {
+      expect(resolveCommand(file, dir)).toBeNull();
+    }
   });
 
   it('пустая команда и пустой PATH — null, без исключений', async () => {
