@@ -112,9 +112,9 @@ describe('resolveRealTarget — файла ещё нет', () => {
   it('новый файл внутри проекта остаётся внутри', async () => {
     const created = path.join(root, 'sub', 'new.txt');
     const real = resolveRealTarget(root, created, null);
-    // Файла ещё нет — `real` собирается из `resolved`, без `realpath`. Корень тоже
-    // берём как есть: сравниваем две строки одной формы, без разворачивания.
-    expect(isInsideRoot(root, real)).toBe(true);
+    // Файла ещё нет, но ближайший существующий предок раскрыт — на macOS это
+    // `/private/var/…`. Корень тоже разворачиваем, иначе формы не совпадут.
+    expect(isInsideRoot(await fs.realpath(root), real)).toBe(true);
   });
 
   // Симлинк на Windows создаётся только из-под администратора или в режиме
