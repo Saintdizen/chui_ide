@@ -170,12 +170,9 @@ describe('search через ripgrep: отказы', () => {
   it.skipIf(!stubSupported)('код 1 — «совпадений нет», а не сбой: отката нет, выдача пуста', async () => {
     const root = await makeDir();
     await fs.writeFile(path.join(root, 'a.ts'), 'нужное\n');
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-one-'));
-    roots.push(dir);
-    await fs.writeFile(path.join(dir, 'rg'), '#!/bin/sh\ncase "$1" in --version) exit 0;; esac\nexit 1\n', 'utf8');
-    await fs.chmod(path.join(dir, 'rg'), 0o755);
-    const previous = process.env.PATH ?? '';
-    process.env.PATH = `${dir}${path.delimiter}${previous}`;
+    // Код выхода задаёт общий хелпер: он же кладёт заглушку под нужным
+    // Windows именем (`rg.cmd`), иначе там команда просто не находится.
+    const stub = await withRipgrep('', 'rg', 1);
     try {
       const ws = service();
       await ws.open(root);
@@ -184,20 +181,15 @@ describe('search через ripgrep: отказы', () => {
       // обход fs не запускается, иначе мы бы дважды платили за тот же ответ.
       expect(result.hits).toEqual([]);
     } finally {
-      process.env.PATH = previous;
+      stub.restore();
     }
   });
 
   it.skipIf(!stubSupported)('код 2 — настоящий сбой ripgrep, и тогда спасает собственный обход', async () => {
     const root = await makeDir();
     await fs.writeFile(path.join(root, 'a.ts'), 'нужное\n');
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-bad-'));
-    roots.push(dir);
-    // --version отвечает 0 (команда «есть»), а поиск падает с кодом 1.
-    await fs.writeFile(path.join(dir, 'rg'), '#!/bin/sh\ncase "$1" in --version) exit 0;; esac\nexit 2\n', 'utf8');
-    await fs.chmod(path.join(dir, 'rg'), 0o755);
-    const previous = process.env.PATH ?? '';
-    process.env.PATH = `${dir}${path.delimiter}${previous}`;
+    // `--version` отвечает 0 (команда «есть»), а поиск падает с кодом 2.
+    const stub = await withRipgrep('', 'rg', 2);
     try {
       const ws = service();
       await ws.open(root);
@@ -205,7 +197,7 @@ describe('search через ripgrep: отказы', () => {
       // Сбой ripgrep не должен превращаться в пустую выдачу: свой обход нашёл.
       expect(result.hits.map((h) => path.basename(h.path))).toEqual(['a.ts']);
     } finally {
-      process.env.PATH = previous;
+      stub.restore();
     }
   });
 });

@@ -104,8 +104,9 @@ describe('resolveRealTarget — файла ещё нет', () => {
     const file = path.join(root, 'a.txt');
     await fs.writeFile(file, 'x');
     const real = await fs.realpath(file);
-    // Windows отдаёт `\\?\D:\…`: сравниваем пути, а не строки в лоб.
-    expect(await fs.realpath(resolveRealTarget(root, file, real))).toBe(real);
+    const rootReal = await fs.realpath(root);
+    // На Windows `realpath` даёт `\\?\D:\…` — берём его и для корня.
+    expect(resolveRealTarget(rootReal, file, real)).toBe(real);
   });
 
   it('новый файл внутри проекта остаётся внутри', async () => {

@@ -22,7 +22,7 @@ export interface RipgrepStub {
   restore(): void;
 }
 
-export async function withRipgrep(output: string, name = 'rg'): Promise<RipgrepStub> {
+export async function withRipgrep(output: string, name = 'rg', exitCode = 0): Promise<RipgrepStub> {
   const dir = await mkdtemp(join(tmpdir(), 'chui-rg-stub-'));
   const argsFile = join(dir, 'args.txt');
   const body = [
@@ -30,6 +30,9 @@ export async function withRipgrep(output: string, name = 'rg'): Promise<RipgrepS
     `fs.appendFileSync(${JSON.stringify(argsFile)}, process.argv.slice(2).map((a) => a + '\\n').join(''));`,
     "if (process.argv[2] === '--version') process.exit(0);",
     `process.stdout.write(${JSON.stringify(output)});`,
+    // Код выхода — часть контракта ripgrep: 1 значит «ничего не нашлось», а не
+    // сбой. Без этого параметра такой случай не подделать.
+    `process.exit(${exitCode});`,
     '',
   ].join('\n');
   const file = join(dir, name);
