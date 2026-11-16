@@ -1618,9 +1618,10 @@ export class WorkspaceService {
     try {
       state.watcher = watch(root, { recursive: true }, (eventType, filename) => {
         const name = filename?.toString();
-        // На macOS рекурсивный watch отдаёт уже абсолютный путь, на Linux —
-        // имя относительно корня. Склейка без проверки давала длинный путь.
-        const full = !name ? root : path.isAbsolute(name) ? name : path.join(root, name);
+        // `isAbsolute` тут не спасает: macOS отдаёт имя от корня файловой системы
+        // (`/chui-bulk-x/one.py`), и оно выглядит абсолютным, хотя на деле относительно
+        // корня проекта. Сверяем с самим корнем — и только потом склеиваем.
+        const full = !name ? root : name.startsWith(`${root}${path.sep}`) ? name : path.join(root, name);
         // Правила исключения перечитываем сразу: иначе правка `.ai_ignore`
         // подействовала бы только при следующем открытии проекта.
         if (name && IGNORE_FILES.some((file) => file === name)) void this.reloadIgnore(root);
