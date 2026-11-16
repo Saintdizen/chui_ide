@@ -24,7 +24,9 @@ async function git(...args: string[]): Promise<void> {
 }
 
 beforeEach(async () => {
-  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-git-tool-'));
+  // macOS: `/var/folders` — симлинк на `/private/var/...`, и `git` печатает
+  // уже развёрнутый путь. Без `realpath` сравнение с `dir` расходится.
+  dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-git-tool-')));
   await git('init', '-q', '-b', 'main');
   await git('config', 'user.email', 'ai@example.com');
   await git('config', 'user.name', 'AI');
@@ -133,7 +135,7 @@ describe('git инструментом', () => {
   });
 
   it('вне репозитория — отказ, а не пустой ответ', async () => {
-    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-nogit-'));
+    const outside = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-nogit-')));
     const other = new WorkspaceService(() => undefined);
     await other.open(outside);
     const outcome = await runTool(
