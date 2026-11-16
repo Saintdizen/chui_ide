@@ -114,9 +114,10 @@ describe('resolveRealTarget — файла ещё нет', () => {
     const real = resolveRealTarget(root, created, null);
     // Файла ещё нет, поэтому `resolveRealTarget` раскрывает ближайшего
     // существующего предка — на macOS это `/private/var/…` вместо `/var/…`.
-    // Корень раскрываем тем же способом: `fs.realpath` от существующего каталога
-    // даёт ту же форму, что и предок (на macOS — `/private/var/…`).
-    expect(isInsideRoot(await fs.realpath(root), real)).toBe(true);
+    // От самого `real` `realpath` не позвать: `sub` ещё нет. А корень после
+    // `fs.realpath` на Windows приходит как `\\?\D:\…` — снимаем префикс.
+    const rootReal = (await fs.realpath(root)).replace(/^\\\\\?\\/, '');
+    expect(isInsideRoot(rootReal, real)).toBe(true);
   });
 
   // Симлинк на Windows создаётся только из-под администратора или в режиме
