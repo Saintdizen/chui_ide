@@ -112,8 +112,8 @@ describe('resolveRealTarget — файла ещё нет', () => {
   it('новый файл внутри проекта остаётся внутри', async () => {
     const created = path.join(root, 'sub', 'new.txt');
     const real = resolveRealTarget(root, created, null);
-    // Сравниваем не строками, а путь с путём: на Windows `realpath` приводит
-    // диск и регистр к своим правилам, и `startsWith` портится сам по себе.
+    // Корень тоже разворачиваем: на Windows только так совпадут буква диска,
+    // форма `\\?\` и регистр — иначе `isInsideRoot` честно скажет «снаружи».
     expect(isInsideRoot(await fs.realpath(root), real)).toBe(true);
   });
 
