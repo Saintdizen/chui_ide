@@ -114,7 +114,13 @@ function run(
       clearTimeout(timer);
       resolve({ code, output, error });
     };
-    const child = spawn(command, [...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Не голый spawn: на Windows настоящий бинарь без `.cmd`/`.exe` даёт EINVAL,
+    // а аргумент одной строкой («--stdio --verbose») без shell приходит одним argv.
+    // shell: true — чтобы работали и POSIX-скрипты без shebang (macOS падал
+    // ENOEXEC), и `.cmd` на Windows (иначе EINVAL). Абсолютный путь в кавычках:
+    // на Windows `C:\...` без них шелл отдаёт как команду `C:`.
+    const line = `"${command}" ${args.map((arg) => `"${arg}"`).join(' ')}`.trimEnd();
+    const child = spawn(line, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: true });
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       finish(null, 'Команда не ответила за 4 секунды — возможно, это не сервер или она ждёт ввода.');
