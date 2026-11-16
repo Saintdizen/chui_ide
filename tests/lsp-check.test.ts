@@ -37,6 +37,12 @@ async function script(dir: string, name: string, body: string): Promise<string> 
 }
 
 /**
+ * Расширение файла-пустышки. На Windows имя без расширения из PATHEXT — не
+ * команда: ни в PATH, ни по абсолютному пути поиск его не возьмёт.
+ */
+const exe = posixOnly ? '.exe' : '';
+
+/**
  * Запуск скрипта-пустышки: имя и args — как из настроек LSP.
  * Скрипт POSIX-шелловый, поэтому на Windows через `sh` не пойдёт — такие tests
  * помечены `skipIf(posixOnly)`. Обёртку оставляю, чтобы не менять каждый test
@@ -53,22 +59,24 @@ afterEach(async () => {
 describe('resolveCommand', () => {
   it('находит файл по абсолютному пути', async () => {
     const dir = await tmpDir();
-    const file = await script(dir, 'gopls', 'echo go version go1.22');
+    const file = await script(dir, `gopls${exe}`, 'echo go version go1.22');
     expect(resolveCommand(file, dir)).toBe(file);
   });
 
   it('относительный путь считается от корня проекта', async () => {
     const dir = await tmpDir();
     await fs.mkdir(path.join(dir, 'node_modules/.bin'), { recursive: true });
-    const file = await script(path.join(dir, 'node_modules/.bin'), 'vscode-langservers-extracted', 'exit 0');
-    expect(resolveCommand('./node_modules/.bin/vscode-langservers-extracted', dir)).toBe(file);
+    const file = await script(path.join(dir, 'node_modules/.bin'), `vscode-langservers-extracted${exe}`, 'exit 0');
+    expect(resolveCommand(`./node_modules/.bin/vscode-langservers-extracted${exe}`, dir)).toBe(file);
   });
 
   it('голое имя ищется по PATH, а не только в корне', async () => {
     const dir = await tmpDir();
     const bin = path.join(dir, 'bin');
     await fs.mkdir(bin, { recursive: true });
-    const file = await script(bin, 'pyright-langserver', 'exit 0');
+    // Искомое имя — голое, как в настройках; на Windows оно находится
+    // перебором PATHEXT, поэтому на диске лежит с расширением.
+    const file = await script(bin, `pyright-langserver${exe}`, 'exit 0');
     expect(resolveCommand('pyright-langserver', dir, `${path.join(dir, 'nope')}${path.delimiter}${bin}`)).toBe(file);
   });
 
@@ -78,13 +86,15 @@ describe('resolveCommand', () => {
   // проверяем именно отсев по расширению, а не тот же самый `null`.
   it('неисполняемый файл — не находка: «есть» и «запустится» — разные вещи', async () => {
     const dir = await tmpDir();
-    // Файл с известным расширением на Windows — существует и потому «находка»;
-    // имя без `.exe`/`.cmd` — нет. На POSIX имя без расширения нормально, решает бит.
-    const file = path.join(dir, posixOnly ? 'gopls.exe' : 'gopls');
-    await fs.writeFile(file, '#!/bin/sh\nexit 0\n', { mode: 0o644 });
     if (posixOnly) {
+      // На Windows бита X нет, решает расширение: файл `gopls.exe` без всяких
+      // битов — находка, а имени `gopls` на диске нет и быть не должно.
+      const exeFile = await script(dir, 'gopls.exe', 'exit 0');
+      expect(resolveCommand(exeFile, dir)).toBe(exeFile);
       expect(resolveCommand(path.join(dir, 'gopls'), dir)).toBeNull();
     } else {
+      const file = path.join(dir, 'gopls');
+      await fs.writeFile(file, '#!/bin/sh\nexit 0\n', { mode: 0o644 });
       expect(resolveCommand(file, dir)).toBeNull();
     }
   });
