@@ -1618,7 +1618,9 @@ export class WorkspaceService {
     try {
       state.watcher = watch(root, { recursive: true }, (eventType, filename) => {
         const name = filename?.toString();
-        const full = name ? path.join(root, name) : root;
+        // На macOS рекурсивный watch отдаёт уже абсолютный путь, на Linux —
+        // имя относительно корня. Склейка без проверки давала длинный путь.
+        const full = !name ? root : path.isAbsolute(name) ? name : path.join(root, name);
         // Правила исключения перечитываем сразу: иначе правка `.ai_ignore`
         // подействовала бы только при следующем открытии проекта.
         if (name && IGNORE_FILES.some((file) => file === name)) void this.reloadIgnore(root);
