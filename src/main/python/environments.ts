@@ -376,10 +376,14 @@ export async function runCommand(
   extraEnv?: Record<string, string>,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
+    // shell: на Windows python из venv — это `.cmd`-обёртка (и сам `pip` тоже),
+    // голым spawn она даёт EINVAL, и человек видит «не удалось создать
+    // окружение» вместо настоящей ошибки. На POSIX оболочка не нужна.
     const child = spawn(command, args, {
       cwd,
       env: { ...process.env, ...extraEnv, NO_COLOR: '1', PIP_DISABLE_PIP_VERSION_CHECK: '1', PIP_NO_INPUT: '1' },
       windowsHide: true,
+      ...(process.platform === 'win32' ? { shell: true } : {}),
     });
 
     // Копим вывод: при сбое он — единственный источник причины, а человек
