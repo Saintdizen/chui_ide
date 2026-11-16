@@ -102,6 +102,11 @@ export function runForge(cli: string, args: string[], cwd: string, timeout = GIT
         timeout,
         maxBuffer: MAX_BUFFER,
         windowsHide: true,
+        // На Windows клиент площадки — это `gh.cmd` из npm-обёртки. Node с 18.20
+        // отказывается запускать `.cmd`/`.bat` без оболочки (`spawn EINVAL`), а
+        // `execFile` подбирает файл по PATHEXT. Шелл тут неизбежен: иначе `gh`
+        // «не установлен» на любой нормальной винде.
+        shell: process.platform === 'win32',
         env: {
           ...process.env,
           // Никаких вопросов и браузера: всё, что требует ввода, не для этого окна.

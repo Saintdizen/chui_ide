@@ -430,7 +430,7 @@ export class WorkspaceService {
     const resolved = path.resolve(target);
     let found: RootState | null = null;
     for (const state of this.roots) {
-      if (!isInsideRoot(state.root, resolved)) continue;
+      if (!isInsideRoot(state.root, resolved) && !isInsideRoot(state.rootReal ?? state.root, resolved)) continue;
       if (!found || state.root.length > found.root.length) found = state;
     }
     return found;
@@ -1738,7 +1738,15 @@ export function runRipgrep(args: readonly string[], cwd: string, signal?: AbortS
   // убить, незачем. Заодно это делает ответ определённым.
   if (signal?.aborted) return Promise.reject(new Error(ABORTED_RG));
   return new Promise((resolve, reject) => {
-    const child = spawn(rgCommand(), [...args], { cwd, windowsHide: true });
+    // На Windows запуск через `rg.cmd` (так зовётся бинарь в npm-обёртке) без
+    // шелла запрещён: Node отдаёт `spawn EINVAL`. С шеллом `rg.cmd` находит и
+    // сам cmd.exe, и заглушки тестов — поэтому это не обход проверки, а
+    // единственный способ звать настоящий rg на винде.
+    const child = spawn(rgCommand(), [...args], {
+      cwd,
+      windowsHide: true,
+      shell: process.platform === 'win32',
+    });
     // Вывод собираем целиком: он ограничен числом совпадений, а склеивать
     // поток частями пришлось бы всё равно — запись рвётся посредине.
     let out = '';

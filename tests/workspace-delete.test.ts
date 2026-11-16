@@ -76,6 +76,26 @@ describe('удаление в корзину', () => {
     await expect(fs.readFile(file, 'utf8')).resolves.toBe('x\n');
   });
 
+  it('событие о файле приходит, даже если корень открыт через симлинк', async () => {
+    // macOS: временная папка — это `/var/...`, а это симлинк на `/private/var`.
+    // Корень держим как открыли, а наблюдатель и realpath отдают канонический
+    // путь. Пока ownerOf сверял только с `root`, файл считался чужим и
+    // событие говорило про корень вместо файла.
+    const real = await makeRoot();
+    const link = `${real}-link`;
+    await fs.symlink(real, link);
+    roots.push(link);
+    const file = path.join(real, 'a.ts');
+    await fs.writeFile(file, 'x\n', 'utf8');
+    const ws = service();
+    await ws.open(link);
+
+    await ws.trash(file);
+    await vi.waitFor(() => expect(events.length).toBeGreaterThan(0));
+    const payload = JSON.stringify(events);
+    expect(payload).toContain('a.ts');
+  });
+
   it('отказ корзины не превращается в тихое «удалено»', async () => {
     const root = await makeRoot();
     await fs.writeFile(path.join(root, 'a.ts'), 'x\n', 'utf8');
