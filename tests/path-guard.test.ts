@@ -112,10 +112,10 @@ describe('resolveRealTarget — файла ещё нет', () => {
   it('новый файл внутри проекта остаётся внутри', async () => {
     const created = path.join(root, 'sub', 'new.txt');
     const real = resolveRealTarget(root, created, null);
-    // Самого файла ещё нет; `real` собран от уже существующего корня. Корень
-    // берём в том же виде, в каком его дал `mkdtemp` — без `realpath`: на
-    // Windows тот добавляет префикс `\\?\`, которого в `real` нет.
-    expect(isInsideRoot(root, real)).toBe(true);
+    // Файла ещё нет, но `resolveRealTarget` раскрыл существующего предка — на macOS
+    // это `/private/var/…` вместо `/var/…`. Корень разворачиваем тем же способом:
+    // от самого корня `realpath` работает (он существует).
+    expect(isInsideRoot(await fs.realpath(root), real)).toBe(true);
   });
 
   // Симлинк на Windows создаётся только из-под администратора или в режиме
