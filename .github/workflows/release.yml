@@ -92,7 +92,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # ubuntu-22.04, не latest: glibc у раннера — это минимальная версия
+          # glibc у пользователя. Node-pty линкуется с системной libc, и на
+          # ubuntu-latest (glibc 2.42) модуль требовал `GLIBC_2.42' —
+          # релиз 0.4.2 падал у людей на Ubuntu 24.04/2.39 с «Failed to load
+          # native module». Сборка на 22.04 (glibc 2.35) запускается на любой
+          # системе новее: glibc новые символы добавляет, старые не убирает.
+          - os: ubuntu-22.04
             label: Linux (AppImage, deb)
             target: --linux AppImage deb
             # electron-rebuild без --arch берёт архитектуру раннера, а артефакт
@@ -170,6 +176,28 @@ jobs:
             echo '::error::pty.node не собрался — терминал в этой сборке упадёт'
             exit 1
           }
+
+      # Наличие файла ничего не говорит о том, на какой glibc он собран:
+      # релиз 0.4.2 прошёл эту проверку и всё равно не грузился у людей.
+      # Поэтому смотрим фактические требования к glibc — максимум среди
+      # неразрешённых символов. Потолок 2.35 — glibc ubuntu-22.04; если выше,
+      # раннер подменили обратно на latest и артефакт снова не запустится.
+      # Сравнение через `sort -V`, а не числом: `GLIBC_2.4` < `GLIBC_2.10`.
+      - name: Проверить, что pty.node не требует glibc новее раннера
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          PTY=node_modules/node-pty/build/Release/pty.node
+          MAX=$(nm -D --undefined-only "$PTY" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -uV | tail -1)
+          [ -n "$MAX" ] || {
+            echo '::error::nm не нашёл в pty.node версий GLIBC — проверить глазами'
+            exit 1
+          }
+          echo "pty.node требует максимум $MAX"
+          if [ "$(printf '%s\n' GLIBC_2.35 "$MAX" | sort -V | tail -1)" != "GLIBC_2.35" ]; then
+            echo "::error::pty.node требует $MAX, а раннер даёт GLIBC_2.35 — собран не на том glibc"
+            exit 1
+          fi
 
       - name: Упаковать
         # --publish never: публикацию делает шаг ниже, одним местом.
