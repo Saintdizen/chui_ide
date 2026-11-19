@@ -95,14 +95,25 @@ jobs:
           - os: ubuntu-latest
             label: Linux (AppImage, deb)
             target: --linux AppImage deb
+            # electron-rebuild без --arch берёт архитектуру раннера, а артефакт
+            # называется по ${arch} из electron-builder — хвосты разъезжаются.
+            arch: x64
           - os: windows-latest
             label: Windows (NSIS)
             target: --win nsis
+            arch: x64
           - os: macos-latest
             label: macOS (dmg, zip)
             # dmg и zip, обе архитектуры (arch — из electron-builder.yml). zip нужен
             # не «на всякий случай»: если dmg не монтируется, человек скачивает архив.
             target: --mac dmg zip
+            # macos-latest — это arm64; electron-builder по умолчанию собирает обе.
+            # Пересборка выше собирает pty.node только под одну арх, а универсальный
+            # dmg несёт оба слайса: arm64-слайс получит рабочий модуль, x64-слайс —
+            # тот же arm64-бинарник и упадёт при открытии терминала. Пока это так,
+            # сборку x64 для macOS надо делать на отдельном x64-раннере (пары
+            # веток matrix — забота следующей задачи, не этой правки).
+            arch: arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -142,12 +153,30 @@ jobs:
       # node-pty — нативный модуль, и он должен быть собран ПОД Electron той же
       # версии, что в devDependencies: иначе приложение падает при открытии
       # терминала с «Failed to load native module: pty.node».
+      #
+      # --arch обязателен: без него electron-rebuild берёт архитектуру раннера
+      # (macos-latest — это arm64), а артефакт называется по `${arch}` из
+      # electron-builder. Проверка ниже — не для красоты: релиз 0.4.1 уехал с
+      # битым терминалом, потому что node-pty не попал ни в build/Release, ни в
+      # prebuilds/linux-x64: electron-builder для Linux предсборку не кладёт, а
+      # npmRebuild: true пересобирал модуль встроенно и без проверки. Теперь
+      # пересборка — здесь, и без pty.node валится сборка, а не установка у человека
+      # (см. npmRebuild: false в electron-builder.yml).
       - name: Пересобрать нативный модуль под Electron
-        run: npx electron-rebuild -f -w node-pty
+        shell: bash
+        run: |
+          npx electron-rebuild -f -w node-pty --arch="${{ matrix.arch }}"
+          test -f node_modules/node-pty/build/Release/pty.node || {
+            echo '::error::pty.node не собрался — терминал в этой сборке упадёт'
+            exit 1
+          }
 
       - name: Упаковать
         # --publish never: публикацию делает шаг ниже, одним местом.
-        run: npx electron-builder ${{ matrix.target }} --publish never
+        # -c.npmRebuild=false: модули уже пересобраны под Electron шагом выше.
+        # Без этого electron-builder пересобирает их встроенно — обычным gyp,
+        # без явной --arch и без проверки, что pty.node вообще появился.
+        run: npx electron-builder ${{ matrix.target }} --publish never -c.npmRebuild=false
 
       # Проверка mac-сборки ДО того, как файл попадёт в релиз. Без неё неподписанный
       # dmg уезжал к человеку, и тот видел «файл повреждён»: на Apple Silicon система

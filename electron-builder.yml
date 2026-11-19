@@ -36,8 +36,12 @@ asarUnpack:
   - '**/*.node'
   - node_modules/**
 
-# node-pty собирается под Electron, поэтому перед упаковкой пересобираем модули.
-npmRebuild: true
+# false, а не true: пересборка node-pty — отдельный шаг CI с проверкой, что
+# pty.node реально появился (см. release.yml). Встроенная пересборка делала
+# то же, но без проверки, и молча уходила в релиз — так 0.4.1 выехала с
+# «Failed to load native module: pty.node» на Linux. Проваливаться должна
+# сборка, а не установка у человека.
+npmRebuild: false
 
 artifactName: '${productName}-${version}-${os}-${arch}.${ext}'
 

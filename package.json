@@ -1,6 +1,6 @@
 {
   "name": "chui-ide",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "license": "MIT",
   "author": {
@@ -30,7 +30,8 @@
     "check:static": "npm run typecheck && npm run format:check && npm run lint && npm run check:layers",
     "check:layers": "node scripts/run-layer-check.mjs",
     "start": "npm run rebuild && npm run build && electron .",
-    "rebuild": "electron-rebuild -f -w node-pty && electron-rebuild -f -w node-pty --arch=x64",
+    "rebuild": "electron-rebuild -f -w node-pty",
+    "rebuild:x64": "electron-rebuild -f -w node-pty --arch=x64",
     "smoke:pty": "ELECTRON_RUN_AS_NODE=1 electron scripts/pty-smoke.cjs",
     "smoke:terminal": "npm run build:main && electron scripts/terminal-smoke.cjs",
     "smoke:window": "npm run build:main && electron scripts/window-smoke.cjs",
