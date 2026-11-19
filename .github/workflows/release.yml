@@ -156,12 +156,12 @@ jobs:
       #
       # --arch обязателен: без него electron-rebuild берёт архитектуру раннера
       # (macos-latest — это arm64), а артефакт называется по `${arch}` из
-      # electron-builder. Проверка ниже — не для красоты: релиз 0.4.1 уехал с
-      # битым терминалом, потому что node-pty не попал ни в build/Release, ни в
-      # prebuilds/linux-x64: electron-builder для Linux предсборку не кладёт, а
-      # npmRebuild: true пересобирал модуль встроенно и без проверки. Теперь
-      # пересборка — здесь, и без pty.node валится сборка, а не установка у человека
-      # (см. npmRebuild: false в electron-builder.yml).
+      # electron-builder. Архитектуру держит только этот шаг.
+      #
+      # Проверка ниже — не для красоты: релиз 0.4.1 уехал в люди с битым терминалом,
+      # потому что пересборка шла встроенной в electron-builder и без проверки.
+      # Теперь без pty.node валится сборка, а не установка у человека, — и
+      # npmRebuild: false в electron-builder.yml тому предпосылка.
       - name: Пересобрать нативный модуль под Electron
         shell: bash
         run: |
@@ -173,10 +173,15 @@ jobs:
 
       - name: Упаковать
         # --publish never: публикацию делает шаг ниже, одним местом.
-        # -c.npmRebuild=false: модули уже пересобраны под Electron шагом выше.
-        # Без этого electron-builder пересобирает их встроенно — обычным gyp,
-        # без явной --arch и без проверки, что pty.node вообще появился.
-        run: npx electron-builder ${{ matrix.target }} --publish never -c.npmRebuild=false
+        #
+        # Флаг `-c.npmRebuild=false` здесь НЕ ставим. У electron-builder 26.x он
+        # не доезжает до конфига: минист получает `npmRebuild` как строку
+        # "false", которую его разбор считает путём к файлу, и пакет падает
+        # на ENOENT «.npmRebuild=false» ещё до упаковки (сборка Windows с тега
+        # v0.4.2). `npmRebuild: false` уже стоит в electron-builder.yml — это
+        # единственное место, где его надо задавать; отсюда модули не
+        # пересобираются, их собрал шаг выше.
+        run: npx electron-builder ${{ matrix.target }} --publish never
 
       # Проверка mac-сборки ДО того, как файл попадёт в релиз. Без неё неподписанный
       # dmg уезжал к человеку, и тот видел «файл повреждён»: на Apple Silicon система
