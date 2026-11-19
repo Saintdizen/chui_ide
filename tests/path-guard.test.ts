@@ -111,12 +111,12 @@ describe('resolveRealTarget — файла ещё нет', () => {
 
   it('новый файл внутри проекта остаётся внутри', async () => {
     const created = path.join(root, 'sub', 'new.txt');
-    const real = resolveRealTarget(root, created, null);
-    // Файла ещё нет, поэтому `resolveRealTarget` раскрывает ближайшего
-    // существующего предка — на macOS это `/private/var/…` вместо `/var/…`.
-    // От самого `real` `realpath` не позвать: `sub` ещё нет. А корень после
-    // `fs.realpath` на Windows приходит как `\\?\D:\…` — снимаем префикс.
+    // Первым аргументом — РАСКРЫТЫЙ корень: `resolveRealTarget` возвращает путь
+    // через `realpath` ближайшего существующего предка, и сравнивать его с сырым
+    // `root` нельзя. На macOS `/var/…` раскрывается в `/private/var/…`, и разница
+    // давала ложное «снаружи». На Windows `realpath` добавляет `\\?\` — снимаем.
     const rootReal = (await fs.realpath(root)).replace(/^\\\\\?\\/, '');
+    const real = resolveRealTarget(rootReal, created, null);
     expect(isInsideRoot(rootReal, real)).toBe(true);
   });
 

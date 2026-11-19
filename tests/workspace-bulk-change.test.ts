@@ -34,14 +34,25 @@ afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-/** Дождаться уведомления: оно приходит по таймеру схлопывания (120 мс). */
-async function waitEvent(timeout = 3000): Promise<WorkspaceChangedPayload> {
+/** Дождаться уведомления: оно приходит по таймеру схлопывания (120 мс).
+ *
+ * События наблюдения за файлом приходят асинхронно и на нагруженном раннере
+ * отстают от записи: пачка из восьми файлов может попасть в два окна
+ * схлопывания. Поэтому ждём НУЖНУЮ форму события (`match`), а не просто первое:
+ * иначе тест ловит «первую пачку» и падает по таймауту планировщика, а не по коду. */
+async function waitEvent(
+  match: (event: WorkspaceChangedPayload) => boolean = () => true,
+  timeout = 3000,
+): Promise<WorkspaceChangedPayload> {
   const deadline = Date.now() + timeout;
-  while (events.length === 0) {
-    if (Date.now() > deadline) throw new Error('уведомление не пришло');
+  let seen = 0;
+  while (Date.now() <= deadline) {
+    const found = events.slice(seen).find(match);
+    if (found) return found;
+    seen = events.length;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  return events[0]!;
+  throw new Error(`уведомление не пришло (событий: ${events.length})`);
 }
 
 describe.skipIf(process.platform === 'darwin')('WorkspaceChanged: одна правка и массовое изменение', () => {
@@ -61,7 +72,7 @@ describe.skipIf(process.platform === 'darwin')('WorkspaceChanged: одна пр�
       await workspace.writeFile(path.join(dir, `file${index}.py`), `x = ${index}\n`);
     }
 
-    const event = await waitEvent();
+    const event = await waitEvent((e) => e.many === true);
     expect(event.many).toBe(true);
     // Путь — корень: конкретный файл тут ничего не говорит, менять надо всё.
     expect(event.path).toBe(dir);
