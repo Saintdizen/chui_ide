@@ -186,8 +186,8 @@ export class NodeAdapter {
 
   /** Показали ли останов клиенту: только тогда «продолжено» имеет смысл сообщать. */
   private reportedStopped = false;
-  /** Останов, пришедший до `configurationDone`: его отдаём, как только клиент настроен. */
-  private pendingPause: Record<string, unknown> | null = null;
+  /** Остановы, пришедшие до `configurationDone`: их отдаём, как только клиент настроен. */
+  private pendingPause: Record<string, unknown>[] | null = null;
   /** Останов на входе (`--inspect-brk`) уже снят: второй раз его снимать нечего. */
   private entryResumed = false;
 
@@ -411,7 +411,7 @@ export class NodeAdapter {
     this.configured = true;
     // Придержанный останов забираем до всего остального: отдать его — обязанность
     // именно настройки, больше его отдать некому.
-    const pending = this.pendingPause;
+    const pending = this.pendingPause ?? [];
     this.pendingPause = null;
     // Подключённый процесс никто не держал: будить его не нужно и вредно — он бы
     // пошёл дальше по нажатию «продолжить», а не по нашему молчаливому вызову.
@@ -425,12 +425,16 @@ export class NodeAdapter {
       // `handleStop`).
       await this.breakpointQueue.catch(() => undefined);
       await this.cdp?.send('Runtime.runIfWaitingForDebugger').catch(() => undefined);
+      // Останов на входе здесь отсеет `handleStop`, а настоящая точка — точку до
+      // настройки — дойдёт до клиента. Отдать надо всё: буфер копится, когда
+      // несколько остановов пришли подряд.
+      for (const pause of pending) await this.handleStop(pause);
       return;
     }
     // Останов, случившийся до настройки: клиент о нём ещё не знает, а программа уже
     // стоит. Отдаём сейчас — иначе сработавшая точка останова выглядела бы как
     // пропущенная, и клиент ждал бы останова, который уже произошёл.
-    if (pending) await this.handleStop(pending);
+    for (const pause of pending) await this.handleStop(pause);
   }
 
   private onDebuggeeStderr(chunk: Buffer): void {
@@ -938,7 +942,13 @@ export class NodeAdapter {
       // приходит настоящая точка. Выбросить её нельзя — программа осталась бы стоять,
       // а клиент ждал бы события, которого уже не будет. Поэтому придержим останов и
       // отдадим его сразу после настройки.
-      if (!this.waitingForDebugger) this.pendingPause = params;
+      // Запуск под `--inspect-brk` тоже может успеть показать точку до настройки: останов
+      // на входе случается позже, но его не гарантирует. Тогда два останова приходят
+      // подряд, и одну ячейку они перезаписывают — теряется настоящая точка. Поэтому
+      // копим: `onConfigured` разбирает их по порядку. Хвостовой останов на входе
+      // там отсекает `handleStop` — он фокусируется только тогда, когда `reason`
+      // похож на `start`.
+      this.pendingPause = [...(this.pendingPause ?? []), params];
       return;
     }
     void this.handleStop(params);
