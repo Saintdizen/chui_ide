@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { app } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { promises as fs } from 'node:fs';
 import { RpcErrorCode, type AppInfo, type RecentProject } from '../../../shared/api';
 import { isProjectKind, projectNameProblem } from '../../../shared/project-kinds';
@@ -7,7 +7,9 @@ import { starterFiles } from '../../project/scaffold';
 import { openProjectFolder } from '../register';
 import { openWelcomeWindow } from '../../window';
 import type { RpcServices } from '../context';
-import { unseenReleases, parseChangelog, type ReleaseNote } from '../../../shared/whats-new';
+import { compareVersions, unseenReleases, parseChangelog, type ReleaseNote } from '../../../shared/whats-new';
+import { fetchLatestRelease, isCheckDue, pickAsset } from '../../update/check';
+import { downloadReleaseAsset } from '../../update/download';
 import { RpcFailure, type RpcRouter } from '../router';
 
 /**
@@ -40,6 +42,42 @@ export function registerAppMethods(router: RpcRouter, deps: RpcServices): void {
   });
   router.register('app.whatsNewSeen', (params: { version: string }) => {
     deps.settings.update({ whatsNewSeen: params.version });
+  });
+
+  // Новая версия: `null` — не смогли узнать (нет сети и т.п.), это не ошибка для человека.
+  // Отдаём только свои файлы: чужая архитектура в списке — повод показать не тот установщик.
+  router.register('app.updateCheck', async () => {
+    // Раз в сутки хватает: релизы не выходят каждый час, а запрос на каждом
+    // старте — лишний сетевой вызов.
+    const settings = deps.settings.get();
+    if (!isCheckDue(settings.lastUpdateCheck, Date.now())) {
+      return { latest: null, assets: [], pageUrl: null };
+    }
+    const latest = await fetchLatestRelease();
+    if (!latest) return { latest: null, assets: [], pageUrl: null };
+    // Отмечаем только удачную попытку: иначе неудача без сети заморозит проверку
+    // на сутки — а через сутки она повторится и снова упрётся в ту же стену.
+    deps.settings.update({ lastUpdateCheck: new Date().toISOString() });
+    // Не новее текущей — значит новости нет: `latest` в ответе GitHub приходит
+    // и когда человек уже обновился, а плашка при каждом запуске — не новость.
+    if (compareVersions(latest.version, app.getVersion()) <= 0) {
+      return { latest: null, assets: [], pageUrl: null };
+    }
+    const asset = pickAsset(latest.assets, process.platform, process.arch);
+    // `pageUrl` отдаём и без файла: под Linux arm64 сборки нет,
+    // но человек должен уметь дойти до страницы релиза сам.
+    return { latest: latest.version, assets: asset ? [asset] : [], pageUrl: latest.pageUrl };
+  });
+
+  // Скачивание идёт через сессию окна, которое попросило: чужого окна не выдумываем.
+  router.register('app.updateDownload', async (_params: void, ctx) => {
+    const latest = await fetchLatestRelease();
+    if (!latest) throw new RpcFailure(RpcErrorCode.Disabled, 'Нет связи с GitHub');
+    const asset = pickAsset(latest.assets, process.platform, process.arch);
+    if (!asset) throw new RpcFailure(RpcErrorCode.NotFound, 'Нет файла под эту систему');
+    const window = BrowserWindow.fromWebContents(ctx.sender);
+    if (!window) throw new RpcFailure(RpcErrorCode.Disabled, 'Окно закрыто');
+    return downloadReleaseAsset(window.webContents.session, asset.url);
   });
 
   router.register(

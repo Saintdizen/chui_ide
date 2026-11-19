@@ -1,5 +1,6 @@
 import type { CommandGrantScope } from '../agent-grants';
 import type { ReleaseNote } from '../whats-new';
+import type { UpdateCheckResult } from '../update';
 import type { MenuRole } from '../app-menu';
 import type { AccountBalance } from '../balance';
 import type { EditorConfigValues } from '../editorconfig';
@@ -327,6 +328,10 @@ export interface ChuiMethods {
   /** Записи «что нового» новее виденной версии: `ReleaseNote[]`. */
   'app.whatsNew': { params: void; result: { releases: ReleaseNote[]; version: string } };
   'app.whatsNewSeen': { params: { version: string }; result: void };
+  /** Новая версия на GitHub; `latest: null` — узнать не удалось (нет сети). */
+  'app.updateCheck': { params: void; result: UpdateCheckResult };
+  /** Скачать файл выпуска под эту платформу и вернуть путь к нему. */
+  'app.updateDownload': { params: void; result: { path: string } };
 
   'dialog.pickFolder': { params: { title?: string }; result: { path: string | null } };
   /**

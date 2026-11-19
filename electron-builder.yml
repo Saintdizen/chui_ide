@@ -18,6 +18,9 @@ directories:
 files:
   - dist/**
   - package.json
+  # Экран «что нового» читает CHANGELOG.md из ресурсов приложения: без него
+  # после обновления он будет пуст.
+  - CHANGELOG.md
   - node_modules/**
   - '!**/*.map'
   - '!**/*.ts'

@@ -477,6 +477,48 @@ export async function startApplication(mount: HTMLElement, options: { probe?: bo
     }
   })();
 
+  // Новая версия: предлагаем скачать сборку под эту платформу. Ставит человек сам —
+  // на macOS сборка не подписана Developer ID, запускать её без его решения было бы обманом.
+  void (async () => {
+    try {
+      const check = await rpc.request('app.updateCheck');
+      if (!check.latest) return;
+      // Файла под эту сборку может не быть: релизы без нужной архитектуры бывают.
+      // Тогда вместо «Скачать» — ссылка на страницу релиза. Молчать тут нельзя:
+      // человек не поймёт, что версия вышла и где её взять.
+      const noAsset = check.assets.length === 0;
+      const pageUrl = check.pageUrl;
+      if (noAsset && !pageUrl) return;
+      // Сужаем тип здесь, а не внутри `run`: там `pageUrl` снова `string | null`.
+      const url = pageUrl ?? '';
+      showToast(noAsset ? `Вышла версия ${check.latest}` : `Вышла версия ${check.latest}. Скачать?`, 'info', {
+        key: 'update-available',
+        action: noAsset
+          ? {
+              label: 'Страница релиза',
+              run: () => {
+                void rpc.request('shell.openExternal', { url }).catch(() => undefined);
+              },
+            }
+          : {
+              label: 'Скачать',
+              run: () => {
+                void (async () => {
+                  try {
+                    const file = await rpc.request('app.updateDownload');
+                    showToast(`Скачано: ${file.path}`, 'info', { key: 'update-download' });
+                  } catch {
+                    showToast('Не удалось скачать обновление', 'error', { key: 'update-download' });
+                  }
+                })();
+              },
+            },
+      });
+    } catch {
+      // Нет сети или GitHub недоступен — молчим: проверка обновлений не повод ругаться.
+    }
+  })();
+
   // Тема: схема одна — тёмная, сервис держит активную тему из файла.
   const theme = new ThemeService(rpc, settings.appearance.customTheme ?? null);
 

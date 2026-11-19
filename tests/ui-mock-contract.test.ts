@@ -87,6 +87,8 @@ const NOT_MOCKED: Record<string, string[]> = {
   // Профиль экспортируется и импортируется через диалоги — они в main, в моке их нет.
   'профиль ходит в диалоги файловой системы — они в main': ['settings.exportProfileTo', 'settings.importProfileFrom'],
   'внешние инструменты (MCP) — процессы запускает main': ['ai.mcpTools'],
+  // GitHub и скачивание файлов — сеть живёт в main; в моке окна сети нет.
+  'проверка и скачивание обновлений ходят в сеть из main': ['app.updateCheck', 'app.updateDownload'],
   'проверка команды и остановка сервера — процессы живут в main': ['lsp.check', 'lsp.stop'],
   // Настоящий cSpell с 79 словарями живет в main: в мок его не тащить —
   // тесты проверки через cSpell держат настоящий (`tests/spell-server.test.ts`).

@@ -158,6 +158,11 @@ export interface Settings {
   workspace: WorkspaceSettings;
   /** Виденная версия «что нового»: показывать только новее. */
   whatsNewSeen?: string;
+  /**
+   * Когда последний раз ходили на GitHub за релизом (ISO). Без отметки проверка
+   * будет на каждом старте, а человек открывает IDE ради кода, не ради новостей.
+   */
+  lastUpdateCheck?: string;
   layout: LayoutSettings;
   /** Именованные раскладки: привычка машины («дебаг», «ревизия»), не проекта. */
   layoutPresets: SavedLayout[];
@@ -357,6 +362,8 @@ export interface SettingsPatch {
   workspace?: WorkspaceSettingsPatch;
   /** Отметка, что человек видел заметки этой версии. */
   whatsNewSeen?: string;
+  /** Время последней удачной проверки релиза — ставит main, не renderer. */
+  lastUpdateCheck?: string;
   lsp?: Partial<LspSettings>;
   git?: Partial<GitSettings>;
   keybindings?: Partial<KeybindingSettings>;
