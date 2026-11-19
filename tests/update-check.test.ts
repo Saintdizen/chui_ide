@@ -46,10 +46,10 @@ describe('pickAsset', () => {
       asset('chui_iDE-0.4.0-win-x64.exe'),
     ];
 
-    // В релизе 0.4.0 для x64 есть только `.deb` (AppImage собран под `x86_64`).
-    // Расширение важнее архитектуры — берём `deb`, а не выдумываем AppImage.
-    it('linux x64 — deb под amd64', () => {
-      expect(pickAsset(RELEASE, 'linux', 'x64')?.name).toBe('chui_iDE-0.4.0-linux-amd64.deb');
+    // В релизе 0.4.0 под x64 два файла: AppImage собран под `x86_64`, deb — под `amd64`.
+    // Оба имени — одна архитектура, а расширение важнее: AppImage идёт первым в списке.
+    it('linux x64 — AppImage важнее deb', () => {
+      expect(pickAsset(RELEASE, 'linux', 'x64')?.name).toBe('chui_iDE-0.4.0-linux-x86_64.AppImage');
     });
 
     it('linux arm64 — файла нет, не подсовываем amd64', () => {
@@ -66,6 +66,21 @@ describe('pickAsset', () => {
 
     it('Windows x64 — установщик exe', () => {
       expect(pickAsset(RELEASE, 'win32', 'x64')?.name).toBe('chui_iDE-0.4.0-win-x64.exe');
+    });
+
+    // Раньше `x86_64` резалось по `_` на `x86` и `64`, и алиас из таблицы не
+    // находился никогда. Заметно это стало бы только если AppImage остался
+    // единственным файлом под Linux — x64-человек остался бы без обновления.
+    it('linux x64 — один x86_64.AppImage всё равно подходит', () => {
+      const onlyAppImage = [asset('chui_iDE-0.4.0-linux-x86_64.AppImage')];
+      expect(pickAsset(onlyAppImage, 'linux', 'x64')?.name).toBe('chui_iDE-0.4.0-linux-x86_64.AppImage');
+    });
+
+    // Без склейки токена `x86_64` режется на `x86` и `64`, и `x86` проходит по алиасу
+    // `ia32`: 32-битная сборка получала бы 64-битный файл и падала при запуске.
+    it('linux ia32 — x86_64.AppImage не отдаётся как 32-битный', () => {
+      const onlyAppImage = [asset('chui_iDE-0.4.0-linux-x86_64.AppImage')];
+      expect(pickAsset(onlyAppImage, 'linux', 'ia32')).toBeNull();
     });
   });
 

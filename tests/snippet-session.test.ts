@@ -10,7 +10,6 @@ import { SnippetSession } from '../src/renderer/editor/complete/snippet-session'
  * сами смещения считает `snippet.ts` и его тесты.
  */
 
-// biome-ignore lint/suspicious/noTemplateCurlyInString: разметка сниппета как есть
 describe('обход мест сниппета', () => {
   it('Tab идёт по местам по порядку и выделяет текст места', () => {
     // biome-ignore lint/suspicious/noTemplateCurlyInString: проверяем разметку сниппета как есть

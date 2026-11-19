@@ -20,6 +20,7 @@ describe('programName', () => {
 
   it('переменная — не имя программы', () => {
     expect(programName('$CMD')).toBe('');
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: ýто shell-литерал, а не шаблон JS
     expect(programName('${CMD}')).toBe('');
   });
 });
@@ -59,6 +60,7 @@ describe('что запускается', () => {
 
   it('значение переменной не наше — помечаем неясность', () => {
     // `${HOME}` — запуск не в нём, но значение неизвестно.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: ýто shell-литерал, а не шаблон JS
     expect(parseCommand('ls ${HOME}').unknown).toBe(true);
     // `$(id)` уже разобрана — это просто вызов `id`.
     expect(names('echo $(id)')).toEqual(['echo', 'id']);

@@ -59,24 +59,32 @@ export function isCheckDue(lastIso: string | undefined, now: number, intervalMs 
  * остаётся без установщика.
  */
 const ARCH_ALIASES: Record<string, string[]> = {
-  x64: ['x64', 'x86_64', 'amd64'],
+  x64: ['x64', 'x8664', 'amd64'],
   arm64: ['arm64', 'aarch64'],
   ia32: ['ia32', 'i386', 'x86'],
 };
 
+/**
+ * Сегменты имени файла по разделителям. Сперва `x86_64` склеивается в один токен:
+ * иначе `_` режет его на `x86` и `64`, и файл одновременно читается как 32-битный
+ * (по `x86` из алиасов `ia32`) и не читается как 64-битный (алиаса `x86_64`
+ * в сегментах нет). Формат взят из живого релиза (`linux-x86_64.AppImage`).
+ */
+function splitSegments(name: string): string[] {
+  return name.replace(/x86_64/g, 'x8664').split(/[-_.]/);
+}
+
 /** Архитектура ищется целым сегментом имени: `x64` не должен находиться в `x86_64` по подстроке. */
 function hasArch(name: string, arch: string): boolean {
   const aliases = ARCH_ALIASES[arch] ?? [arch];
-  const segments = name.split(/[-_.]/);
-  return segments.some((segment) => aliases.includes(segment));
+  return splitSegments(name).some((segment) => aliases.includes(segment));
 }
 
 /** Любая известная архитектура в имени — чтобы отличить универсальную сборку от чужой. */
 const ALL_ARCH_TOKENS = Object.values(ARCH_ALIASES).flat();
 
 function hasAnyArch(name: string): boolean {
-  const segments = name.split(/[-_.]/);
-  return segments.some((segment) => ALL_ARCH_TOKENS.includes(segment));
+  return splitSegments(name).some((segment) => ALL_ARCH_TOKENS.includes(segment));
 }
 
 interface GithubAsset {
